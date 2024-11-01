@@ -33,11 +33,10 @@ By using HexWallet, you are acknowledging your understanding and acceptance of t
 | Number | Parts | Description |
 | :-------------: | :-------------: | :----- |
 | :one: | Project Name | 	:vhs: HexWallet |
-| :two: | Version  | 🕸 Version 0.0.1 |
-| :three: | Support Crypto| ![Bitcoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin.png "Bitcoin (BTC)") ![Ethereum](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ethereum.png "Ethereum (ETH)") ![Dash](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/dash.png "Dash (DASH)") ![Bitcoin Gold](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin-gold.png "Bitcoin Gold (BTG)") ![Litecoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/litecoin.png "Litecoin (LTC)") ![Ravencoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ravencoin.png "Ravencoin (RVN)") ![TRON](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/tron.png "TRON (TRX)") ![XRP](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/xrp.png "XRP (XRP)")|
+| :two: | Version  | 🕸 Version 0.0.1-beta |
+| :three: | Support Crypto| ![Bitcoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin.png "Bitcoin (BTC)") ![Ethereum](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ethereum.png "Ethereum (ETH)") ![Dash](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/dash.png "Dash (DASH)") ![Bitcoin Gold](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin-gold.png "Bitcoin Gold (BTG)") ![Litecoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/litecoin.png "Litecoin (LTC)") ![Ravencoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ravencoin.png "Ravencoin (RVN)") ![TRON](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/tron.png "TRON (TRX)") ![XRP](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/xrp.png "Ripple (XRP)")|
 | :four: | Support Web | :globe_with_meridians: No |
 | :five: | Support Mobile | 📱 No |
-| :six: | Is Beta Version | :snowflake: Yes |
 
 <br>
 
