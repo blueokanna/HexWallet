@@ -1,4 +1,4 @@
-## HexWallet - The open source for ESP32-S3 crypto hardware wallet (BETA)
+## HexWallet - The open source for ESP32-S3 crypto hardware wallet (BETA) - [中文文档](https://github.com/blueokanna/HexWallet/blob/main/README-zh.md)
 
 ### :warning: Disclaimer for HexWallet:
 ```
