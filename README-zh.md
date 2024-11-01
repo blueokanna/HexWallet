@@ -1,4 +1,4 @@
-## HexWallet - ESP32-S3 加密硬件钱包的开源版本（BETA 版）- [English Readme](https://github.com/blueokanna/HexWallet/edit/main/README.md)
+## HexWallet - ESP32-S3 加密硬件钱包的开源版本（BETA 版）- [English Readme](https://github.com/blueokanna/HexWallet/blob/main/README.md)
 
 ### :warning: HexWallet 免责声明:
 ```
