@@ -1,4 +1,4 @@
-## HexWallet - The open source for ESP32-S3 crypto hardware wallet 
+## HexWallet - The open source for ESP32-S3 crypto hardware wallet (BETA)
 
 ### :warning: Disclaimer for HexWallet:
 ```
