@@ -35,8 +35,8 @@ HexWallet 可能包含受其自身许可和免责声明约束的第三方软件�
 | :one: | 项目名称e | 	:vhs: HexWallet |
 | :two: | 项目版本  | 🕸 Version 0.0.1 - beta |
 | :three: | 支持的虚拟货币| ![Bitcoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin.png "Bitcoin (BTC)") ![Ethereum](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ethereum.png "Ethereum (ETH)") ![Dash](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/dash.png "Dash (DASH)") ![Bitcoin Gold](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin-gold.png "Bitcoin Gold (BTG)") ![Litecoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/litecoin.png "Litecoin (LTC)") ![Ravencoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ravencoin.png "Ravencoin (RVN)") ![TRON](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/tron.png "TRON (TRX)") ![XRP](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/xrp.png "XRP (XRP)")|
-| :four: | 是否支持网页 | :globe_with_meridians: No |
-| :five: | 是否支持移动设备 | 📱 No |
+| :four: | 是否支持网页 | :globe_with_meridians: 未实现网页功能 |
+| :five: | 是否支持移动设备 | 📱 未实现特定软件 |
 
 <br>
 
@@ -64,8 +64,3 @@ https://iancoleman.io/bip39/
 
 | ![0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed](https://github.com/user-attachments/assets/608c5e0d-edfc-4dee-be6f-63d40b53a65f) | ![0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed (1)](https://github.com/user-attachments/assets/87205826-1f76-4724-9734-3ecbfbfb729f) | ![XuJwtHWdsYzfLawymR3B3nDdS2W8dHnxyR](https://github.com/user-attachments/assets/71915604-cc14-426f-a8b9-9b7f023da084) |
 |------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-
-
-| ![0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed](https://github.com/user-attachments/assets/608c5e0d-edfc-4dee-be6f-63d40b53a65f) | ![0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed (1)](https://github.com/user-attachments/assets/87205826-1f76-4724-9734-3ecbfbfb729f) |
-|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-
