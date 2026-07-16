@@ -12,6 +12,7 @@ constexpr size_t kWalletUiMaxTransactionOutputs = 16;
 
 struct WalletUiTransactionOutput {
   uint64_t value;
+  const char *amount_text;
   const char *address;
   const char *ownership;
 };
@@ -22,6 +23,7 @@ struct WalletUiTransactionReview {
   size_t output_count;
   uint64_t fee;
   uint64_t fee_rate;
+  const char *fee_text;
   const char *approval_code;
 };
 

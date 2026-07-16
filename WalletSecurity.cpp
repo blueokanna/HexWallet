@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <esp_system.h>
 #include <mbedtls/ecp.h>
+#include <mbedtls/ecdsa.h>
 #include <mbedtls/platform_util.h>
 #include <mbedtls/pkcs5.h>
 #include <string.h>
@@ -352,6 +353,80 @@ WalletError uncompressed_public_key_from_private(
                                                              : WalletError::CryptoFailure;
 }
 
+WalletError secp256k1_sign_digest_recoverable(
+    const uint8_t private_key[kPrivateKeySize],
+    const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature) {
+  if (private_key == nullptr || digest == nullptr || out_signature == nullptr ||
+      !valid_private_key(private_key)) {
+    return WalletError::InvalidArgument;
+  }
+  memset(out_signature, 0, sizeof(*out_signature));
+  mbedtls_ecp_group group;
+  mbedtls_ecp_point public_key;
+  mbedtls_ecp_point recovery_point;
+  mbedtls_mpi private_scalar, r, s, half_order, z, inverse_s, u1, u2, reduced_x;
+  mbedtls_ecp_group_init(&group);
+  mbedtls_ecp_point_init(&public_key);
+  mbedtls_ecp_point_init(&recovery_point);
+  mbedtls_mpi_init(&private_scalar); mbedtls_mpi_init(&r); mbedtls_mpi_init(&s);
+  mbedtls_mpi_init(&half_order); mbedtls_mpi_init(&z); mbedtls_mpi_init(&inverse_s);
+  mbedtls_mpi_init(&u1); mbedtls_mpi_init(&u2); mbedtls_mpi_init(&reduced_x);
+  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
+  if (result == 0) result = mbedtls_mpi_read_binary(&private_scalar, private_key, kPrivateKeySize);
+  if (result == 0) {
+    result = mbedtls_ecdsa_sign_det_ext(&group, &r, &s, &private_scalar,
+                                        digest, kSha256Size, MBEDTLS_MD_SHA256,
+                                        random_callback, nullptr);
+  }
+  if (result == 0) result = mbedtls_mpi_copy(&half_order, &group.N);
+  if (result == 0) result = mbedtls_mpi_shift_r(&half_order, 1);
+  if (result == 0 && mbedtls_mpi_cmp_mpi(&s, &half_order) > 0) {
+    result = mbedtls_mpi_sub_mpi(&s, &group.N, &s);
+  }
+  if (result == 0) {
+    result = mbedtls_ecp_mul(&group, &public_key, &private_scalar, &group.G,
+                             random_callback, nullptr);
+  }
+  if (result == 0) {
+    result = mbedtls_ecdsa_verify(&group, digest, kSha256Size, &public_key, &r, &s);
+  }
+
+  // The verification point equals the ECDSA nonce point for the normalized
+  // low-S signature. Its Y parity is the recovery bit used by Ethereum.
+  if (result == 0) result = mbedtls_mpi_read_binary(&z, digest, kSha256Size);
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&z, &z, &group.N);
+  if (result == 0) result = mbedtls_mpi_inv_mod(&inverse_s, &s, &group.N);
+  if (result == 0) result = mbedtls_mpi_mul_mpi(&u1, &z, &inverse_s);
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&u1, &u1, &group.N);
+  if (result == 0) result = mbedtls_mpi_mul_mpi(&u2, &r, &inverse_s);
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&u2, &u2, &group.N);
+  if (result == 0) {
+    result = mbedtls_ecp_muladd(&group, &recovery_point, &u1, &group.G, &u2, &public_key);
+  }
+  if (result == 0) {
+    result = mbedtls_mpi_copy(&reduced_x, &recovery_point.MBEDTLS_PRIVATE(X));
+  }
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&reduced_x, &reduced_x, &group.N);
+  if (result == 0 && (mbedtls_mpi_cmp_mpi(&reduced_x, &r) != 0 ||
+                      mbedtls_mpi_cmp_mpi(&recovery_point.MBEDTLS_PRIVATE(X), &group.N) >= 0)) {
+    result = MBEDTLS_ERR_ECP_VERIFY_FAILED;
+  }
+  if (result == 0) result = mbedtls_mpi_write_binary(&r, out_signature->r, kPrivateKeySize);
+  if (result == 0) result = mbedtls_mpi_write_binary(&s, out_signature->s, kPrivateKeySize);
+  if (result == 0) {
+    out_signature->y_parity = static_cast<uint8_t>(
+        mbedtls_mpi_get_bit(&recovery_point.MBEDTLS_PRIVATE(Y), 0));
+  }
+
+  mbedtls_mpi_free(&reduced_x); mbedtls_mpi_free(&u2); mbedtls_mpi_free(&u1);
+  mbedtls_mpi_free(&inverse_s); mbedtls_mpi_free(&z); mbedtls_mpi_free(&half_order);
+  mbedtls_mpi_free(&s); mbedtls_mpi_free(&r); mbedtls_mpi_free(&private_scalar);
+  mbedtls_ecp_point_free(&recovery_point); mbedtls_ecp_point_free(&public_key);
+  mbedtls_ecp_group_free(&group);
+  if (result != 0) secure_zero(out_signature, sizeof(*out_signature));
+  return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
+}
+
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivateNode *out_node) {
   if (seed == nullptr || out_node == nullptr || seed_size < 16 || seed_size > 64) {
     return WalletError::InvalidArgument;
@@ -599,6 +674,33 @@ bool run_bip32_self_test() {
   secure_zero(&derived_public, sizeof(derived_public));
   secure_zero(&private_child, sizeof(private_child));
   secure_zero(&private_child_public, sizeof(private_child_public));
+  return passed;
+}
+
+bool run_secp256k1_self_test() {
+  static const uint8_t kPrivateKey[kPrivateKeySize] = {
+      0x61,0x9c,0x33,0x50,0x25,0xc7,0xf4,0x01,0x2e,0x55,0x6c,0x2a,0x58,0xb2,0x50,0x6e,
+      0x30,0xb8,0x51,0x1b,0x53,0xad,0xe9,0x5e,0xa3,0x16,0xfd,0x8c,0x32,0x86,0xfe,0xb9,
+  };
+  static const uint8_t kDigest[kSha256Size] = {
+      0xc3,0x7a,0xf3,0x11,0x16,0xd1,0xb2,0x7c,0xaf,0x68,0xaa,0xe9,0xe3,0xac,0x82,0xf1,
+      0x47,0x79,0x29,0x01,0x4d,0x5b,0x91,0x76,0x57,0xd0,0xeb,0x49,0x47,0x8c,0xb6,0x70,
+  };
+  static const uint8_t kExpectedR[kPrivateKeySize] = {
+      0x36,0x09,0xe1,0x7b,0x84,0xf6,0xa7,0xd3,0x0c,0x80,0xbf,0xa6,0x10,0xb5,0xb4,0x54,
+      0x2f,0x32,0xa8,0xa0,0xd5,0x44,0x7a,0x12,0xfb,0x13,0x66,0xd7,0xf0,0x1c,0xc4,0x4a,
+  };
+  static const uint8_t kExpectedS[kPrivateKeySize] = {
+      0x57,0x3a,0x95,0x4c,0x45,0x18,0x33,0x15,0x61,0x40,0x6f,0x90,0x30,0x0e,0x8f,0x33,
+      0x58,0xf5,0x19,0x28,0xd4,0x3c,0x21,0x2a,0x8c,0xae,0xd0,0x2d,0xe6,0x7e,0xeb,0xee,
+  };
+  RecoverableSignature signature;
+  const bool passed = secp256k1_sign_digest_recoverable(kPrivateKey, kDigest, &signature) ==
+                          WalletError::Ok &&
+      crypto_constant_time_equal(signature.r, kExpectedR, sizeof(signature.r)) &&
+      crypto_constant_time_equal(signature.s, kExpectedS, sizeof(signature.s)) &&
+      signature.y_parity <= 1;
+  secure_zero(&signature, sizeof(signature));
   return passed;
 }
 

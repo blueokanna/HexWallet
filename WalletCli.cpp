@@ -8,12 +8,14 @@
 #include "BitcoinTransaction.h"
 #include "CryptoNoteAddress.h"
 #include "CryptoPrimitives.h"
+#include "EvmTransaction.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
 #include "WalletEngine.h"
 #include "WalletSecurity.h"
 #include "WalletSession.h"
 #include "WalletTokens.h"
+#include "WalletTransportPolicy.h"
 #include "WalletUi.h"
 
 namespace hexwallet {
@@ -48,6 +50,9 @@ uint8_t challenge[kChallengeSize];
 char line_buffer[kLineSize];
 size_t line_used = 0;
 BitcoinSigningRequest pending_transaction;
+EvmSigningRequest pending_evm_transaction;
+enum class PendingTransactionKind : uint8_t { None, Bitcoin, Evm };
+PendingTransactionKind pending_transaction_kind = PendingTransactionKind::None;
 bool transaction_pending = false;
 uint32_t transaction_approval = 0;
 uint32_t transaction_expires_at = 0;
@@ -117,6 +122,8 @@ const char *error_text(WalletError error) {
 
 void clear_pending_transaction() {
   clear_bitcoin_request(&pending_transaction);
+  clear_evm_request(&pending_evm_transaction);
+  pending_transaction_kind = PendingTransactionKind::None;
   transaction_pending = false;
   transaction_approval = 0;
   transaction_expires_at = 0;
@@ -187,8 +194,12 @@ void show_help() {
   Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet token <id> [index] | wallet addresses [index]");
-  Serial.println("OK signing: tx inspect <psbt-v0-hex> | tx sign <six-digit-confirmation>");
+  Serial.println("OK signing: tx inspect <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | tx reject");
+#if HEXWALLET_ENABLE_SECRET_EXPORT
   Serial.println("OK sensitive: wallet secret [index] | selftest");
+#else
+  Serial.println("OK sensitive: secret export disabled | selftest");
+#endif
 }
 
 void show_status() {
@@ -341,6 +352,7 @@ void show_tokens(const char *network_filter) {
     Serial.print(" decimals="); Serial.print(token.decimals);
     Serial.print(" asset="); Serial.print(token.contract_or_mint);
     Serial.print(" capabilities="); Serial.print(token_supports_account_address(token) ? "account-address" : "none");
+    if (token_supports_transfer_signing(token)) Serial.print(",transfer-signing");
     Serial.print(" status=\""); Serial.print(token.status); Serial.println("\"");
     ++matches;
   }
@@ -360,7 +372,9 @@ void show_token(const char *id) {
   Serial.print(" standard="); Serial.print(token_standard_text(token->standard));
   Serial.print(" decimals="); Serial.print(token->decimals);
   Serial.print(" asset="); Serial.println(token->contract_or_mint);
-  Serial.print(" capabilities="); Serial.println(token_supports_account_address(*token) ? "account-address" : "none");
+  Serial.print(" capabilities="); Serial.print(token_supports_account_address(*token) ? "account-address" : "none");
+  if (token_supports_transfer_signing(*token)) Serial.print(",transfer-signing");
+  Serial.println();
   Serial.print(" status=\""); Serial.print(token->status); Serial.println("\"");
 }
 
@@ -493,7 +507,9 @@ void handle_wallet_token(char *arguments) {
   Serial.print(" decimals="); Serial.print(token->decimals);
   Serial.print(" path="); Serial.print(derived.path);
   Serial.print(" account-address="); Serial.println(derived.address);
-  Serial.println("INFO transfer-signing-unavailable");
+  Serial.println(token_supports_transfer_signing(*token) ?
+                 "INFO transfer-signing=evm-inspect-workflow" :
+                 "INFO transfer-signing-unavailable");
   clear_derived_address(&derived);
 }
 
@@ -525,6 +541,12 @@ void handle_wallet(char *command) {
   const bool secret = strncmp(command, "wallet secret", 13) == 0;
   const bool addresses = strncmp(command, "wallet addresses", 16) == 0;
   if (secret || addresses) {
+#if !HEXWALLET_ENABLE_SECRET_EXPORT
+    if (secret) {
+      Serial.println("ERR secret-export-disabled-at-build-time");
+      return;
+    }
+#endif
     const size_t prefix_size = secret ? 13 : 16;
     const char *argument = command + prefix_size;
     if (*argument == ' ') ++argument;
@@ -569,6 +591,12 @@ void print_transaction_review() {
 
 void inspect_transaction(const char *psbt_hex) {
   if (!require_authentication()) return;
+  const WalletTransportState transport_state = {true, false, display_is_available};
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::SigningRequest, transport_state)) {
+    Serial.println("ERR trusted-display-required-for-signing");
+    return;
+  }
   HdPrivateNode master;
   if (!load_master(&master)) return;
   static uint8_t psbt[HEXWALLET_MAX_PSBT_BYTES];
@@ -592,11 +620,16 @@ void inspect_transaction(const char *psbt_hex) {
   transaction_approval = random_value % 1000000U;
   transaction_expires_at = millis() + kTransactionApprovalMs;
   transaction_pending = true;
+  pending_transaction_kind = PendingTransactionKind::Bitcoin;
   print_transaction_review();
   char approval[7];
   snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
-  Serial.print("OK confirm-code="); Serial.print(approval);
-  Serial.println(" expires-ms=120000; compare every output before tx sign");
+  if (display_is_available) {
+    Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
+  } else {
+    Serial.print("OK confirm-code="); Serial.print(approval);
+    Serial.println(" expires-ms=120000; compare every output before tx sign");
+  }
   WalletUiTransactionReview review = {};
   review.network = "BITCOIN";
   review.output_count = pending_transaction.output_count;
@@ -606,7 +639,7 @@ void inspect_transaction(const char *psbt_hex) {
   review.approval_code = approval;
   for (size_t index = 0; index < review.output_count; ++index) {
     const BitcoinOutput &output = pending_transaction.outputs[index];
-    review.outputs[index] = {output.value, output.address,
+    review.outputs[index] = {output.value, nullptr, output.address,
                              output.change ? "CHANGE" : (output.wallet_owned ? "WALLET" : "EXTERNAL")};
   }
   wallet_ui_show_transaction(review);
@@ -615,7 +648,14 @@ void inspect_transaction(const char *psbt_hex) {
 
 void sign_transaction(const char *approval_text) {
   if (!require_authentication()) return;
-  if (!transaction_pending) {
+  const WalletTransportState transport_state = {true, false, display_is_available};
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::ApprovalResponse, transport_state)) {
+    clear_pending_transaction();
+    Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+    return;
+  }
+  if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Bitcoin) {
     Serial.println("ERR no-reviewed-transaction");
     return;
   }
@@ -671,6 +711,166 @@ void sign_transaction(const char *approval_text) {
   wallet_ui_show_catalog();
 }
 
+void inspect_evm_transaction(char *arguments) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = {true, false, display_is_available};
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::SigningRequest, transport_state)) {
+    Serial.println("ERR trusted-display-required-for-signing");
+    return;
+  }
+  char *network_end = strchr(arguments, ' ');
+  if (network_end == nullptr) { Serial.println("ERR invalid-evm-command"); return; }
+  *network_end++ = '\0';
+  char *index_end = strchr(network_end, ' ');
+  if (index_end == nullptr) { Serial.println("ERR invalid-evm-command"); return; }
+  *index_end++ = '\0';
+  const NetworkProfile *network = find_network_profile(arguments);
+  if (network == nullptr || network->encoding != AddressEncoding::Evm) {
+    Serial.println("ERR unsupported-evm-network");
+    return;
+  }
+  bool valid_index;
+  const uint32_t address_index = parse_index(network_end, &valid_index);
+  if (!valid_index) { Serial.println("ERR invalid-index"); return; }
+  uint8_t transaction[kEvmMaxUnsignedTransactionSize];
+  size_t transaction_size = 0;
+  if (!decode_hex(index_end, transaction, sizeof(transaction), &transaction_size)) {
+    secure_zero(transaction, sizeof(transaction));
+    Serial.println("ERR invalid-evm-transaction-hex");
+    return;
+  }
+  HdPrivateNode master;
+  if (!load_master(&master)) { secure_zero(transaction, sizeof(transaction)); return; }
+  clear_pending_transaction();
+  const EvmTransactionError error = evm_parse_transaction(
+      transaction, transaction_size, *network, master, address_index, &pending_evm_transaction);
+  secure_zero(&master, sizeof(master));
+  secure_zero(transaction, sizeof(transaction));
+  if (error != EvmTransactionError::Ok) {
+    clear_pending_transaction();
+    Serial.print("ERR evm-inspect "); Serial.println(evm_transaction_error_text(error));
+    return;
+  }
+  uint32_t random_value;
+  esp_fill_random(&random_value, sizeof(random_value));
+  transaction_approval = random_value % 1000000U;
+  transaction_expires_at = millis() + kTransactionApprovalMs;
+  transaction_pending = true;
+  pending_transaction_kind = PendingTransactionKind::Evm;
+  const char *asset = pending_evm_transaction.token == nullptr ? network->symbol :
+                                                               pending_evm_transaction.token->symbol;
+  Serial.println("BEGIN TRANSACTION REVIEW");
+  Serial.print("network="); Serial.print(network->id);
+  Serial.print(" type="); Serial.println(pending_evm_transaction.type == EvmTransactionType::Eip1559 ?
+                                          "EIP-1559" : "EIP-155");
+  Serial.print("from="); Serial.println(pending_evm_transaction.from_address);
+  Serial.print("asset="); Serial.print(asset);
+  Serial.print(" recipient="); Serial.println(pending_evm_transaction.recipient_address);
+  Serial.print("amount="); Serial.print(pending_evm_transaction.amount_text);
+  Serial.print(" "); Serial.println(asset);
+  if (pending_evm_transaction.token != nullptr) {
+    Serial.print("contract="); Serial.println(pending_evm_transaction.token->contract_or_mint);
+  }
+  Serial.print("nonce="); Serial.print(static_cast<unsigned long long>(pending_evm_transaction.nonce));
+  Serial.print(" gas-limit="); Serial.println(static_cast<unsigned long long>(pending_evm_transaction.gas_limit));
+  Serial.print("maximum-fee="); Serial.print(pending_evm_transaction.maximum_fee_text);
+  Serial.print(" "); Serial.println(network->symbol);
+  Serial.print("review-id="); print_hex(pending_evm_transaction.request_hash, 8); Serial.println();
+  Serial.println("END TRANSACTION REVIEW");
+  char approval[7];
+  snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+  if (display_is_available) {
+    Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
+  } else {
+    Serial.print("OK confirm-code="); Serial.print(approval);
+    Serial.println(" expires-ms=120000");
+  }
+  char display_amount[112];
+  char display_fee[112];
+  snprintf(display_amount, sizeof(display_amount), "%s %s", pending_evm_transaction.amount_text, asset);
+  snprintf(display_fee, sizeof(display_fee), "%s %s", pending_evm_transaction.maximum_fee_text,
+           network->symbol);
+  WalletUiTransactionReview review = {};
+  review.network = network->name;
+  review.output_count = 1;
+  review.outputs[0] = {0, display_amount, pending_evm_transaction.recipient_address,
+                       pending_evm_transaction.token == nullptr ? "NATIVE TRANSFER" : "REGISTERED ERC-20"};
+  review.fee_text = display_fee;
+  review.approval_code = approval;
+  wallet_ui_show_transaction(review);
+  secure_zero(display_amount, sizeof(display_amount));
+  secure_zero(display_fee, sizeof(display_fee));
+  secure_zero(approval, sizeof(approval));
+}
+
+void sign_evm_transaction(const char *approval_text) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = {true, false, display_is_available};
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::ApprovalResponse, transport_state)) {
+    clear_pending_transaction();
+    Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+    return;
+  }
+  if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Evm) {
+    Serial.println("ERR no-reviewed-evm-transaction");
+    return;
+  }
+  if (deadline_reached(millis(), transaction_expires_at) || approval_text == nullptr ||
+      strlen(approval_text) != 6) {
+    clear_pending_transaction();
+    Serial.println("ERR invalid-or-expired-confirmation; review-cleared");
+    return;
+  }
+  uint32_t supplied = 0;
+  for (size_t index = 0; index < 6; ++index) {
+    if (approval_text[index] < '0' || approval_text[index] > '9') {
+      clear_pending_transaction();
+      Serial.println("ERR invalid-confirmation; review-cleared");
+      return;
+    }
+    supplied = supplied * 10U + static_cast<uint32_t>(approval_text[index] - '0');
+  }
+  if (supplied != transaction_approval) {
+    clear_pending_transaction();
+    Serial.println("ERR confirmation-mismatch; review-cleared");
+    return;
+  }
+  HdPrivateNode master;
+  if (!load_master(&master)) { clear_pending_transaction(); return; }
+  uint8_t signed_transaction[kEvmMaxSignedTransactionSize];
+  size_t signed_size = sizeof(signed_transaction);
+  const EvmTransactionError error = evm_sign_transaction(
+      pending_evm_transaction, master, signed_transaction, &signed_size);
+  secure_zero(&master, sizeof(master));
+  clear_pending_transaction();
+  if (error != EvmTransactionError::Ok) {
+    secure_zero(signed_transaction, sizeof(signed_transaction));
+    Serial.print("ERR evm-sign "); Serial.println(evm_transaction_error_text(error));
+    return;
+  }
+  uint8_t transaction_hash[kKeccak256Size];
+  const bool hashed = crypto_keccak256(signed_transaction, signed_size, transaction_hash);
+  Serial.print("OK signed-transaction="); print_hex(signed_transaction, signed_size); Serial.println();
+  if (hashed) { Serial.print("tx-hash=0x"); print_hex(transaction_hash, sizeof(transaction_hash)); Serial.println(); }
+  secure_zero(transaction_hash, sizeof(transaction_hash));
+  secure_zero(signed_transaction, sizeof(signed_transaction));
+  wallet_ui_show_catalog();
+}
+
+void handle_evm(char *command) {
+  constexpr char kInspectPrefix[] = "evm inspect ";
+  constexpr char kSignPrefix[] = "evm sign ";
+  if (strncmp(command, kInspectPrefix, sizeof(kInspectPrefix) - 1) == 0) {
+    inspect_evm_transaction(command + sizeof(kInspectPrefix) - 1);
+  } else if (strncmp(command, kSignPrefix, sizeof(kSignPrefix) - 1) == 0) {
+    sign_evm_transaction(command + sizeof(kSignPrefix) - 1);
+  } else {
+    Serial.println("ERR invalid-evm-command");
+  }
+}
+
 void handle_transaction(char *command) {
   constexpr char kInspectPrefix[] = "tx inspect ";
   constexpr char kSignPrefix[] = "tx sign ";
@@ -678,6 +878,10 @@ void handle_transaction(char *command) {
     inspect_transaction(command + sizeof(kInspectPrefix) - 1);
   } else if (strncmp(command, kSignPrefix, sizeof(kSignPrefix) - 1) == 0) {
     sign_transaction(command + sizeof(kSignPrefix) - 1);
+  } else if (strcmp(command, "tx reject") == 0) {
+    clear_pending_transaction();
+    wallet_ui_show_catalog();
+    Serial.println("OK transaction-rejected-and-cleared");
   } else {
     Serial.println("ERR invalid-transaction-command");
   }
@@ -693,6 +897,8 @@ void run_self_tests() {
   const bool networks = run_network_profile_self_tests();
   const bool tokens = run_token_profile_self_tests();
   const bool transaction = run_bitcoin_transaction_self_test();
+  const bool evm = run_evm_transaction_self_test();
+  const bool transport = run_transport_policy_self_test();
   Serial.print("OK crypto="); Serial.print(crypto ? "pass" : "FAIL");
   Serial.print(" cryptonote="); Serial.print(cryptonote ? "pass" : "FAIL");
   Serial.print(" bip39="); Serial.print(bip39 ? "pass" : "FAIL");
@@ -700,7 +906,9 @@ void run_self_tests() {
   Serial.print(" address="); Serial.print(address ? "pass" : "FAIL");
   Serial.print(" networks="); Serial.print(networks ? "pass" : "FAIL");
   Serial.print(" tokens="); Serial.print(tokens ? "pass" : "FAIL");
-  Serial.print(" bip143="); Serial.println(transaction ? "pass" : "FAIL");
+  Serial.print(" bip143="); Serial.print(transaction ? "pass" : "FAIL");
+  Serial.print(" evm="); Serial.print(evm ? "pass" : "FAIL");
+  Serial.print(" transport-policy="); Serial.println(transport ? "pass" : "FAIL");
 }
 
 void handle_line(char *command) {
@@ -718,6 +926,7 @@ void handle_line(char *command) {
     Serial.println("OK locked");
   } else if (strcmp(command, "selftest") == 0) run_self_tests();
   else if (strncmp(command, "wallet ", 7) == 0) handle_wallet(command);
+  else if (strncmp(command, "evm ", 4) == 0) handle_evm(command);
   else if (strncmp(command, "tx ", 3) == 0) handle_transaction(command);
   else Serial.println("ERR unknown-command; use help");
 }

@@ -35,47 +35,47 @@ bool valid_spl_mint(const char *mint) {
 
 const TokenProfile kTokenProfiles[] = {
     {"eth-usdc", "eth", "USDC", "USD Coin", TokenStandard::Erc20,
-     "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"eth-usdt", "eth", "USDT", "Tether USD", TokenStandard::Erc20,
-     "0xdAC17F958D2ee523a2206206994597C13D831ec7", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xdAC17F958D2ee523a2206206994597C13D831ec7", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"eth-dai", "eth", "DAI", "Dai Stablecoin", TokenStandard::Erc20,
-     "0x6B175474E89094C44Da98b954EedeAC495271d0F", 18, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x6B175474E89094C44Da98b954EedeAC495271d0F", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"eth-wbtc", "eth", "WBTC", "Wrapped Bitcoin", TokenStandard::Erc20,
-     "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 8, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 8, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"bsc-usdt", "bsc", "USDT", "Binance-Peg BSC-USD", TokenStandard::Erc20,
-     "0x55d398326f99059fF775485246999027B3197955", 18, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x55d398326f99059fF775485246999027B3197955", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"bsc-usdc", "bsc", "USDC", "Binance-Peg USD Coin", TokenStandard::Erc20,
-     "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"bsc-busd", "bsc", "BUSD", "Binance USD", TokenStandard::Erc20,
-     "0xe9e7CEA3Dedca5984780Bafc599bD69ADd087D56", 18, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xe9e7CEA3Dedca5984780Bafc599bD69ADd087D56", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"matic-usdc", "matic", "USDC", "USD Coin", TokenStandard::Erc20,
-     "0x3c499c542cEF5E3811e1192ce70d8cc03d5c3359", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x3c499c542cEF5E3811e1192ce70d8cc03d5c3359", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"matic-usdt", "matic", "USDT", "Tether USD", TokenStandard::Erc20,
-     "0xc2132D05D31c914a87C6611C10748AaCbEbfA6E", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xc2132D05D31c914a87C6611C10748AaCbEbfA6E", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"arb-usdc", "arb1", "USDC", "USD Coin", TokenStandard::Erc20,
-     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"arb-usdt", "arb1", "USDT", "Tether USD", TokenStandard::Erc20,
-     "0xfd086bC7CD5C481DCC9C85eFfA478A1C0b69FCbb", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xfd086bC7CD5C481DCC9C85eFfA478A1C0b69FCbb", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"opt-usdc", "opt", "USDC", "USD Coin", TokenStandard::Erc20,
-     "0x7F5c764cBc14f9669B88837ca1490cCa17c31607", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x7F5c764cBc14f9669B88837ca1490cCa17c31607", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"base-usdc", "base", "USDC", "USD Coin", TokenStandard::Erc20,
-     "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"avaxc-usdc", "avaxc", "USDC", "USD Coin", TokenStandard::Erc20,
-     "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", 6, TokenCapabilityAccountAddress,
-     "ERC-20 account address supported; transfer signing unavailable"},
+     "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-20 account address and transfer signing supported"},
     {"sol-usdc", "sol", "USDC", "USD Coin", TokenStandard::Spl,
      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6, TokenCapabilityNone,
      "SPL mint registered; Solana address and transfer signing unavailable"},
@@ -101,6 +101,11 @@ bool token_supports_account_address(const TokenProfile &token) {
          network_supports_token_accounts(*network);
 }
 
+bool token_supports_transfer_signing(const TokenProfile &token) {
+  return token.standard == TokenStandard::Erc20 &&
+         (token.capabilities & TokenCapabilityTransferSigning) != 0;
+}
+
 const char *token_standard_text(TokenStandard standard) {
   switch (standard) {
     case TokenStandard::Erc20: return "ERC-20";
@@ -117,7 +122,8 @@ bool run_token_profile_self_tests() {
         token.name == nullptr || token.name[0] == '\0' || token.contract_or_mint == nullptr ||
         token.contract_or_mint[0] == '\0' || token.status == nullptr || token.status[0] == '\0') return false;
     if (token.standard == TokenStandard::Erc20) {
-      if (!valid_erc20_contract(token.contract_or_mint) || !token_supports_account_address(token)) return false;
+      if (!valid_erc20_contract(token.contract_or_mint) || !token_supports_account_address(token) ||
+          !token_supports_transfer_signing(token)) return false;
     } else if (token.standard == TokenStandard::Spl) {
       if (!valid_spl_mint(token.contract_or_mint) || token_supports_account_address(token)) return false;
     } else {

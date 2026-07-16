@@ -12,6 +12,7 @@ constexpr size_t kSeedSize = 64;
 constexpr size_t kCompressedPublicKeySize = 33;
 constexpr size_t kUncompressedPublicKeySize = 65;
 constexpr size_t kExtendedKeyTextSize = 113;
+constexpr size_t kCompactSignatureSize = 64;
 constexpr uint32_t kHardenedOffset = 0x80000000UL;
 
 enum class WalletError : uint8_t {
@@ -44,6 +45,12 @@ struct HdPublicNode {
   uint32_t child_number;
 };
 
+struct RecoverableSignature {
+  uint8_t r[kPrivateKeySize];
+  uint8_t s[kPrivateKeySize];
+  uint8_t y_parity;
+};
+
 enum class ExtendedKeyFormat : uint8_t {
   Xprv,
   Xpub,
@@ -71,6 +78,9 @@ WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
 WalletError uncompressed_public_key_from_private(
     const uint8_t private_key[kPrivateKeySize],
     uint8_t out_public_key[kUncompressedPublicKeySize]);
+WalletError secp256k1_sign_digest_recoverable(
+    const uint8_t private_key[kPrivateKeySize],
+    const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature);
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size,
                                  HdPrivateNode *out_node);
 WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index,
@@ -88,6 +98,7 @@ WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat form
 // Checks the BIP32 non-hardened public/private derivation invariant. It never
 // emits key material to serial; external official vectors remain mandatory in CI.
 bool run_bip32_self_test();
+bool run_secp256k1_self_test();
 
 }  // namespace hexwallet
 

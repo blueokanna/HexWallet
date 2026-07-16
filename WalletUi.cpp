@@ -211,16 +211,25 @@ void wallet_ui_show_transaction(const WalletUiTransactionReview &review) {
 
   for (size_t index = 0; index < review.output_count; ++index) {
     const WalletUiTransactionOutput &output = review.outputs[index];
-    snprintf(line, sizeof(line), "%u  %llu sat\n%s\n%s", static_cast<unsigned>(index + 1),
-             static_cast<unsigned long long>(output.value), output.address, output.ownership);
+    if (output.amount_text != nullptr) {
+      snprintf(line, sizeof(line), "%u  %s\n%s\n%s", static_cast<unsigned>(index + 1),
+               output.amount_text, output.address, output.ownership);
+    } else {
+      snprintf(line, sizeof(line), "%u  %llu sat\n%s\n%s", static_cast<unsigned>(index + 1),
+               static_cast<unsigned long long>(output.value), output.address, output.ownership);
+    }
     lv_obj_t *label = lv_label_create(screen_content);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
     lv_label_set_text(label, line);
   }
-  snprintf(line, sizeof(line), "FEE  %llu sat  |  %llu sat/vB",
-           static_cast<unsigned long long>(review.fee),
-           static_cast<unsigned long long>(review.fee_rate));
+  if (review.fee_text != nullptr) {
+    snprintf(line, sizeof(line), "MAX FEE  %s", review.fee_text);
+  } else {
+    snprintf(line, sizeof(line), "FEE  %llu sat  |  %llu sat/vB",
+             static_cast<unsigned long long>(review.fee),
+             static_cast<unsigned long long>(review.fee_rate));
+  }
   lv_obj_t *fee = lv_label_create(screen_content);
   lv_label_set_text(fee, line);
   lv_obj_set_style_text_color(fee, lv_color_hex(0x8a241e), 0);

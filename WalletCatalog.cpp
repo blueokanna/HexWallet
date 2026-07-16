@@ -79,8 +79,14 @@ const CatalogSeed kCatalog[] = {
 
 WalletCatalogEntry resolved_entry(size_t index) {
   const CatalogSeed &seed = kCatalog[index];
-  return {seed.id, seed.symbol, seed.name, seed.slip44, seed.capabilities,
-          seed.network_id == nullptr ? nullptr : find_network_profile(seed.network_id), seed.status};
+  const NetworkProfile *network = seed.network_id == nullptr ? nullptr : find_network_profile(seed.network_id);
+  uint8_t capabilities = seed.capabilities;
+  const char *status = seed.status;
+  if (network != nullptr && network->encoding == AddressEncoding::Evm) {
+    capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
+    status = "EIP-155/EIP-1559 native and registered ERC-20 transfer signing";
+  }
+  return {seed.id, seed.symbol, seed.name, seed.slip44, capabilities, network, status};
 }
 
 bool equals_ignore_case(const char *left, const char *right) {

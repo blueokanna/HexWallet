@@ -16,6 +16,7 @@ enum class TokenStandard : uint8_t {
 enum TokenCapability : uint8_t {
   TokenCapabilityNone = 0,
   TokenCapabilityAccountAddress = 1 << 0,
+  TokenCapabilityTransferSigning = 1 << 1,
 };
 
 struct TokenProfile {
@@ -36,6 +37,7 @@ extern const size_t kTokenProfileCount;
 const TokenProfile *find_token_profile(const char *id);
 const NetworkProfile *token_network(const TokenProfile &token);
 bool token_supports_account_address(const TokenProfile &token);
+bool token_supports_transfer_signing(const TokenProfile &token);
 const char *token_standard_text(TokenStandard standard);
 bool run_token_profile_self_tests();
 
