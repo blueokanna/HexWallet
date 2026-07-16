@@ -10,6 +10,7 @@ constexpr size_t kPrivateKeySize = 32;
 constexpr size_t kChainCodeSize = 32;
 constexpr size_t kSeedSize = 64;
 constexpr size_t kCompressedPublicKeySize = 33;
+constexpr size_t kUncompressedPublicKeySize = 65;
 constexpr size_t kExtendedKeyTextSize = 113;
 constexpr uint32_t kHardenedOffset = 0x80000000UL;
 
@@ -63,9 +64,13 @@ WalletError bip39_generate_english_24(char *out, size_t out_size);
 WalletError bip39_validate_english(const char *mnemonic);
 WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
                                     uint8_t out_seed[kSeedSize]);
+bool run_bip39_self_test();
 
 WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
                                     uint8_t out_public_key[kCompressedPublicKeySize]);
+WalletError uncompressed_public_key_from_private(
+    const uint8_t private_key[kPrivateKeySize],
+    uint8_t out_public_key[kUncompressedPublicKeySize]);
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size,
                                  HdPrivateNode *out_node);
 WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index,

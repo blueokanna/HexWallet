@@ -1,22 +1,24 @@
-#ifndef __KECCAK256_H_
-#define __KECCAK256_H_
+#ifndef HEXWALLET_KECCAK256_H
+#define HEXWALLET_KECCAK256_H
 
-#include <Arduino.h>
+#include <stddef.h>
 #include <stdint.h>
 
-#define sha3_max_permutation_size 25
-#define sha3_max_rate_in_qwords 24
+// Streaming legacy Keccak-256 (Ethereum), not FIPS SHA3-256.  The suffix is
+// 0x01 as required by Ethereum instead of SHA3's 0x06.
+constexpr size_t kKeccak256StateLanes = 25;
+constexpr size_t kKeccak256RateBytes = 136;
+constexpr size_t kKeccak256DigestBytes = 32;
 
-typedef struct SHA3_CTX {
-    uint64_t hash[sha3_max_permutation_size];
-    uint64_t message[sha3_max_rate_in_qwords];
-    uint16_t rest;
+struct SHA3_CTX {
+  uint64_t state[kKeccak256StateLanes];
+  uint8_t buffer[kKeccak256RateBytes];
+  size_t used;
+  bool finalized;
+};
 
-} SHA3_CTX;
-
-void keccak_init(SHA3_CTX *ctx);
-void keccak_update(SHA3_CTX *ctx, const unsigned char *msg, uint16_t size);
-void keccak_final(SHA3_CTX *ctx, unsigned char* result);
-
+void keccak_init(SHA3_CTX *context);
+bool keccak_update(SHA3_CTX *context, const uint8_t *data, size_t size);
+bool keccak_final(SHA3_CTX *context, uint8_t result[kKeccak256DigestBytes]);
 
 #endif

@@ -34,7 +34,6 @@ bool convertbits(data& out, const data& in) {
 
 namespace segwit_address {
 
-/** Encode a SegWit address. */
 std::string encode(const std::string& hrp, int witver, const data& witprogram) {
   data enc;
   enc.push_back(witver);
@@ -44,7 +43,6 @@ std::string encode(const std::string& hrp, int witver, const data& witprogram) {
   return ret;
 }
 
-/** Decode a SegWit address. */
 std::pair<int, data> decode(const std::string& hrp, const std::string& addr) {
   const auto dec = bech32::decode(addr);
   if (dec.hrp != hrp || dec.data.size() < 1) return std::make_pair(-1, data());

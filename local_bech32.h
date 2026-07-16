@@ -16,11 +16,10 @@ enum class Encoding {
 
 std::string encode(const std::string& hrp, const std::vector<uint8_t>& values, Encoding encoding);
 
-/** A type for the result of decoding. */
 struct DecodeResult {
-  Encoding encoding;          //!< What encoding was detected in the result; Encoding::INVALID if failed.
-  std::string hrp;            //!< The human readable part
-  std::vector<uint8_t> data;  //!< The payload (excluding checksum)
+  Encoding encoding;
+  std::string hrp;
+  std::vector<uint8_t> data;
 
   DecodeResult()
     : encoding(Encoding::INVALID) {}

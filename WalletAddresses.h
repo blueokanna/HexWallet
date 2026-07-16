@@ -14,10 +14,11 @@ struct UtxoAddressProfile {
   uint8_t p2pkh_version;
   uint8_t p2sh_version;
   const char *bech32_hrp;
+  bool ripple_alphabet;
 };
 
-constexpr UtxoAddressProfile kBitcoinMainnet = {0x00, 0x05, "bc"};
-constexpr UtxoAddressProfile kBitcoinTestnet = {0x6f, 0xc4, "tb"};
+constexpr UtxoAddressProfile kBitcoinMainnet = {0x00, 0x05, "bc", false};
+constexpr UtxoAddressProfile kBitcoinTestnet = {0x6f, 0xc4, "tb", false};
 
 WalletError address_p2pkh(const UtxoAddressProfile &profile,
                           const uint8_t public_key[kCompressedPublicKeySize],
@@ -28,6 +29,14 @@ WalletError address_p2sh_p2wpkh(const UtxoAddressProfile &profile,
 WalletError address_p2wpkh(const UtxoAddressProfile &profile,
                            const uint8_t public_key[kCompressedPublicKeySize],
                            char *out, size_t out_size);
+WalletError address_evm(const uint8_t public_key[kUncompressedPublicKeySize],
+                        char *out, size_t out_size);
+WalletError address_keccak_base58(uint8_t version,
+                                  const uint8_t public_key[kUncompressedPublicKeySize],
+                                  char *out, size_t *in_out_size);
+WalletError address_from_script(const UtxoAddressProfile &profile,
+                                const uint8_t *script, size_t script_size,
+                                char *out, size_t out_size);
 
 }  // namespace hexwallet
 

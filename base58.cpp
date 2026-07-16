@@ -1,13 +1,31 @@
 #include <Arduino.h>
-#include <mbedtls/sha256.h>
+#include <mbedtls/platform_util.h>
 #include <string.h>
 
 #include "base58.h"
+#include "CryptoPrimitives.h"
 
 namespace {
 
 constexpr char kBitcoinAlphabet[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 constexpr char kRippleAlphabet[] = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
+constexpr size_t kChecksumSize = 4;
+constexpr size_t kMaximumEncodedSize = 120;
+constexpr size_t kDecodeBufferSize = 128;
+
+struct ScopedZero {
+  ScopedZero(void *data_value, size_t size_value) : data(data_value), size(size_value) {}
+  ~ScopedZero() { mbedtls_platform_zeroize(data, size); }
+  void *data;
+  size_t size;
+};
+
+void clear_and_free(uint8_t *buffer, size_t size) {
+  if (buffer != nullptr) {
+    mbedtls_platform_zeroize(buffer, size);
+    free(buffer);
+  }
+}
 
 bool encode_base58(const char *alphabet, char *out, size_t *in_out_size,
                    const void *input, size_t input_size) {
@@ -46,7 +64,7 @@ bool encode_base58(const char *alphabet, char *out, size_t *in_out_size,
   const size_t required = zeroes + work_size - first + 1;
   if (*in_out_size < required) {
     *in_out_size = required;
-    free(work);
+    clear_and_free(work, work_size);
     return false;
   }
   memset(out, alphabet[0], zeroes);
@@ -56,19 +74,13 @@ bool encode_base58(const char *alphabet, char *out, size_t *in_out_size,
   }
   out[output_index] = '\0';
   *in_out_size = required;
-  free(work);
+  clear_and_free(work, work_size);
   return true;
 }
 
 int bitcoin_digit(unsigned char value) {
-  if (value >= '1' && value <= '9') return value - '1';
-  if (value >= 'A' && value <= 'H') return value - 'A' + 9;
-  if (value >= 'J' && value <= 'N') return value - 'J' + 17;
-  if (value == 'P') return 22;
-  if (value >= 'Q' && value <= 'Z') return value - 'Q' + 23;
-  if (value >= 'a' && value <= 'k') return value - 'a' + 33;
-  if (value >= 'm' && value <= 'z') return value - 'm' + 44;
-  return -1;
+  const char *position = strchr(kBitcoinAlphabet, value);
+  return position == nullptr ? -1 : static_cast<int>(position - kBitcoinAlphabet);
 }
 
 }  // namespace
@@ -86,10 +98,11 @@ bool b58check_dec(uint8_t *bin, size_t *binsz, const char *b58) {
     return false;
   }
   const size_t encoded_size = strlen(b58);
-  if (encoded_size == 0 || encoded_size > 120) {
+  if (encoded_size == 0 || encoded_size > kMaximumEncodedSize) {
     return false;
   }
-  uint8_t little_endian[128] = {0};
+  uint8_t little_endian[kDecodeBufferSize] = {0};
+  ScopedZero little_endian_guard(little_endian, sizeof(little_endian));
   size_t decoded_size = 0;
   size_t zeroes = 0;
   while (zeroes < encoded_size && b58[zeroes] == '1') {
@@ -115,28 +128,27 @@ bool b58check_dec(uint8_t *bin, size_t *binsz, const char *b58) {
     }
   }
   const size_t total_size = zeroes + decoded_size;
-  if (total_size < 4) {
+  if (total_size < kChecksumSize) {
     return false;
   }
-  const size_t payload_size = total_size - 4;
+  const size_t payload_size = total_size - kChecksumSize;
   if (*binsz < payload_size) {
     *binsz = payload_size;
     return false;
   }
-  uint8_t decoded[128] = {0};
+  uint8_t decoded[kDecodeBufferSize] = {0};
+  ScopedZero decoded_guard(decoded, sizeof(decoded));
   for (size_t i = 0; i < decoded_size; ++i) {
     decoded[zeroes + i] = little_endian[decoded_size - i - 1];
   }
-  uint8_t checksum[32];
-  mbedtls_sha256(decoded, payload_size, checksum, 0);
-  mbedtls_sha256(checksum, sizeof(checksum), checksum, 0);
-  const bool valid = memcmp(checksum, decoded + payload_size, 4) == 0;
+  uint8_t checksum[hexwallet::kSha256Size];
+  ScopedZero checksum_guard(checksum, sizeof(checksum));
+  const bool valid = hexwallet::crypto_double_sha256(decoded, payload_size, checksum) &&
+                     hexwallet::crypto_constant_time_equal(
+                         checksum, decoded + payload_size, kChecksumSize);
   if (valid) {
     memcpy(bin, decoded, payload_size);
     *binsz = payload_size;
   }
-  memset(little_endian, 0, sizeof(little_endian));
-  memset(decoded, 0, sizeof(decoded));
-  memset(checksum, 0, sizeof(checksum));
   return valid;
 }
