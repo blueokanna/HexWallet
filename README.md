@@ -1,67 +1,34 @@
-## HexWallet - The open source for ESP32-S3 crypto hardware wallet (BETA) - [中文文档](https://github.com/blueokanna/HexWallet/blob/main/README-zh.md)
+# HexWallet (BETA) - [中文文档](https://github.com/blueokanna/HexWallet/blob/main/README-zh.md)
 
-### :warning: Disclaimer for HexWallet:
-```
-Copyright (c) 2024 Blueokanna
-This software, HexWallet, is developed by Blueokanna and other contributors, and is licensed under the Apache 2.0. The following disclaimer applies:
+ESP32 and LVGL firmware foundation for an offline cryptocurrency hardware
+wallet. This repository is experimental and is not suitable for holding funds.
 
-1. Risk of Use:
-By using HexWallet, you agree to take full responsibility for any risks associated with its use. The authors of HexWallet shall not be liable for any damages or losses incurred as a result of using, modifying, or distributing this software.
+## Current architecture
 
-2. No Warranties:
-HexWallet is provided "as is" without any express or implied warranties, including, but not limited to, the implied warranties of merchantability, fitness for a particular purpose, and non-infringement. The authors do not guarantee that HexWallet will meet your requirements or that its operation will be uninterrupted or error-free.
+- `WalletSecurity.*`: BIP39 English validation and seed derivation, BIP32
+  private/public derivation, path parsing, and extended-key serialization.
+- `WalletAddresses.*`: data-driven Bitcoin P2PKH, BIP13 P2SH-P2WPKH, and BIP173
+  P2WPKH address encodings.
+- `WalletUi.*`: LVGL 9 lock screen without secret material.
+- `WalletBoardPort.*`: the only hardware-specific boundary.
 
-3. Intellectual Property:
-The authors of HexWallet do not warrant that the use of the software will not infringe on the rights of third parties. It is your responsibility to ensure that you have the necessary permissions to use any third-party software or content included in HexWallet.
+The startup firmware never logs a mnemonic, seed, private key, chain code, or
+extended private key. The supplied board port intentionally fails closed until
+it is replaced with an implementation for the exact display and input hardware.
 
-4. Limitation of Liability:
-Under no circumstances shall the authors of HexWallet be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
+## Arduino IDE
 
-5. Third-Party Content:
-HexWallet may include third-party software or libraries that are subject to their own licenses and disclaimers. You are responsible for reviewing and complying with any such third-party licenses.
+Install Espressif ESP32 board support 3.x or later, LVGL 9.x, and a driver for
+the exact display panel. Then implement the selected panel's GPIO, bus, LVGL
+draw-buffer, flush, touch/buttons, and power sequencing in
+`WalletBoardPort.cpp`.
 
-6. Changes to Disclaimer:
-This disclaimer may be updated from time to time and at any time without notice. It is your responsibility to check this disclaimer periodically for changes.
-By using HexWallet, you are acknowledging your understanding and acceptance of this disclaimer. If you do not agree with this disclaimer, you are not allowed to use HexWallet.
-```
+See [HARDWARE_PORTING.md](HARDWARE_PORTING.md) for the LVGL 9 color-panel
+template, e-ink constraints, and the pre-release security gate.
 
-<br>
+## Security status
 
-
-## 💰: HexWallet Project
-
-| Number | Parts | Description |
-| :-------------: | :-------------: | :----- |
-| :one: | Project Name | 	:vhs: HexWallet |
-| :two: | Version  | 🕸 Version 0.0.1-beta |
-| :three: | Support Crypto| ![Bitcoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin.png "Bitcoin (BTC)") ![Ethereum](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ethereum.png "Ethereum (ETH)") ![Dash](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/dash.png "Dash (DASH)") ![Bitcoin Gold](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/bitcoin-gold.png "Bitcoin Gold (BTG)") ![Litecoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/litecoin.png "Litecoin (LTC)") ![Ravencoin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/ravencoin.png "Ravencoin (RVN)") ![TRON](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/tron.png "TRON (TRX)") ![XRP](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/xrp.png "Ripple (XRP)")|
-| :four: | Support Web | :globe_with_meridians: No |
-| :five: | Support Mobile | 📱 No |
-
-<br>
-
-## :question: Q&A
-
-### 1. How to use?
-Firstly, ensure that you have downloaded and installed the Arduino IDE. Proceed to configure the necessary board support packages comprehensively. Subsequently, install the required Arduino libraries for the project. Notably, you will likely need to install the **ArduinoJson** library, which can be located and downloaded via the Arduino Library Manager. Once all essential libraries have been installed, proceed to download the project code from GitHub. Open the code using the Arduino IDE and attempt to upload it to your ESP32-S3 board.
-
-### 2. Why it doesn't work?
-Please attempt to update the **ESP32 Board Manager** within the Arduino IDE and verify that all updates function correctly. Bear in mind that the current version is a **beta release**. Should you encounter any issues, feel free to report them on GitHub. I will monitor the repository and address your concerns promptly. I warmly invite all contributors to fork and submit pull requests to enhance the robustness of my project.
-
-### 3. How can I get address and verify it?
-To interface with your ESP32 board (ESP32-S3) via the serial port, you should configure your serial monitor to read the data at a baud rate of 115200. By doing so, you will be able to retrieve the mnemonic, seed, as well as the extended public key (xpub) and private key (xprv), including their respective ‘z’ counterparts for certain cryptocurrencies. For verification purposes, you can validate the generated addresses using the tool at : 
-```
-https://iancoleman.io/bip39/
-```
-Please be advised that Bitcoin addresses are generated according to the BIP84 (segwit) protocol, while other cryptocurrencies generally adhere to the BIP44 specification. Should you opt to utilize these addresses and experience any asset loss as a result, please be aware that our actions are governed by the terms outlined in our disclaimer.
-
-<br>
-
-## 💵 Donations
-
-| ![Tether](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/tether.png "Tether (USDT)") **USDT** : Arbitrum One Network: **0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed** | ![USD Coin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/usd-coin.png "USD Coin (USDC)") **USDC**: Arbitrum One Network: **0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed** | ![Dash Coin](https://raw.githubusercontent.com/ErikThiart/cryptocurrency-icons/master/16/dash.png "Dash Coin (Dash)") **Dash**: Dash Network: **XuJwtHWdsYzfLawymR3B3nDdS2W8dHnxyR** |
-|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-
-| ![0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed](https://github.com/user-attachments/assets/608c5e0d-edfc-4dee-be6f-63d40b53a65f) | ![0x4051d34Af2025A33aFD5EacCA7A90046f7a64Bed (1)](https://github.com/user-attachments/assets/87205826-1f76-4724-9734-3ecbfbfb729f) | ![XuJwtHWdsYzfLawymR3B3nDdS2W8dHnxyR](https://github.com/user-attachments/assets/71915604-cc14-426f-a8b9-9b7f023da084) |
-|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-
+This project does not yet include a secure-element integration, encrypted
+secret storage, PIN retry policy, transaction parser, signing policy, trusted
+transaction-review workflow, or authenticated firmware updates. These need
+independent implementation and audit before any real assets are used.
