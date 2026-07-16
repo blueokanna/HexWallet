@@ -48,8 +48,10 @@ void populate_catalog(const char *query) {
     char row[128];
     const bool signs = wallet_catalog_has(entry, WalletCapabilitySigning);
     const bool addresses = wallet_catalog_has(entry, WalletCapabilityAddress);
+    const bool tokens = wallet_catalog_has(entry, WalletCapabilityTokenAccount);
     snprintf(row, sizeof(row), "%s  %s  %s", entry.symbol, entry.name,
-             signs ? "ADDRESS + SIGN" : (addresses ? "ADDRESS" : "UNSUPPORTED"));
+             signs ? "ADDRESS + SIGN" : (tokens ? "ADDRESS + TOKENS" :
+             (addresses ? "ADDRESS" : "UNSUPPORTED")));
     lv_obj_t *button = lv_list_add_button(coin_list, nullptr, row);
     lv_obj_set_height(button, 42);
     lv_obj_set_style_radius(button, 4, 0);

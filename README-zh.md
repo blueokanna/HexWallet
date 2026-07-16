@@ -1,59 +1,122 @@
-# HexWallet（BETA）
+# HexWallet
 
-HexWallet 是面向 ESP32 的离线钱包固件基础，提供经过认证的串口界面和 LVGL 9.5.0 图形界面。当前项目仍处于实验阶段；在完成真实板级适配、安全存储、固件信任链和独立安全审计前，不能保存真实资产。
+HexWallet 是 ESP32 离线钱包固件的基础工程。它从临时 BIP39 钱包派生地址，提供经过认证的串口接口，审核受限的 Bitcoin PSBT，并使用独立的网络与 Token 注册表管理元数据。
 
-## 已实现
+这是 Beta 固件，不是生产级硬件钱包。在完成板级适配、可信显示与确认链路、密钥存储保护和独立安全审计之前，禁止存放真实资产。
 
-- BIP39 英文 24 词生成、校验和 PBKDF2-HMAC-SHA512 种子派生。
-- BIP32 私钥/公钥子密钥派生和扩展密钥序列化。
-- 由 `WalletNetworks`、`WalletCatalog` 和 `WalletEngine` 驱动的统一地址派生。
-- 串口挑战应答认证、持久化失败计数、指数退避、会话超时和易失钱包清除。
-- CLI 与 LVGL 9.5.0 共用的可搜索币种目录。
-- Bitcoin 主网原生 P2WPKH PSBT v0 审核和签名。
-- SHA-256、RIPEMD-160、legacy Keccak-256、BIP39、BIP32、地址、BIP143 和 RFC6979 ECDSA 启动自检。
+## 已实现能力
 
-Bitcoin 签名器只接受有边界限制的 PSBT v0。所有输入必须是当前钱包 BIP84 路径控制的原生 P2WPKH，只允许 `SIGHASH_ALL`。签名前会校验每个输入的公钥、脚本和派生路径，解析每个输出，拒绝未知脚本，检查金额溢出和费用策略。签名使用 RFC6979 secp256k1 ECDSA、low-S，并在输出签名前再次验签。工程中不存在“任意 32 字节摘要签名”接口。
+- BIP39 英文 24 词助记词生成、校验及 PBKDF2-HMAC-SHA512 种子派生。
+- BIP32 私钥和公钥子密钥派生、扩展密钥序列化、启动已知答案自检。
+- Bitcoin 主网 PSBT v0 审核与签名：BIP84 P2WPKH 和 BIP49 P2SH-P2WPKH 输入，限定 `SIGHASH_ALL`、BIP143、RFC6979 low-S ECDSA、费用限制和一次性确认码。
+- Bitcoin、Litecoin、Dogecoin、Dash、Bitcoin Gold、Ravencoin、XRP Ledger、TRON、Monero、Masari 及已登记 EVM 网络的地址派生。
+- Monero 与 Masari 的 CryptoNote 标准地址：Keccak 标量派生、Edwards25519 公钥、网络前缀、分块 Base58 和校验和；交易解析与签名尚未开放。
+- 已登记 ERC-20 Token 的合约地址、精度和账户地址查询。ERC-20 使用其所属 EVM 网络的同一个账户地址。
+- 通过本地 `slip-0044.md` 的编号建立可搜索目录，并清晰区分“地址”“Token 账户”“交易审核”“签名”和“未实现”。
+- 串口挑战应答认证、失败退避、会话超时和易失性钱包清除。
+
+## 架构
+
+| 模块 | 责任 |
+| --- | --- |
+| `WalletSecurity` | BIP39、BIP32、secp256k1、KDF、安全清零 |
+| `CryptoNoteAddress` | CryptoNote 标量派生、Edwards25519 公钥和 Base58 标准地址 |
+| `WalletNetworks` | 链的 SLIP-0044 编号、派生编号、地址编码和 EVM chain ID |
+| `WalletTokens` | Token 标准、所属网络、合约或 mint、精度、真实能力状态 |
+| `WalletEngine` | 路径生成和地址编码 |
+| `WalletCatalog` | 面向 CLI/UI 的能力目录 |
+| `BitcoinTransaction` | 严格 PSBT v0 解析、审核、BIP143 签名和交易序列化 |
+| `WalletCli` | 认证后的串口命令与输出 |
+| `WalletBoardPort` | 特定硬件的屏幕、输入、电源时序 |
+
+`SLIP-0044` 只规定 BIP44 的 hardened coin type，不能规定地址格式、交易序列化、签名算法或 Token 规则。因此把一个条目加入 `slip-0044.md` 或目录，不代表该链可以派生地址、签名或转账。未实现链必须保持未实现状态，不能伪造支持。
+
+## 派生策略
+
+`NetworkProfile` 同时保存 `slip44_coin_type` 与 `derivation_coin_type`。
+
+- UTXO 和非 EVM 网络使用它们注册的 SLIP-0044 编号。
+- 已登记 EVM 网络统一使用 `m/44'/60'/account'/change/index`，其自身的 SLIP-0044 编号和 EVM chain ID 仍保留为元数据。这样同一助记词和索引可在 Ethereum、EVM 网络及 ERC-20 Token 中得到同一个标准账户地址。
+- Bitcoin 通过独立 Profile 选择 BIP44、BIP49 或 BIP84。
+- Monero 与 Masari 先按 `m/44'/coin'/account'/change/index` 得到 BIP32 子私钥，再将该 32 字节作为 CryptoNote Keccak-and-reduce 支付/查看私钥派生的输入。这是 HexWallet 自己明确规定的 BIP39 确定性策略，不是 Monero 官方 25 词种子格式，也不承诺兼容其他硬件钱包。
+
+修改派生策略会改变地址。任何已有资产都必须记录实际使用的派生路径。
+
+## 网络与 Token
+
+当前 EVM 地址与 Token 账户支持覆盖 Ethereum、Ethereum Classic、BSC、Polygon、Optimism、Arbitrum One、Base、Avalanche C-Chain、Fantom、Cronos、Gnosis Chain、Celo、Kava EVM、Core、Moonbeam、Moonriver。
+
+Token 注册表含有部分经过固定登记的 USDC、USDT、DAI、WBTC、BUSD ERC-20 合约，以及一个已登记但未实现的 SPL USDC mint。合约或 mint 只是静态元数据，不是余额，不会自动发现资产。使用资产前必须自行核验网络和合约地址。
+
+Solana/SPL 转账没有实现。它需要 Ed25519 HD 派生、Solana Base58 地址、关联 Token 账户派生、消息解析和 Ed25519 签名。当前 SPL 条目会明确返回不可用，不会生成错误地址或签名。
+
+Monero 与 Masari 已实现主网标准地址，但 RingCT/CLSAG 交易解析、key image、诱饵校验、子地址、多签与签名尚未实现。Chia 的 BLS12-381、CLVM puzzle、coin spend 解析和聚合签名栈尚未实现和验证，因此 XCH 地址与签名保持不可用。任何链的质押/验证者消息只有在目录明确列出对应的专用解析器和审核策略后才允许签名。
 
 ## 能力矩阵
 
-| 网络 | 地址 | 交易审核 | 签名 |
-| --- | --- | --- | --- |
-| Bitcoin `m/84'/0'` | 原生 P2WPKH | PSBT v0、P2WPKH 输入 | BIP143 ECDSA |
-| Bitcoin `m/44'/0'` | P2PKH | 无 | 无 |
-| Litecoin、Dogecoin、Dash、Bitcoin Gold、Ravencoin | P2PKH | 无 | 无 |
-| Ethereum、Ethereum Classic、Optimism、Polygon、Fantom、Base、Arbitrum、Avalanche C-Chain、BSC | EVM 地址 | 无 | 无 |
-| XRP Ledger | Classic 地址 | 无 | 无 |
-| TRON | Base58Check 账户地址 | 无 | 无 |
+| 能力 | 当前范围 |
+| --- | --- |
+| Bitcoin 签名 | 主网 PSBT v0、BIP49 P2SH-P2WPKH、BIP84 P2WPKH、`SIGHASH_ALL` |
+| Bitcoin 地址 | BIP44 P2PKH、BIP49 P2SH-P2WPKH、BIP84 P2WPKH |
+| EVM 地址 | 已登记 EVM 网络，BIP44 coin type 60 |
+| Monero/Masari 地址 | 文档所述 HexWallet BIP39 策略下的 CryptoNote 主网标准地址 |
+| Monero/Masari 交易签名 | 未实现 |
+| Chia 地址或签名 | 未实现 |
+| ERC-20 Token 账户地址 | 已登记 Token 的网络、合约、精度与账户地址 |
+| ERC-20 转账签名 | 未实现 |
+| Solana/SPL 地址与签名 | 未实现 |
+| 其他 SLIP-0044 条目 | 仅目录登记，直至存在完整实现和测试向量 |
 
-可搜索目录还会显示 BCH、BSV、XEC、DGB、PPC、NMC、XMR、ZEC、KAS、ERG、CKB、FLUX 和 XCH，但明确标记为不支持。这样可以避免把“发现了币种名称”伪装成“已经实现钱包”。
+## 串口命令
 
-SLIP-0044 只用于注册的 hardened `coin_type`，不定义地址格式、网络前缀、哈希、脚本或交易规则。MiningPoolStats 只用于发现候选网络。没有官方规范和测试向量的网络不会启用。
-
-## 终端界面
-
-没有屏幕时，经过认证的 CLI 仍可完整使用。币种元数据可在锁定状态查询；钱包、秘密导出和签名必须先认证。
+锁定时可查询公开元数据：
 
 ```text
+help
+status
 coin list
-coin search <文本>
+coin search <text>
 coin show <id>
-wallet generate
-wallet import <24 个单词>
-wallet address <id> [index]
-wallet addresses [index]
-wallet secret [index]
-tx inspect <psbt-v0-hex>
-tx sign <六位确认码>
+token list [network]
+token show <id>
 ```
 
-`tx inspect` 会先显示每个输出、归属分类、输入/输出总额、费用、估算虚拟字节、费率和审核 ID，然后生成两分钟有效的一次性确认码。详细协议见 [CLI_PROTOCOL.md](CLI_PROTOCOL.md)。
+认证并加载钱包后可执行：
 
-## 构建与安全限制
+```text
+wallet generate
+wallet import <24-word-mnemonic>
+wallet address <network> [index]
+wallet token <token-id> [index]
+wallet addresses [index]
+tx inspect <psbt-v0-hex>
+tx sign <six-digit-confirmation>
+```
 
-安装 Espressif ESP32 Core 3.3.10 或更新版本以及 LVGL 9.5.0。`WalletBoardPort.cpp` 在没有为具体屏幕、总线、GPIO、输入设备和供电时序完成适配前会主动报告无屏幕。
+例如 `wallet token eth-usdc 0` 会返回 Ethereum 的 BIP44 路径、账户地址、USDC 合约和精度；它不会签名或发送 Token。`wallet secret` 会通过串口输出敏感材料，只能用于明确的恢复操作。
 
-2026-07-16 实际编译结果：无 LVGL 版本占用 410,280 字节 Flash、46,724 字节静态 RAM；LVGL 9.5.0 版本占用 491,640 字节 Flash、47,348 字节静态 RAM。
+## 构建
 
-当前 PIN verifier 和钱包仍位于普通 ESP32 内存/NVS。生产硬件还必须具备加密存储或经过审计的安全元件、Flash Encryption、Secure Boot、防回滚、认证固件更新、实体确认按键、可信显示链路、侧信道和故障注入评估、恢复测试、可复现构建及独立审计。串口确认码能防止误操作，但不能抵御已经控制同一认证串口会话的主机。
+已验证目标为 Espressif ESP32 core 3.3.10 和 FQBN `esp32:esp32:lilygo_t_display_s3`。无 LVGL 的 CLI 固件可使用：
 
-目前只有 Bitcoin 原生 P2WPKH 签名。EVM、TRON、XRP、Bitcoin legacy、其他币种交易、PSBT v2、Taproot、多签、P2SH-P2WPKH 和任意脚本均未实现或会被拒绝。
+```text
+arduino-cli compile --fqbn esp32:esp32:lilygo_t_display_s3 \
+  --build-property compiler.cpp.extra_flags=-DHEXWALLET_ENABLE_LVGL=0 \
+  --build-property compiler.c.extra_flags=-DHEXWALLET_ENABLE_LVGL=0 .
+```
+
+启用 `HEXWALLET_ENABLE_LVGL=1` 需要 LVGL 9.5.0。`WalletBoardPort.cpp` 在未知道准确板型、显示控制器、触摸控制器、GPIO、总线和电源时序时会 fail-closed。`ESP32-S3N8` 只表示芯片配置，不是完整的 LilyGo 板型或触摸控制器型号。
+
+## 测试与安全边界
+
+当 `HEXWALLET_RUN_SELF_TESTS=1` 时，启动会运行加密、CryptoNote、BIP39、BIP32、地址、网络注册表、Token 注册表和 Bitcoin 交易自检。Token 自检会检查 ERC-20 合约格式、SPL mint Base58 格式、网络关联和 ID 唯一性。
+
+编译通过和自检通过不等于生产安全。真实资产前必须具备加密存储或经过审计的安全元件、Secure Boot、Flash Encryption、防回滚、认证固件更新、实体确认输入、可信显示链路、故障注入和侧信道测试、恢复测试、可复现构建和独立审计。
+
+串口确认码只能降低误操作风险，不能在主机控制同一认证串口会话时建立可信用户意图。未知 Bitcoin 脚本、PSBT v2、Taproot、多签、任意摘要、EVM 交易、ERC-20 转账、SPL 转账和未实现链会被拒绝或保持不可用。
+
+固件目前没有实现 Wi-Fi 交易传输，也不允许把 Wi-Fi 用于签名请求；未来 Wi-Fi 代码只能隔离用于只读的实时价格和公开区块高度。BLE 确认/拒绝同样尚未实现，只有在响应经过认证并绑定到显示屏已审核请求的精确摘要后，才能作为签名确认通道。
+
+## 许可证
+
+Copyright (c) 2024-2026 Blueokanna。本项目只向自然人授予个人非商业使用许可。修改版和衍生版仍不得商用；组织使用、雇佣或客户工作、出售或预装硬件、收费或托管服务、代管/质押服务及任何直接或间接商业活动，都必须事先联系 `blueokanna@gmail.com` 取得单独的书面商业授权。完整条款见 `LICENSE`，发生解释差异时以其中英文原文为准。

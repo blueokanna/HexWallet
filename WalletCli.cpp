@@ -6,12 +6,14 @@
 #include <string.h>
 
 #include "BitcoinTransaction.h"
+#include "CryptoNoteAddress.h"
 #include "CryptoPrimitives.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
 #include "WalletEngine.h"
 #include "WalletSecurity.h"
 #include "WalletSession.h"
+#include "WalletTokens.h"
 #include "WalletUi.h"
 
 namespace hexwallet {
@@ -182,9 +184,9 @@ uint32_t parse_index(const char *text, bool *ok) {
 }
 
 void show_help() {
-  Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id>");
+  Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
-  Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet addresses [index]");
+  Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet token <id> [index] | wallet addresses [index]");
   Serial.println("OK signing: tx inspect <psbt-v0-hex> | tx sign <six-digit-confirmation>");
   Serial.println("OK sensitive: wallet secret [index] | selftest");
 }
@@ -285,6 +287,7 @@ void unlock(const char *proof_text) {
 
 void print_capabilities(const WalletCatalogEntry &entry) {
   Serial.print(wallet_catalog_has(entry, WalletCapabilityAddress) ? "address" : "none");
+  if (wallet_catalog_has(entry, WalletCapabilityTokenAccount)) Serial.print(",token-account");
   if (wallet_catalog_has(entry, WalletCapabilityTransactionReview)) Serial.print(",review");
   if (wallet_catalog_has(entry, WalletCapabilitySigning)) Serial.print(",sign");
 }
@@ -324,6 +327,48 @@ void handle_coin(char *command) {
   else if (strncmp(command, "coin search ", 12) == 0 && command[12] != '\0') show_catalog(command + 12);
   else if (strncmp(command, "coin show ", 10) == 0 && command[10] != '\0') show_coin(command + 10);
   else Serial.println("ERR invalid-coin-command");
+}
+
+void show_tokens(const char *network_filter) {
+  size_t matches = 0;
+  for (size_t index = 0; index < kTokenProfileCount; ++index) {
+    const TokenProfile &token = kTokenProfiles[index];
+    if (network_filter != nullptr && *network_filter != '\0' && strcmp(token.network_id, network_filter) != 0) continue;
+    Serial.print("token="); Serial.print(token.id);
+    Serial.print(" network="); Serial.print(token.network_id);
+    Serial.print(" symbol="); Serial.print(token.symbol);
+    Serial.print(" standard="); Serial.print(token_standard_text(token.standard));
+    Serial.print(" decimals="); Serial.print(token.decimals);
+    Serial.print(" asset="); Serial.print(token.contract_or_mint);
+    Serial.print(" capabilities="); Serial.print(token_supports_account_address(token) ? "account-address" : "none");
+    Serial.print(" status=\""); Serial.print(token.status); Serial.println("\"");
+    ++matches;
+  }
+  Serial.print("OK matches="); Serial.println(matches);
+}
+
+void show_token(const char *id) {
+  const TokenProfile *token = find_token_profile(id);
+  if (token == nullptr) {
+    Serial.println("ERR unknown-token");
+    return;
+  }
+  Serial.print("OK token="); Serial.print(token->id);
+  Serial.print(" network="); Serial.print(token->network_id);
+  Serial.print(" symbol="); Serial.print(token->symbol);
+  Serial.print(" name=\""); Serial.print(token->name); Serial.println("\"");
+  Serial.print(" standard="); Serial.print(token_standard_text(token->standard));
+  Serial.print(" decimals="); Serial.print(token->decimals);
+  Serial.print(" asset="); Serial.println(token->contract_or_mint);
+  Serial.print(" capabilities="); Serial.println(token_supports_account_address(*token) ? "account-address" : "none");
+  Serial.print(" status=\""); Serial.print(token->status); Serial.println("\"");
+}
+
+void handle_token(char *command) {
+  if (strcmp(command, "token list") == 0) show_tokens("");
+  else if (strncmp(command, "token list ", 11) == 0 && command[11] != '\0') show_tokens(command + 11);
+  else if (strncmp(command, "token show ", 11) == 0 && command[11] != '\0') show_token(command + 11);
+  else Serial.println("ERR invalid-token-command");
 }
 
 void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
@@ -405,6 +450,53 @@ void handle_wallet_address(char *arguments) {
   show_addresses(index, entry.network, false);
 }
 
+void handle_wallet_token(char *arguments) {
+  char *separator = strchr(arguments, ' ');
+  const char *index_text = "";
+  if (separator != nullptr) {
+    *separator++ = '\0';
+    index_text = separator;
+  }
+  const TokenProfile *token = find_token_profile(arguments);
+  if (token == nullptr) {
+    Serial.println("ERR unknown-token");
+    return;
+  }
+  if (!token_supports_account_address(*token)) {
+    Serial.print("ERR token-account-unsupported status=\""); Serial.print(token->status); Serial.println("\"");
+    return;
+  }
+  bool valid_index;
+  const uint32_t index = parse_index(index_text, &valid_index);
+  if (!valid_index) {
+    Serial.println("ERR invalid-index");
+    return;
+  }
+  const NetworkProfile *network = token_network(*token);
+  if (network == nullptr) {
+    Serial.println("ERR token-network-unsupported");
+    return;
+  }
+  HdPrivateNode master;
+  if (!load_master(&master)) return;
+  DerivedAddress derived;
+  const WalletError result = derive_address(master, *network, 0, 0, index, &derived);
+  secure_zero(&master, sizeof(master));
+  if (result != WalletError::Ok) {
+    Serial.print("ERR token-account "); Serial.println(error_text(result));
+    return;
+  }
+  Serial.print("OK token="); Serial.print(token->id);
+  Serial.print(" network="); Serial.print(network->id);
+  Serial.print(" standard="); Serial.print(token_standard_text(token->standard));
+  Serial.print(" asset="); Serial.print(token->contract_or_mint);
+  Serial.print(" decimals="); Serial.print(token->decimals);
+  Serial.print(" path="); Serial.print(derived.path);
+  Serial.print(" account-address="); Serial.println(derived.address);
+  Serial.println("INFO transfer-signing-unavailable");
+  clear_derived_address(&derived);
+}
+
 void handle_wallet(char *command) {
   if (!require_authentication()) return;
   if (strcmp(command, "wallet generate") == 0) {
@@ -423,6 +515,11 @@ void handle_wallet(char *command) {
   constexpr char kAddressPrefix[] = "wallet address ";
   if (strncmp(command, kAddressPrefix, sizeof(kAddressPrefix) - 1) == 0) {
     handle_wallet_address(command + sizeof(kAddressPrefix) - 1);
+    return;
+  }
+  constexpr char kTokenPrefix[] = "wallet token ";
+  if (strncmp(command, kTokenPrefix, sizeof(kTokenPrefix) - 1) == 0) {
+    handle_wallet_token(command + sizeof(kTokenPrefix) - 1);
     return;
   }
   const bool secret = strncmp(command, "wallet secret", 13) == 0;
@@ -589,14 +686,20 @@ void handle_transaction(char *command) {
 void run_self_tests() {
   if (!require_authentication()) return;
   const bool crypto = run_crypto_self_tests();
+  const bool cryptonote = run_cryptonote_self_tests();
   const bool bip39 = run_bip39_self_test();
   const bool bip32 = run_bip32_self_test();
   const bool address = run_address_self_tests();
+  const bool networks = run_network_profile_self_tests();
+  const bool tokens = run_token_profile_self_tests();
   const bool transaction = run_bitcoin_transaction_self_test();
   Serial.print("OK crypto="); Serial.print(crypto ? "pass" : "FAIL");
+  Serial.print(" cryptonote="); Serial.print(cryptonote ? "pass" : "FAIL");
   Serial.print(" bip39="); Serial.print(bip39 ? "pass" : "FAIL");
   Serial.print(" bip32="); Serial.print(bip32 ? "pass" : "FAIL");
   Serial.print(" address="); Serial.print(address ? "pass" : "FAIL");
+  Serial.print(" networks="); Serial.print(networks ? "pass" : "FAIL");
+  Serial.print(" tokens="); Serial.print(tokens ? "pass" : "FAIL");
   Serial.print(" bip143="); Serial.println(transaction ? "pass" : "FAIL");
 }
 
@@ -606,6 +709,7 @@ void handle_line(char *command) {
   if (strcmp(command, "help") == 0) show_help();
   else if (strcmp(command, "status") == 0) show_status();
   else if (strncmp(command, "coin ", 5) == 0) handle_coin(command);
+  else if (strncmp(command, "token ", 6) == 0) handle_token(command);
   else if (strcmp(command, "auth begin") == 0) begin_challenge();
   else if (strncmp(command, "auth unlock ", 12) == 0) unlock(command + 12);
   else if (strncmp(command, "auth provision ", 15) == 0) provision_pin(command + 15);

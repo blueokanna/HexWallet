@@ -1,201 +1,213 @@
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
+HEXWALLET PERSONAL NON-COMMERCIAL SOURCE LICENSE
+Version 1.0, 16 July 2026
 
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+Copyright (c) 2024-2026 Blueokanna. All rights reserved.
+Commercial licensing contact: blueokanna@gmail.com
 
-   1. Definitions.
+This is a source-available license. It is not an open-source license as that
+term is defined by the Open Source Initiative. No permission is granted except
+as expressly stated below.
 
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
+1. DEFINITIONS
 
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
+1.1 "Licensor" means Blueokanna, the copyright owner of the Work.
 
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
+1.2 "Work" means the HexWallet source code, firmware, documentation, tests,
+configuration, and other material distributed with this License, in source or
+object form, excluding Third-Party Material identified under Section 10.
 
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
+1.3 "Derivative Work" means any modification, adaptation, translation, port,
+fork, combined work, or other material based on or incorporating any material
+part of the Work. Renaming, reorganizing, translating, obfuscating, compiling,
+linking, or making only minor changes does not avoid this definition.
 
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
+1.4 "Individual" means one natural person acting solely on that person's own
+behalf. It does not include a company, partnership, government body, school,
+university, laboratory, nonprofit, association, decentralized organization,
+investment fund, employer, client, or any other organization or legal entity.
 
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
+1.5 "Personal Non-Commercial Use" means use by an Individual solely for:
 
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
+    (a) private study, learning, security research, experimentation, or hobby
+        activity that is not funded, directed, or reimbursed by an organization;
+    (b) building and using a device personally owned by that Individual; or
+    (c) managing only that Individual's own digital assets, including personal
+        transfers or staking, when the activity is not conducted as a business,
+        professional service, pooled service, or service for another person.
 
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
+Personal Non-Commercial Use must not be primarily intended for or directed
+toward Commercial Use and must not provide a Commercial Benefit to any person
+or entity other than incidental personal investment gains under paragraph (c).
 
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
+1.6 "Commercial Benefit" means money, digital assets, services, business
+advantage, cost savings, product development, operational capability, publicity,
+data, customer acquisition, or any other direct or indirect economic benefit.
 
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
+1.7 "Commercial Use" includes, without limitation:
 
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
+    (a) sale, lease, licensing, subscription, paid access, paid support,
+        consulting, contracting, employment duties, or professional services;
+    (b) use by or for any organization, including internal evaluation, research,
+        prototyping, testing, training, security review, or operations;
+    (c) use in or with any product, hardware wallet, appliance, firmware image,
+        application, hosted service, custody service, exchange, validator,
+        staking pool, mining service, fundraising activity, or managed account;
+    (d) preinstallation, bundling, distribution, or promotion intended to support
+        a commercial product, service, brand, token, network, or organization;
+    (e) accepting fees, commissions, rewards, donations tied to access or
+        services, advertising revenue, sponsorship, or other compensation; and
+    (f) any use of a Derivative Work for a purpose listed above, even when the
+        Derivative Work has different branding, authorship notices, interfaces,
+        file structure, or additional code.
 
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
+Use is Commercial Use if it is performed by a contractor, employee, student,
+researcher, volunteer, agent, affiliate, or intermediary for the benefit of an
+organization or commercial activity. A person may not rely on an Individual's
+permission to obtain rights for an employer, client, controlled entity, or any
+other third party.
 
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
+2. PERSONAL LICENSE GRANT
 
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
+Subject to continuous compliance with this License, Licensor grants an
+Individual a limited, worldwide, non-exclusive, non-transferable, non-
+sublicensable, revocable, royalty-free copyright license to:
 
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
+    (a) access, reproduce, and compile the Work;
+    (b) create Derivative Works; and
+    (c) use the Work and Derivative Works,
 
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
+solely for that Individual's Personal Non-Commercial Use.
 
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
+No patent, trademark, trade-secret, publicity, commercial, or other license is
+granted except the copyright permission expressly stated in this Section.
 
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
+3. NON-COMMERCIAL SHARING
 
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
+An Individual may redistribute an unmodified or modified copy solely without
+charge and solely to enable recipients' Personal Non-Commercial Use, provided
+that every copy:
 
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
+    (a) includes this complete, unmodified License and all copyright, attribution,
+        security, and disclaimer notices;
+    (b) clearly identifies every modified file and the date and author of the
+        modification;
+    (c) is provided in source form when any object or executable form is provided;
+    (d) is not subject to additional terms that conflict with or reduce the
+        protections in this License;
+    (e) is not distributed through a paid channel, monetized download, product,
+        service, hardware sale, token offering, or commercial promotion; and
+    (f) does not state or imply Licensor's endorsement, certification, security
+        approval, warranty, or commercial authorization.
 
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
+Redistribution under this Section does not permit sublicensing. Each recipient
+receives rights, if eligible, directly from Licensor under this License.
 
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
+4. COMMERCIAL USE REQUIRES WRITTEN AUTHORIZATION
 
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
+Commercial Use is prohibited unless Licensor has signed a separate written
+commercial license that expressly covers the user, Work, version, product,
+service, scope, and term involved. Silence, source availability, a pull request,
+an issue response, prior Personal Non-Commercial Use, or acceptance of a
+contribution is not commercial authorization.
 
-   END OF TERMS AND CONDITIONS
+For commercial licensing, contact blueokanna@gmail.com before any Commercial
+Use. Licensor has no obligation to offer or grant a commercial license.
 
-   APPENDIX: How to apply the Apache License to your work.
+5. PROHIBITED CONDUCT
 
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
+Without separate written permission from Licensor, You must not:
 
-   Copyright @Blueokanna start in 2024
+    (a) engage in any Commercial Use;
+    (b) sell, rent, sublicense, monetize, or commercially distribute the Work or
+        a Derivative Work;
+    (c) remove, conceal, alter, or bypass license, copyright, attribution,
+        capability, security, risk, or unsupported-feature notices;
+    (d) represent incomplete, simulated, placeholder, or unverified cryptographic
+        behavior as secure, valid, production-ready, or endorsed by Licensor;
+    (e) use the Work to provide custody, signing, staking, validation, transfer,
+        or wallet services for assets owned or controlled by another person;
+    (f) use a change of identity, entity, branding, repository, jurisdiction,
+        technical architecture, or distribution method to evade this License; or
+    (g) assist another person or entity in conduct that would violate this
+        License if performed directly.
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
+6. MODIFICATIONS AND DERIVATIVE WORKS
 
-       http://www.apache.org/licenses/LICENSE-2.0
+All permissions and restrictions in this License apply to the entire Derivative
+Work to the extent it incorporates or is based on the Work. An Individual may
+own original copyright in that Individual's additions, but that ownership does
+not grant any right to use Licensor's Work commercially or to relicense the Work.
+Separately written, independently developed material that does not incorporate,
+derive from, or require the Work is not governed by this License merely because
+it interoperates with the Work.
 
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+7. CONTRIBUTIONS
+
+Unless a separate written agreement states otherwise, any contribution
+intentionally submitted to Licensor for inclusion in the Work is licensed to
+Licensor under a perpetual, worldwide, irrevocable, non-exclusive, transferable,
+sublicensable, royalty-free license to use, reproduce, modify, distribute,
+commercialize, and otherwise exploit the contribution. A contributor represents
+that the contributor has authority to grant those rights. Merely reporting a
+bug or discussing an idea is not a contribution of source code.
+
+8. TERMINATION AND ENFORCEMENT
+
+Any breach automatically terminates all permissions under this License
+immediately, without notice. On termination, the breaching party must stop using
+and distributing the Work and Derivative Works and delete all copies under that
+party's possession or control, except copies that applicable law requires to be
+retained. Termination does not erase liability for prior breach and does not
+limit Licensor's right to seek injunctions, damages, an accounting, costs, or
+other remedies available by law. Sections 1, 4 through 6, and 8 through 14
+survive termination.
+
+9. SECURITY AND REGULATORY RESPONSIBILITY
+
+The Work concerns cryptographic keys and digital assets. It may be incomplete,
+experimental, vulnerable to side-channel attacks, incompatible with a network,
+or capable of irreversible loss. You are solely responsible for independent
+review, testing against authoritative vectors, backups, transaction review,
+hardware security, and compliance with laws and network rules. A feature listed
+in metadata or documentation is not a guarantee of security or fitness.
+
+10. THIRD-PARTY MATERIAL
+
+Third-Party Material is governed only by its applicable copyright notices and
+licenses. This License does not expand or restrict rights that Licensor cannot
+license. When a file or component identifies another license or copyright owner,
+that notice controls for that material. You must comply with all such terms.
+
+11. NO TRADEMARK LICENSE
+
+No right is granted to use "HexWallet", the Licensor's name, logos, or other
+marks except factually to identify an unmodified copy's origin. Modified copies
+must be clearly described as unofficial and modified.
+
+12. DISCLAIMER OF WARRANTY
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE WORK IS PROVIDED "AS IS" AND
+"AS AVAILABLE", WITH ALL FAULTS AND WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, EXPRESS, IMPLIED, OR STATUTORY, INCLUDING TITLE, NON-INFRINGEMENT,
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, SECURITY,
+COMPATIBILITY, OR ABSENCE OF MALICIOUS OR DEFECTIVE CODE.
+
+13. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, LICENSOR WILL NOT BE LIABLE UNDER ANY
+LEGAL THEORY FOR ANY DIRECT, INDIRECT, SPECIAL, INCIDENTAL, CONSEQUENTIAL,
+EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOSS OF KEYS, DIGITAL ASSETS, REWARDS,
+DATA, PROFITS, GOODWILL, OR BUSINESS, ARISING FROM OR RELATED TO THE WORK OR THIS
+LICENSE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH LOSS.
+
+14. GENERAL TERMS
+
+This License is the entire agreement for the permissions it grants. A waiver
+must be express and written by Licensor and applies only to the specific event
+identified. If any provision is unenforceable, it will be reformed only to the
+minimum extent necessary, and the remaining provisions remain effective.
+Headings are for convenience only. "Including" means "including without
+limitation." Any ambiguity will not be resolved to expand the granted rights.
+The English text of this License is controlling over any translation.
+
+END OF LICENSE

@@ -5,8 +5,10 @@
 #include "WalletCli.h"
 #include "WalletConfig.h"
 #include "CryptoPrimitives.h"
+#include "CryptoNoteAddress.h"
 #include "WalletEngine.h"
 #include "WalletSecurity.h"
+#include "WalletTokens.h"
 #include "WalletUi.h"
 
 namespace {
@@ -20,9 +22,12 @@ void setup() {
 
 #if HEXWALLET_RUN_SELF_TESTS
   security_ready = hexwallet::run_crypto_self_tests() &&
+                   hexwallet::run_cryptonote_self_tests() &&
                    hexwallet::run_bip39_self_test() &&
                    hexwallet::run_bip32_self_test() &&
                    hexwallet::run_address_self_tests() &&
+                   hexwallet::run_network_profile_self_tests() &&
+                   hexwallet::run_token_profile_self_tests() &&
                    hexwallet::run_bitcoin_transaction_self_test();
   if (!security_ready) {
     Serial.println("FATAL: cryptographic self-test failed; wallet services disabled");

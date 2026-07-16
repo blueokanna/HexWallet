@@ -13,6 +13,7 @@ enum WalletCapability : uint8_t {
   WalletCapabilityAddress = 1 << 0,
   WalletCapabilityTransactionReview = 1 << 1,
   WalletCapabilitySigning = 1 << 2,
+  WalletCapabilityTokenAccount = 1 << 3,
 };
 
 struct WalletCatalogEntry {
