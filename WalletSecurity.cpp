@@ -550,15 +550,29 @@ WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPubli
   mbedtls_mpi_init(&left);
   mbedtls_mpi_init(&one);
   size_t public_size = kCompressedPublicKeySize;
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
-                     mbedtls_ecp_point_read_binary(&group, &parent_point, parent->public_key, kCompressedPublicKeySize) ||
-                     mbedtls_mpi_read_binary(&left, material, kPrivateKeySize) ||
-                     mbedtls_mpi_lset(&one, 1) ||
-                     mbedtls_ecp_muladd(&group, &child_point, &left, &group.G, &one, &parent_point) ||
-                     mbedtls_ecp_point_write_binary(&group, &child_point, MBEDTLS_ECP_PF_COMPRESSED,
-                                                    &public_size, out_node->public_key, kCompressedPublicKeySize);
-  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 &&
-                     mbedtls_mpi_cmp_mpi(&left, &group.N) < 0 && !mbedtls_ecp_is_zero(&child_point) &&
+  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
+               mbedtls_ecp_point_read_binary(&group, &parent_point, parent->public_key,
+                                             kCompressedPublicKeySize);
+  if (result == 0) result = mbedtls_ecp_check_pubkey(&group, &parent_point);
+  if (result == 0) result = mbedtls_mpi_read_binary(&left, material, kPrivateKeySize);
+  const bool valid_offset = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 &&
+                            mbedtls_mpi_cmp_mpi(&left, &group.N) < 0;
+  if (result == 0 && !valid_offset) result = MBEDTLS_ERR_ECP_INVALID_KEY;
+  if (result == 0) result = mbedtls_mpi_lset(&one, 1);
+  if (result == 0) {
+    // mbedTLS exposes point addition through muladd: R = left * G + 1 * parent.
+    result = mbedtls_ecp_muladd(&group, &child_point, &left, &group.G,
+                                &one, &parent_point);
+  }
+  if (result == 0) {
+    result = mbedtls_ecp_check_pubkey(&group, &child_point);
+  }
+  if (result == 0) {
+    result = mbedtls_ecp_point_write_binary(&group, &child_point, MBEDTLS_ECP_PF_COMPRESSED,
+                                            &public_size, out_node->public_key,
+                                            kCompressedPublicKeySize);
+  }
+  const bool valid = result == 0 && valid_offset && !mbedtls_ecp_is_zero(&child_point) &&
                      public_size == kCompressedPublicKeySize;
   if (valid) {
     memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
@@ -640,34 +654,60 @@ WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat form
 bool run_bip32_self_test() {
   const uint8_t seed[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
                           0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
-  HdPrivateNode master;
-  HdPrivateNode derived;
-  HdPublicNode master_public;
-  HdPublicNode derived_public;
-  HdPrivateNode private_child;
-  HdPublicNode private_child_public;
+  HdPrivateNode master{};
+  HdPrivateNode derived{};
+  HdPublicNode master_public{};
+  HdPublicNode derived_public{};
+  HdPrivateNode private_child{};
+  HdPublicNode private_child_public{};
   static const uint8_t kExpectedMasterPrivate[kPrivateKeySize] = {
-      0xe8,0xf3,0x2e,0x72,0x3d,0xec,0xf4,0x05,0x1a,0xef,0xac,0x8e,0x2c,0x93,0xc9,0xc9,
+      0xe8,0xf3,0x2e,0x72,0x3d,0xec,0xf4,0x05,0x1a,0xef,0xac,0x8e,0x2c,0x93,0xc9,0xc5,
       0xb2,0x14,0x31,0x38,0x17,0xcd,0xb0,0x1a,0x14,0x94,0xb9,0x17,0xc8,0x43,0x6b,0x35,
   };
   static const uint8_t kExpectedMasterChain[kChainCodeSize] = {
       0x87,0x3d,0xff,0x81,0xc0,0x2f,0x52,0x56,0x23,0xfd,0x1f,0xe5,0x16,0x7e,0xac,0x3a,
       0x55,0xa0,0x49,0xde,0x3d,0x31,0x4b,0xb4,0x2e,0xe2,0x27,0xff,0xed,0x37,0xd5,0x08,
   };
-  const bool passed = hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
-                      memcmp(master.private_key, kExpectedMasterPrivate, kPrivateKeySize) == 0 &&
-                      memcmp(master.chain_code, kExpectedMasterChain, kChainCodeSize) == 0 &&
-                      hd_private_derive_path(&master, "m/0'/1/2'", &derived) == WalletError::Ok &&
-                      hd_public_neuter(&master, &master_public) == WalletError::Ok &&
-                      hd_private_derive(&master, 0, &private_child) == WalletError::Ok &&
-                      hd_public_neuter(&private_child, &private_child_public) == WalletError::Ok &&
-                      hd_public_derive(&master_public, 0, &derived_public) == WalletError::Ok &&
-                      derived.depth == 3 && derived.child_number == (2 | kHardenedOffset) &&
-                      master_public.depth == 0 && derived_public.depth == 1 &&
-                      memcmp(private_child_public.public_key, derived_public.public_key,
-                             kCompressedPublicKeySize) == 0 &&
-                      memcmp(private_child_public.chain_code, derived_public.chain_code,
-                             kChainCodeSize) == 0;
+  const WalletError master_error = hd_private_from_seed(seed, sizeof(seed), &master);
+  const bool master_vector = master_error == WalletError::Ok &&
+                             memcmp(master.private_key, kExpectedMasterPrivate, kPrivateKeySize) == 0 &&
+                             memcmp(master.chain_code, kExpectedMasterChain, kChainCodeSize) == 0;
+  const WalletError path_error = master_error == WalletError::Ok
+                                     ? hd_private_derive_path(&master, "m/0'/1/2'", &derived)
+                                     : WalletError::InvalidChild;
+  const bool path_metadata = path_error == WalletError::Ok && derived.depth == 3 &&
+                             derived.child_number == (2 | kHardenedOffset);
+  const WalletError master_public_error = master_error == WalletError::Ok
+                                              ? hd_public_neuter(&master, &master_public)
+                                              : WalletError::InvalidKey;
+  const WalletError private_child_error = master_error == WalletError::Ok
+                                              ? hd_private_derive(&master, 0, &private_child)
+                                              : WalletError::InvalidChild;
+  const WalletError private_child_public_error = private_child_error == WalletError::Ok
+                                                    ? hd_public_neuter(&private_child, &private_child_public)
+                                                    : WalletError::InvalidKey;
+  const WalletError public_child_error = master_public_error == WalletError::Ok
+                                             ? hd_public_derive(&master_public, 0, &derived_public)
+                                             : WalletError::InvalidChild;
+  const bool public_metadata = master_public_error == WalletError::Ok &&
+                               master_public.depth == 0 && public_child_error == WalletError::Ok &&
+                               derived_public.depth == 1;
+  const bool public_private_match = private_child_public_error == WalletError::Ok &&
+                                    public_child_error == WalletError::Ok &&
+                                    memcmp(private_child_public.public_key, derived_public.public_key,
+                                           kCompressedPublicKeySize) == 0 &&
+                                    memcmp(private_child_public.chain_code, derived_public.chain_code,
+                                           kChainCodeSize) == 0;
+  const bool passed = master_vector && path_metadata && public_metadata && public_private_match;
+  if (!passed) {
+    // Report only stage status and error codes; never print key material.
+    Serial.print("BIP32_DETAIL master="); Serial.print(master_vector ? "pass" : "FAIL");
+    Serial.print(" path="); Serial.print(path_metadata ? "pass" : "FAIL");
+    Serial.print(" neuter="); Serial.print(master_public_error == WalletError::Ok ? "pass" : "FAIL");
+    Serial.print(" private-child="); Serial.print(private_child_error == WalletError::Ok ? "pass" : "FAIL");
+    Serial.print(" public-child="); Serial.print(public_child_error == WalletError::Ok ? "pass" : "FAIL");
+    Serial.print(" public-match="); Serial.println(public_private_match ? "pass" : "FAIL");
+  }
   secure_zero(&master, sizeof(master));
   secure_zero(&derived, sizeof(derived));
   secure_zero(&master_public, sizeof(master_public));

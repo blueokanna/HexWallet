@@ -55,7 +55,10 @@ bool run_network_profile_self_tests() {
         network.bip_purpose >= kHardenedOffset || network.slip44_coin_type >= kHardenedOffset ||
         network.derivation_coin_type >= kHardenedOffset) return false;
     if (network.encoding == AddressEncoding::Evm) {
-      if (network.derivation_coin_type != 60 || network.evm_chain_id == 0) return false;
+      const uint32_t expected_derivation_type = strcmp(network.id, "etc") == 0 ? 61 : 60;
+      if (network.derivation_coin_type != expected_derivation_type || network.evm_chain_id == 0) {
+        return false;
+      }
     } else if (network.evm_chain_id != 0) {
       return false;
     } else if (network.encoding == AddressEncoding::CryptoNote && network.account_version == 0) {
@@ -69,10 +72,13 @@ bool run_network_profile_self_tests() {
     }
   }
   const NetworkProfile *ethereum = find_network_profile("eth");
+  const NetworkProfile *ethereum_classic = find_network_profile("etc");
   const NetworkProfile *bsc = find_network_profile("bsc");
   const NetworkProfile *monero = find_network_profile("xmr");
   const NetworkProfile *masari = find_network_profile("msr");
   return ethereum != nullptr && ethereum->evm_chain_id == 1 &&
+         ethereum_classic != nullptr && ethereum_classic->derivation_coin_type == 61 &&
+         ethereum_classic->evm_chain_id == 61 &&
          bsc != nullptr && bsc->derivation_coin_type == 60 && bsc->evm_chain_id == 56 &&
          monero != nullptr && monero->account_version == 18 &&
          masari != nullptr && masari->account_version == 28;

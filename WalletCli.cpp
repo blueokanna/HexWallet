@@ -148,7 +148,7 @@ void record_failure() {
 
 bool require_authentication() {
   if (!authenticated) {
-    Serial.println("ERR locked");
+    Serial.println("ERR locked; run auth begin, calculate the HMAC proof, then auth unlock <proof-hex>");
     return false;
   }
   authenticated_at = millis();
@@ -247,7 +247,7 @@ void provision_pin(char *arguments) {
   secure_zero(new_verifier, sizeof(new_verifier));
   preferences.putUInt(kFailuresKey, 0);
   provisioned = true;
-  Serial.println("OK provisioned");
+  Serial.println("OK provisioned; run auth begin and auth unlock <proof-hex>");
 }
 
 void begin_challenge() {
@@ -959,7 +959,11 @@ bool wallet_cli_init(bool display_available) {
   }
   Serial.println("HexWallet authenticated CLI ready; use help");
   if (!display_available) Serial.println("INFO no display detected; authenticated CLI is the active interface");
-  if (!provisioned) Serial.println("INFO authentication is not provisioned");
+  if (!provisioned) {
+    Serial.println("INFO authentication is not provisioned; use auth provision <pin> <pin>");
+  } else {
+    Serial.println("INFO authentication required; use auth begin then auth unlock <proof-hex>");
+  }
   return true;
 #endif
 }

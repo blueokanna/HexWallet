@@ -2,6 +2,8 @@
 
 HexWallet is an offline ESP32 wallet firmware foundation. It derives addresses from a volatile BIP39 wallet, provides an authenticated serial interface, reviews bounded Bitcoin PSBT requests, and keeps network and token metadata in explicit registries. It is beta firmware, not a production hardware wallet, and must not hold real funds until the hardware port and security controls are complete.
 
+For the complete CLI workflow, including Arduino CLI build/upload, serial settings, challenge-response authentication, wallet lifecycle, address lookup, transaction review, signing restrictions, and troubleshooting, see the [detailed Chinese CLI guide](README-zh.md).
+
 ## What Is Implemented
 
 - BIP39 English 24-word generation, validation, and PBKDF2-HMAC-SHA512 seed derivation.
