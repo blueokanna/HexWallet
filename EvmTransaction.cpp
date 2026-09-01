@@ -460,7 +460,8 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     return EvmTransactionError::CryptoFailure;
   }
   DerivedAddress derived;
-  const WalletError address_error = derive_address(master, network, 0, 0, address_index, &derived);
+  const WalletError address_error =
+      derive_address(master, nullptr, network, 0, 0, address_index, &derived);
   if (address_error != WalletError::Ok) {
     clear_evm_request(&parsed);
     return EvmTransactionError::WrongWallet;
@@ -516,8 +517,8 @@ EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
     return EvmTransactionError::WrongWallet;
   }
   DerivedAddress derived;
-  if (derive_address(master, *validated.network, 0, 0, validated.address_index, &derived) !=
-      WalletError::Ok) {
+  if (derive_address(master, nullptr, *validated.network, 0, 0,
+                     validated.address_index, &derived) != WalletError::Ok) {
     clear_evm_request(&validated);
     return EvmTransactionError::WrongWallet;
   }
@@ -670,7 +671,8 @@ bool run_evm_transaction_self_test() {
   RecoverableSignature etc_signature;
   size_t expected_etc_size = 0;
   if (passed) {
-    passed = derive_address(master, *ethereum_classic, 0, 0, 0, &etc_derived) == WalletError::Ok &&
+    passed = derive_address(master, nullptr, *ethereum_classic, 0, 0, 0, &etc_derived) ==
+        WalletError::Ok &&
         strcmp(parsed.from_address, etc_derived.address) == 0 &&
         secp256k1_sign_digest_recoverable(etc_derived.private_key, parsed.signing_hash,
                                           &etc_signature) == WalletError::Ok &&

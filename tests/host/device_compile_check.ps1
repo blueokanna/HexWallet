@@ -40,6 +40,7 @@ $includes = @(
 # cannot be hand-replicated; the arduino-cli firmware-build CI job owns that).
 $includes = @(
   $root,
+  (Join-Path $PSScriptRoot "mock"),
   (Join-Path $core "cores\esp32"),
   (Join-Path $libs "include"),
   (Join-Path $libs "include\mbedtls\mbedtls\include"),
@@ -49,16 +50,20 @@ $includes = @(
 )
 
 # Firmware sources that are pure C++ (no Arduino.h / ESP-IDF / LVGL).
-# WalletSecurity.cpp needs Arduino.h + esp_system.h (esp_fill_random) and
-# WalletUi/WalletBoardPort/WalletCli/WalletEngine/WalletTransportPolicy need
-# Arduino + LVGL configuration; those are exercised by the full arduino-cli
-# build in CI.  This check covers the crypto core for the 32-bit target.
+# WalletSecurity.cpp needs Arduino.h + esp_system.h (esp_fill_random), and
+# WalletUi/WalletBoardPort/WalletCli/WalletTransportPolicy need Arduino +
+# LVGL configuration; those are exercised by the full arduino-cli build in CI.
+# WalletEngine.cpp, EvmTransaction.cpp and BitcoinTransaction.cpp are compiled
+# here too - the derive_address() seed-parameter refactor broke
+# EvmTransaction.cpp and only the device build caught it, so any source that
+# can compile with the curated include set is kept in this list.
 $sources = @(
   "CryptoPrimitives.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "CryptoNoteAddress.cpp", "WalletNetworks.cpp",
-  "WalletTokens.cpp", "WalletCatalog.cpp", "WalletSession.cpp"
+  "WalletTokens.cpp", "WalletCatalog.cpp", "WalletSession.cpp",
+  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp"
 )
 
 $objDir = Join-Path $PSScriptRoot "obj-device"
