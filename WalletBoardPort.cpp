@@ -372,45 +372,41 @@ static void cst816s_read() {
 #endif  // HEXWALLET_TOUCH_CST816S
 
 // ===========================================================================
-//  LVGL glue
+//  LVGL glue (LVGL 9.5 API: lv_display_t / lv_indev_t)
 // ===========================================================================
 #if HEXWALLET_ENABLE_LVGL
+static uint8_t *g_draw_buf = nullptr;
 
 #if defined(HEXWALLET_DISPLAY_KIND_COLOR)
-static void color_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+static void color_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
 #if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || \
     HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
   rm67162_push_pixels(area->x1, area->y1, uint16_t(area->x2 - area->x1 + 1),
-                      uint16_t(area->y2 - area->y1 + 1),
-                      reinterpret_cast<const uint8_t *>(&color_p->full));
+                      uint16_t(area->y2 - area->y1 + 1), px_map);
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
   st_push_pixels(area->x1, area->y1, uint16_t(area->x2 - area->x1 + 1),
-                 uint16_t(area->y2 - area->y1 + 1),
-                 reinterpret_cast<const uint8_t *>(&color_p->full));
+                 uint16_t(area->y2 - area->y1 + 1), px_map);
 #endif
-  lv_disp_flush_ready(disp);
+  lv_display_flush_ready(disp);
 }
 #endif  // color
 
 #if defined(HEXWALLET_DISPLAY_KIND_EINK)
-// 1bpp frame buffer for the e-paper (w*h/8 bytes). The 16bpp source is the
-// LVGL draw buffer itself (disp->draw_buf->buf1): with a full-frame single
-// draw buffer, once lv_disp_flush_is_last() reports the frame is complete the
-// draw buffer holds the whole picture.
+// 1bpp frame buffer for the e-paper (w*h/8 bytes).
 static uint8_t *s_eink_bw = nullptr;
 
-static void eink_convert_to_bw(const lv_color_t *frame, uint16_t w, uint16_t h) {
+static void eink_convert_to_bw(const uint8_t *frame16, uint16_t w, uint16_t h) {
+  const uint16_t *frame = reinterpret_cast<const uint16_t *>(frame16);
   for (uint16_t y = 0; y < h; ++y) {
     for (uint16_t x = 0; x < w; ++x) {
-      const uint16_t c16 = frame[size_t(y) * w + x].full;
-      // LV_COLOR_16_SWAP is enabled, undo the byte swap to get RGB565.
+      // LV_COLOR_16_SWAP is enabled (backward-compat swap in lv_refr.c before
+      // flush_cb), so the in-memory bytes are swapped; undo to get RGB565.
+      const uint16_t c16 = frame[size_t(y) * w + x];
       const uint16_t c = uint16_t((c16 << 8) | (c16 >> 8));
       const uint32_t r8 = ((c >> 11) & 0x1F) * 255 / 31;
       const uint32_t g8 = ((c >> 5) & 0x3F) * 255 / 63;
       const uint32_t b8 = (c & 0x1F) * 255 / 31;
       const uint32_t lum = (r8 * 299 + g8 * 587 + b8 * 114) / 1000;  // 0..255
-      // Ordered dithering (4x4 Bayer). A pixel is inked when its luminance
-      // is below a position-dependent threshold; 50% gray dithers 1:1.
       const uint8_t idx = uint8_t((y & 3) * 4 + (x & 3));
       const bool on = lum < uint32_t(255 - kBayer4[idx] * 17);
       const size_t bit = size_t(y) * w + x;
@@ -420,28 +416,22 @@ static void eink_convert_to_bw(const lv_color_t *frame, uint16_t w, uint16_t h) 
   }
 }
 
-static void eink_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
-  // The draw buffer is the full frame; dirty areas were rendered into it in
-  // place. Nothing to push until the frame is complete. s_epd.refresh() is
-  // synchronous (it waits on BUSY internally), so by the time the next frame
-  // starts rendering the panel is idle again.
-  if (lv_disp_flush_is_last(disp)) {
+static void eink_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+  if (lv_display_flush_is_last(disp)) {
 #if HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
-    const lv_color_t *frame =
-        static_cast<const lv_color_t *>(disp->draw_buf->buf1);
-    eink_convert_to_bw(frame, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
+    eink_convert_to_bw(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
     s_epd.writeScreenBuffer(s_eink_bw);
     s_epd.refresh(true);
     s_epd.powerOff();
 #endif
   }
-  lv_disp_flush_ready(disp);
+  lv_display_flush_ready(disp);
 }
 #endif  // eink
 
 #if defined(HEXWALLET_TOUCH_CST816S)
-static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
-  (void)drv;
+static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+  (void)indev;
   cst816s_read();
   data->point.x = s_touch_x;
   data->point.y = s_touch_y;
@@ -449,24 +439,24 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
 }
 #endif
 
-static bool lvgl_register_display(uint16_t width, uint16_t height,
-                                  void (*flush_cb)(lv_disp_drv_t *, const lv_area_t *, lv_color_t *),
-                                  void (*render_start_cb)(lv_disp_drv_t *)) {
-  const size_t buf_px = size_t(width) * height;
-  lv_color_t *buf = static_cast<lv_color_t *>(board_alloc(buf_px * sizeof(lv_color_t)));
+static bool lvgl_register_display(
+    uint16_t width, uint16_t height, bool full_frame,
+    void (*flush_cb)(lv_display_t *, const lv_area_t *, uint8_t *)) {
+  const size_t buf_px =
+      full_frame ? size_t(width) * height
+                 : size_t(width) * (size_t(height) / 10 < 16 ? 16 : size_t(height) / 10);
+  // RGB565: 2 bytes per pixel.
+  uint8_t *buf = static_cast<uint8_t *>(board_alloc(buf_px * 2));
   if (buf == nullptr) return false;
-  static lv_disp_draw_buf_t draw_buf;
-  lv_disp_draw_buf_init(&draw_buf, buf, nullptr, buf_px);
-
-  static lv_disp_drv_t disp_drv;
-  lv_disp_drv_init(&disp_drv);
-  disp_drv.hor_res = width;
-  disp_drv.ver_res = height;
-  disp_drv.flush_cb = flush_cb;
-  disp_drv.render_start_cb = render_start_cb;
-  disp_drv.antialiasing = 0;
-  disp_drv.draw_buf = &draw_buf;
-  if (lv_disp_drv_register(&disp_drv) == nullptr) return false;
+  g_draw_buf = buf;
+  lv_display_t *disp = lv_display_create(width, height);
+  if (disp == nullptr) return false;
+  // buf_size is in bytes.
+  lv_display_set_buffers(disp, buf, nullptr, buf_px * 2,
+                         full_frame ? LV_DISPLAY_RENDER_MODE_DIRECT
+                                    : LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_set_flush_cb(disp, flush_cb);
+  lv_display_set_antialiasing(disp, false);
   return true;
 }
 
@@ -562,7 +552,7 @@ bool board_display_init() {
   if (!st7789_init()) return false;
 #endif
   if (!lvgl_register_display(HEXWALLET_LCD_WIDTH, HEXWALLET_LCD_HEIGHT,
-                             color_flush_cb, nullptr)) {
+                             false, color_flush_cb)) {
     return false;
   }
   g_display_ready = true;
@@ -576,7 +566,7 @@ bool board_display_init() {
   s_epd.setRotation(0);
   s_epd.setFullWindow();
   if (!lvgl_register_display(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
-                             eink_flush_cb, nullptr)) {
+                             true, eink_flush_cb)) {
     return false;
   }
   g_display_ready = true;
@@ -596,11 +586,12 @@ bool board_display_init() {
 #if defined(HEXWALLET_TOUCH_CST816S)
   if (cst816s_probe()) {
 #if HEXWALLET_ENABLE_LVGL
-    static lv_indev_drv_t indev_drv;
-    lv_indev_drv_init(&indev_drv);
-    indev_drv.type = LV_INDEV_TYPE_POINTER;
-    indev_drv.read_cb = touch_read_cb;
-    if (lv_indev_drv_register(&indev_drv) != nullptr) g_touch_ready = true;
+    lv_indev_t *indev = lv_indev_create();
+    if (indev != nullptr) {
+      lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+      lv_indev_set_read_cb(indev, touch_read_cb);
+      g_touch_ready = true;
+    }
 #endif
   }
 #endif

@@ -13,6 +13,8 @@ tests/host/obj/
 tests/host/obj-device/
 tests/host/obj-board/
 tests/host/*.log
+# Local LVGL checkout used by the board-port compile check (CI clones it).
+tests/host/lvgl_real/
 
 # Arduino / IDE
 .pio/

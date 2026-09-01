@@ -1,8 +1,9 @@
-// Minimal LVGL 9 API mock used ONLY by the host-side board-port compile
-// check (tests/host/board_port_compile_check.ps1). It exists so the
-// hardware driver code can be syntax- and type-checked with the real ESP32
-// headers but without pulling in the full LVGL tree. It is NOT shipped to
-// the device and is never used by the firmware build.
+// Minimal LVGL 9.5 API mock used ONLY as a fallback by the host-side
+// board-port compile check (tests/host/board_port_compile_check.ps1) when the
+// real LVGL tree is unavailable. The check PREFERS the real LVGL checkout
+// (tests/host/lvgl_real or $env:HEXWALLET_LVGL_DIR); this file exists so the
+// fallback surface matches the real 9.5 API (lv_display_t / lv_indev_t) and
+// never drifts back to the removed lv_disp_drv_t / lv_indev_drv_t API.
 #ifndef HEXWALLET_MOCK_LVGL_H
 #define HEXWALLET_MOCK_LVGL_H
 
@@ -16,7 +17,9 @@
 typedef int16_t lv_coord_t;
 
 typedef struct {
-  uint16_t full;
+  uint8_t blue;
+  uint8_t green;
+  uint8_t red;
 } lv_color_t;
 
 typedef struct {
@@ -27,52 +30,48 @@ typedef struct {
   lv_coord_t x, y;
 } lv_point_t;
 
-// --- display driver -------------------------------------------------------
-typedef struct _lv_disp_draw_buf_t {
-  void *buf1;
-  void *buf2;
-  uint32_t size;
-} lv_disp_draw_buf_t;
-
-typedef struct _lv_disp_drv_t lv_disp_drv_t;
-typedef void (*lv_disp_flush_cb_t)(lv_disp_drv_t *, const lv_area_t *, lv_color_t *);
-typedef void (*lv_disp_render_start_cb_t)(lv_disp_drv_t *);
-
-struct _lv_disp_drv_t {
-  lv_coord_t hor_res;
-  lv_coord_t ver_res;
-  lv_disp_flush_cb_t flush_cb;
-  lv_disp_render_start_cb_t render_start_cb;
-  bool antialiasing;
-  lv_disp_draw_buf_t *draw_buf;
-  void *user_data;
-};
-
-typedef struct _lv_disp_t {
+typedef struct _lv_display_t {
   void *reserved;
-} lv_disp_t;
-
-// --- input device ---------------------------------------------------------
-typedef struct {
-  lv_point_t point;
-  uint8_t state;
-} lv_indev_data_t;
-
-typedef struct _lv_indev_drv_t {
-  uint8_t type;
-  void (*read_cb)(struct _lv_indev_drv_t *, lv_indev_data_t *);
-  void *user_data;
-} lv_indev_drv_t;
+} lv_display_t;
 
 typedef struct _lv_indev_t {
   void *reserved;
 } lv_indev_t;
 
-#define LV_INDEV_TYPE_POINTER 0
-#define LV_INDEV_STATE_RELEASED 0
-#define LV_INDEV_STATE_PRESSED 1
+// --- input device data (matches lv_indev.h) --------------------------------
+typedef enum {
+  LV_INDEV_STATE_RELEASED = 0,
+  LV_INDEV_STATE_PRESSED,
+} lv_indev_state_t;
 
-// --- widgets --------------------------------------------------------------
+typedef enum {
+  LV_INDEV_TYPE_NONE,
+  LV_INDEV_TYPE_POINTER,
+  LV_INDEV_TYPE_KEYPAD,
+  LV_INDEV_TYPE_BUTTON,
+  LV_INDEV_TYPE_ENCODER,
+} lv_indev_type_t;
+
+typedef struct {
+  lv_indev_state_t state;
+  lv_point_t point;
+  uint32_t key;
+  uint32_t btn_id;
+  int16_t enc_diff;
+} lv_indev_data_t;
+
+typedef void (*lv_display_flush_cb_t)(lv_display_t *disp, const lv_area_t *area,
+                                      uint8_t *px_map);
+typedef void (*lv_indev_read_cb_t)(lv_indev_t *indev, lv_indev_data_t *data);
+
+// --- render modes (matches lv_display.h) -----------------------------------
+typedef enum {
+  LV_DISPLAY_RENDER_MODE_PARTIAL,
+  LV_DISPLAY_RENDER_MODE_DIRECT,
+  LV_DISPLAY_RENDER_MODE_FULL,
+} lv_display_render_mode_t;
+
+// --- widgets ---------------------------------------------------------------
 typedef struct _lv_obj_t lv_obj_t;
 typedef struct _lv_event_t lv_event_t;
 typedef void (*lv_event_cb_t)(lv_event_t *e);
@@ -102,16 +101,18 @@ typedef enum {
 #define LV_SCROLLBAR_MODE_AUTO 1
 #define LV_LABEL_LONG_WRAP 2
 
-// --- API (declared only; the check is compile-only) -----------------------
-void lv_disp_draw_buf_init(lv_disp_draw_buf_t *draw_buf, void *buf1, void *buf2,
-                           uint32_t size_in_px);
-void lv_disp_drv_init(lv_disp_drv_t *drv);
-lv_disp_t *lv_disp_drv_register(lv_disp_drv_t *drv);
-void lv_disp_flush_ready(lv_disp_drv_t *drv);
-bool lv_disp_flush_is_last(lv_disp_drv_t *drv);
+// --- API (declared only; the check is compile-only) ------------------------
+lv_display_t *lv_display_create(int32_t hor_res, int32_t ver_res);
+void lv_display_set_buffers(lv_display_t *disp, void *buf1, void *buf2,
+                            uint32_t buf_size, lv_display_render_mode_t render_mode);
+void lv_display_set_flush_cb(lv_display_t *disp, lv_display_flush_cb_t flush_cb);
+void lv_display_set_antialiasing(lv_display_t *disp, bool en);
+void lv_display_flush_ready(lv_display_t *disp);
+bool lv_display_flush_is_last(lv_display_t *disp);
 
-void lv_indev_drv_init(lv_indev_drv_t *drv);
-lv_indev_t *lv_indev_drv_register(lv_indev_drv_t *drv);
+lv_indev_t *lv_indev_create(void);
+void lv_indev_set_type(lv_indev_t *indev, lv_indev_type_t indev_type);
+void lv_indev_set_read_cb(lv_indev_t *indev, lv_indev_read_cb_t read_cb);
 
 void lv_timer_handler(void);
 

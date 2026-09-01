@@ -85,13 +85,21 @@ jobs:
           # toolchain to prove the crypto core builds for the 32-bit device.
           powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
 
+      - name: Clone LVGL 9.5.0 (for the board port compile check)
+        shell: pwsh
+        run: |
+          # The board port check compiles against the REAL LVGL checkout so
+          # driver code can never drift from the actual 9.5 API (the removed
+          # lv_disp_drv_t/lv_indev_drv_t API once broke the build silently).
+          git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git tests/host/lvgl_real
+
       - name: Board port compile check (all board profiles)
         shell: pwsh
         run: |
           # Compiles WalletBoardPort.cpp + WalletUi.cpp for every supported
           # board profile (AMOLED, AMOLED Plus, T-Display S3, T-Deck Max,
-          # T-Echo Lite) against the Xtensa toolchain and a minimal LVGL/Arduino
-          # mock, catching driver syntax/type errors before flashing hardware.
+          # T-Echo Lite) against the Xtensa toolchain and the real LVGL 9.5
+          # headers, catching driver syntax/type errors before flashing.
           powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
 
   firmware-build:

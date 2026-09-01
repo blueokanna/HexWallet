@@ -43,6 +43,7 @@ $includes = @(
   (Join-Path $PSScriptRoot "mock"),
   (Join-Path $core "cores\esp32"),
   (Join-Path $libs "include"),
+  (Join-Path $libs "include\esp_hw_support\include"),
   (Join-Path $libs "include\mbedtls\mbedtls\include"),
   (Join-Path $libs "include\mbedtls\port\include"),
   (Join-Path $libs "include\xtensa\include"),

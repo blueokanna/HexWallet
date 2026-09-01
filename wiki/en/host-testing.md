@@ -60,7 +60,11 @@ powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
 # expected: DEVICE COMPILE: all sources OK
 ```
 
-Files that need `Arduino.h` + ESP-IDF (e.g. `WalletSecurity.cpp` →
+`WalletEngine.cpp`, `EvmTransaction.cpp` and `BitcoinTransaction.cpp` are in
+this list too — a `derive_address()` signature refactor once broke
+`EvmTransaction.cpp` and only the device build caught it, so any source that
+compiles with the curated include set is kept here. Files that need
+`Arduino.h` + the full ESP-IDF graph (e.g. `WalletSecurity.cpp` →
 `esp_fill_random`) or LVGL config are owned by the CI `arduino-cli` build
 instead. The Xtensa g++ `@file` response-file handling mangles backslash `-I`
 paths, so the include flags are passed directly.
@@ -69,20 +73,20 @@ paths, so the include flags are passed directly.
 
 `tests/host/board_port_compile_check.ps1` compiles `WalletBoardPort.cpp` and
 `WalletUi.cpp` for **every supported board profile** (AMOLED, AMOLED Plus,
-T-Display S3, T-Deck Max, T-Echo Lite) against the Xtensa toolchain.
-`tests/host/mock/` shadows `Arduino.h`, `SPI.h`, `Wire.h` and `lvgl.h` with a
-small deterministic surface (and `soc/` with the ESP32-S3 register macros), so
-driver syntax and LVGL API usage are type-checked on the host without pulling
-in the full ESP-IDF graph.
+T-Display S3, T-Deck Max, T-Echo Lite) against the Xtensa toolchain and the
+**real LVGL 9.5 checkout** (`tests/host/lvgl_real` or `$env:HEXWALLET_LVGL_DIR`).
+The mock/ directory only shadows `Arduino.h`, `SPI.h`, `Wire.h` and the
+ESP32-S3 register macros (`soc/`); `lvgl.h` itself always comes from the real
+tree so the check cannot validate against a stale API surface. This matters:
+LVGL 9.5 removed the v8-era `lv_disp_drv_t` / `lv_indev_drv_t` registration
+API in favor of `lv_display_create()` / `lv_indev_create()`, and the old API
+broke the device build silently.
 
 ```text
+git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git tests/host/lvgl_real
 powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
 # expected: BOARD PORT COMPILE: all boards OK
 ```
-
-Register names and the real Arduino/LVGL APIs are validated for real by the
-`arduino-cli` firmware build in CI; the mock exists to catch driver-level
-errors cheaply and deterministically.
 
 ## CI
 
@@ -91,7 +95,8 @@ errors cheaply and deterministically.
 - **host-tests** (windows): installs `arduino-cli` 1.5.1 (versioned asset URL;
   the bare `latest` alias 404s), installs `esp32:esp32@3.3.10`, points
   `HEXWALLET_ESP32_LIBS` at the bundled mbedtls headers, runs `build.ps1`,
-  `device_compile_check.ps1`, then `board_port_compile_check.ps1`.
+  `device_compile_check.ps1`, clones LVGL 9.5.0, then runs
+  `board_port_compile_check.ps1` against it.
 - **firmware-build** (ubuntu): installs `arduino-cli` 1.5.1 via the official
   install script (the script refuses to create `$BINDIR` itself, so `~/bin` is
   created first), installs `esp32:esp32@3.3.10`, clones LVGL 9.5.0, and runs
