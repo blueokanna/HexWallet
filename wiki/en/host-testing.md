@@ -85,8 +85,15 @@ broke the device build silently.
 ```text
 git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git tests/host/lvgl_real
 powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
-# expected: BOARD PORT COMPILE: all boards OK
+# expected: [lv_conf] lv_mem_core_builtin.c => rc=0
+#           BOARD PORT COMPILE: all boards OK
 ```
+
+The check also compiles a real LVGL implementation TU (`lv_mem_core_builtin.c`,
+as C, the way the arduino-cli build compiles LVGL) to validate `lv_conf.h`
+itself — an empty `LV_MEM_POOL_INCLUDE` once expanded into a bare `#include`
+inside that file and broke the device build while every header-only check
+stayed green.
 
 ## CI
 

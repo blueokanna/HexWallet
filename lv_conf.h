@@ -30,9 +30,15 @@
  *====================*/
 #define LV_MEM_CUSTOM 0
 #define LV_MEM_SIZE (96U * 1024U)
-#define LV_MEM_ADR 0
-#define LV_MEM_POOL_INCLUDE
-#define LV_MEM_POOL_ALLOC
+#define LV_MEM_ADR 0     /* 0: use the built-in pool */
+/* LV_MEM_POOL_INCLUDE / LV_MEM_POOL_ALLOC must stay UNDEFINED when
+ * LV_MEM_ADR == 0: lv_mem_core_builtin.c does `#include LV_MEM_POOL_INCLUDE`
+ * under `#ifdef`, so an empty definition breaks the build with a bare
+ * `#include` directive. */
+#if LV_MEM_ADR == 0
+#undef LV_MEM_POOL_INCLUDE
+#undef LV_MEM_POOL_ALLOC
+#endif
 #define LV_MEM_BUF_MAX_NUM 16
 
 /*====================

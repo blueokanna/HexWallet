@@ -61,6 +61,15 @@ $incArgs = foreach ($i in $includes) { "-I$i" }
 # lv_conf.h lives at the sketch root; LV_CONF_INCLUDE_SIMPLE makes lvgl find it.
 $extraDefines = @("-DLV_CONF_INCLUDE_SIMPLE")
 
+# The C compiler (xtensa-esp32-elf-gcc.exe sits next to g++). Used to validate
+# lv_conf.h against a real LVGL implementation TU compiled as C (the way the
+# arduino-cli build compiles LVGL), which catches config bugs that only appear
+# inside LVGL's own .c files (e.g. an empty LV_MEM_POOL_INCLUDE breaking
+# `#include LV_MEM_POOL_INCLUDE` in lv_mem_core_builtin.c).
+$gccC = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32-elf-gcc.exe" -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+if (-not $gccC) { throw "xtensa-esp32-elf-gcc.exe not found; is the ESP32 core installed?" }
+
 $boards = @(
   @{ Name = "amoled";    Define = "-DHEXWALLET_BOARD=1" },
   @{ Name = "amoled_plus"; Define = "-DHEXWALLET_BOARD=2" },
@@ -74,6 +83,23 @@ $objDir = Join-Path $PSScriptRoot "obj-board"
 New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 $fail = 0
+
+# --- lv_conf.h validation: compile a real LVGL implementation TU as C ------
+$confTu = Join-Path $lvglDir "src\stdlib\builtin\lv_mem_core_builtin.c"
+if (Test-Path $confTu) {
+  $confLog = Join-Path $objDir "lv_conf_check.log"
+  & $gccC -std=c11 -fsyntax-only -Wno-unused-parameter $extraDefines $incArgs $confTu *> $confLog
+  $confRc = $LASTEXITCODE
+  Write-Output ("  [lv_conf] lv_mem_core_builtin.c => rc={0}" -f $confRc)
+  if ($confRc -ne 0) {
+    $fail++
+    Write-Output "----- lv_conf.h / LVGL config -----"
+    Get-Content $confLog -Encoding Unicode | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
+  }
+} else {
+  Write-Output "WARN: $confTu not found; skipping lv_conf.h validation"
+}
+
 foreach ($b in $boards) {
   foreach ($s in $sources) {
     $src = Join-Path $root $s

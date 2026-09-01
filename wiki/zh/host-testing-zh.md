@@ -77,8 +77,14 @@ API 表面验证。这一点很关键：LVGL 9.5 移除了 v8 时代的 `lv_disp
 ```text
 git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git tests/host/lvgl_real
 powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
-# 期望：BOARD PORT COMPILE: all boards OK
+# 期望：[lv_conf] lv_mem_core_builtin.c => rc=0
+#       BOARD PORT COMPILE: all boards OK
 ```
+
+该检查还会以 C 模式（与 arduino-cli 构建编译 LVGL 的方式一致）编译一个
+真实的 LVGL 实现单元（`lv_mem_core_builtin.c`）来验证 `lv_conf.h` 本身
+——空的 `LV_MEM_POOL_INCLUDE` 曾在该文件内展开成裸 `#include` 并炸掉设备
+构建，而所有仅查头文件的检查都保持绿灯。
 
 ## CI
 
