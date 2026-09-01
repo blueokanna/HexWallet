@@ -220,10 +220,13 @@ static void sha512_finish(host_sha512_ctx *ctx, uint8_t out[64]) {
   }
   while (ctx->used != 112) sha512_update(ctx, &zero, 1);
   /* 128-bit big-endian length: the 64-bit bit count goes in the LOW half
-     (bytes 120..127), the high half is zero. */
-  uint8_t len[16];
+     (bytes 120..127), the high half is zero (messages are < 2^64 bits).
+     NB: shifting the 64-bit counter by >= 64 (e.g. `bits >> 120`) is
+     undefined behaviour and clang fills those bytes with garbage, so write
+     only the low 8 bytes into a zero-initialized array. */
+  uint8_t len[16] = {0};
   int i;
-  for (i = 0; i < 16; i++) len[i] = (uint8_t)(bits >> (120 - i * 8));
+  for (i = 0; i < 8; i++) len[i + 8] = (uint8_t)(bits >> (56 - i * 8));
   sha512_update(ctx, len, 16);
   for (i = 0; i < 8; i++) {
     int j;

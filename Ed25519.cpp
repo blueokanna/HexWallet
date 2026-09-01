@@ -129,16 +129,21 @@ void fe_tobytes(uint8_t *out, const fe value) {
   q = (h9 + q) >> 25;
 
   h0 += 19 * q;
-  int64_t carry0 = h0 >> 26; h1 += carry0; h0 -= carry0 << 26;
-  int64_t carry1 = h1 >> 25; h2 += carry1; h1 -= carry1 << 25;
-  int64_t carry2 = h2 >> 26; h3 += carry2; h2 -= carry2 << 26;
-  int64_t carry3 = h3 >> 25; h4 += carry3; h3 -= carry3 << 25;
-  int64_t carry4 = h4 >> 26; h5 += carry4; h4 -= carry4 << 26;
-  int64_t carry5 = h5 >> 25; h6 += carry5; h5 -= carry5 << 25;
-  int64_t carry6 = h6 >> 26; h7 += carry6; h6 -= carry6 << 26;
-  int64_t carry7 = h7 >> 25; h8 += carry7; h7 -= carry7 << 25;
-  int64_t carry8 = h8 >> 26; h9 += carry8; h8 -= carry8 << 26;
-  int64_t carry9 = h9 >> 25; h9 -= carry9 << 25;
+  // NOTE: carry limbs can be negative (fe_sub produces negative limbs), and
+  // left-shifting a negative value is UB in C++17 (MSVC happens to keep the
+  // 2's-complement result, clang optimizes assuming it cannot happen). Use
+  // multiplication by a positive power of two instead, which is equivalent
+  // and fully defined.
+  int64_t carry0 = h0 >> 26; h1 += carry0; h0 -= carry0 * (INT64_C(1) << 26);
+  int64_t carry1 = h1 >> 25; h2 += carry1; h1 -= carry1 * (INT64_C(1) << 25);
+  int64_t carry2 = h2 >> 26; h3 += carry2; h2 -= carry2 * (INT64_C(1) << 26);
+  int64_t carry3 = h3 >> 25; h4 += carry3; h3 -= carry3 * (INT64_C(1) << 25);
+  int64_t carry4 = h4 >> 26; h5 += carry4; h4 -= carry4 * (INT64_C(1) << 26);
+  int64_t carry5 = h5 >> 25; h6 += carry5; h5 -= carry5 * (INT64_C(1) << 25);
+  int64_t carry6 = h6 >> 26; h7 += carry6; h6 -= carry6 * (INT64_C(1) << 26);
+  int64_t carry7 = h7 >> 25; h8 += carry7; h7 -= carry7 * (INT64_C(1) << 25);
+  int64_t carry8 = h8 >> 26; h9 += carry8; h8 -= carry8 * (INT64_C(1) << 26);
+  int64_t carry9 = h9 >> 25; h9 -= carry9 * (INT64_C(1) << 25);
 
   // ref10 bit packing: limbs sit on 25.5-bit boundaries. Each byte carries
   // the tail of one limb and the head of the next, except where a limb ends
@@ -211,17 +216,18 @@ void fe_mul(fe out, const fe left, const fe right) {
   static const int kSizes[10] = {26, 25, 26, 25, 26, 25, 26, 25, 26, 25};
   // Full reduction: propagate carries limb by limb, then fold h9's top with
   // the 2^255 == 19 rule. Repeat until stable (three passes suffice for the
-  // bounded products below).
+  // bounded products below). Negative carry limbs are possible (fe_sub), so
+  // scale with multiplication, never a left shift of a negative value (UB).
   for (int pass = 0; pass < 3; ++pass) {
     int64_t h[10] = {h0, h1, h2, h3, h4, h5, h6, h7, h8, h9};
     int64_t c = 0;
     for (int i = 0; i < 9; ++i) {
       c = h[i] >> kSizes[i];
       h[i + 1] += c;
-      h[i] -= c << kSizes[i];
+      h[i] -= c * (INT64_C(1) << kSizes[i]);
     }
     c = h[9] >> kSizes[9];
-    h[9] -= c << kSizes[9];
+    h[9] -= c * (INT64_C(1) << kSizes[9]);
     h[0] += 19 * c;
     h0 = h[0]; h1 = h[1]; h2 = h[2]; h3 = h[3]; h4 = h[4];
     h5 = h[5]; h6 = h[6]; h7 = h[7]; h8 = h[8]; h9 = h[9];

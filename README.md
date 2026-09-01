@@ -164,6 +164,21 @@ powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
 # expected: BOARD PORT COMPILE: all boards OK
 ```
 
+Crypto code is additionally rebuilt with clang-cl as an **optimizer
+differential check** — MSVC sometimes "accidentally" produces the right
+result for undefined behaviour while clang exposes it, so the two builds must
+agree:
+
+```text
+powershell -ExecutionPolicy Bypass -File tests/host/build_clang_ubsan.ps1
+# expected: extended-crypto=pass  alt-addresses=pass
+```
+
+This gate exists because a shift-count-overflow UB in the host SHA-512 shim
+(writing the 128-bit length with `bits >> 120`) once corrupted the length
+field under clang, failing Ed25519 TC1 and SLIP-10 on CI while every local
+MSVC build stayed green.
+
 CI (`.github/workflows/ci.yml`) runs all three host jobs plus a full
 `arduino-cli` firmware build for the ESP32-S3 with LVGL 9.5.0.
 

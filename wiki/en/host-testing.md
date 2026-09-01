@@ -95,6 +95,33 @@ itself — an empty `LV_MEM_POOL_INCLUDE` once expanded into a bare `#include`
 inside that file and broke the device build while every header-only check
 stayed green.
 
+## 5. Optimizer differential check (clang-cl)
+
+`tests/host/build_clang_ubsan.ps1` rebuilds the same sources with **clang-cl**
+(the LLVM toolchain bundled with VS) into `host_test_clang.exe` and runs it.
+Optimizers disagree about how to lower C/C++ **undefined behaviour**: MSVC
+often "accidentally" produces the right result while clang exposes it. If the
+two builds disagree, there is UB in the code — even when MSVC is fully green.
+
+```text
+powershell -ExecutionPolicy Bypass -File tests/host/build_clang_ubsan.ps1
+# expected: extended-crypto=pass / alt-addresses=pass
+```
+
+War story: `mbedtls_host.c`'s `sha512_finish` encoded the 128-bit length with
+`bits >> (120 - i*8)` — shifting the 64-bit counter by >= 64 is UB, and clang
+filled the length's high half with garbage bytes, corrupting SHA-512 output
+and intermittently failing Ed25519 TC1 pubkey/sig and SLIP-10 derivation on
+CI's MSVC (the local MSVC happened to mask the shift count and pass). Fix:
+the high half is always zero, so only the low 8 bytes are written
+(`len[i+8] = bits >> (56 - i*8)`). The same class of bug lived in
+`Ed25519.cpp`'s carry chains, where left-shifting a negative limb
+(`carry << 26`) is UB; it was replaced with `carry * (1 << 26)`.
+
+Treat this tool as a **mandatory gate for crypto code**: any change that
+touches shifts, signedness or overflow-sensitive code should pass both the
+MSVC and the clang-cl builds.
+
 ## CI
 
 `.github/workflows/ci.yml`:

@@ -10,6 +10,7 @@
 *.ilk
 build/
 tests/host/obj/
+tests/host/obj-clang/
 tests/host/obj-device/
 tests/host/obj-board/
 tests/host/*.log
