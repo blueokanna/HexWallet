@@ -10,8 +10,6 @@
 namespace hexwallet {
 
 constexpr size_t kDerivationPathTextSize = 48;
-// Address text buffer. Cardano base addresses are the longest supported
-// format (up to 103 chars + NUL); 128 bytes covers every coin with margin.
 constexpr size_t kAddressTextSize = 128;
 
 struct DerivedAddress {

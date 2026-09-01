@@ -89,13 +89,3 @@ Solana (base58), Algorand, Tezos `tz1`, Qubic, cashaddr (BCH + eCash),
 Avalanche `X-`, Cosmos bech32 (CRO/SEI), and Cardano base addresses are
 implemented in `WalletAltAddresses.cpp` and pass the full `alt-addresses`
 host suite.
-
-## Lessons learned (bignum hygiene)
-
-- Never let `mod` return a negative or unreduced value; canonicalize to
-  `[0, B)`.
-- Long division must be exact for dividends with ~2× the divisor limb count.
-- Alias handling (`X == A`) in add/mul/mod is required — point arithmetic
-  aliases constantly.
-- When a scalarmult fails "randomly" at a high bit, suspect the accumulator's
-  *sign*, not the scalar.

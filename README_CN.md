@@ -61,7 +61,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 能够识别串口的 Windows、Linux 或 macOS 主机。
 - 进行交易签名时，必须使用已经正确适配的可信显示器；没有可信显示器时，默认策略会拒绝签名。
 
-`ESP32-S3N8` 只表示芯片和 Flash/PSRAM 配置，不等于具体的开发板型号。显示器控制器、触摸控制器、GPIO、I2C/SPI 总线和供电时序必须与 `WalletBoardPort.cpp` 的适配一致。
+`ESP32-S3N8` 只表示芯片和 Flash/PSRAM 配置，不等于具体的开发板型号。支持的板卡在 `WalletBoardPins.h` 中声明（引脚取自官方 LilyGO 引脚图和工厂代码），`WalletBoardPort.cpp` 实现了 RM67162 SPI、ST7789 8 位并行与 GxEPD2 电子纸三套真实驱动；选择不支持的板型或缺少 GxEPD2 时会明确报错并 fail-closed。
 
 ### 软件
 
@@ -110,19 +110,27 @@ arduino-cli board list
 arduino-cli board listall esp32:esp32 | Select-String -Pattern 'S3|s3|LilyGo'
 ```
 
-本仓库文档验证过的目标是：
+本仓库验证的编译目标是 ESP32 core 3.3.10 + FQBN `esp32:esp32:esp32s3` + LVGL 9.5.0。目标板卡通过 `WalletConfig.h` 里的 `HEXWALLET_BOARD` 在编译期选择：
 
-```text
-esp32:esp32:lilygo_t_display_s3
+| `HEXWALLET_BOARD` | 板卡 | 面板 | 控制器 | 接口 | 分辨率 |
+| --- | --- | --- | --- | --- | --- |
+| `HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED`（默认） | T-Display S3 AMOLED | RM67162 | RM67162 | SPI | 240×536 |
+| `HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS` | T-Display S3 AMOLED Plus | RM67162 | RM67162 | SPI | 240×536 |
+| `HEXWALLET_BOARD_T_DISPLAY_S3` | T-Display S3 | ST7789 | ST7789 | 8 位并行 | 170×320 |
+| `HEXWALLET_BOARD_T_DECK_MAX` | T-Deck Max | GDEQ031T10 | UC8253 | SPI（电子纸） | 240×320 |
+| `HEXWALLET_BOARD_T_ECHO_LITE` | T-Echo Lite Kit | 电子纸 | — | SPI（电子纸） | 176×192 |
+
+引脚定义在 `WalletBoardPins.h`，取自官方 LilyGO 引脚图与工厂代码；RM67162 与 ST7789 的初始化序列与官方驱动逐字节一致。选择具体板卡：
+
+```powershell
+arduino-cli compile `
+  --fqbn esp32:esp32:esp32s3 `
+  --build-property compiler.cpp.extra_flags=-DHEXWALLET_BOARD=3 `
+  --build-property compiler.c.extra_flags=-DHEXWALLET_BOARD=3 `
+  .
 ```
 
-如果你的板子不是 LilyGo T-Display S3，不能盲目使用这个 FQBN。应选择与你的实际板型、Flash、PSRAM、USB 模式和分区表匹配的 FQBN。例如，通用 ESP32-S3 开发板可能使用：
-
-```text
-esp32:esp32:esp32s3
-```
-
-具体应以 `arduino-cli board list` 和板卡资料为准。
+`HEXWALLET_BOARD=3` 对应 T-Display S3，取值见 `WalletConfig.h`。通用 ESP32-S3 开发板用 `esp32:esp32:esp32s3`，具体以 `arduino-cli board list` 和板卡资料为准。
 
 ### CLI-only 编译
 
@@ -130,20 +138,20 @@ esp32:esp32:esp32s3
 
 ```powershell
 arduino-cli compile `
-  --fqbn esp32:esp32:lilygo_t_display_s3 `
+  --fqbn esp32:esp32:esp32s3 `
   --build-property compiler.cpp.extra_flags=-DHEXWALLET_ENABLE_LVGL=0 `
   --build-property compiler.c.extra_flags=-DHEXWALLET_ENABLE_LVGL=0 `
   .
 ```
 
-编译成功不代表显示器、触摸、供电和签名安全链路已经适配。CLI-only 构建可以用于地址和协议测试，但没有可信显示器时默认不能签名。
+编译成功不代表显示器、触摸、供电和签名安全链路已经验证通过。CLI-only 构建可以用于地址和协议测试，但没有可信显示器时默认不能签名。
 
 ### 启用 LVGL 编译
 
 安装并确认 LVGL 9.5.0 后，使用实际板型编译：
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:lilygo_t_display_s3 .
+arduino-cli compile --fqbn esp32:esp32:esp32s3 .
 ```
 
 如果出现：
@@ -173,7 +181,7 @@ HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION=0
 ```powershell
 arduino-cli upload `
   -p COM7 `
-  --fqbn esp32:esp32:lilygo_t_display_s3 `
+  --fqbn esp32:esp32:esp32s3 `
   .
 ```
 
@@ -695,6 +703,8 @@ wallet generate
 | `WalletNetworks` | 网络、派生类型、地址编码、EVM chain ID |
 | `WalletTokens` | 已登记 Token、合约地址、精度和能力 |
 | `BitcoinTransaction` | PSBT v0 解析、审查、BIP143 签名 |
+| `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序） |
+| `WalletBoardPins` | 全部五块受支持 LilyGO 板卡的逐引脚定义 |
 | `EvmTransaction` | EIP-155、EIP-1559、原生转账和登记 ERC-20 |
 | `WalletBoardPort` | 板级显示器、输入和电源适配 |
 | `WalletTransportPolicy` | Serial、BLE、Wi-Fi 的 fail-closed 策略 |

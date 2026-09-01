@@ -1,8 +1,10 @@
 #include "WalletUi.h"
 
+#include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "WalletBoardPort.h"
 #include "WalletCatalog.h"
 
 #if HEXWALLET_ENABLE_LVGL
@@ -15,6 +17,34 @@ namespace {
 
 bool initialized = false;
 bool session_authenticated = false;
+bool eink_panel = false;
+unsigned long last_service_ms = 0;
+
+// Resolution-adaptive scale factor. The UI is laid out against a 240px-wide
+// reference; every fixed dimension goes through sc() so a 170px or 176px
+// panel shrinks widgets proportionally instead of clipping them.
+static float ui_scale() {
+  const uint16_t w = board_display_width();
+  const uint16_t h = board_display_height();
+  const uint16_t min_side = (w < h) ? w : h;
+  if (min_side == 0) return 1.0f;
+  float s = static_cast<float>(min_side) / 240.0f;
+  if (s < 0.55f) s = 0.55f;
+  if (s > 1.25f) s = 1.25f;
+  return s;
+}
+
+static int sc(int value) {
+  const int scaled = static_cast<int>(static_cast<float>(value) * ui_scale());
+  return scaled < 1 ? 1 : scaled;
+}
+
+static lv_color_t theme_fg() { return lv_color_hex(eink_panel ? 0x000000 : 0x161916); }
+static lv_color_t theme_bg() { return lv_color_hex(eink_panel ? 0xffffff : 0xf4f5f2); }
+static lv_color_t theme_accent() { return lv_color_hex(eink_panel ? 0x000000 : 0x155b2a); }
+static lv_color_t theme_warn() { return lv_color_hex(eink_panel ? 0x000000 : 0x8a241e); }
+static lv_color_t theme_badge_on() { return lv_color_hex(eink_panel ? 0xd9d9d9 : 0xd9eadb); }
+static lv_color_t theme_badge_off() { return lv_color_hex(eink_panel ? 0xffffff : 0xf0d8d5); }
 lv_obj_t *screen_content = nullptr;
 lv_obj_t *state_label = nullptr;
 lv_obj_t *status_label = nullptr;
@@ -53,8 +83,9 @@ void populate_catalog(const char *query) {
              signs ? "ADDRESS + SIGN" : (tokens ? "ADDRESS + TOKENS" :
              (addresses ? "ADDRESS" : "UNSUPPORTED")));
     lv_obj_t *button = lv_list_add_button(coin_list, nullptr, row);
-    lv_obj_set_height(button, 42);
+    lv_obj_set_height(button, sc(42));
     lv_obj_set_style_radius(button, 4, 0);
+    lv_obj_set_style_text_color(button, theme_fg(), 0);
     lv_obj_add_event_cb(button, coin_clicked, LV_EVENT_CLICKED, reinterpret_cast<void *>(index));
     ++matches;
   }
@@ -81,7 +112,7 @@ void create_catalog_view() {
 
   search_field = lv_textarea_create(screen_content);
   lv_obj_set_width(search_field, LV_PCT(100));
-  lv_obj_set_height(search_field, 44);
+  lv_obj_set_height(search_field, sc(44));
   lv_textarea_set_one_line(search_field, true);
   lv_textarea_set_max_length(search_field, 32);
   lv_textarea_set_placeholder_text(search_field, "Search symbol or network");
@@ -96,7 +127,7 @@ void create_catalog_view() {
 
   keyboard = lv_keyboard_create(screen_content);
   lv_obj_set_width(keyboard, LV_PCT(100));
-  lv_obj_set_height(keyboard, 150);
+  lv_obj_set_height(keyboard, sc(150));
   lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
   populate_catalog("");
 }
@@ -108,13 +139,16 @@ bool wallet_ui_init() {
 #if !HEXWALLET_ENABLE_LVGL
   return false;
 #else
+  eink_panel = board_is_eink();
+  const lv_color_t fg = theme_fg();
+  const lv_color_t bg = theme_bg();
   lv_obj_t *screen = lv_screen_active();
   if (screen == nullptr) return false;
   lv_obj_clean(screen);
-  lv_obj_set_style_bg_color(screen, lv_color_hex(0xf4f5f2), 0);
-  lv_obj_set_style_text_color(screen, lv_color_hex(0x161916), 0);
-  lv_obj_set_style_pad_all(screen, 12, 0);
-  lv_obj_set_style_pad_row(screen, 10, 0);
+  lv_obj_set_style_bg_color(screen, bg, 0);
+  lv_obj_set_style_text_color(screen, fg, 0);
+  lv_obj_set_style_pad_all(screen, sc(12), 0);
+  lv_obj_set_style_pad_row(screen, sc(10), 0);
   lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
 
   lv_obj_t *header = lv_obj_create(screen);
@@ -126,10 +160,11 @@ bool wallet_ui_init() {
 
   lv_obj_t *title = lv_label_create(header);
   lv_label_set_text(title, "HEX WALLET");
+  lv_obj_set_style_text_color(title, fg, 0);
 
   state_label = lv_label_create(header);
-  lv_obj_set_style_pad_hor(state_label, 8, 0);
-  lv_obj_set_style_pad_ver(state_label, 4, 0);
+  lv_obj_set_style_pad_hor(state_label, sc(8), 0);
+  lv_obj_set_style_pad_ver(state_label, sc(4), 0);
   lv_obj_set_style_radius(state_label, 4, 0);
 
   screen_content = lv_obj_create(screen);
@@ -140,9 +175,10 @@ bool wallet_ui_init() {
   status_label = lv_label_create(screen);
   lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(status_label, LV_PCT(100));
-  lv_obj_set_style_text_color(status_label, lv_color_hex(0x48514a), 0);
+  lv_obj_set_style_text_color(status_label, theme_warn(), 0);
 
   initialized = true;
+  last_service_ms = 0;
   wallet_ui_show_catalog();
   wallet_ui_set_authenticated(false);
   return true;
@@ -166,10 +202,8 @@ void wallet_ui_set_authenticated(bool authenticated) {
   session_authenticated = authenticated;
   if (!initialized || state_label == nullptr) return;
   lv_label_set_text(state_label, authenticated ? "UNLOCKED" : "LOCKED");
-  lv_obj_set_style_bg_color(state_label,
-                            lv_color_hex(authenticated ? 0xd9eadb : 0xf0d8d5), 0);
-  lv_obj_set_style_text_color(state_label,
-                              lv_color_hex(authenticated ? 0x155b2a : 0x8a241e), 0);
+  lv_obj_set_style_bg_color(state_label, authenticated ? theme_badge_on() : theme_badge_off(), 0);
+  lv_obj_set_style_text_color(state_label, authenticated ? theme_accent() : theme_warn(), 0);
   wallet_ui_set_status(authenticated ? "Authenticated session active" : "Authentication required");
 #else
   (void)authenticated;
@@ -246,7 +280,14 @@ void wallet_ui_show_transaction(const WalletUiTransactionReview &review) {
 
 void wallet_ui_service() {
 #if HEXWALLET_ENABLE_LVGL
-  if (initialized) lv_timer_handler();
+  if (!initialized) return;
+  const unsigned long now = millis();
+  // E-paper panels are slow to refresh; drive LVGL at the policy's minimum
+  // refresh interval instead of every loop pass.
+  const unsigned long interval = eink_panel ? ui_policy().eink_min_refresh_ms : 16UL;
+  if (eink_panel && last_service_ms != 0 && (now - last_service_ms) < interval) return;
+  last_service_ms = now;
+  lv_timer_handler();
 #endif
 }
 

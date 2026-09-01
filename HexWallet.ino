@@ -66,6 +66,17 @@ void setup() {
       Serial.println("FATAL: LVGL UI initialization failed");
       display_available = false;
     }
+    hexwallet::board_power(true);
+    Serial.print("INFO: display ");
+    Serial.print(hexwallet::board_display_width());
+    Serial.print("x");
+    Serial.print(hexwallet::board_display_height());
+    Serial.print(" (");
+    Serial.print(hexwallet::board_name());
+    Serial.println(")");
+  } else {
+    Serial.print("WARN: no display on ");
+    Serial.println(hexwallet::board_name());
   }
   if (!hexwallet::wallet_cli_init(display_available)) {
     Serial.println("FATAL: authenticated CLI initialization failed");

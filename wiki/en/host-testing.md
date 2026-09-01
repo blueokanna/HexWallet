@@ -65,15 +65,35 @@ Files that need `Arduino.h` + ESP-IDF (e.g. `WalletSecurity.cpp` →
 instead. The Xtensa g++ `@file` response-file handling mangles backslash `-I`
 paths, so the include flags are passed directly.
 
+## 4. Board port compile check (all board profiles)
+
+`tests/host/board_port_compile_check.ps1` compiles `WalletBoardPort.cpp` and
+`WalletUi.cpp` for **every supported board profile** (AMOLED, AMOLED Plus,
+T-Display S3, T-Deck Max, T-Echo Lite) against the Xtensa toolchain.
+`tests/host/mock/` shadows `Arduino.h`, `SPI.h`, `Wire.h` and `lvgl.h` with a
+small deterministic surface (and `soc/` with the ESP32-S3 register macros), so
+driver syntax and LVGL API usage are type-checked on the host without pulling
+in the full ESP-IDF graph.
+
+```text
+powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
+# expected: BOARD PORT COMPILE: all boards OK
+```
+
+Register names and the real Arduino/LVGL APIs are validated for real by the
+`arduino-cli` firmware build in CI; the mock exists to catch driver-level
+errors cheaply and deterministically.
+
 ## CI
 
 `.github/workflows/ci.yml`:
 
-- **host-tests** (windows): installs `arduino-cli`, installs
-  `esp32:esp32@3.3.10`, points `HEXWALLET_ESP32_LIBS` at the bundled mbedtls
-  headers, runs `build.ps1`, then runs `device_compile_check.ps1`.
+- **host-tests** (windows): installs `arduino-cli` 1.5.1 (versioned asset URL;
+  the bare `latest` alias 404s), installs `esp32:esp32@3.3.10`, points
+  `HEXWALLET_ESP32_LIBS` at the bundled mbedtls headers, runs `build.ps1`,
+  `device_compile_check.ps1`, then `board_port_compile_check.ps1`.
 - **firmware-build** (ubuntu): full `arduino-cli compile --fqbn
-  esp32:esp32:esp32` with the LVGL library.
+  esp32:esp32:esp32s3` with LVGL 9.5.0.
 
 `build.ps1` / `build_diag.ps1` read `HEXWALLET_ESP32_LIBS` (the `esp32-libs`
 tool's `include\mbedtls` dir) and fall back to the local Arduino15 default.

@@ -11,6 +11,8 @@
 build/
 tests/host/obj/
 tests/host/obj-device/
+tests/host/obj-board/
+tests/host/*.log
 
 # Arduino / IDE
 .pio/

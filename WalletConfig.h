@@ -1,6 +1,22 @@
 #ifndef HEXWALLET_CONFIG_H
 #define HEXWALLET_CONFIG_H
 
+// ---------------------------------------------------------------------------
+// Board selection. Compile-time hardware target; every board profile lives in
+// WalletBoardPins.h and the drivers in WalletBoardPort.cpp.
+// ---------------------------------------------------------------------------
+#define HEXWALLET_BOARD_NONE                  0
+#define HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED   1
+#define HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS 2
+#define HEXWALLET_BOARD_T_DISPLAY_S3          3
+#define HEXWALLET_BOARD_T_DECK_MAX            4
+#define HEXWALLET_BOARD_T_ECHO_LITE           5
+
+#ifndef HEXWALLET_BOARD
+// Default target: the reference board the port was developed and validated on.
+#define HEXWALLET_BOARD HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED
+#endif
+
 #ifndef HEXWALLET_ENABLE_LVGL
 #define HEXWALLET_ENABLE_LVGL 1
 #endif
@@ -65,13 +81,30 @@ struct UiPolicy {
   DisplayKind display_kind;
   unsigned long eink_min_refresh_ms;
   bool allow_animations;
+  uint16_t logical_width;
+  uint16_t logical_height;
 };
 
-static const UiPolicy kUiPolicy = {
-  DisplayKind::MonoEink,
-  900UL,
-  false,
-};
+// Board-aware UI policy, resolved at compile time from HEXWALLET_BOARD.
+// Monochrome e-paper panels get a slow-refresh, animation-free, black/white
+// policy; color panels get the full LVGL theme.
+inline const UiPolicy &ui_policy() {
+  static const UiPolicy kPolicy = []() {
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || \
+    HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
+    return UiPolicy{DisplayKind::Color, 0UL, true, 240, 536};
+#elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
+    return UiPolicy{DisplayKind::Color, 0UL, true, 170, 320};
+#elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DECK_MAX
+    return UiPolicy{DisplayKind::MonoEink, 900UL, false, 800, 480};
+#elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_ECHO_LITE
+    return UiPolicy{DisplayKind::MonoEink, 900UL, false, 176, 192};
+#else
+    return UiPolicy{DisplayKind::Color, 0UL, true, 240, 536};
+#endif
+  }();
+  return kPolicy;
+}
 
 }  // namespace hexwallet
 

@@ -65,8 +65,6 @@ enum class ExtendedKeyFormat : uint8_t {
 void secure_zero(void *data, size_t length);
 bool is_ascii(const char *text);
 
-// BIP39 English implementation. Non-ASCII text is rejected because BIP39
-// requires NFKD normalization, which is not provided by Arduino core.
 WalletError bip39_generate_english_24(char *out, size_t out_size);
 WalletError bip39_validate_english(const char *mnemonic);
 WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
@@ -95,8 +93,6 @@ WalletError hd_serialize_private(const HdPrivateNode *node, ExtendedKeyFormat fo
 WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat format,
                                 char *out, size_t *in_out_size);
 
-// Checks the BIP32 non-hardened public/private derivation invariant. It never
-// emits key material to serial; external official vectors remain mandatory in CI.
 bool run_bip32_self_test();
 bool run_secp256k1_self_test();
 

@@ -59,15 +59,33 @@ powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
 或 LVGL 配置的文件由 CI 的 `arduino-cli` 构建负责。Xtensa g++ 的
 `@file` 响应文件处理会弄坏带反斜杠的 `-I` 路径，所以 include 参数直接传递。
 
+## 4. 板级端口编译检查（所有板卡配置）
+
+`tests/host/board_port_compile_check.ps1` 针对**每一个支持的板卡配置**
+（AMOLED、AMOLED Plus、T-Display S3、T-Deck Max、T-Echo Lite）用 Xtensa
+工具链编译 `WalletBoardPort.cpp` 与 `WalletUi.cpp`。`tests/host/mock/`
+用一套小而确定的表面遮蔽 `Arduino.h`、`SPI.h`、`Wire.h` 与 `lvgl.h`
+（`soc/` 提供 ESP32-S3 寄存器宏），从而在主机上完成驱动语法与 LVGL API
+用法的类型检查，无需引入完整的 ESP-IDF 依赖图。
+
+```text
+powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
+# 期望：BOARD PORT COMPILE: all boards OK
+```
+
+寄存器名与真实 Arduino/LVGL API 由 CI 的 `arduino-cli` 固件构建负责验证；
+mock 只用于廉价、确定地捕获驱动层错误。
+
 ## CI
 
 `.github/workflows/ci.yml`：
 
-- **host-tests**（windows）：安装 `arduino-cli`，安装 `esp32:esp32@3.3.10`，
-  把 `HEXWALLET_ESP32_LIBS` 指向自带的 mbedtls 头文件，运行 `build.ps1`，
-  再运行 `device_compile_check.ps1`。
+- **host-tests**（windows）：安装 `arduino-cli` 1.5.1（使用带版本的资产
+  URL，裸 `latest` 别名会 404），安装 `esp32:esp32@3.3.10`，把
+  `HEXWALLET_ESP32_LIBS` 指向自带的 mbedtls 头文件，依次运行
+  `build.ps1`、`device_compile_check.ps1`、`board_port_compile_check.ps1`。
 - **firmware-build**（ubuntu）：完整 `arduino-cli compile --fqbn
-  esp32:esp32:esp32` 并带 LVGL 库。
+  esp32:esp32:esp32s3` 并带 LVGL 9.5.0。
 
 `build.ps1` / `build_diag.ps1` 读取 `HEXWALLET_ESP32_LIBS`
 （`esp32-libs` 工具的 `include\mbedtls` 目录），否则回退到本地

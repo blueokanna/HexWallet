@@ -1,6 +1,6 @@
 # HexWallet
 
-HexWallet is an offline ESP32 wallet firmware foundation. It derives addresses from a volatile BIP39 wallet, provides an authenticated serial interface, reviews bounded Bitcoin PSBT requests, and keeps network and token metadata in explicit registries. It is beta firmware, not a production hardware wallet, and must not hold real funds until the hardware port and security controls are complete.
+HexWallet is an offline ESP32 wallet firmware foundation. It derives addresses from a volatile BIP39 wallet, provides an authenticated serial interface, reviews bounded Bitcoin PSBT requests, keeps network and token metadata in explicit registries, and now drives real display hardware (RM67162 AMOLED, ST7789 parallel, and GxEPD2 e-paper) through a per-board LVGL port with resolution-adaptive layouts. It remains beta firmware, not a production hardware wallet, and must not hold real funds until the security controls listed under "Security Boundaries" are complete.
 
 For the complete CLI workflow, including Arduino CLI build/upload, serial settings, challenge-response authentication, wallet lifecycle, address lookup, transaction review, signing restrictions, and troubleshooting, see the [detailed Chinese CLI guide](README-zh.md).
 
@@ -30,7 +30,8 @@ For the complete CLI workflow, including Arduino CLI build/upload, serial settin
 | `WalletCatalog` | Searchable user-facing capability catalog |
 | `BitcoinTransaction` | Strict PSBT v0 parser, transaction review, BIP143 signing, final serialization |
 | `WalletCli` | Authenticated serial command parsing and output |
-| `WalletBoardPort` | Board-specific display, input, and power integration |
+| `WalletBoardPort` | Board profile (pins, panel driver, LVGL buffers, flush + touch callbacks, power sequencing) |
+| `WalletBoardPins` | Verified per-board pin assignments for all five supported LilyGO boards |
 | `WalletTransportPolicy` | Fail-closed Serial/BLE/Wi-Fi operation policy |
 
 The registries are intentionally data-only. Adding a SLIP-0044 number does not enable a chain. A chain requires an address encoder, transaction parser, signing algorithm, serialization rules, and test vectors before its signing capability may be enabled.
@@ -108,15 +109,33 @@ Authentication uses a one-use challenge and HMAC proof. Bitcoin inspection accep
 
 ## Build
 
-The current verified build target is Espressif ESP32 core 3.3.10 with FQBN `esp32:esp32:lilygo_t_display_s3`. The CLI-only firmware can be compiled with LVGL disabled:
+The verified build target is the Espressif ESP32 core 3.3.10 with FQBN `esp32:esp32:esp32s3` and LVGL 9.5.0. The target board is a compile-time choice via `HEXWALLET_BOARD` in `WalletConfig.h`:
+
+| `HEXWALLET_BOARD` | Board | Panel | Controller | Interface | Resolution |
+| --- | --- | --- | --- | --- | --- |
+| `HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED` (default) | T-Display S3 AMOLED | RM67162 | RM67162 | SPI | 240×536 |
+| `HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS` | T-Display S3 AMOLED Plus | RM67162 | RM67162 | SPI | 240×536 |
+| `HEXWALLET_BOARD_T_DISPLAY_S3` | T-Display S3 | ST7789 | ST7789 | 8-bit parallel | 170×320 |
+| `HEXWALLET_BOARD_T_DECK_MAX` | T-Deck Max | GDEQ031T10 | UC8253 | SPI (e-paper) | 240×320 |
+| `HEXWALLET_BOARD_T_ECHO_LITE` | T-Echo Lite Kit | e-paper | — | SPI (e-paper) | 176×192 |
+
+Pin assignments live in `WalletBoardPins.h` and are taken from the official LilyGO pinout diagrams and factory code; the RM67162 init sequence and the ST7789 init sequence match the official LilyGO drivers byte for byte. Build for a specific board with `--build-property`:
 
 ```text
-arduino-cli compile --fqbn esp32:esp32:lilygo_t_display_s3 \
+arduino-cli compile --fqbn esp32:esp32:esp32s3 \
+  --build-property compiler.cpp.extra_flags=-DHEXWALLET_BOARD=3 \
+  --build-property compiler.c.extra_flags=-DHEXWALLET_BOARD=3 .
+```
+
+`HEXWALLET_BOARD=3` selects the T-Display S3; see `WalletConfig.h` for the values. The CLI-only firmware can be compiled with LVGL disabled:
+
+```text
+arduino-cli compile --fqbn esp32:esp32:esp32s3 \
   --build-property compiler.cpp.extra_flags=-DHEXWALLET_ENABLE_LVGL=0 \
   --build-property compiler.c.extra_flags=-DHEXWALLET_ENABLE_LVGL=0 .
 ```
 
-LVGL 9.5.0 is required when `HEXWALLET_ENABLE_LVGL=1`. `WalletBoardPort.cpp` deliberately fails closed until it is implemented for the exact board, display controller, touch controller, GPIO map, bus, and power sequence. `ESP32-S3N8` identifies a chip configuration, not a complete LilyGo product or a touch controller.
+The port is fail-closed: a board with no display profile, or an e-paper profile without the `GxEPD2` library, prints the reason over Serial and runs the CLI only. The T-Echo Lite is an nRF52840 board (Adafruit nRF52 core, not ESP32); its pin profile is defined and the e-paper backend is shared with the T-Deck Max, but a separate nRF52 build target is required before it can run the full firmware.
 
 ## Test And Verification
 
@@ -136,7 +155,17 @@ powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
 # expected: DEVICE COMPILE: all sources OK
 ```
 
-CI (`.github/workflows/ci.yml`) runs both jobs plus a full `arduino-cli` firmware build for ESP32.
+Every board profile is compile-checked for the 32-bit target by compiling
+`WalletBoardPort.cpp` and `WalletUi.cpp` for all five boards against the
+Xtensa toolchain and a minimal LVGL/Arduino mock:
+
+```text
+powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
+# expected: BOARD PORT COMPILE: all boards OK
+```
+
+CI (`.github/workflows/ci.yml`) runs all three host jobs plus a full
+`arduino-cli` firmware build for the ESP32-S3 with LVGL 9.5.0.
 
 Compile success and self-tests do not replace protocol test vectors, hardware-in-the-loop tests, fuzzing, side-channel evaluation, or an independent security audit.
 
