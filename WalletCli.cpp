@@ -386,9 +386,11 @@ void handle_token(char *command) {
 }
 
 void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
-                   uint32_t address_index, bool include_private) {
+                   const uint8_t *seed, uint32_t address_index,
+                   bool include_private) {
   DerivedAddress derived;
-  const WalletError result = derive_address(master, network, 0, 0, address_index, &derived);
+  const WalletError result =
+      derive_address(master, seed, network, 0, 0, address_index, &derived);
   if (result != WalletError::Ok) {
     Serial.print("ERR network="); Serial.print(network.id);
     Serial.print(" error="); Serial.println(error_text(result));
@@ -409,15 +411,14 @@ void show_addresses(uint32_t address_index, const NetworkProfile *only_network, 
   HdPrivateNode master;
   if (!load_master(&master)) return;
   uint8_t seed[kSeedSize];
+  const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
   if (include_secrets) {
     const char *mnemonic = wallet_session_mnemonic_for_export();
-    WalletError seed_result = mnemonic == nullptr ? WalletError::InvalidArgument :
-        bip39_seed_from_english(mnemonic, "", seed);
     char extended[kExtendedKeyTextSize];
     size_t extended_size = sizeof(extended);
     Serial.println("BEGIN SENSITIVE");
     Serial.print("mnemonic="); Serial.println(mnemonic == nullptr ? "" : mnemonic);
-    if (seed_result == WalletError::Ok) {
+    if (have_seed) {
       Serial.print("seed="); print_hex(seed, sizeof(seed)); Serial.println();
     }
     Serial.print("master-private="); print_hex(master.private_key, sizeof(master.private_key)); Serial.println();
@@ -428,10 +429,12 @@ void show_addresses(uint32_t address_index, const NetworkProfile *only_network, 
     secure_zero(extended, sizeof(extended));
   }
   if (only_network != nullptr) {
-    print_derived(*only_network, master, address_index, include_secrets);
+    print_derived(*only_network, master, have_seed ? seed : nullptr,
+                  address_index, include_secrets);
   } else {
     for (size_t index = 0; index < kNetworkProfileCount; ++index) {
-      print_derived(kNetworkProfiles[index], master, address_index, include_secrets);
+      print_derived(kNetworkProfiles[index], master, have_seed ? seed : nullptr,
+                    address_index, include_secrets);
     }
   }
   if (include_secrets) Serial.println("END SENSITIVE");
@@ -493,9 +496,13 @@ void handle_wallet_token(char *arguments) {
   }
   HdPrivateNode master;
   if (!load_master(&master)) return;
+  uint8_t seed[kSeedSize];
+  const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
   DerivedAddress derived;
-  const WalletError result = derive_address(master, *network, 0, 0, index, &derived);
+  const WalletError result =
+      derive_address(master, have_seed ? seed : nullptr, *network, 0, 0, index, &derived);
   secure_zero(&master, sizeof(master));
+  secure_zero(seed, sizeof(seed));
   if (result != WalletError::Ok) {
     Serial.print("ERR token-account "); Serial.println(error_text(result));
     return;

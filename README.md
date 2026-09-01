@@ -12,6 +12,7 @@ For the complete CLI workflow, including Arduino CLI build/upload, serial settin
 - Strict EIP-155 legacy and EIP-1559 type-2 review/signing for registered EVM networks. Only native transfers and `transfer(address,uint256)` calls to registered ERC-20 contracts are accepted.
 - Address derivation for Bitcoin, Litecoin, Dogecoin, Dash, Bitcoin Gold, Ravencoin, XRP Ledger, TRON, Monero, Masari, and the registered EVM networks in `WalletNetworks.cpp`.
 - CryptoNote standard-address construction for Monero and Masari: Keccak scalar derivation, Edwards25519 public keys, network prefixes, block Base58, and checksums. Transaction parsing and signing are not enabled.
+- Chia standard addresses via the EIP-2333/ERC-2333 BLS12-381 key tree (`m/12381/8444/0/index`), CLVM `shatree` puzzle hashing, the default hidden puzzle (`ff0980`) and synthetic-offset public key, and `bech32m` encoding. The BLS12-381 G1 stack (field/group arithmetic, canonical generator, 48-byte ZCash-style compression) is implemented and verified against the official ERC-2333 test vectors and an independent reference oracle. Chia coin-spend parsing, aggregate signatures, and signing are not enabled.
 - Token metadata and account-address lookup for registered ERC-20 assets. An ERC-20 token uses the same EVM account address as its network; the registry records the contract address and decimal precision.
 - A searchable SLIP-0044 catalog that distinguishes address support, token-account support, transaction review, and signing support.
 - Authenticated CLI sessions with challenge-response authentication, persistent retry counters, exponential backoff, timeout, and volatile wallet clearing.
@@ -53,7 +54,7 @@ The token registry currently contains selected, fixed ERC-20 contracts for USDC,
 
 Solana and SPL transfer support is not implemented. It requires Ed25519 HD derivation, Solana base58 account encoding, associated-token-account derivation, message parsing, and Ed25519 signing. The SPL entry remains explicitly unavailable rather than producing an incorrect address or signature.
 
-Monero and Masari standard addresses are implemented, but RingCT/CLSAG transaction parsing, key images, decoy verification, subaddresses, multisig, and signing are not. Chia addresses and signing remain unavailable because the BLS12-381, CLVM puzzle, coin-spend parsing, and aggregate-signature stack has not been implemented and verified. Staking or validator messages are not accepted for any chain unless a chain-specific parser and review policy is explicitly listed as supported.
+Monero and Masari standard addresses are implemented, but RingCT/CLSAG transaction parsing, key images, decoy verification, subaddresses, multisig, and signing are not. Chia standard-address derivation is implemented and verified; Chia coin-spend parsing, aggregate signatures, and signing remain unavailable. Staking or validator messages are not accepted for any chain unless a chain-specific parser and review policy is explicitly listed as supported.
 
 ## Capability Matrix
 
@@ -65,7 +66,8 @@ Monero and Masari standard addresses are implemented, but RingCT/CLSAG transacti
 | EVM native signing | Canonical EIP-155 legacy and EIP-1559 type 2, bounded gas fee, simple transfer only |
 | Monero/Masari addresses | CryptoNote mainnet standard addresses under the documented HexWallet BIP39 policy |
 | Monero/Masari transaction signing | Not implemented |
-| Chia address or signing | Not implemented |
+| Chia addresses | EIP-2333/ERC-2333 key tree, BLS12-381 G1, CLVM shatree, bech32m — verified against official vectors |
+| Chia transaction signing | Not implemented |
 | ERC-20 account address | Registered token metadata on supported EVM networks |
 | ERC-20 transfer signing | Registered contracts only, exact `transfer(address,uint256)` calldata |
 | Solana/SPL address or signing | Not implemented |
@@ -120,12 +122,21 @@ LVGL 9.5.0 is required when `HEXWALLET_ENABLE_LVGL=1`. `WalletBoardPort.cpp` del
 
 The firmware runs crypto, secp256k1, CryptoNote, BIP39, BIP32, address, EIP-155/EIP-1559, transport-policy, and Bitcoin transaction self-tests during startup when `HEXWALLET_RUN_SELF_TESTS=1`. The EIP-155 test matches the official unsigned RLP, signing hash, `v/r/s`, and signed transaction.
 
+The extended crypto stack (SHA-3, SHA-512/256, BLAKE2b, Ed25519, SLIP-10, EIP-2333/ERC-2333 BLS12-381, Chia addresses, and the alt-address encoders) is verified on the host by compiling every firmware source against the *exact* mbedtls headers bundled with the ESP32 Arduino core and running every embedded official vector:
+
 ```text
-clang++ -std=c++17 -Wall -Wextra -Werror tests/CryptoHashHostTest.cpp keccak256.cpp local_ripemd160.cpp -o crypto-test
-./crypto-test
-clang++ -std=c++17 -Wall -Wextra -Werror tests/CryptoNoteAddressHostTest.cpp keccak256.cpp -o cryptonote-test
-./cryptonote-test
+powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
+# expected: extended-crypto=pass  alt-addresses=pass
 ```
+
+Verified against authoritative sources: RFC 8032 Ed25519 (TC1/TC2), SLIP-10, the official ERC-2333 test vectors (master SK, compressed Lamport PK, child SK), RFC 6979 low-S ECDSA, and an independent pure-Python BLS12-381/EIP-2333 oracle (Chia `v0`/`ones`/16-byte-seed addresses and the derived public key match byte-for-byte). A device-target smoke check additionally compiles the pure-C++ crypto core with the ESP32 Xtensa toolchain:
+
+```text
+powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
+# expected: DEVICE COMPILE: all sources OK
+```
+
+CI (`.github/workflows/ci.yml`) runs both jobs plus a full `arduino-cli` firmware build for ESP32.
 
 Compile success and self-tests do not replace protocol test vectors, hardware-in-the-loop tests, fuzzing, side-channel evaluation, or an independent security audit.
 

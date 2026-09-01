@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'README_CN.md'
+      - 'docs/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ESP32_CORE_VERSION: 3.3.10
+
+jobs:
+  host-tests:
+    name: Host self-tests (MSVC + ESP32 mbedtls headers)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\arduino-cli.zip"
+          Invoke-WebRequest -Uri "https://github.com/arduino/arduino-cli/releases/latest/download/arduino-cli_latest_Windows_64bit.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\arduino-cli" -Force
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\bin" | Out-Null
+          Move-Item -Force "$env:RUNNER_TEMP\arduino-cli\arduino-cli.exe" "$env:RUNNER_TEMP\bin\arduino-cli.exe"
+          & "$env:RUNNER_TEMP\bin\arduino-cli.exe" version
+
+      - name: Install ESP32 core ${{ env.ESP32_CORE_VERSION }} (exact mbedtls headers)
+        shell: pwsh
+        run: |
+          $cli = "$env:RUNNER_TEMP\bin\arduino-cli.exe"
+          & $cli config init --overwrite --dest-dir "$env:RUNNER_TEMP\arduino-cli-conf"
+          & $cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          & $cli core update-index
+          & $cli core install esp32:esp32@${{ env.ESP32_CORE_VERSION }}
+
+      - name: Locate esp32-libs mbedtls include dir
+        shell: pwsh
+        run: |
+          $libs = Join-Path $env:LOCALAPPDATA "Arduino15\packages\esp32\tools\esp32-libs\${{ env.ESP32_CORE_VERSION }}\include\mbedtls"
+          if (-not (Test-Path $libs)) { throw "esp32-libs not found at $libs" }
+          Add-Content -Path $env:GITHUB_ENV -Value "HEXWALLET_ESP32_LIBS=$libs"
+          Write-Output "mbedtls include root: $libs"
+
+      - name: Build and run host self-tests
+        shell: pwsh
+        run: |
+          # build.ps1 compiles mbedtls_host.c + all firmware sources with cl.exe
+          # and runs host_test.exe, exiting with the test verdict.
+          powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
+
+      - name: Device-target compile check (xtensa g++)
+        shell: pwsh
+        run: |
+          # Compiles every pure-C++ firmware source with the ESP32 Xtensa
+          # toolchain to prove the crypto core builds for the 32-bit device.
+          powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
+
+  firmware-build:
+    name: Device build (ESP32)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="$HOME/bin" sh
+          $HOME/bin/arduino-cli version
+
+      - name: Install ESP32 core ${{ env.ESP32_CORE_VERSION }}
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@${{ env.ESP32_CORE_VERSION }}
+
+      - name: Install LVGL (required by the sketch)
+        run: |
+          mkdir -p "$HOME/Arduino/libraries"
+          cd "$HOME/Arduino/libraries"
+          git clone --depth 1 --branch v8.3.11 https://github.com/lvgl/lvgl.git
+
+      - name: Compile firmware for ESP32
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32 --library "$HOME/Arduino/libraries/lvgl" .

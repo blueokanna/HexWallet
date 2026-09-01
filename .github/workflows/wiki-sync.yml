@@ -1,0 +1,70 @@
+# Publish the in-repo `wiki/` directory to the GitHub wiki.
+#
+# The wiki is a separate git repo (<owner>/<repo>.wiki). This workflow
+# checks it out, replaces every tracked markdown page with the content of
+# `wiki/` from `main`, and pushes. Layout in the wiki repo:
+#
+#   Home.md          <- wiki/Home.md   (landing page)
+#   _Sidebar.md      <- wiki/_Sidebar.md
+#   *.md             <- wiki/en/*.md   (English tutorials, at the root)
+#   *.md             <- wiki/zh/*.md   (Chinese tutorials, at the root)
+#
+# `git rm -r '*.md'` first, so renames and deletions in `wiki/` propagate
+# instead of leaving stale pages behind.
+#
+# Push auth: the automatic GITHUB_TOKEN can write to the wiki as long as
+# `contents: write` is granted (it is below). If your fork/org blocks
+# that, create a fine-grained PAT with "Read and write" access to the
+# wiki and store it as the GH_PAT secret — the token expression falls
+# back to it automatically.
+
+name: Wiki Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wiki/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Publish wiki
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Checkout wiki
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Sync wiki content
+        run: |
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Drop every tracked markdown page so renames/deletions propagate.
+          git rm -r --quiet --ignore-unmatch '*.md' || true
+          # Landing page and sidebar go to the wiki root.
+          cp ../repo/wiki/Home.md ./Home.md
+          cp ../repo/wiki/_Sidebar.md ./_Sidebar.md
+          # Tutorials also live at the root; names are already unique
+          # between the two languages.
+          cp ../repo/wiki/en/*.md ./
+          cp ../repo/wiki/zh/*.md ./
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No wiki changes; nothing to push"
+            exit 0
+          fi
+          git commit -m "Publish wiki from main (${{ github.sha }})"
+          git push

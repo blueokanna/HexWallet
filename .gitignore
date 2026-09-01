@@ -1,0 +1,21 @@
+# Build artifacts — Arduino sketch + host self-tests
+*.o
+*.obj
+*.exe
+*.elf
+*.bin
+*.map
+*.a
+*.pdb
+*.ilk
+build/
+tests/host/obj/
+tests/host/obj-device/
+
+# Arduino / IDE
+.pio/
+.vscode/arduino.json
+
+# OS / editor
+Thumbs.db
+.DS_Store

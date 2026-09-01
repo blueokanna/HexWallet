@@ -41,6 +41,11 @@ WalletError wallet_session_load_master(HdPrivateNode *master) {
   return result;
 }
 
+WalletError wallet_session_load_seed(uint8_t out_seed[kSeedSize]) {
+  if (!loaded || out_seed == nullptr) return WalletError::InvalidArgument;
+  return bip39_seed_from_english(mnemonic, "", out_seed);
+}
+
 const char *wallet_session_mnemonic_for_export() {
   return loaded ? mnemonic : nullptr;
 }

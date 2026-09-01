@@ -1,5 +1,5 @@
-#include <Arduino.h>
 #include <mbedtls/platform_util.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "base58.h"
