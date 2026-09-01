@@ -104,7 +104,11 @@ jobs:
       - name: Install arduino-cli ${{ env.ARDUINO_CLI_VERSION }}
         run: |
           set -e
-          BINDIR="$HOME/bin" sh -c 'curl -fsSL --retry 5 --retry-all-errors https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s $ARDUINO_CLI_VERSION'
+          # The arduino-cli install.sh refuses to create $BINDIR itself; on a
+          # fresh runner ~/bin does not exist, so create it first.
+          mkdir -p "$HOME/bin"
+          export BINDIR="$HOME/bin"
+          curl -fsSL --retry 5 --retry-all-errors https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s "$ARDUINO_CLI_VERSION"
           "$HOME/bin/arduino-cli" version
 
       - name: Install ESP32 core ${{ env.ESP32_CORE_VERSION }}
@@ -125,4 +129,11 @@ jobs:
       - name: Compile firmware for ESP32-S3 (T-Display S3 AMOLED profile)
         run: |
           export PATH="$HOME/bin:$PATH"
-          arduino-cli compile --fqbn esp32:esp32:esp32s3 --library "$HOME/Arduino/libraries/lvgl" .
+          # LV_CONF_INCLUDE_SIMPLE makes lvgl pick up lv_conf.h from the
+          # sketch root (which arduino-cli puts on the include path); without
+          # it LVGL falls back to its built-in defaults and the UI widgets
+          # (list, textarea, keyboard, ...) are not compiled in.
+          arduino-cli compile --fqbn esp32:esp32:esp32s3 --library "$HOME/Arduino/libraries/lvgl" \
+            --build-property compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE \
+            --build-property compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE \
+            .

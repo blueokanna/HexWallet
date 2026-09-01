@@ -84,8 +84,11 @@ mock 只用于廉价、确定地捕获驱动层错误。
   URL，裸 `latest` 别名会 404），安装 `esp32:esp32@3.3.10`，把
   `HEXWALLET_ESP32_LIBS` 指向自带的 mbedtls 头文件，依次运行
   `build.ps1`、`device_compile_check.ps1`、`board_port_compile_check.ps1`。
-- **firmware-build**（ubuntu）：完整 `arduino-cli compile --fqbn
-  esp32:esp32:esp32s3` 并带 LVGL 9.5.0。
+- **firmware-build**（ubuntu）：用官方安装脚本安装 `arduino-cli` 1.5.1
+  （脚本拒绝自行创建 `$BINDIR`，因此先 `mkdir ~/bin`），安装
+  `esp32:esp32@3.3.10`，克隆 LVGL 9.5.0，以 `arduino-cli compile --fqbn
+  esp32:esp32:esp32s3` 编译，并传入 `LV_CONF_INCLUDE_SIMPLE` 以使用
+  草图根目录的 `lv_conf.h`。
 
 `build.ps1` / `build_diag.ps1` 读取 `HEXWALLET_ESP32_LIBS`
 （`esp32-libs` 工具的 `include\mbedtls` 目录），否则回退到本地

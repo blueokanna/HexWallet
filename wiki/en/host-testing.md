@@ -92,8 +92,11 @@ errors cheaply and deterministically.
   the bare `latest` alias 404s), installs `esp32:esp32@3.3.10`, points
   `HEXWALLET_ESP32_LIBS` at the bundled mbedtls headers, runs `build.ps1`,
   `device_compile_check.ps1`, then `board_port_compile_check.ps1`.
-- **firmware-build** (ubuntu): full `arduino-cli compile --fqbn
-  esp32:esp32:esp32s3` with LVGL 9.5.0.
+- **firmware-build** (ubuntu): installs `arduino-cli` 1.5.1 via the official
+  install script (the script refuses to create `$BINDIR` itself, so `~/bin` is
+  created first), installs `esp32:esp32@3.3.10`, clones LVGL 9.5.0, and runs
+  `arduino-cli compile --fqbn esp32:esp32:esp32s3` with
+  `LV_CONF_INCLUDE_SIMPLE` so the sketch-root `lv_conf.h` is used.
 
 `build.ps1` / `build_diag.ps1` read `HEXWALLET_ESP32_LIBS` (the `esp32-libs`
 tool's `include\mbedtls` dir) and fall back to the local Arduino15 default.
