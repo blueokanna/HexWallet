@@ -74,11 +74,11 @@ bool run_bip39_self_test();
 WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
                                     uint8_t out_public_key[kCompressedPublicKeySize]);
 WalletError uncompressed_public_key_from_private(
-    const uint8_t private_key[kPrivateKeySize],
-    uint8_t out_public_key[kUncompressedPublicKeySize]);
+  const uint8_t private_key[kPrivateKeySize],
+  uint8_t out_public_key[kUncompressedPublicKeySize]);
 WalletError secp256k1_sign_digest_recoverable(
-    const uint8_t private_key[kPrivateKeySize],
-    const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature);
+  const uint8_t private_key[kPrivateKeySize],
+  const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature);
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size,
                                  HdPrivateNode *out_node);
 WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index,

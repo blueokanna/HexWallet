@@ -122,6 +122,33 @@ Treat this tool as a **mandatory gate for crypto code**: any change that
 touches shifts, signedness or overflow-sensitive code should pass both the
 MSVC and the clang-cl builds.
 
+## 6. Device runtime stack budget
+
+All the host layers above run on a desktop with a multi-MB process stack, so
+they **cannot** detect stack overflow on the device. `setup()` and `loop()`
+run on the Arduino loop task, whose stack is `HEXWALLET_LOOP_TASK_STACK_SIZE`
+in `HexWallet.ino` (32 KB). Anything deeper than that — including every
+crypto self-test suite plus LVGL rendering — panics on hardware with a
+`LoadStoreError` (EXCCAUSE 0x1c) at a garbage address.
+
+War story: `parent_sk_to_lamport_pk` in `BlsG1.cpp` (EIP-2333 Lamport key
+derivation) declared `lamport0[8160] + lamport1[8160] + lamport_pk[16320]`
+on the **stack** — a ~32 KB frame on a 16 KB loop stack. Every host test was
+green; the device panicked inside `eip2333_derive_child` during startup. The
+frame showed up in the panic backtrace as a single ~32 KB stack-pointer jump,
+and `xtensa-esp32s3-elf-addr2line` pinned it to `BlsG1.cpp:415`. The buffers
+now live on the heap (with null-check + `secure_zero` + `free`), and the
+function's frame dropped from `entry a1, 0x7fe0` (32,736 B) to
+`entry a1, 128` (128 B).
+
+Rule of thumb: in any function reachable from `setup()`/`loop()` (the loop
+task stack), keep local arrays comfortably small; anything above ~1 KB should
+be heap-allocated. To decode a device panic: rebuild the sketch with
+`arduino-cli compile`, then run `xtensa-esp32s3-elf-addr2line -e <elf> -f -C`
+on the `Backtrace:` addresses; a large stack-frame gap between two frames
+points at a function with a big local array (check its `entry a1, <size>`
+instruction with `objdump -d`).
+
 ## CI
 
 `.github/workflows/ci.yml`:

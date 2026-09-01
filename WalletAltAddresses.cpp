@@ -22,8 +22,7 @@ constexpr size_t kAltMaxPayloadSize = 64;
 // base58check with a double-SHA256 checksum (Bitcoin family).
 bool base58check_sha256(const uint8_t *payload, size_t payload_size,
                         char *out, size_t *in_out_size) {
-  if (payload == nullptr || out == nullptr || in_out_size == nullptr ||
-      payload_size > kAltMaxPayloadSize) {
+  if (payload == nullptr || out == nullptr || in_out_size == nullptr || payload_size > kAltMaxPayloadSize) {
     return false;
   }
   uint8_t checksum[kSha256Size];
@@ -40,8 +39,7 @@ bool base58check_sha256(const uint8_t *payload, size_t payload_size,
 // base58check with a blake2b-256 checksum (Ergo).
 bool base58check_blake2b(const uint8_t *payload, size_t payload_size,
                          char *out, size_t *in_out_size) {
-  if (payload == nullptr || out == nullptr || in_out_size == nullptr ||
-      payload_size > kAltMaxPayloadSize) {
+  if (payload == nullptr || out == nullptr || in_out_size == nullptr || payload_size > kAltMaxPayloadSize) {
     return false;
   }
   uint8_t checksum[32];
@@ -150,8 +148,7 @@ WalletError address_cardano_base(const uint8_t payment_key[32],
   }
   uint8_t payment_hash[28];
   uint8_t stake_hash[28];
-  if (!crypto_blake2b(payment_key, 32, payment_hash, sizeof(payment_hash)) ||
-      !crypto_blake2b(stake_key, 32, stake_hash, sizeof(stake_hash))) {
+  if (!crypto_blake2b(payment_key, 32, payment_hash, sizeof(payment_hash)) || !crypto_blake2b(stake_key, 32, stake_hash, sizeof(stake_hash))) {
     secure_zero(payment_hash, sizeof(payment_hash));
     secure_zero(stake_hash, sizeof(stake_hash));
     return WalletError::CryptoFailure;
@@ -263,66 +260,167 @@ WalletError address_ergo(const uint8_t public_key[kCompressedPublicKeySize],
 bool run_alt_address_self_tests() {
   // secp256k1 private key = 1 -> compressed public key.
   static const uint8_t kPkOne[kCompressedPublicKeySize] = {
-      0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0,
-      0x62, 0x95, 0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d,
-      0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98,
+    0x02,
+    0x79,
+    0xbe,
+    0x66,
+    0x7e,
+    0xf9,
+    0xdc,
+    0xbb,
+    0xac,
+    0x55,
+    0xa0,
+    0x62,
+    0x95,
+    0xce,
+    0x87,
+    0x0b,
+    0x07,
+    0x02,
+    0x9b,
+    0xfc,
+    0xdb,
+    0x2d,
+    0xce,
+    0x28,
+    0xd9,
+    0x59,
+    0xf2,
+    0x81,
+    0x5b,
+    0x16,
+    0xf8,
+    0x17,
+    0x98,
   };
   // ed25519 seed = 32 x 0x01 -> public key.
   static const uint8_t kEdSeed[32] = {
-      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-      0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
   };
   static const uint8_t kEdPk[32] = {
-      0x8a, 0x88, 0xe3, 0xdd, 0x74, 0x09, 0xf1, 0x95, 0xfd, 0x52, 0xdb,
-      0x2d, 0x3c, 0xba, 0x5d, 0x72, 0xca, 0x67, 0x09, 0xbf, 0x1d, 0x94,
-      0x12, 0x1b, 0xf3, 0x74, 0x88, 0x01, 0xb4, 0x0f, 0x6f, 0x5c,
+    0x8a,
+    0x88,
+    0xe3,
+    0xdd,
+    0x74,
+    0x09,
+    0xf1,
+    0x95,
+    0xfd,
+    0x52,
+    0xdb,
+    0x2d,
+    0x3c,
+    0xba,
+    0x5d,
+    0x72,
+    0xca,
+    0x67,
+    0x09,
+    0xbf,
+    0x1d,
+    0x94,
+    0x12,
+    0x1b,
+    0xf3,
+    0x74,
+    0x88,
+    0x01,
+    0xb4,
+    0x0f,
+    0x6f,
+    0x5c,
   };
   char address[kAddressTextSize];
   size_t address_size = sizeof(address);
   bool passed = true;
 
-  passed = selftest_report("solana", address_solana(kEdPk, address, &address_size) == WalletError::Ok &&
-           strcmp(address, "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9") == 0) && passed;
+  passed = selftest_report("solana", address_solana(kEdPk, address, &address_size) == WalletError::Ok && strcmp(address, "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9") == 0) && passed;
   address_size = sizeof(address);
-  passed = selftest_report("tezos", address_tezos_tz1(kEdPk, address, &address_size) == WalletError::Ok &&
-           strcmp(address, "tz1c8PEDNfj6UxoQM2XCyfTHM5KbGGgoqDrH") == 0) && passed;
-  passed = selftest_report("algorand ed01", address_algorand(kEdPk, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "RKEOHXLUBHYZL7KS3MWTZOS5OLFGOCN7DWKBEG7TOSEADNAPN5OOTUNSLE") == 0) && passed;
+  passed = selftest_report("tezos", address_tezos_tz1(kEdPk, address, &address_size) == WalletError::Ok && strcmp(address, "tz1c8PEDNfj6UxoQM2XCyfTHM5KbGGgoqDrH") == 0) && passed;
+  passed = selftest_report("algorand ed01", address_algorand(kEdPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "RKEOHXLUBHYZL7KS3MWTZOS5OLFGOCN7DWKBEG7TOSEADNAPN5OOTUNSLE") == 0) && passed;
   // Algorand known vector (public key from go-algorand address tests).
   static const uint8_t kAlgoPk[32] = {
-      0x26, 0xf7, 0x8a, 0xce, 0x0d, 0xc1, 0xf4, 0x13, 0xa3, 0x7b, 0x70,
-      0xb0, 0xbf, 0xa6, 0x10, 0x91, 0x19, 0x71, 0xf0, 0x8d, 0xff, 0x05,
-      0x98, 0x6f, 0xe5, 0x17, 0x89, 0x92, 0x9d, 0x01, 0x13, 0x6c,
+    0x26,
+    0xf7,
+    0x8a,
+    0xce,
+    0x0d,
+    0xc1,
+    0xf4,
+    0x13,
+    0xa3,
+    0x7b,
+    0x70,
+    0xb0,
+    0xbf,
+    0xa6,
+    0x10,
+    0x91,
+    0x19,
+    0x71,
+    0xf0,
+    0x8d,
+    0xff,
+    0x05,
+    0x98,
+    0x6f,
+    0xe5,
+    0x17,
+    0x89,
+    0x92,
+    0x9d,
+    0x01,
+    0x13,
+    0x6c,
   };
-  passed = selftest_report("algorand go-algo", address_algorand(kAlgoPk, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "E33YVTQNYH2BHI33OCYL7JQQSEMXD4EN74CZQ37FC6EZFHIBCNWOWXIZ5M") == 0) && passed;
+  passed = selftest_report("algorand go-algo", address_algorand(kAlgoPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "E33YVTQNYH2BHI33OCYL7JQQSEMXD4EN74CZQ37FC6EZFHIBCNWOWXIZ5M") == 0) && passed;
 
   address_size = sizeof(address);
-  passed = selftest_report("zcash t1", address_zcash_transparent(0x1cb8, 0x1cbd, kPkOne, address, &address_size) == WalletError::Ok &&
-           strcmp(address, "t1UYsZVJkLPeMjxEtACvSxfWuNmddpWfxzs") == 0) && passed;
-  passed = selftest_report("cashaddr bch", address_cashaddr("bitcoincash", kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "bitcoincash:qw508d6qejxtdg4y5r3zarvary0c5xw7k9e8dplv0") == 0) && passed;
-  passed = selftest_report("cashaddr xec", address_cashaddr("ecash", kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "ecash:qw508d6qejxtdg4y5r3zarvary0c5xw7kjp6rx7xg") == 0) && passed;
-  passed = selftest_report("cosmos cro", address_cosmos_bech32("cro", kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "cro1w508d6qejxtdg4y5r3zarvary0c5xw7kzxlrnf") == 0) && passed;
-  passed = selftest_report("cosmos sei", address_cosmos_bech32("sei", kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "sei1w508d6qejxtdg4y5r3zarvary0c5xw7kh3xvfe") == 0) && passed;
-  passed = selftest_report("avax", address_avalanche_xp("avax", kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "X-avax1qp63uahgrxged4z5jswyt5dn5v3lzsem6cl7ra9f") == 0) && passed;
-  passed = selftest_report("kaspa pk1", address_kaspa(kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes4ypce9sf") == 0) && passed;
-  passed = selftest_report("qubic ed01", address_qubic(kEdPk, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "3ho582fh18iq3rk2pj66j31p6kd432947reg87frgi13fe3aino2q4c") == 0) && passed;
-  passed = selftest_report("filecoin", address_filecoin(kPkOne, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "aep2ssiu2xjqkewe3yertg2adajt6sc6ma") == 0) && passed;
+  passed = selftest_report("zcash t1", address_zcash_transparent(0x1cb8, 0x1cbd, kPkOne, address, &address_size) == WalletError::Ok && strcmp(address, "t1UYsZVJkLPeMjxEtACvSxfWuNmddpWfxzs") == 0) && passed;
+  passed = selftest_report("cashaddr bch", address_cashaddr("bitcoincash", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "bitcoincash:qw508d6qejxtdg4y5r3zarvary0c5xw7k9e8dplv0") == 0) && passed;
+  passed = selftest_report("cashaddr xec", address_cashaddr("ecash", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "ecash:qw508d6qejxtdg4y5r3zarvary0c5xw7kjp6rx7xg") == 0) && passed;
+  passed = selftest_report("cosmos cro", address_cosmos_bech32("cro", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "cro1w508d6qejxtdg4y5r3zarvary0c5xw7kzxlrnf") == 0) && passed;
+  passed = selftest_report("cosmos sei", address_cosmos_bech32("sei", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "sei1w508d6qejxtdg4y5r3zarvary0c5xw7kh3xvfe") == 0) && passed;
+  passed = selftest_report("avax", address_avalanche_xp("avax", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "X-avax1qp63uahgrxged4z5jswyt5dn5v3lzsem6cl7ra9f") == 0) && passed;
+  passed = selftest_report("kaspa pk1", address_kaspa(kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes4ypce9sf") == 0) && passed;
+  passed = selftest_report("qubic ed01", address_qubic(kEdPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "3ho582fh18iq3rk2pj66j31p6kd432947reg87frgi13fe3aino2q4c") == 0) && passed;
+  passed = selftest_report("filecoin", address_filecoin(kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "aep2ssiu2xjqkewe3yertg2adajt6sc6ma") == 0) && passed;
   address_size = sizeof(address);
-  passed = selftest_report("ergo", address_ergo(kPkOne, address, &address_size) == WalletError::Ok &&
-           strcmp(address, "9fSgJ7BmUxBQJ454prQDQ7fQMBkXPLaAmDnimgTtjym6FYPHjAV") == 0) && passed;
-  passed = selftest_report("cardano", address_cardano_base(kEdPk, kEdPk, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address,
-                  "addr1qyxk54m7j3q6mrkevcunryrwf4p7e68c93cjk8gzxkhlkpsddftha9zp4k8dje3exxgxun2ran50str39vwsydd0lvrqyqym9s") == 0) && passed;
+  passed = selftest_report("ergo", address_ergo(kPkOne, address, &address_size) == WalletError::Ok && strcmp(address, "9fSgJ7BmUxBQJ454prQDQ7fQMBkXPLaAmDnimgTtjym6FYPHjAV") == 0) && passed;
+  passed = selftest_report("cardano", address_cardano_base(kEdPk, kEdPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "addr1qyxk54m7j3q6mrkevcunryrwf4p7e68c93cjk8gzxkhlkpsddftha9zp4k8dje3exxgxun2ran50str39vwsydd0lvrqyqym9s") == 0) && passed;
 
   secure_zero(address, sizeof(address));
   (void)kEdSeed;

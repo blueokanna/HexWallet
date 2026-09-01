@@ -14,26 +14,38 @@ constexpr uint8_t kFinalBit = 0x80;
 // Keccak-f[1600] constants from FIPS 202 section 3.2.  They are algorithm
 // parameters, kept immutable and isolated from wallet/network policy.
 constexpr uint64_t kRoundConstants[kRoundCount] = {
-    UINT64_C(0x0000000000000001), UINT64_C(0x0000000000008082),
-    UINT64_C(0x800000000000808a), UINT64_C(0x8000000080008000),
-    UINT64_C(0x000000000000808b), UINT64_C(0x0000000080000001),
-    UINT64_C(0x8000000080008081), UINT64_C(0x8000000000008009),
-    UINT64_C(0x000000000000008a), UINT64_C(0x0000000000000088),
-    UINT64_C(0x0000000080008009), UINT64_C(0x000000008000000a),
-    UINT64_C(0x000000008000808b), UINT64_C(0x800000000000008b),
-    UINT64_C(0x8000000000008089), UINT64_C(0x8000000000008003),
-    UINT64_C(0x8000000000008002), UINT64_C(0x8000000000000080),
-    UINT64_C(0x000000000000800a), UINT64_C(0x800000008000000a),
-    UINT64_C(0x8000000080008081), UINT64_C(0x8000000000008080),
-    UINT64_C(0x0000000080000001), UINT64_C(0x8000000080008008),
+  UINT64_C(0x0000000000000001),
+  UINT64_C(0x0000000000008082),
+  UINT64_C(0x800000000000808a),
+  UINT64_C(0x8000000080008000),
+  UINT64_C(0x000000000000808b),
+  UINT64_C(0x0000000080000001),
+  UINT64_C(0x8000000080008081),
+  UINT64_C(0x8000000000008009),
+  UINT64_C(0x000000000000008a),
+  UINT64_C(0x0000000000000088),
+  UINT64_C(0x0000000080008009),
+  UINT64_C(0x000000008000000a),
+  UINT64_C(0x000000008000808b),
+  UINT64_C(0x800000000000008b),
+  UINT64_C(0x8000000000008089),
+  UINT64_C(0x8000000000008003),
+  UINT64_C(0x8000000000008002),
+  UINT64_C(0x8000000000000080),
+  UINT64_C(0x000000000000800a),
+  UINT64_C(0x800000008000000a),
+  UINT64_C(0x8000000080008081),
+  UINT64_C(0x8000000000008080),
+  UINT64_C(0x0000000080000001),
+  UINT64_C(0x8000000080008008),
 };
 
 constexpr uint8_t kRotation[5][5] = {
-    {0, 36, 3, 41, 18},
-    {1, 44, 10, 45, 2},
-    {62, 6, 43, 15, 61},
-    {28, 55, 25, 21, 56},
-    {27, 20, 39, 8, 14},
+  { 0, 36, 3, 41, 18 },
+  { 1, 44, 10, 45, 2 },
+  { 62, 6, 43, 15, 61 },
+  { 28, 55, 25, 21, 56 },
+  { 27, 20, 39, 8, 14 },
 };
 
 uint64_t rotate_left(uint64_t value, uint8_t shift) {
@@ -80,8 +92,7 @@ void permutation(uint64_t state[kLaneCount]) {
 
     for (uint8_t y = 0; y < 5; ++y) {
       for (uint8_t x = 0; x < 5; ++x) {
-        state[x + 5 * y] = moved[x + 5 * y] ^
-                             ((~moved[(x + 1) % 5 + 5 * y]) & moved[(x + 2) % 5 + 5 * y]);
+        state[x + 5 * y] = moved[x + 5 * y] ^ ((~moved[(x + 1) % 5 + 5 * y]) & moved[(x + 2) % 5 + 5 * y]);
       }
     }
     state[0] ^= kRoundConstants[round];

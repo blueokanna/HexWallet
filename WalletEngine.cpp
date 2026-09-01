@@ -115,44 +115,46 @@ WalletError derive_ed25519_address(const NetworkProfile &network,
   }
   WalletError result = WalletError::Ok;
   switch (network.encoding) {
-    case AddressEncoding::Ed25519Base58: {
-      size_t size = sizeof(out->address);
-      result = address_solana(public_key, out->address, &size);
-      break;
-    }
+    case AddressEncoding::Ed25519Base58:
+      {
+        size_t size = sizeof(out->address);
+        result = address_solana(public_key, out->address, &size);
+        break;
+      }
     case AddressEncoding::Ed25519Base32:
       result = address_algorand(public_key, out->address, sizeof(out->address));
       break;
-    case AddressEncoding::Ed25519Blake2bBase58: {
-      size_t size = sizeof(out->address);
-      result = address_tezos_tz1(public_key, out->address, &size);
-      break;
-    }
+    case AddressEncoding::Ed25519Blake2bBase58:
+      {
+        size_t size = sizeof(out->address);
+        result = address_tezos_tz1(public_key, out->address, &size);
+        break;
+      }
     case AddressEncoding::QubicBase26:
       result = address_qubic(public_key, out->address, sizeof(out->address));
       break;
-    case AddressEncoding::Ed25519Blake2b224Bech32: {
-      // Cardano base address: payment role 0 and stake role 2.
-      uint32_t stake_path[6];
-      size_t stake_path_size = 0;
-      uint8_t stake_child[32];
-      uint8_t stake_key[32];
-      if (!build_slip10_path(network, account, 2, address_index, stake_path,
-                             &stake_path_size) ||
-          !slip10_ed25519_derive(seed, kSeedSize, stake_path, stake_path_size, stake_child) ||
-          !ed25519_public_key(stake_child, stake_key)) {
+    case AddressEncoding::Ed25519Blake2b224Bech32:
+      {
+        // Cardano base address: payment role 0 and stake role 2.
+        uint32_t stake_path[6];
+        size_t stake_path_size = 0;
+        uint8_t stake_child[32];
+        uint8_t stake_key[32];
+        if (!build_slip10_path(network, account, 2, address_index, stake_path,
+                               &stake_path_size)
+            || !slip10_ed25519_derive(seed, kSeedSize, stake_path, stake_path_size, stake_child) || !ed25519_public_key(stake_child, stake_key)) {
+          secure_zero(stake_child, sizeof(stake_child));
+          secure_zero(stake_key, sizeof(stake_key));
+          secure_zero(child, sizeof(child));
+          secure_zero(public_key, sizeof(public_key));
+          return WalletError::CryptoFailure;
+        }
+        result = address_cardano_base(public_key, stake_key, out->address,
+                                      sizeof(out->address));
         secure_zero(stake_child, sizeof(stake_child));
         secure_zero(stake_key, sizeof(stake_key));
-        secure_zero(child, sizeof(child));
-        secure_zero(public_key, sizeof(public_key));
-        return WalletError::CryptoFailure;
+        break;
       }
-      result = address_cardano_base(public_key, stake_key, out->address,
-                                    sizeof(out->address));
-      secure_zero(stake_child, sizeof(stake_child));
-      secure_zero(stake_key, sizeof(stake_key));
-      break;
-    }
     default:
       result = WalletError::InvalidArgument;
       break;
@@ -168,9 +170,7 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
                            const NetworkProfile &network,
                            uint32_t account, uint32_t change,
                            uint32_t address_index, DerivedAddress *out) {
-  if (out == nullptr || account >= kHardenedOffset || change >= kHardenedOffset ||
-      address_index >= kHardenedOffset || network.bip_purpose >= kHardenedOffset ||
-      network.derivation_coin_type >= kHardenedOffset) {
+  if (out == nullptr || account >= kHardenedOffset || change >= kHardenedOffset || address_index >= kHardenedOffset || network.bip_purpose >= kHardenedOffset || network.derivation_coin_type >= kHardenedOffset) {
     return WalletError::InvalidArgument;
   }
   memset(out, 0, sizeof(*out));
@@ -188,26 +188,22 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
       return WalletError::InvalidArgument;
     }
     const WalletError result =
-        chia_standard_address(seed, kSeedSize, address_index, out->address,
-                              sizeof(out->address))
-            ? WalletError::Ok
-            : WalletError::CryptoFailure;
+      chia_standard_address(seed, kSeedSize, address_index, out->address,
+                            sizeof(out->address))
+        ? WalletError::Ok
+        : WalletError::CryptoFailure;
     if (result != WalletError::Ok) clear_derived_address(out);
     return result;
   }
 
   // Ed25519 networks use SLIP-0010 from the seed.
-  if (network.encoding == AddressEncoding::Ed25519Base58 ||
-      network.encoding == AddressEncoding::Ed25519Base32 ||
-      network.encoding == AddressEncoding::Ed25519Blake2bBase58 ||
-      network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 ||
-      network.encoding == AddressEncoding::QubicBase26) {
+  if (network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::QubicBase26) {
     if (seed == nullptr) {
       clear_derived_address(out);
       return WalletError::InvalidArgument;
     }
     const WalletError result =
-        derive_ed25519_address(network, seed, account, change, address_index, out);
+      derive_ed25519_address(network, seed, account, change, address_index, out);
     if (result != WalletError::Ok) clear_derived_address(out);
     return result;
   }
@@ -222,11 +218,10 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
   memcpy(out->private_key, child.private_key, kPrivateKeySize);
 
   if (network.encoding == AddressEncoding::CryptoNote) {
-    const CryptoNoteAddressProfile profile = {network.account_version};
+    const CryptoNoteAddressProfile profile = { network.account_version };
     result = cryptonote_address_from_seed(profile, child.private_key, out->address,
                                           sizeof(out->address), out->private_key);
-  } else if (network.encoding == AddressEncoding::Evm ||
-             network.encoding == AddressEncoding::Tron) {
+  } else if (network.encoding == AddressEncoding::Evm || network.encoding == AddressEncoding::Tron) {
     uint8_t public_key[kUncompressedPublicKeySize];
     result = uncompressed_public_key_from_private(child.private_key, public_key);
     if (result == WalletError::Ok && network.encoding == AddressEncoding::Evm) {
@@ -246,26 +241,29 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
           result = address_p2wpkh(network.utxo, public_key, out->address,
                                   sizeof(out->address));
           break;
-        case AddressEncoding::P2shP2wpkh: {
-          size_t output_size = sizeof(out->address);
-          result = address_p2sh_p2wpkh(network.utxo, public_key, out->address,
-                                       &output_size);
-          break;
-        }
-        case AddressEncoding::P2pkh: {
-          size_t output_size = sizeof(out->address);
-          result = address_p2pkh(network.utxo, public_key, out->address,
-                                 &output_size);
-          break;
-        }
-        case AddressEncoding::ZcashTransparent: {
-          size_t output_size = sizeof(out->address);
-          result = address_zcash_transparent(network.alt_p2pkh_version,
-                                             network.alt_p2sh_version,
-                                             public_key, out->address,
-                                             &output_size);
-          break;
-        }
+        case AddressEncoding::P2shP2wpkh:
+          {
+            size_t output_size = sizeof(out->address);
+            result = address_p2sh_p2wpkh(network.utxo, public_key, out->address,
+                                         &output_size);
+            break;
+          }
+        case AddressEncoding::P2pkh:
+          {
+            size_t output_size = sizeof(out->address);
+            result = address_p2pkh(network.utxo, public_key, out->address,
+                                   &output_size);
+            break;
+          }
+        case AddressEncoding::ZcashTransparent:
+          {
+            size_t output_size = sizeof(out->address);
+            result = address_zcash_transparent(network.alt_p2pkh_version,
+                                               network.alt_p2sh_version,
+                                               public_key, out->address,
+                                               &output_size);
+            break;
+          }
         case AddressEncoding::CashAddr:
           result = address_cashaddr(network.alt_hrp, public_key, out->address,
                                     sizeof(out->address));
@@ -284,11 +282,12 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
         case AddressEncoding::Blake2bBase32Filecoin:
           result = address_filecoin(public_key, out->address, sizeof(out->address));
           break;
-        case AddressEncoding::Blake2bBase58Ergo: {
-          size_t output_size = sizeof(out->address);
-          result = address_ergo(public_key, out->address, &output_size);
-          break;
-        }
+        case AddressEncoding::Blake2bBase58Ergo:
+          {
+            size_t output_size = sizeof(out->address);
+            result = address_ergo(public_key, out->address, &output_size);
+            break;
+          }
         default:
           result = WalletError::InvalidArgument;
           break;
@@ -307,23 +306,80 @@ void clear_derived_address(DerivedAddress *address) {
 
 bool run_address_self_tests() {
   static const uint8_t kPrivateOne[kPrivateKeySize] = {
-      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
   };
   static const uint8_t kExpectedCompressed[kCompressedPublicKeySize] = {
-      0x02,0x79,0xbe,0x66,0x7e,0xf9,0xdc,0xbb,0xac,0x55,0xa0,0x62,0x95,0xce,0x87,0x0b,
-      0x07,0x02,0x9b,0xfc,0xdb,0x2d,0xce,0x28,0xd9,0x59,0xf2,0x81,0x5b,0x16,0xf8,0x17,0x98,
+    0x02,
+    0x79,
+    0xbe,
+    0x66,
+    0x7e,
+    0xf9,
+    0xdc,
+    0xbb,
+    0xac,
+    0x55,
+    0xa0,
+    0x62,
+    0x95,
+    0xce,
+    0x87,
+    0x0b,
+    0x07,
+    0x02,
+    0x9b,
+    0xfc,
+    0xdb,
+    0x2d,
+    0xce,
+    0x28,
+    0xd9,
+    0x59,
+    0xf2,
+    0x81,
+    0x5b,
+    0x16,
+    0xf8,
+    0x17,
+    0x98,
   };
   uint8_t compressed[kCompressedPublicKeySize];
   uint8_t uncompressed[kUncompressedPublicKeySize];
   char address[kAddressTextSize];
   size_t address_size = sizeof(address);
-  bool passed = public_key_from_private(kPrivateOne, compressed) == WalletError::Ok &&
-                crypto_constant_time_equal(compressed, kExpectedCompressed, sizeof(compressed)) &&
-                address_p2pkh(kBitcoinMainnet, compressed, address, &address_size) == WalletError::Ok &&
-                strcmp(address, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH") == 0;
-  passed = passed && uncompressed_public_key_from_private(kPrivateOne, uncompressed) == WalletError::Ok &&
-           address_evm(uncompressed, address, sizeof(address)) == WalletError::Ok &&
-           strcmp(address, "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf") == 0;
+  bool passed = public_key_from_private(kPrivateOne, compressed) == WalletError::Ok && crypto_constant_time_equal(compressed, kExpectedCompressed, sizeof(compressed)) && address_p2pkh(kBitcoinMainnet, compressed, address, &address_size) == WalletError::Ok && strcmp(address, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH") == 0;
+  passed = passed && uncompressed_public_key_from_private(kPrivateOne, uncompressed) == WalletError::Ok && address_evm(uncompressed, address, sizeof(address)) == WalletError::Ok && strcmp(address, "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf") == 0;
   passed = passed && run_alt_address_self_tests();
   secure_zero(compressed, sizeof(compressed));
   secure_zero(uncompressed, sizeof(uncompressed));

@@ -1,13 +1,8 @@
-// BLS12-381 G1 (Chia address derivation) and EIP-2333 key derivation.
-//
-// The BLS12-381 base field is 381 bits; all big-integer arithmetic uses
-// mbedtls_mpi (bundled with the ESP32 core). Point arithmetic is affine over
-// y^2 = x^3 + 4. The whole chain is locked by run_crypto_extended_self_tests()
-// against EIP-2333 test vectors and an independent Python reference.
 #include "CryptoExtended.h"
 
 #include <mbedtls/bignum.h>
 #include <mbedtls/md.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "CryptoPrimitives.h"
@@ -17,11 +12,11 @@ namespace hexwallet {
 namespace {
 
 const char kFieldPrimeHex[] =
-    "1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab";
+  "1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab";
 const char kGroupOrderHex[] =
-    "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001";
+  "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001";
 const char kGeneratorXHex[] =
-    "17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
+  "17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
 constexpr size_t kBlsFieldBytes = 48;
 constexpr size_t kBlsScalarBytes = 32;
@@ -354,8 +349,8 @@ bool hkdf_mod_r(const uint8_t *ikm, size_t ikm_size, uint8_t out_sk[32]) {
       break;
     }
     memcpy(extract_input, ikm, ikm_size);
-    extract_input[ikm_size] = 0x00;  // I2OSP(0,1)
-    uint8_t info[2] = {0x00, 0x30};  // I2OSP(48,2)
+    extract_input[ikm_size] = 0x00;    // I2OSP(0,1)
+    uint8_t info[2] = { 0x00, 0x30 };  // I2OSP(48,2)
     if (!hkdf_sha256(salt, salt_size, extract_input, ikm_size + 1, info,
                      sizeof(info), okm, sizeof(okm))) {
       ok = false;
@@ -410,41 +405,50 @@ bool parent_sk_to_lamport_pk(const uint8_t parent_sk[32], uint32_t index,
   salt[1] = static_cast<uint8_t>(index >> 16);
   salt[2] = static_cast<uint8_t>(index >> 8);
   salt[3] = static_cast<uint8_t>(index);
-  uint8_t lamport0[kLamportSkSize];
-  uint8_t lamport1[kLamportSkSize];
   uint8_t not_ikm[32];
   for (size_t index_byte = 0; index_byte < 32; ++index_byte) {
     not_ikm[index_byte] = static_cast<uint8_t>(~parent_sk[index_byte]);
   }
-  const bool ok0 = ikm_to_lamport_sk(parent_sk, 32, salt, sizeof(salt), lamport0);
-  const bool ok1 = ikm_to_lamport_sk(not_ikm, 32, salt, sizeof(salt), lamport1);
-  if (!ok0 || !ok1) {
-    secure_zero(lamport0, sizeof(lamport0));
-    secure_zero(lamport1, sizeof(lamport1));
+  // The three Lamport buffers are 8 KB + 8 KB + 16 KB. On the ESP32 the loop
+  // task stack is only a few KB of SRAM, so these MUST live on the heap: a
+  // ~32 KB stack frame overflows the loop task and panics with a
+  // LoadStoreError at a garbage address (seen on real hardware, invisible on
+  // the PC host tests which enjoy a multi-MB process stack).
+  constexpr size_t kLamportPkSize = 2 * kLamportCount * 32;
+  uint8_t *lamport0 = static_cast<uint8_t *>(malloc(kLamportSkSize));
+  uint8_t *lamport1 = static_cast<uint8_t *>(malloc(kLamportSkSize));
+  uint8_t *lamport_pk = static_cast<uint8_t *>(malloc(kLamportPkSize));
+  if (lamport0 == nullptr || lamport1 == nullptr || lamport_pk == nullptr) {
+    free(lamport0);
+    free(lamport1);
+    free(lamport_pk);
     secure_zero(not_ikm, sizeof(not_ikm));
     return false;
   }
-  uint8_t lamport_pk[2 * kLamportCount * 32];
-  for (size_t index_chunk = 0; index_chunk < kLamportCount; ++index_chunk) {
-    if (!sha256(lamport0 + index_chunk * 32, 32, lamport_pk + index_chunk * 32)) {
-      secure_zero(lamport0, sizeof(lamport0));
-      secure_zero(lamport1, sizeof(lamport1));
-      secure_zero(not_ikm, sizeof(not_ikm));
-      return false;
-    }
-    if (!sha256(lamport1 + index_chunk * 32, 32,
-                lamport_pk + kLamportCount * 32 + index_chunk * 32)) {
-      secure_zero(lamport0, sizeof(lamport0));
-      secure_zero(lamport1, sizeof(lamport1));
-      secure_zero(not_ikm, sizeof(not_ikm));
-      return false;
+  memset(lamport0, 0, kLamportSkSize);
+  memset(lamport1, 0, kLamportSkSize);
+  memset(lamport_pk, 0, kLamportPkSize);
+  bool ok = ikm_to_lamport_sk(parent_sk, 32, salt, sizeof(salt), lamport0);
+  if (ok) ok = ikm_to_lamport_sk(not_ikm, 32, salt, sizeof(salt), lamport1);
+  if (ok) {
+    for (size_t index_chunk = 0; index_chunk < kLamportCount; ++index_chunk) {
+      if (!sha256(lamport0 + index_chunk * 32, 32,
+                  lamport_pk + index_chunk * 32) ||
+          !sha256(lamport1 + index_chunk * 32, 32,
+                  lamport_pk + kLamportCount * 32 + index_chunk * 32)) {
+        ok = false;
+        break;
+      }
     }
   }
-  const bool ok = sha256(lamport_pk, sizeof(lamport_pk), out_compressed);
-  secure_zero(lamport0, sizeof(lamport0));
-  secure_zero(lamport1, sizeof(lamport1));
+  if (ok) ok = sha256(lamport_pk, kLamportPkSize, out_compressed);
+  secure_zero(lamport0, kLamportSkSize);
+  secure_zero(lamport1, kLamportSkSize);
+  secure_zero(lamport_pk, kLamportPkSize);
   secure_zero(not_ikm, sizeof(not_ikm));
-  secure_zero(lamport_pk, sizeof(lamport_pk));
+  free(lamport0);
+  free(lamport1);
+  free(lamport_pk);
   return ok;
 }
 
@@ -505,12 +509,7 @@ bool bls12_381_g1_add_generator(const uint8_t point[48],
   point_init(&generator);
   point_init(&offset_point);
   point_init(&result);
-  bool ok = mbedtls_mpi_read_string(&p, 16, kFieldPrimeHex) == 0 &&
-            mbedtls_mpi_read_binary(&offset, secret_offset, 32) == 0 &&
-            point_decompress(point, &p, &base) && generator_init(&generator) &&
-            point_scalarmult(&offset_point, &generator, &offset, &p) &&
-            point_add(&result, &base, &offset_point, &p) &&
-            point_compress(&result, &p, out_compressed);
+  bool ok = mbedtls_mpi_read_string(&p, 16, kFieldPrimeHex) == 0 && mbedtls_mpi_read_binary(&offset, secret_offset, 32) == 0 && point_decompress(point, &p, &base) && generator_init(&generator) && point_scalarmult(&offset_point, &generator, &offset, &p) && point_add(&result, &base, &offset_point, &p) && point_compress(&result, &p, out_compressed);
   mbedtls_mpi_free(&p);
   mbedtls_mpi_free(&offset);
   point_free(&base);
@@ -541,7 +540,7 @@ bool chia_standard_address(const uint8_t *seed, size_t seed_size,
   if (seed == nullptr || out == nullptr || seed_size == 0) return false;
   uint8_t sk[32];
   if (!hkdf_mod_r(seed, seed_size, sk)) return false;
-  const uint32_t path[4] = {12381, 8444, 0, address_index};
+  const uint32_t path[4] = { 12381, 8444, 0, address_index };
   for (size_t index = 0; index < 4; ++index) {
     if (!eip2333_derive_child(sk, path[index], sk)) {
       secure_zero(sk, sizeof(sk));
@@ -554,7 +553,7 @@ bool chia_standard_address(const uint8_t *seed, size_t seed_size,
     return false;
   }
   // DEFAULT_HIDDEN_PUZZLE = ff0980 => tree hash = pair(atom 0x09, nil).
-  uint8_t atom09[1] = {0x09};
+  uint8_t atom09[1] = { 0x09 };
   uint8_t nil_hash[32];
   uint8_t atom09_hash[32];
   uint8_t hidden_hash[32];
@@ -570,10 +569,7 @@ bool chia_standard_address(const uint8_t *seed, size_t seed_size,
   memcpy(offset_input, pubkey, 48);
   memcpy(offset_input + 48, hidden_hash, 32);
   uint8_t offset_digest[32];
-  bool ok = mbedtls_mpi_read_string(&r, 16, kGroupOrderHex) == 0 &&
-            sha256(offset_input, sizeof(offset_input), offset_digest) &&
-            mbedtls_mpi_read_binary(&offset, offset_digest, 32) == 0 &&
-            mbedtls_mpi_mod_mpi(&offset, &offset, &r) == 0;
+  bool ok = mbedtls_mpi_read_string(&r, 16, kGroupOrderHex) == 0 && sha256(offset_input, sizeof(offset_input), offset_digest) && mbedtls_mpi_read_binary(&offset, offset_digest, 32) == 0 && mbedtls_mpi_mod_mpi(&offset, &offset, &r) == 0;
   uint8_t offset_bytes[32];
   if (ok) ok = mbedtls_mpi_write_binary(&offset, offset_bytes, 32) == 0;
   if (ok) ok = bls12_381_g1_add_generator(pubkey, offset_bytes, pubkey);
@@ -582,9 +578,38 @@ bool chia_standard_address(const uint8_t *seed, size_t seed_size,
 
   // puzzle_hash = curry_and_treehash(QUOTED_MOD_HASH, shatree_atom(pubkey))
   static const uint8_t kModHash[32] = {
-      0xe9, 0xaa, 0xa4, 0x9f, 0x45, 0xba, 0xd5, 0xc8, 0x89, 0xb8, 0x6e,
-      0xe3, 0x34, 0x15, 0x50, 0xc1, 0x55, 0xcf, 0xdd, 0x10, 0xc3, 0xa6,
-      0x75, 0x7d, 0xe6, 0x18, 0xd2, 0x06, 0x12, 0xff, 0xfd, 0x52,
+    0xe9,
+    0xaa,
+    0xa4,
+    0x9f,
+    0x45,
+    0xba,
+    0xd5,
+    0xc8,
+    0x89,
+    0xb8,
+    0x6e,
+    0xe3,
+    0x34,
+    0x15,
+    0x50,
+    0xc1,
+    0x55,
+    0xcf,
+    0xdd,
+    0x10,
+    0xc3,
+    0xa6,
+    0x75,
+    0x7d,
+    0xe6,
+    0x18,
+    0xd2,
+    0x06,
+    0x12,
+    0xff,
+    0xfd,
+    0x52,
   };
   uint8_t one_hash[32];
   uint8_t quoted_mod_hash[32];
@@ -593,11 +618,11 @@ bool chia_standard_address(const uint8_t *seed, size_t seed_size,
   uint8_t a_kw_hash[32];
   uint8_t curried_values[32];
   uint8_t puzzle_hash[32];
-  const uint8_t one_atom[1] = {0x01};
-  const uint8_t two_atom[1] = {0x02};
-  const uint8_t four_atom[1] = {0x04};
+  const uint8_t one_atom[1] = { 0x01 };
+  const uint8_t two_atom[1] = { 0x02 };
+  const uint8_t four_atom[1] = { 0x04 };
   if (ok) {
-    shatree_atom(one_atom, 1, one_hash);              // shatree_int(1)
+    shatree_atom(one_atom, 1, one_hash);                // shatree_int(1)
     shatree_pair(one_hash, kModHash, quoted_mod_hash);  // (q . MOD)
     shatree_atom(pubkey, 48, arg_hash);
     shatree_atom(four_atom, 1, c_kw_hash);
@@ -607,9 +632,9 @@ bool chia_standard_address(const uint8_t *seed, size_t seed_size,
     uint8_t tail[32];
     uint8_t cv_pair[32];
     uint8_t inner[32];
-    shatree_pair(one_hash, arg_hash, quoted_arg);   // (q . arg)
-    shatree_pair(one_hash, nil_hash, tail);         // (1 . nil)
-    shatree_pair(quoted_arg, tail, cv_pair);        // ((q arg) . (1 nil))
+    shatree_pair(one_hash, arg_hash, quoted_arg);  // (q . arg)
+    shatree_pair(one_hash, nil_hash, tail);        // (1 . nil)
+    shatree_pair(quoted_arg, tail, cv_pair);       // ((q arg) . (1 nil))
     shatree_pair(c_kw_hash, cv_pair, curried_values);
     // puzzle_hash = (a (q . MOD) (curried . nil))
     shatree_pair(curried_values, nil_hash, inner);

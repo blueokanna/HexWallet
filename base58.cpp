@@ -14,8 +14,11 @@ constexpr size_t kMaximumEncodedSize = 120;
 constexpr size_t kDecodeBufferSize = 128;
 
 struct ScopedZero {
-  ScopedZero(void *data_value, size_t size_value) : data(data_value), size(size_value) {}
-  ~ScopedZero() { mbedtls_platform_zeroize(data, size); }
+  ScopedZero(void *data_value, size_t size_value)
+    : data(data_value), size(size_value) {}
+  ~ScopedZero() {
+    mbedtls_platform_zeroize(data, size);
+  }
   void *data;
   size_t size;
 };
@@ -29,8 +32,7 @@ void clear_and_free(uint8_t *buffer, size_t size) {
 
 bool encode_base58(const char *alphabet, char *out, size_t *in_out_size,
                    const void *input, size_t input_size) {
-  if (alphabet == nullptr || out == nullptr || in_out_size == nullptr ||
-      (input == nullptr && input_size != 0)) {
+  if (alphabet == nullptr || out == nullptr || in_out_size == nullptr || (input == nullptr && input_size != 0)) {
     return false;
   }
   const uint8_t *bytes = static_cast<const uint8_t *>(input);
@@ -101,7 +103,7 @@ bool b58check_dec(uint8_t *bin, size_t *binsz, const char *b58) {
   if (encoded_size == 0 || encoded_size > kMaximumEncodedSize) {
     return false;
   }
-  uint8_t little_endian[kDecodeBufferSize] = {0};
+  uint8_t little_endian[kDecodeBufferSize] = { 0 };
   ScopedZero little_endian_guard(little_endian, sizeof(little_endian));
   size_t decoded_size = 0;
   size_t zeroes = 0;
@@ -136,16 +138,14 @@ bool b58check_dec(uint8_t *bin, size_t *binsz, const char *b58) {
     *binsz = payload_size;
     return false;
   }
-  uint8_t decoded[kDecodeBufferSize] = {0};
+  uint8_t decoded[kDecodeBufferSize] = { 0 };
   ScopedZero decoded_guard(decoded, sizeof(decoded));
   for (size_t i = 0; i < decoded_size; ++i) {
     decoded[zeroes + i] = little_endian[decoded_size - i - 1];
   }
   uint8_t checksum[hexwallet::kSha256Size];
   ScopedZero checksum_guard(checksum, sizeof(checksum));
-  const bool valid = hexwallet::crypto_double_sha256(decoded, payload_size, checksum) &&
-                     hexwallet::crypto_constant_time_equal(
-                         checksum, decoded + payload_size, kChecksumSize);
+  const bool valid = hexwallet::crypto_double_sha256(decoded, payload_size, checksum) && hexwallet::crypto_constant_time_equal(checksum, decoded + payload_size, kChecksumSize);
   if (valid) {
     memcpy(bin, decoded, payload_size);
     *binsz = payload_size;

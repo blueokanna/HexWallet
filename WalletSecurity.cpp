@@ -30,10 +30,8 @@ bool valid_private_key(const uint8_t key[kPrivateKeySize]) {
   mbedtls_mpi scalar;
   mbedtls_ecp_group_init(&group);
   mbedtls_mpi_init(&scalar);
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
-                     mbedtls_mpi_read_binary(&scalar, key, kPrivateKeySize);
-  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&scalar, 0) > 0 &&
-                     mbedtls_mpi_cmp_mpi(&scalar, &group.N) < 0;
+  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&scalar, key, kPrivateKeySize);
+  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&scalar, 0) > 0 && mbedtls_mpi_cmp_mpi(&scalar, &group.N) < 0;
   mbedtls_mpi_free(&scalar);
   mbedtls_ecp_group_free(&group);
   return valid;
@@ -48,9 +46,7 @@ bool fingerprint(const uint8_t public_key[kCompressedPublicKeySize], uint32_t *o
   uint8_t digest[20];
   const bool ok = hash160(public_key, kCompressedPublicKeySize, digest);
   if (ok) {
-    *out = (static_cast<uint32_t>(digest[0]) << 24) |
-           (static_cast<uint32_t>(digest[1]) << 16) |
-           (static_cast<uint32_t>(digest[2]) << 8) | digest[3];
+    *out = (static_cast<uint32_t>(digest[0]) << 24) | (static_cast<uint32_t>(digest[1]) << 16) | (static_cast<uint32_t>(digest[2]) << 8) | digest[3];
   }
   secure_zero(digest, sizeof(digest));
   return ok;
@@ -64,15 +60,18 @@ void write_u32_be(uint8_t *out, uint32_t value) {
 }
 
 bool version_bytes(ExtendedKeyFormat format, bool private_key, uint8_t out[4]) {
-  if ((private_key && (format == ExtendedKeyFormat::Xpub || format == ExtendedKeyFormat::Zpub ||
-                       format == ExtendedKeyFormat::Tpub || format == ExtendedKeyFormat::Vpub)) ||
-      (!private_key && (format == ExtendedKeyFormat::Xprv || format == ExtendedKeyFormat::Zprv ||
-                        format == ExtendedKeyFormat::Tprv || format == ExtendedKeyFormat::Vprv))) {
+  if ((private_key && (format == ExtendedKeyFormat::Xpub || format == ExtendedKeyFormat::Zpub || format == ExtendedKeyFormat::Tpub || format == ExtendedKeyFormat::Vpub)) || (!private_key && (format == ExtendedKeyFormat::Xprv || format == ExtendedKeyFormat::Zprv || format == ExtendedKeyFormat::Tprv || format == ExtendedKeyFormat::Vprv))) {
     return false;
   }
   static const uint32_t kVersions[] = {
-    0x0488ADE4UL, 0x0488B21EUL, 0x04B2430CUL, 0x04B24746UL,
-    0x04358394UL, 0x043587CFUL, 0x045F18BCUL, 0x045F1CF6UL,
+    0x0488ADE4UL,
+    0x0488B21EUL,
+    0x04B2430CUL,
+    0x04B24746UL,
+    0x04358394UL,
+    0x043587CFUL,
+    0x045F18BCUL,
+    0x045F1CF6UL,
   };
   const uint8_t index = static_cast<uint8_t>(format);
   if (index >= sizeof(kVersions) / sizeof(kVersions[0])) return false;
@@ -137,8 +136,7 @@ bool word_index(const char *word, size_t length, uint16_t *out_index) {
 }
 
 bool english_word_list_is_valid() {
-  return strcmp(english_word_list[0], "abandon") == 0 &&
-         strcmp(english_word_list[2047], "zoo") == 0;
+  return strcmp(english_word_list[0], "abandon") == 0 && strcmp(english_word_list[2047], "zoo") == 0;
 }
 
 }  // namespace
@@ -214,7 +212,7 @@ WalletError bip39_validate_english(const char *mnemonic) {
   if (length == 0 || length >= kMnemonicTextSize) {
     return WalletError::InvalidMnemonic;
   }
-  uint8_t bits[33] = {0};
+  uint8_t bits[33] = { 0 };
   uint16_t bit_position = 0;
   uint8_t word_count = 0;
   const char *cursor = mnemonic;
@@ -281,26 +279,84 @@ WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase
   memcpy(salt, "mnemonic", 8);
   memcpy(salt + 8, passphrase, passphrase_length);
   const int result = mbedtls_pkcs5_pbkdf2_hmac_ext(
-      MBEDTLS_MD_SHA512, reinterpret_cast<const unsigned char *>(mnemonic), strlen(mnemonic),
-      reinterpret_cast<const unsigned char *>(salt), 8 + passphrase_length,
-      2048, kSeedSize, out_seed);
+    MBEDTLS_MD_SHA512, reinterpret_cast<const unsigned char *>(mnemonic), strlen(mnemonic),
+    reinterpret_cast<const unsigned char *>(salt), 8 + passphrase_length,
+    2048, kSeedSize, out_seed);
   secure_zero(salt, sizeof(salt));
   return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
 }
 
 bool run_bip39_self_test() {
   static const char kMnemonic[] =
-      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   static const uint8_t kExpectedSeed[kSeedSize] = {
-      0xc5,0x52,0x57,0xc3,0x60,0xc0,0x7c,0x72,0x02,0x9a,0xeb,0xc1,0xb5,0x3c,0x05,0xed,
-      0x03,0x62,0xad,0xa3,0x8e,0xad,0x3e,0x3e,0x9e,0xfa,0x37,0x08,0xe5,0x34,0x95,0x53,
-      0x1f,0x09,0xa6,0x98,0x75,0x99,0xd1,0x82,0x64,0xc1,0xe1,0xc9,0x2f,0x2c,0xf1,0x41,
-      0x63,0x0c,0x7a,0x3c,0x4a,0xb7,0xc8,0x1b,0x2f,0x00,0x16,0x98,0xe7,0x46,0x3b,0x04,
+    0xc5,
+    0x52,
+    0x57,
+    0xc3,
+    0x60,
+    0xc0,
+    0x7c,
+    0x72,
+    0x02,
+    0x9a,
+    0xeb,
+    0xc1,
+    0xb5,
+    0x3c,
+    0x05,
+    0xed,
+    0x03,
+    0x62,
+    0xad,
+    0xa3,
+    0x8e,
+    0xad,
+    0x3e,
+    0x3e,
+    0x9e,
+    0xfa,
+    0x37,
+    0x08,
+    0xe5,
+    0x34,
+    0x95,
+    0x53,
+    0x1f,
+    0x09,
+    0xa6,
+    0x98,
+    0x75,
+    0x99,
+    0xd1,
+    0x82,
+    0x64,
+    0xc1,
+    0xe1,
+    0xc9,
+    0x2f,
+    0x2c,
+    0xf1,
+    0x41,
+    0x63,
+    0x0c,
+    0x7a,
+    0x3c,
+    0x4a,
+    0xb7,
+    0xc8,
+    0x1b,
+    0x2f,
+    0x00,
+    0x16,
+    0x98,
+    0xe7,
+    0x46,
+    0x3b,
+    0x04,
   };
   uint8_t seed[kSeedSize];
-  const bool passed = bip39_validate_english(kMnemonic) == WalletError::Ok &&
-                      bip39_seed_from_english(kMnemonic, "TREZOR", seed) == WalletError::Ok &&
-                      crypto_constant_time_equal(seed, kExpectedSeed, sizeof(seed));
+  const bool passed = bip39_validate_english(kMnemonic) == WalletError::Ok && bip39_seed_from_english(kMnemonic, "TREZOR", seed) == WalletError::Ok && crypto_constant_time_equal(seed, kExpectedSeed, sizeof(seed));
   secure_zero(seed, sizeof(seed));
   return passed;
 }
@@ -317,11 +373,7 @@ WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
   mbedtls_ecp_point_init(&point);
   mbedtls_mpi_init(&scalar);
   size_t length = kCompressedPublicKeySize;
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
-                     mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize) ||
-                     mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr) ||
-                     mbedtls_ecp_point_write_binary(&group, &point, MBEDTLS_ECP_PF_COMPRESSED,
-                                                    &length, out_public_key, kCompressedPublicKeySize);
+  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize) || mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr) || mbedtls_ecp_point_write_binary(&group, &point, MBEDTLS_ECP_PF_COMPRESSED, &length, out_public_key, kCompressedPublicKeySize);
   mbedtls_mpi_free(&scalar);
   mbedtls_ecp_point_free(&point);
   mbedtls_ecp_group_free(&group);
@@ -329,8 +381,8 @@ WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
 }
 
 WalletError uncompressed_public_key_from_private(
-    const uint8_t private_key[kPrivateKeySize],
-    uint8_t out_public_key[kUncompressedPublicKeySize]) {
+  const uint8_t private_key[kPrivateKeySize],
+  uint8_t out_public_key[kUncompressedPublicKeySize]) {
   if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidKey;
   }
@@ -341,11 +393,7 @@ WalletError uncompressed_public_key_from_private(
   mbedtls_ecp_point_init(&point);
   mbedtls_mpi_init(&scalar);
   size_t length = kUncompressedPublicKeySize;
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
-                     mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize) ||
-                     mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr) ||
-                     mbedtls_ecp_point_write_binary(&group, &point, MBEDTLS_ECP_PF_UNCOMPRESSED,
-                                                    &length, out_public_key, kUncompressedPublicKeySize);
+  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize) || mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr) || mbedtls_ecp_point_write_binary(&group, &point, MBEDTLS_ECP_PF_UNCOMPRESSED, &length, out_public_key, kUncompressedPublicKeySize);
   mbedtls_mpi_free(&scalar);
   mbedtls_ecp_point_free(&point);
   mbedtls_ecp_group_free(&group);
@@ -354,10 +402,9 @@ WalletError uncompressed_public_key_from_private(
 }
 
 WalletError secp256k1_sign_digest_recoverable(
-    const uint8_t private_key[kPrivateKeySize],
-    const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature) {
-  if (private_key == nullptr || digest == nullptr || out_signature == nullptr ||
-      !valid_private_key(private_key)) {
+  const uint8_t private_key[kPrivateKeySize],
+  const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature) {
+  if (private_key == nullptr || digest == nullptr || out_signature == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidArgument;
   }
   memset(out_signature, 0, sizeof(*out_signature));
@@ -368,9 +415,15 @@ WalletError secp256k1_sign_digest_recoverable(
   mbedtls_ecp_group_init(&group);
   mbedtls_ecp_point_init(&public_key);
   mbedtls_ecp_point_init(&recovery_point);
-  mbedtls_mpi_init(&private_scalar); mbedtls_mpi_init(&r); mbedtls_mpi_init(&s);
-  mbedtls_mpi_init(&half_order); mbedtls_mpi_init(&z); mbedtls_mpi_init(&inverse_s);
-  mbedtls_mpi_init(&u1); mbedtls_mpi_init(&u2); mbedtls_mpi_init(&reduced_x);
+  mbedtls_mpi_init(&private_scalar);
+  mbedtls_mpi_init(&r);
+  mbedtls_mpi_init(&s);
+  mbedtls_mpi_init(&half_order);
+  mbedtls_mpi_init(&z);
+  mbedtls_mpi_init(&inverse_s);
+  mbedtls_mpi_init(&u1);
+  mbedtls_mpi_init(&u2);
+  mbedtls_mpi_init(&reduced_x);
   int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
   if (result == 0) result = mbedtls_mpi_read_binary(&private_scalar, private_key, kPrivateKeySize);
   if (result == 0) {
@@ -407,21 +460,27 @@ WalletError secp256k1_sign_digest_recoverable(
     result = mbedtls_mpi_copy(&reduced_x, &recovery_point.MBEDTLS_PRIVATE(X));
   }
   if (result == 0) result = mbedtls_mpi_mod_mpi(&reduced_x, &reduced_x, &group.N);
-  if (result == 0 && (mbedtls_mpi_cmp_mpi(&reduced_x, &r) != 0 ||
-                      mbedtls_mpi_cmp_mpi(&recovery_point.MBEDTLS_PRIVATE(X), &group.N) >= 0)) {
+  if (result == 0 && (mbedtls_mpi_cmp_mpi(&reduced_x, &r) != 0 || mbedtls_mpi_cmp_mpi(&recovery_point.MBEDTLS_PRIVATE(X), &group.N) >= 0)) {
     result = MBEDTLS_ERR_ECP_VERIFY_FAILED;
   }
   if (result == 0) result = mbedtls_mpi_write_binary(&r, out_signature->r, kPrivateKeySize);
   if (result == 0) result = mbedtls_mpi_write_binary(&s, out_signature->s, kPrivateKeySize);
   if (result == 0) {
     out_signature->y_parity = static_cast<uint8_t>(
-        mbedtls_mpi_get_bit(&recovery_point.MBEDTLS_PRIVATE(Y), 0));
+      mbedtls_mpi_get_bit(&recovery_point.MBEDTLS_PRIVATE(Y), 0));
   }
 
-  mbedtls_mpi_free(&reduced_x); mbedtls_mpi_free(&u2); mbedtls_mpi_free(&u1);
-  mbedtls_mpi_free(&inverse_s); mbedtls_mpi_free(&z); mbedtls_mpi_free(&half_order);
-  mbedtls_mpi_free(&s); mbedtls_mpi_free(&r); mbedtls_mpi_free(&private_scalar);
-  mbedtls_ecp_point_free(&recovery_point); mbedtls_ecp_point_free(&public_key);
+  mbedtls_mpi_free(&reduced_x);
+  mbedtls_mpi_free(&u2);
+  mbedtls_mpi_free(&u1);
+  mbedtls_mpi_free(&inverse_s);
+  mbedtls_mpi_free(&z);
+  mbedtls_mpi_free(&half_order);
+  mbedtls_mpi_free(&s);
+  mbedtls_mpi_free(&r);
+  mbedtls_mpi_free(&private_scalar);
+  mbedtls_ecp_point_free(&recovery_point);
+  mbedtls_ecp_point_free(&public_key);
   mbedtls_ecp_group_free(&group);
   if (result != 0) secure_zero(out_signature, sizeof(*out_signature));
   return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
@@ -485,13 +544,8 @@ WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPri
   mbedtls_mpi_init(&left);
   mbedtls_mpi_init(&parent_key);
   mbedtls_mpi_init(&child_key);
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
-                     mbedtls_mpi_read_binary(&left, material, kPrivateKeySize) ||
-                     mbedtls_mpi_read_binary(&parent_key, parent->private_key, kPrivateKeySize) ||
-                     mbedtls_mpi_add_mpi(&child_key, &left, &parent_key) ||
-                     mbedtls_mpi_mod_mpi(&child_key, &child_key, &group.N);
-  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 &&
-                     mbedtls_mpi_cmp_mpi(&left, &group.N) < 0 && mbedtls_mpi_cmp_int(&child_key, 0) != 0;
+  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&left, material, kPrivateKeySize) || mbedtls_mpi_read_binary(&parent_key, parent->private_key, kPrivateKeySize) || mbedtls_mpi_add_mpi(&child_key, &left, &parent_key) || mbedtls_mpi_mod_mpi(&child_key, &child_key, &group.N);
+  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 && mbedtls_mpi_cmp_mpi(&left, &group.N) < 0 && mbedtls_mpi_cmp_int(&child_key, 0) != 0;
   if (valid) {
     mbedtls_mpi_write_binary(&child_key, out_node->private_key, kPrivateKeySize);
     memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
@@ -550,13 +604,10 @@ WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPubli
   mbedtls_mpi_init(&left);
   mbedtls_mpi_init(&one);
   size_t public_size = kCompressedPublicKeySize;
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) ||
-               mbedtls_ecp_point_read_binary(&group, &parent_point, parent->public_key,
-                                             kCompressedPublicKeySize);
+  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_ecp_point_read_binary(&group, &parent_point, parent->public_key, kCompressedPublicKeySize);
   if (result == 0) result = mbedtls_ecp_check_pubkey(&group, &parent_point);
   if (result == 0) result = mbedtls_mpi_read_binary(&left, material, kPrivateKeySize);
-  const bool valid_offset = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 &&
-                            mbedtls_mpi_cmp_mpi(&left, &group.N) < 0;
+  const bool valid_offset = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 && mbedtls_mpi_cmp_mpi(&left, &group.N) < 0;
   if (result == 0 && !valid_offset) result = MBEDTLS_ERR_ECP_INVALID_KEY;
   if (result == 0) result = mbedtls_mpi_lset(&one, 1);
   if (result == 0) {
@@ -572,8 +623,7 @@ WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPubli
                                             &public_size, out_node->public_key,
                                             kCompressedPublicKeySize);
   }
-  const bool valid = result == 0 && valid_offset && !mbedtls_ecp_is_zero(&child_point) &&
-                     public_size == kCompressedPublicKeySize;
+  const bool valid = result == 0 && valid_offset && !mbedtls_ecp_is_zero(&child_point) && public_size == kCompressedPublicKeySize;
   if (valid) {
     memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
     out_node->depth = parent->depth + 1;
@@ -592,8 +642,7 @@ WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPubli
 
 WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path,
                                    HdPrivateNode *out_node) {
-  if (master == nullptr || path == nullptr || out_node == nullptr || path[0] != 'm' ||
-      (path[1] != '\0' && path[1] != '/')) {
+  if (master == nullptr || path == nullptr || out_node == nullptr || path[0] != 'm' || (path[1] != '\0' && path[1] != '/')) {
     return WalletError::InvalidPath;
   }
   HdPrivateNode current = *master;
@@ -652,8 +701,8 @@ WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat form
 }
 
 bool run_bip32_self_test() {
-  const uint8_t seed[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                          0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
+  const uint8_t seed[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                           0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
   HdPrivateNode master{};
   HdPrivateNode derived{};
   HdPublicNode master_public{};
@@ -661,52 +710,108 @@ bool run_bip32_self_test() {
   HdPrivateNode private_child{};
   HdPublicNode private_child_public{};
   static const uint8_t kExpectedMasterPrivate[kPrivateKeySize] = {
-      0xe8,0xf3,0x2e,0x72,0x3d,0xec,0xf4,0x05,0x1a,0xef,0xac,0x8e,0x2c,0x93,0xc9,0xc5,
-      0xb2,0x14,0x31,0x38,0x17,0xcd,0xb0,0x1a,0x14,0x94,0xb9,0x17,0xc8,0x43,0x6b,0x35,
+    0xe8,
+    0xf3,
+    0x2e,
+    0x72,
+    0x3d,
+    0xec,
+    0xf4,
+    0x05,
+    0x1a,
+    0xef,
+    0xac,
+    0x8e,
+    0x2c,
+    0x93,
+    0xc9,
+    0xc5,
+    0xb2,
+    0x14,
+    0x31,
+    0x38,
+    0x17,
+    0xcd,
+    0xb0,
+    0x1a,
+    0x14,
+    0x94,
+    0xb9,
+    0x17,
+    0xc8,
+    0x43,
+    0x6b,
+    0x35,
   };
   static const uint8_t kExpectedMasterChain[kChainCodeSize] = {
-      0x87,0x3d,0xff,0x81,0xc0,0x2f,0x52,0x56,0x23,0xfd,0x1f,0xe5,0x16,0x7e,0xac,0x3a,
-      0x55,0xa0,0x49,0xde,0x3d,0x31,0x4b,0xb4,0x2e,0xe2,0x27,0xff,0xed,0x37,0xd5,0x08,
+    0x87,
+    0x3d,
+    0xff,
+    0x81,
+    0xc0,
+    0x2f,
+    0x52,
+    0x56,
+    0x23,
+    0xfd,
+    0x1f,
+    0xe5,
+    0x16,
+    0x7e,
+    0xac,
+    0x3a,
+    0x55,
+    0xa0,
+    0x49,
+    0xde,
+    0x3d,
+    0x31,
+    0x4b,
+    0xb4,
+    0x2e,
+    0xe2,
+    0x27,
+    0xff,
+    0xed,
+    0x37,
+    0xd5,
+    0x08,
   };
   const WalletError master_error = hd_private_from_seed(seed, sizeof(seed), &master);
-  const bool master_vector = master_error == WalletError::Ok &&
-                             memcmp(master.private_key, kExpectedMasterPrivate, kPrivateKeySize) == 0 &&
-                             memcmp(master.chain_code, kExpectedMasterChain, kChainCodeSize) == 0;
+  const bool master_vector = master_error == WalletError::Ok && memcmp(master.private_key, kExpectedMasterPrivate, kPrivateKeySize) == 0 && memcmp(master.chain_code, kExpectedMasterChain, kChainCodeSize) == 0;
   const WalletError path_error = master_error == WalletError::Ok
-                                     ? hd_private_derive_path(&master, "m/0'/1/2'", &derived)
-                                     : WalletError::InvalidChild;
-  const bool path_metadata = path_error == WalletError::Ok && derived.depth == 3 &&
-                             derived.child_number == (2 | kHardenedOffset);
+                                   ? hd_private_derive_path(&master, "m/0'/1/2'", &derived)
+                                   : WalletError::InvalidChild;
+  const bool path_metadata = path_error == WalletError::Ok && derived.depth == 3 && derived.child_number == (2 | kHardenedOffset);
   const WalletError master_public_error = master_error == WalletError::Ok
-                                              ? hd_public_neuter(&master, &master_public)
-                                              : WalletError::InvalidKey;
+                                            ? hd_public_neuter(&master, &master_public)
+                                            : WalletError::InvalidKey;
   const WalletError private_child_error = master_error == WalletError::Ok
-                                              ? hd_private_derive(&master, 0, &private_child)
-                                              : WalletError::InvalidChild;
+                                            ? hd_private_derive(&master, 0, &private_child)
+                                            : WalletError::InvalidChild;
   const WalletError private_child_public_error = private_child_error == WalletError::Ok
-                                                    ? hd_public_neuter(&private_child, &private_child_public)
-                                                    : WalletError::InvalidKey;
+                                                   ? hd_public_neuter(&private_child, &private_child_public)
+                                                   : WalletError::InvalidKey;
   const WalletError public_child_error = master_public_error == WalletError::Ok
-                                             ? hd_public_derive(&master_public, 0, &derived_public)
-                                             : WalletError::InvalidChild;
-  const bool public_metadata = master_public_error == WalletError::Ok &&
-                               master_public.depth == 0 && public_child_error == WalletError::Ok &&
-                               derived_public.depth == 1;
-  const bool public_private_match = private_child_public_error == WalletError::Ok &&
-                                    public_child_error == WalletError::Ok &&
-                                    memcmp(private_child_public.public_key, derived_public.public_key,
-                                           kCompressedPublicKeySize) == 0 &&
-                                    memcmp(private_child_public.chain_code, derived_public.chain_code,
-                                           kChainCodeSize) == 0;
+                                           ? hd_public_derive(&master_public, 0, &derived_public)
+                                           : WalletError::InvalidChild;
+  const bool public_metadata = master_public_error == WalletError::Ok && master_public.depth == 0 && public_child_error == WalletError::Ok && derived_public.depth == 1;
+  const bool public_private_match = private_child_public_error == WalletError::Ok && public_child_error == WalletError::Ok && memcmp(private_child_public.public_key, derived_public.public_key, kCompressedPublicKeySize) == 0 && memcmp(private_child_public.chain_code, derived_public.chain_code, kChainCodeSize) == 0;
   const bool passed = master_vector && path_metadata && public_metadata && public_private_match;
   if (!passed) {
     // Report only stage status and error codes; never print key material.
-    Serial.print("BIP32_DETAIL master="); Serial.print(master_vector ? "pass" : "FAIL");
-    Serial.print(" path="); Serial.print(path_metadata ? "pass" : "FAIL");
-    Serial.print(" neuter="); Serial.print(master_public_error == WalletError::Ok ? "pass" : "FAIL");
-    Serial.print(" private-child="); Serial.print(private_child_error == WalletError::Ok ? "pass" : "FAIL");
-    Serial.print(" public-child="); Serial.print(public_child_error == WalletError::Ok ? "pass" : "FAIL");
-    Serial.print(" public-match="); Serial.println(public_private_match ? "pass" : "FAIL");
+    Serial.print("BIP32_DETAIL master=");
+    Serial.print(master_vector ? "pass" : "FAIL");
+    Serial.print(" path=");
+    Serial.print(path_metadata ? "pass" : "FAIL");
+    Serial.print(" neuter=");
+    Serial.print(master_public_error == WalletError::Ok ? "pass" : "FAIL");
+    Serial.print(" private-child=");
+    Serial.print(private_child_error == WalletError::Ok ? "pass" : "FAIL");
+    Serial.print(" public-child=");
+    Serial.print(public_child_error == WalletError::Ok ? "pass" : "FAIL");
+    Serial.print(" public-match=");
+    Serial.println(public_private_match ? "pass" : "FAIL");
   }
   secure_zero(&master, sizeof(master));
   secure_zero(&derived, sizeof(derived));
@@ -719,27 +824,143 @@ bool run_bip32_self_test() {
 
 bool run_secp256k1_self_test() {
   static const uint8_t kPrivateKey[kPrivateKeySize] = {
-      0x61,0x9c,0x33,0x50,0x25,0xc7,0xf4,0x01,0x2e,0x55,0x6c,0x2a,0x58,0xb2,0x50,0x6e,
-      0x30,0xb8,0x51,0x1b,0x53,0xad,0xe9,0x5e,0xa3,0x16,0xfd,0x8c,0x32,0x86,0xfe,0xb9,
+    0x61,
+    0x9c,
+    0x33,
+    0x50,
+    0x25,
+    0xc7,
+    0xf4,
+    0x01,
+    0x2e,
+    0x55,
+    0x6c,
+    0x2a,
+    0x58,
+    0xb2,
+    0x50,
+    0x6e,
+    0x30,
+    0xb8,
+    0x51,
+    0x1b,
+    0x53,
+    0xad,
+    0xe9,
+    0x5e,
+    0xa3,
+    0x16,
+    0xfd,
+    0x8c,
+    0x32,
+    0x86,
+    0xfe,
+    0xb9,
   };
   static const uint8_t kDigest[kSha256Size] = {
-      0xc3,0x7a,0xf3,0x11,0x16,0xd1,0xb2,0x7c,0xaf,0x68,0xaa,0xe9,0xe3,0xac,0x82,0xf1,
-      0x47,0x79,0x29,0x01,0x4d,0x5b,0x91,0x76,0x57,0xd0,0xeb,0x49,0x47,0x8c,0xb6,0x70,
+    0xc3,
+    0x7a,
+    0xf3,
+    0x11,
+    0x16,
+    0xd1,
+    0xb2,
+    0x7c,
+    0xaf,
+    0x68,
+    0xaa,
+    0xe9,
+    0xe3,
+    0xac,
+    0x82,
+    0xf1,
+    0x47,
+    0x79,
+    0x29,
+    0x01,
+    0x4d,
+    0x5b,
+    0x91,
+    0x76,
+    0x57,
+    0xd0,
+    0xeb,
+    0x49,
+    0x47,
+    0x8c,
+    0xb6,
+    0x70,
   };
   static const uint8_t kExpectedR[kPrivateKeySize] = {
-      0x36,0x09,0xe1,0x7b,0x84,0xf6,0xa7,0xd3,0x0c,0x80,0xbf,0xa6,0x10,0xb5,0xb4,0x54,
-      0x2f,0x32,0xa8,0xa0,0xd5,0x44,0x7a,0x12,0xfb,0x13,0x66,0xd7,0xf0,0x1c,0xc4,0x4a,
+    0x36,
+    0x09,
+    0xe1,
+    0x7b,
+    0x84,
+    0xf6,
+    0xa7,
+    0xd3,
+    0x0c,
+    0x80,
+    0xbf,
+    0xa6,
+    0x10,
+    0xb5,
+    0xb4,
+    0x54,
+    0x2f,
+    0x32,
+    0xa8,
+    0xa0,
+    0xd5,
+    0x44,
+    0x7a,
+    0x12,
+    0xfb,
+    0x13,
+    0x66,
+    0xd7,
+    0xf0,
+    0x1c,
+    0xc4,
+    0x4a,
   };
   static const uint8_t kExpectedS[kPrivateKeySize] = {
-      0x57,0x3a,0x95,0x4c,0x45,0x18,0x33,0x15,0x61,0x40,0x6f,0x90,0x30,0x0e,0x8f,0x33,
-      0x58,0xf5,0x19,0x28,0xd4,0x3c,0x21,0x2a,0x8c,0xae,0xd0,0x2d,0xe6,0x7e,0xeb,0xee,
+    0x57,
+    0x3a,
+    0x95,
+    0x4c,
+    0x45,
+    0x18,
+    0x33,
+    0x15,
+    0x61,
+    0x40,
+    0x6f,
+    0x90,
+    0x30,
+    0x0e,
+    0x8f,
+    0x33,
+    0x58,
+    0xf5,
+    0x19,
+    0x28,
+    0xd4,
+    0x3c,
+    0x21,
+    0x2a,
+    0x8c,
+    0xae,
+    0xd0,
+    0x2d,
+    0xe6,
+    0x7e,
+    0xeb,
+    0xee,
   };
   RecoverableSignature signature;
-  const bool passed = secp256k1_sign_digest_recoverable(kPrivateKey, kDigest, &signature) ==
-                          WalletError::Ok &&
-      crypto_constant_time_equal(signature.r, kExpectedR, sizeof(signature.r)) &&
-      crypto_constant_time_equal(signature.s, kExpectedS, sizeof(signature.s)) &&
-      signature.y_parity <= 1;
+  const bool passed = secp256k1_sign_digest_recoverable(kPrivateKey, kDigest, &signature) == WalletError::Ok && crypto_constant_time_equal(signature.r, kExpectedR, sizeof(signature.r)) && crypto_constant_time_equal(signature.s, kExpectedS, sizeof(signature.s)) && signature.y_parity <= 1;
   secure_zero(&signature, sizeof(signature));
   return passed;
 }

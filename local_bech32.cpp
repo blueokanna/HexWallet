@@ -16,7 +16,11 @@ constexpr char kCharset[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 constexpr uint32_t kBech32Constant = 1;
 constexpr uint32_t kBech32mConstant = 0x2bc830a3;
 constexpr uint32_t kGenerator[] = {
-    0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3,
+  0x3b6a57b2,
+  0x26508e6d,
+  0x1ea119fa,
+  0x3d4233dd,
+  0x2a1462b3,
 };
 constexpr size_t kChecksumLength = 6;
 constexpr size_t kMaximumTextLength = 90;
@@ -115,14 +119,13 @@ DecodeResult decode(const std::string& str) {
   }
   if (lower && upper) return {};
   size_t pos = str.rfind('1');
-  if (str.size() > kMaximumTextLength || pos == str.npos || pos == 0 ||
-      pos + 1 + kChecksumLength > str.size()) {
+  if (str.size() > kMaximumTextLength || pos == str.npos || pos == 0 || pos + 1 + kChecksumLength > str.size()) {
     return {};
   }
   data values(str.size() - 1 - pos);
   for (size_t i = 0; i < str.size() - 1 - pos; ++i) {
     unsigned char c = str[i + pos + 1];
-    const char *position = strchr(kCharset, lc(c));
+    const char* position = strchr(kCharset, lc(c));
     if (position == nullptr) return {};
     values[i] = static_cast<uint8_t>(position - kCharset);
   }

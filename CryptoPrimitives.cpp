@@ -50,13 +50,12 @@ bool crypto_hmac_sha512(const uint8_t *key, size_t key_size, const uint8_t *data
 bool crypto_pbkdf2_sha256(const uint8_t *password, size_t password_size,
                           const uint8_t *salt, size_t salt_size, uint32_t iterations,
                           uint8_t *out, size_t out_size) {
-  if (password == nullptr || salt == nullptr || out == nullptr || iterations == 0 ||
-      out_size == 0 || out_size > UINT32_MAX) {
+  if (password == nullptr || salt == nullptr || out == nullptr || iterations == 0 || out_size == 0 || out_size > UINT32_MAX) {
     return false;
   }
   const int result = mbedtls_pkcs5_pbkdf2_hmac_ext(
-      MBEDTLS_MD_SHA256, password, password_size, salt, salt_size,
-      iterations, static_cast<uint32_t>(out_size), out);
+    MBEDTLS_MD_SHA256, password, password_size, salt, salt_size,
+    iterations, static_cast<uint32_t>(out_size), out);
   return result == 0;
 }
 
@@ -85,23 +84,99 @@ bool crypto_constant_time_equal(const uint8_t *left, const uint8_t *right, size_
 
 bool run_crypto_self_tests() {
   static const uint8_t kEmptyKeccak[kKeccak256Size] = {
-      0xc5,0xd2,0x46,0x01,0x86,0xf7,0x23,0x3c,0x92,0x7e,0x7d,0xb2,0xdc,0xc7,0x03,0xc0,
-      0xe5,0x00,0xb6,0x53,0xca,0x82,0x27,0x3b,0x7b,0xfa,0xd8,0x04,0x5d,0x85,0xa4,0x70,
+    0xc5,
+    0xd2,
+    0x46,
+    0x01,
+    0x86,
+    0xf7,
+    0x23,
+    0x3c,
+    0x92,
+    0x7e,
+    0x7d,
+    0xb2,
+    0xdc,
+    0xc7,
+    0x03,
+    0xc0,
+    0xe5,
+    0x00,
+    0xb6,
+    0x53,
+    0xca,
+    0x82,
+    0x27,
+    0x3b,
+    0x7b,
+    0xfa,
+    0xd8,
+    0x04,
+    0x5d,
+    0x85,
+    0xa4,
+    0x70,
   };
   static const uint8_t kAbcSha[kSha256Size] = {
-      0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,
-      0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad,
+    0xba,
+    0x78,
+    0x16,
+    0xbf,
+    0x8f,
+    0x01,
+    0xcf,
+    0xea,
+    0x41,
+    0x41,
+    0x40,
+    0xde,
+    0x5d,
+    0xae,
+    0x22,
+    0x23,
+    0xb0,
+    0x03,
+    0x61,
+    0xa3,
+    0x96,
+    0x17,
+    0x7a,
+    0x9c,
+    0xb4,
+    0x10,
+    0xff,
+    0x61,
+    0xf2,
+    0x00,
+    0x15,
+    0xad,
   };
   static const uint8_t kEmptyRipemd[kRipemd160Size] = {
-      0x9c,0x11,0x85,0xa5,0xc5,0xe9,0xfc,0x54,0x61,0x28,0x08,0x97,0x7e,0xe8,0xf5,0x48,
-      0xb2,0x25,0x8d,0x31,
+    0x9c,
+    0x11,
+    0x85,
+    0xa5,
+    0xc5,
+    0xe9,
+    0xfc,
+    0x54,
+    0x61,
+    0x28,
+    0x08,
+    0x97,
+    0x7e,
+    0xe8,
+    0xf5,
+    0x48,
+    0xb2,
+    0x25,
+    0x8d,
+    0x31,
   };
-  static const uint8_t kAbc[] = {'a','b','c'};
+  static const uint8_t kAbc[] = { 'a', 'b', 'c' };
   uint8_t actual[kSha256Size];
-  bool passed = crypto_sha256(kAbc, sizeof(kAbc), actual) &&
-                crypto_constant_time_equal(actual, kAbcSha, sizeof(actual));
-  passed = passed && crypto_keccak256(nullptr, 0, actual) &&
-           crypto_constant_time_equal(actual, kEmptyKeccak, sizeof(actual));
+  bool passed = crypto_sha256(kAbc, sizeof(kAbc), actual) && crypto_constant_time_equal(actual, kAbcSha, sizeof(actual));
+  passed = passed && crypto_keccak256(nullptr, 0, actual) && crypto_constant_time_equal(actual, kEmptyKeccak, sizeof(actual));
   uint8_t short_actual[kRipemd160Size];
   local_ripemd160(nullptr, 0, short_actual);
   passed = passed && crypto_constant_time_equal(short_actual, kEmptyRipemd, sizeof(short_actual));

@@ -20,8 +20,7 @@ constexpr uint8_t kWitnessVersionZeroOpcode = 0x00;
 
 WalletError base58check(const uint8_t *payload, size_t payload_size, bool ripple_alphabet,
                         char *out, size_t *in_out_size) {
-  if (payload == nullptr || out == nullptr || in_out_size == nullptr ||
-      payload_size > kMaximumBase58PayloadSize) {
+  if (payload == nullptr || out == nullptr || in_out_size == nullptr || payload_size > kMaximumBase58PayloadSize) {
     return WalletError::InvalidArgument;
   }
   uint8_t encoded[kMaximumBase58CheckedSize];
@@ -166,8 +165,7 @@ WalletError address_from_script(const UtxoAddressProfile &profile,
     return WalletError::Ok;
   }
   uint8_t payload[kVersionedHash160Size];
-  if (script_size == 25 && script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
-      script[23] == 0x88 && script[24] == 0xac) {
+  if (script_size == 25 && script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 && script[23] == 0x88 && script[24] == 0xac) {
     payload[0] = profile.p2pkh_version;
     memcpy(payload + 1, script + 3, kRipemd160Size);
   } else if (script_size == 23 && script[0] == 0xa9 && script[1] == 0x14 && script[22] == 0x87) {

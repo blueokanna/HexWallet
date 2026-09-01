@@ -109,6 +109,28 @@ powershell -ExecutionPolicy Bypass -File tests/host/build_clang_ubsan.ps1
 因此本工具是**加密代码的必检关卡**：任何涉及移位/符号/溢出敏感代码的
 改动，都应同时通过 MSVC 与 clang-cl 两份构建。
 
+## 6. 设备端运行时栈预算
+
+以上所有主机层都在桌面（多 MB 进程栈）上运行，因此**无法**发现设备上的
+栈溢出。`setup()`/`loop()` 运行在 Arduino loop task 上，其栈由
+`HexWallet.ino` 的 `HEXWALLET_LOOP_TASK_STACK_SIZE` 决定（32 KB）。任何
+超出此深度的调用链——包括全部 11 套密码学自测 + LVGL 渲染——都会在真机
+上以 `LoadStoreError`（EXCCAUSE 0x1c）访问垃圾地址而 panic。
+
+实战教训：`BlsG1.cpp` 的 `parent_sk_to_lamport_pk`（EIP-2333 Lamport 密钥
+派生）曾在**栈上**声明 `lamport0[8160] + lamport1[8160] + lamport_pk[16320]`
+——约 32 KB 的帧压在 16 KB 的 loop 栈上。所有主机测试全绿，真机却在
+`eip2333_derive_child`（启动自测）时崩溃。回溯中表现为单个 ~32 KB 的栈
+指针跳变，`xtensa-esp32s3-elf-addr2line` 精确定位到 `BlsG1.cpp:415`。
+现在这三个缓冲区改为堆分配（含 null 检查 + `secure_zero` + `free`），
+函数帧从 `entry a1, 0x7fe0`（32,736 B）降到 `entry a1, 128`（128 B）。
+
+经验法则：任何可从 `setup()`/`loop()`（loop task 栈）到达的函数，局部
+数组必须保持很小；超过 ~1 KB 就要堆分配。解码设备 panic：用
+`arduino-cli compile` 重建草图，再用 `xtensa-esp32s3-elf-addr2line -e <elf>
+-f -C` 解析 `Backtrace:` 地址；相邻两帧间的大段栈空隙指向带大局部数组的
+函数（用 `objdump -d` 看它的 `entry a1, <size>` 指令即可确认帧大小）。
+
 ## CI
 
 `.github/workflows/ci.yml`：

@@ -1,10 +1,3 @@
-// Ed25519 (RFC 8032) and SLIP-0010 hardened Ed25519 derivation.
-//
-// Field arithmetic uses the ref10 25.5-bit limb layout. Group operations use
-// the RFC 8032 affine formulas on the base point (signing and key generation
-// only ever multiply the base point, so no arbitrary point addition is needed).
-// All entry points are verified against the RFC 8032 and SLIP-0010 vectors in
-// run_crypto_extended_self_tests().
 #include "CryptoExtended.h"
 
 #include <mbedtls/md.h>
@@ -47,27 +40,19 @@ void fe_sub(fe out, const fe left, const fe right) {
 }
 
 int64_t load_26(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) |
-         (static_cast<int64_t>(data[2]) << 16) |
-         (static_cast<int64_t>(data[3]) << 24) |
-         (static_cast<int64_t>(data[4]) << 32);
+  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16) | (static_cast<int64_t>(data[3]) << 24) | (static_cast<int64_t>(data[4]) << 32);
 }
 
 int64_t load_25(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) |
-         (static_cast<int64_t>(data[2]) << 16) |
-         (static_cast<int64_t>(data[3]) << 24);
+  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16) | (static_cast<int64_t>(data[3]) << 24);
 }
 
 int64_t load_3(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) |
-         (static_cast<int64_t>(data[2]) << 16);
+  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16);
 }
 
 int64_t load_4(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) |
-         (static_cast<int64_t>(data[2]) << 16) |
-         (static_cast<int64_t>(data[3]) << 24);
+  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16) | (static_cast<int64_t>(data[3]) << 24);
 }
 
 void store_26(uint8_t *out, int64_t value) {
@@ -97,8 +82,8 @@ void fe_frombytes(fe out, const uint8_t *data) {
   for (int i = 0; i < 4; ++i) v[i] = load_le64_word(data + i * 8);
   v[3] &= UINT64_C(0x7fffffffffffffff);  // ignore the sign bit (bit 255)
 
-  static const int kOffsets[10] = {0, 26, 51, 77, 102, 128, 153, 179, 204, 230};
-  static const int kSizes[10] = {26, 25, 26, 25, 26, 25, 26, 25, 26, 25};
+  static const int kOffsets[10] = { 0, 26, 51, 77, 102, 128, 153, 179, 204, 230 };
+  static const int kSizes[10] = { 26, 25, 26, 25, 26, 25, 26, 25, 26, 25 };
   for (int limb = 0; limb < 10; ++limb) {
     const int start = kOffsets[limb];
     const int count = kSizes[limb];
@@ -134,16 +119,35 @@ void fe_tobytes(uint8_t *out, const fe value) {
   // 2's-complement result, clang optimizes assuming it cannot happen). Use
   // multiplication by a positive power of two instead, which is equivalent
   // and fully defined.
-  int64_t carry0 = h0 >> 26; h1 += carry0; h0 -= carry0 * (INT64_C(1) << 26);
-  int64_t carry1 = h1 >> 25; h2 += carry1; h1 -= carry1 * (INT64_C(1) << 25);
-  int64_t carry2 = h2 >> 26; h3 += carry2; h2 -= carry2 * (INT64_C(1) << 26);
-  int64_t carry3 = h3 >> 25; h4 += carry3; h3 -= carry3 * (INT64_C(1) << 25);
-  int64_t carry4 = h4 >> 26; h5 += carry4; h4 -= carry4 * (INT64_C(1) << 26);
-  int64_t carry5 = h5 >> 25; h6 += carry5; h5 -= carry5 * (INT64_C(1) << 25);
-  int64_t carry6 = h6 >> 26; h7 += carry6; h6 -= carry6 * (INT64_C(1) << 26);
-  int64_t carry7 = h7 >> 25; h8 += carry7; h7 -= carry7 * (INT64_C(1) << 25);
-  int64_t carry8 = h8 >> 26; h9 += carry8; h8 -= carry8 * (INT64_C(1) << 26);
-  int64_t carry9 = h9 >> 25; h9 -= carry9 * (INT64_C(1) << 25);
+  int64_t carry0 = h0 >> 26;
+  h1 += carry0;
+  h0 -= carry0 * (INT64_C(1) << 26);
+  int64_t carry1 = h1 >> 25;
+  h2 += carry1;
+  h1 -= carry1 * (INT64_C(1) << 25);
+  int64_t carry2 = h2 >> 26;
+  h3 += carry2;
+  h2 -= carry2 * (INT64_C(1) << 26);
+  int64_t carry3 = h3 >> 25;
+  h4 += carry3;
+  h3 -= carry3 * (INT64_C(1) << 25);
+  int64_t carry4 = h4 >> 26;
+  h5 += carry4;
+  h4 -= carry4 * (INT64_C(1) << 26);
+  int64_t carry5 = h5 >> 25;
+  h6 += carry5;
+  h5 -= carry5 * (INT64_C(1) << 25);
+  int64_t carry6 = h6 >> 26;
+  h7 += carry6;
+  h6 -= carry6 * (INT64_C(1) << 26);
+  int64_t carry7 = h7 >> 25;
+  h8 += carry7;
+  h7 -= carry7 * (INT64_C(1) << 25);
+  int64_t carry8 = h8 >> 26;
+  h9 += carry8;
+  h8 -= carry8 * (INT64_C(1) << 26);
+  int64_t carry9 = h9 >> 25;
+  h9 -= carry9 * (INT64_C(1) << 25);
 
   // ref10 bit packing: limbs sit on 25.5-bit boundaries. Each byte carries
   // the tail of one limb and the head of the next, except where a limb ends
@@ -192,34 +196,24 @@ void fe_mul(fe out, const fe left, const fe right) {
   const int64_t g0 = right[0], g1 = right[1], g2 = right[2], g3 = right[3], g4 = right[4];
   const int64_t g5 = right[5], g6 = right[6], g7 = right[7], g8 = right[8], g9 = right[9];
 
-  int64_t h0 = f0 * g0 + 38 * f1 * g9 + 19 * f2 * g8 + 38 * f3 * g7 + 19 * f4 * g6 +
-               38 * f5 * g5 + 19 * f6 * g4 + 38 * f7 * g3 + 19 * f8 * g2 + 38 * f9 * g1;
-  int64_t h1 = f0 * g1 + f1 * g0 + 19 * f2 * g9 + 19 * f3 * g8 + 19 * f4 * g7 +
-               19 * f5 * g6 + 19 * f6 * g5 + 19 * f7 * g4 + 19 * f8 * g3 + 19 * f9 * g2;
-  int64_t h2 = f0 * g2 + 2 * f1 * g1 + f2 * g0 + 38 * f3 * g9 + 19 * f4 * g8 +
-               38 * f5 * g7 + 19 * f6 * g6 + 38 * f7 * g5 + 19 * f8 * g4 + 38 * f9 * g3;
-  int64_t h3 = f0 * g3 + f1 * g2 + f2 * g1 + f3 * g0 + 19 * f4 * g9 + 19 * f5 * g8 +
-               19 * f6 * g7 + 19 * f7 * g6 + 19 * f8 * g5 + 19 * f9 * g4;
-  int64_t h4 = f0 * g4 + 2 * f1 * g3 + f2 * g2 + 2 * f3 * g1 + f4 * g0 + 38 * f5 * g9 +
-               19 * f6 * g8 + 38 * f7 * g7 + 19 * f8 * g6 + 38 * f9 * g5;
-  int64_t h5 = f0 * g5 + f1 * g4 + f2 * g3 + f3 * g2 + f4 * g1 + f5 * g0 + 19 * f6 * g9 +
-               19 * f7 * g8 + 19 * f8 * g7 + 19 * f9 * g6;
-  int64_t h6 = f0 * g6 + 2 * f1 * g5 + f2 * g4 + 2 * f3 * g3 + f4 * g2 + 2 * f5 * g1 +
-               f6 * g0 + 38 * f7 * g9 + 19 * f8 * g8 + 38 * f9 * g7;
-  int64_t h7 = f0 * g7 + f1 * g6 + f2 * g5 + f3 * g4 + f4 * g3 + f5 * g2 + f6 * g1 +
-               f7 * g0 + 19 * f8 * g9 + 19 * f9 * g8;
-  int64_t h8 = f0 * g8 + 2 * f1 * g7 + f2 * g6 + 2 * f3 * g5 + f4 * g4 + 2 * f5 * g3 +
-               f6 * g2 + 2 * f7 * g1 + f8 * g0 + 38 * f9 * g9;
-  int64_t h9 = f0 * g9 + f1 * g8 + f2 * g7 + f3 * g6 + f4 * g5 + f5 * g4 + f6 * g3 +
-               f7 * g2 + f8 * g1 + f9 * g0;
+  int64_t h0 = f0 * g0 + 38 * f1 * g9 + 19 * f2 * g8 + 38 * f3 * g7 + 19 * f4 * g6 + 38 * f5 * g5 + 19 * f6 * g4 + 38 * f7 * g3 + 19 * f8 * g2 + 38 * f9 * g1;
+  int64_t h1 = f0 * g1 + f1 * g0 + 19 * f2 * g9 + 19 * f3 * g8 + 19 * f4 * g7 + 19 * f5 * g6 + 19 * f6 * g5 + 19 * f7 * g4 + 19 * f8 * g3 + 19 * f9 * g2;
+  int64_t h2 = f0 * g2 + 2 * f1 * g1 + f2 * g0 + 38 * f3 * g9 + 19 * f4 * g8 + 38 * f5 * g7 + 19 * f6 * g6 + 38 * f7 * g5 + 19 * f8 * g4 + 38 * f9 * g3;
+  int64_t h3 = f0 * g3 + f1 * g2 + f2 * g1 + f3 * g0 + 19 * f4 * g9 + 19 * f5 * g8 + 19 * f6 * g7 + 19 * f7 * g6 + 19 * f8 * g5 + 19 * f9 * g4;
+  int64_t h4 = f0 * g4 + 2 * f1 * g3 + f2 * g2 + 2 * f3 * g1 + f4 * g0 + 38 * f5 * g9 + 19 * f6 * g8 + 38 * f7 * g7 + 19 * f8 * g6 + 38 * f9 * g5;
+  int64_t h5 = f0 * g5 + f1 * g4 + f2 * g3 + f3 * g2 + f4 * g1 + f5 * g0 + 19 * f6 * g9 + 19 * f7 * g8 + 19 * f8 * g7 + 19 * f9 * g6;
+  int64_t h6 = f0 * g6 + 2 * f1 * g5 + f2 * g4 + 2 * f3 * g3 + f4 * g2 + 2 * f5 * g1 + f6 * g0 + 38 * f7 * g9 + 19 * f8 * g8 + 38 * f9 * g7;
+  int64_t h7 = f0 * g7 + f1 * g6 + f2 * g5 + f3 * g4 + f4 * g3 + f5 * g2 + f6 * g1 + f7 * g0 + 19 * f8 * g9 + 19 * f9 * g8;
+  int64_t h8 = f0 * g8 + 2 * f1 * g7 + f2 * g6 + 2 * f3 * g5 + f4 * g4 + 2 * f5 * g3 + f6 * g2 + 2 * f7 * g1 + f8 * g0 + 38 * f9 * g9;
+  int64_t h9 = f0 * g9 + f1 * g8 + f2 * g7 + f3 * g6 + f4 * g5 + f5 * g4 + f6 * g3 + f7 * g2 + f8 * g1 + f9 * g0;
 
-  static const int kSizes[10] = {26, 25, 26, 25, 26, 25, 26, 25, 26, 25};
+  static const int kSizes[10] = { 26, 25, 26, 25, 26, 25, 26, 25, 26, 25 };
   // Full reduction: propagate carries limb by limb, then fold h9's top with
   // the 2^255 == 19 rule. Repeat until stable (three passes suffice for the
   // bounded products below). Negative carry limbs are possible (fe_sub), so
   // scale with multiplication, never a left shift of a negative value (UB).
   for (int pass = 0; pass < 3; ++pass) {
-    int64_t h[10] = {h0, h1, h2, h3, h4, h5, h6, h7, h8, h9};
+    int64_t h[10] = { h0, h1, h2, h3, h4, h5, h6, h7, h8, h9 };
     int64_t c = 0;
     for (int i = 0; i < 9; ++i) {
       c = h[i] >> kSizes[i];
@@ -229,12 +223,28 @@ void fe_mul(fe out, const fe left, const fe right) {
     c = h[9] >> kSizes[9];
     h[9] -= c * (INT64_C(1) << kSizes[9]);
     h[0] += 19 * c;
-    h0 = h[0]; h1 = h[1]; h2 = h[2]; h3 = h[3]; h4 = h[4];
-    h5 = h[5]; h6 = h[6]; h7 = h[7]; h8 = h[8]; h9 = h[9];
+    h0 = h[0];
+    h1 = h[1];
+    h2 = h[2];
+    h3 = h[3];
+    h4 = h[4];
+    h5 = h[5];
+    h6 = h[6];
+    h7 = h[7];
+    h8 = h[8];
+    h9 = h[9];
   }
 
-  out[0] = h0; out[1] = h1; out[2] = h2; out[3] = h3; out[4] = h4;
-  out[5] = h5; out[6] = h6; out[7] = h7; out[8] = h8; out[9] = h9;
+  out[0] = h0;
+  out[1] = h1;
+  out[2] = h2;
+  out[3] = h3;
+  out[4] = h4;
+  out[5] = h5;
+  out[6] = h6;
+  out[7] = h7;
+  out[8] = h8;
+  out[9] = h9;
 }
 
 void fe_sq(fe out, const fe value) {
@@ -244,7 +254,8 @@ void fe_sq(fe out, const fe value) {
 void fe_invert(fe out, const fe value) {
   fe t0, t1, t2, t3;
   fe_sq(t0, value);
-  fe_sq(t1, t0); fe_sq(t1, t1);
+  fe_sq(t1, t0);
+  fe_sq(t1, t1);
   fe_mul(t1, value, t1);
   fe_mul(t0, t0, t1);
   fe_sq(t2, t0);
@@ -319,10 +330,12 @@ void sub_words(uint64_t out[4], const uint64_t right[4], const uint64_t left[4])
 // step, so the running remainder after consuming every bit is the answer.
 void reduce_mod_l(uint64_t *value, size_t word_count, uint8_t out[32]) {
   static const uint64_t kL[4] = {
-      UINT64_C(0x5812631a5cf5d3ed), UINT64_C(0x14def9dea2f79cd6),
-      UINT64_C(0x0000000000000000), UINT64_C(0x1000000000000000),
+    UINT64_C(0x5812631a5cf5d3ed),
+    UINT64_C(0x14def9dea2f79cd6),
+    UINT64_C(0x0000000000000000),
+    UINT64_C(0x1000000000000000),
   };
-  uint64_t acc[4] = {0, 0, 0, 0};
+  uint64_t acc[4] = { 0, 0, 0, 0 };
 
   const size_t total_bits = word_count * 64;
   for (size_t bit = total_bits; bit-- > 0;) {
@@ -407,7 +420,7 @@ void sc_muladd(uint8_t out[32], const uint8_t *a, const uint8_t *b,
     bw[index] = load_le64_word(b + index * 8);
     cw[index] = load_le64_word(c + index * 8);
   }
-  uint64_t wide[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  uint64_t wide[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
   for (int i = 0; i < 4; ++i) {
     uint64_t carry = 0;
     for (int j = 0; j < 4; ++j) {
@@ -438,21 +451,108 @@ void sc_muladd(uint8_t out[32], const uint8_t *a, const uint8_t *b,
 
 // d = -121665/121666 mod 2^255-19 (RFC 8032).
 const uint8_t kEdwardsD[32] = {
-    0xa3, 0x78, 0x59, 0x13, 0xca, 0x4d, 0xeb, 0x75, 0xab, 0xd8, 0x41,
-    0x41, 0x4d, 0x0a, 0x70, 0x00, 0x98, 0xe8, 0x79, 0x77, 0x79, 0x40,
-    0xc7, 0x8c, 0x73, 0xfe, 0x6f, 0x2b, 0xee, 0x6c, 0x03, 0x52,
+  0xa3,
+  0x78,
+  0x59,
+  0x13,
+  0xca,
+  0x4d,
+  0xeb,
+  0x75,
+  0xab,
+  0xd8,
+  0x41,
+  0x41,
+  0x4d,
+  0x0a,
+  0x70,
+  0x00,
+  0x98,
+  0xe8,
+  0x79,
+  0x77,
+  0x79,
+  0x40,
+  0xc7,
+  0x8c,
+  0x73,
+  0xfe,
+  0x6f,
+  0x2b,
+  0xee,
+  0x6c,
+  0x03,
+  0x52,
 };
 
 // Base point: y = 4/5, x = 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a.
 const uint8_t kBaseY[32] = {
-    0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+  0x58,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
+  0x66,
 };
 const uint8_t kBaseX[32] = {
-    0x1a, 0xd5, 0x25, 0x8f, 0x60, 0x2d, 0x56, 0xc9, 0xb2, 0xa7, 0x25,
-    0x95, 0x60, 0xc7, 0x2c, 0x69, 0x5c, 0xdc, 0xd6, 0xfd, 0x31, 0xe2,
-    0xa4, 0xc0, 0xfe, 0x53, 0x6e, 0xcd, 0xd3, 0x36, 0x69, 0x21,
+  0x1a,
+  0xd5,
+  0x25,
+  0x8f,
+  0x60,
+  0x2d,
+  0x56,
+  0xc9,
+  0xb2,
+  0xa7,
+  0x25,
+  0x95,
+  0x60,
+  0xc7,
+  0x2c,
+  0x69,
+  0x5c,
+  0xdc,
+  0xd6,
+  0xfd,
+  0x31,
+  0xe2,
+  0xa4,
+  0xc0,
+  0xfe,
+  0x53,
+  0x6e,
+  0xcd,
+  0xd3,
+  0x36,
+  0x69,
+  0x21,
 };
 
 // (x3, y3) = (x1, y1) + (x2, y2) on edwards25519 (RFC 8032 formulas).
@@ -461,12 +561,12 @@ void edwards_add(fe x3, fe y3, const fe x1, const fe y1, const fe x2,
   fe d_fe;
   fe_frombytes(d_fe, kEdwardsD);
   fe t0, t1, t2, t3, t4;
-  fe_mul(t0, x1, x2);      // x1*x2
-  fe_mul(t1, y1, y2);      // y1*y2
-  fe_mul(t2, t0, t1);      // x1*x2*y1*y2
-  fe_mul(t3, d_fe, t2);    // d * x1*x2*y1*y2
+  fe_mul(t0, x1, x2);    // x1*x2
+  fe_mul(t1, y1, y2);    // y1*y2
+  fe_mul(t2, t0, t1);    // x1*x2*y1*y2
+  fe_mul(t3, d_fe, t2);  // d * x1*x2*y1*y2
   fe_1(t4);
-  fe_add(t4, t4, t3);      // 1 + d*...
+  fe_add(t4, t4, t3);  // 1 + d*...
   fe_invert(t4, t4);
   // x3 = (x1*y2 + x2*y1) / (1 + d*x1*x2*y1*y2)
   fe_mul(x3, x1, y2);
@@ -477,7 +577,7 @@ void edwards_add(fe x3, fe y3, const fe x1, const fe y1, const fe x2,
   fe_1(t4);
   fe_sub(t4, t4, t3);
   fe_invert(t4, t4);
-  fe_add(y3, t1, t0);   // y1*y2 + x1*x2
+  fe_add(y3, t1, t0);  // y1*y2 + x1*x2
   fe_mul(y3, y3, t4);
   secure_zero(d_fe, sizeof(d_fe));
   secure_zero(t0, sizeof(t0));
@@ -543,8 +643,7 @@ bool ed25519_public_key(const uint8_t seed[32], uint8_t out_public[32]) {
 
 bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
                   size_t message_size, uint8_t out_signature[64]) {
-  if (seed == nullptr || out_signature == nullptr ||
-      (message == nullptr && message_size != 0)) {
+  if (seed == nullptr || out_signature == nullptr || (message == nullptr && message_size != 0)) {
     return false;
   }
   uint8_t hash[64];
@@ -630,8 +729,7 @@ bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
 bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
                            const uint32_t *path, size_t path_size,
                            uint8_t out_private[32]) {
-  if (seed == nullptr || seed_size == 0 || out_private == nullptr ||
-      (path == nullptr && path_size != 0)) {
+  if (seed == nullptr || seed_size == 0 || out_private == nullptr || (path == nullptr && path_size != 0)) {
     return false;
   }
   static const uint8_t kSlip10Key[] = "ed25519 seed";

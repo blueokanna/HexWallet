@@ -37,8 +37,7 @@ uint16_t read_battery_mv() {
 //  Initialization sequence and window logic mirror the official LilyGO
 //  rm67162.cpp SPI path; see Xinyuan-LilyGO/T-Display-S3-AMOLED.
 // ===========================================================================
-#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || \
-    HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
 
 struct LcdCmd {
   uint8_t cmd;
@@ -47,13 +46,13 @@ struct LcdCmd {
 };
 
 static const LcdCmd kRm67162SpiInit[] = {
-    {0xFE, {0x00}, 0x01},        // PAGE
-    {0x36, {0x00}, 0x01},        // Scan direction control (MADCTL)
-    {0x3A, {0x75}, 0x01},        // Interface pixel format: 16bpp
-    {0x51, {0x00}, 0x01},        // Write display brightness
-    {0x11, {0x00}, 0x81},        // Sleep out + delay(120)
-    {0x29, {0x00}, 0x81},        // Display on + delay(120)
-    {0x51, {0xD0}, 0x01},        // Brightness 0xD0
+  { 0xFE, { 0x00 }, 0x01 },  // PAGE
+  { 0x36, { 0x00 }, 0x01 },  // Scan direction control (MADCTL)
+  { 0x3A, { 0x75 }, 0x01 },  // Interface pixel format: 16bpp
+  { 0x51, { 0x00 }, 0x01 },  // Write display brightness
+  { 0x11, { 0x00 }, 0x81 },  // Sleep out + delay(120)
+  { 0x29, { 0x00 }, 0x81 },  // Display on + delay(120)
+  { 0x51, { 0xD0 }, 0x01 },  // Brightness 0xD0
 };
 
 static void rm67162_write_command(uint8_t cmd) {
@@ -84,19 +83,19 @@ static void rm67162_send_cmd(uint8_t cmd, const uint8_t *data, uint8_t len) {
 static void rm67162_set_rotation(uint8_t rotation) {
   uint8_t madctl = 0x00;  // RGB order
   switch (rotation) {
-    case 1:  madctl = 0x40 | 0x20; break;  // MV | MX  (landscape)
-    case 2:  madctl = 0x40 | 0x80; break;  // MX | MY
-    case 3:  madctl = 0x20 | 0x80; break;  // MV | MY
+    case 1: madctl = 0x40 | 0x20; break;  // MV | MX  (landscape)
+    case 2: madctl = 0x40 | 0x80; break;  // MX | MY
+    case 3: madctl = 0x20 | 0x80; break;  // MV | MY
     default: break;
   }
   rm67162_send_cmd(0x36, &madctl, 1);
 }
 
 static void rm67162_set_window(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
-  uint8_t caset[4] = {uint8_t(x1 >> 8), uint8_t(x1), uint8_t(x2 >> 8), uint8_t(x2)};
-  uint8_t paset[4] = {uint8_t(y1 >> 8), uint8_t(y1), uint8_t(y2 >> 8), uint8_t(y2)};
-  rm67162_send_cmd(0x2A, caset, 4);  // column address set
-  rm67162_send_cmd(0x2B, paset, 4);  // page address set
+  uint8_t caset[4] = { uint8_t(x1 >> 8), uint8_t(x1), uint8_t(x2 >> 8), uint8_t(x2) };
+  uint8_t paset[4] = { uint8_t(y1 >> 8), uint8_t(y1), uint8_t(y2 >> 8), uint8_t(y2) };
+  rm67162_send_cmd(0x2A, caset, 4);    // column address set
+  rm67162_send_cmd(0x2B, paset, 4);    // page address set
   rm67162_send_cmd(0x2C, nullptr, 0);  // memory write
 }
 
@@ -156,18 +155,29 @@ static bool rm67162_init() {
 #include <soc/gpio_reg.h>
 
 static inline void gpio_fast_set(uint8_t pin) {
-  if (pin < 32) { REG_WRITE(GPIO_OUT_W1TS_REG, (1UL << pin)); }
-  else { REG_WRITE(GPIO_OUT1_W1TS_REG, (1UL << (pin - 32))); }
+  if (pin < 32) {
+    REG_WRITE(GPIO_OUT_W1TS_REG, (1UL << pin));
+  } else {
+    REG_WRITE(GPIO_OUT1_W1TS_REG, (1UL << (pin - 32)));
+  }
 }
 static inline void gpio_fast_clr(uint8_t pin) {
-  if (pin < 32) { REG_WRITE(GPIO_OUT_W1TC_REG, (1UL << pin)); }
-  else { REG_WRITE(GPIO_OUT1_W1TC_REG, (1UL << (pin - 32))); }
+  if (pin < 32) {
+    REG_WRITE(GPIO_OUT_W1TC_REG, (1UL << pin));
+  } else {
+    REG_WRITE(GPIO_OUT1_W1TC_REG, (1UL << (pin - 32)));
+  }
 }
 
 static const uint8_t kStDataPins[8] = {
-    HEXWALLET_LCD_PIN_D0, HEXWALLET_LCD_PIN_D1, HEXWALLET_LCD_PIN_D2,
-    HEXWALLET_LCD_PIN_D3, HEXWALLET_LCD_PIN_D4, HEXWALLET_LCD_PIN_D5,
-    HEXWALLET_LCD_PIN_D6, HEXWALLET_LCD_PIN_D7,
+  HEXWALLET_LCD_PIN_D0,
+  HEXWALLET_LCD_PIN_D1,
+  HEXWALLET_LCD_PIN_D2,
+  HEXWALLET_LCD_PIN_D3,
+  HEXWALLET_LCD_PIN_D4,
+  HEXWALLET_LCD_PIN_D5,
+  HEXWALLET_LCD_PIN_D6,
+  HEXWALLET_LCD_PIN_D7,
 };
 
 // Lookup tables: for every byte value the bit pattern to set/clear on the
@@ -215,28 +225,28 @@ struct StCmd {
 
 // Official LilyGO T-Display-S3 ST7789 init (lcd_st7789v in tft.ino).
 static const StCmd kSt7789Init[] = {
-    {0x11, {0}, 0x80},
-    {0x3A, {0x05}, 1},
-    {0xB2, {0x0B, 0x0B, 0x00, 0x33, 0x33}, 5},
-    {0xB7, {0x75}, 1},
-    {0xBB, {0x28}, 1},
-    {0xC0, {0x2C}, 1},
-    {0xC2, {0x01}, 1},
-    {0xC3, {0x1F}, 1},
-    {0xC6, {0x13}, 1},
-    {0xD0, {0xA7}, 1},
-    {0xD0, {0xA4, 0xA1}, 2},
-    {0xD6, {0xA1}, 1},
-    {0xE0, {0xF0, 0x05, 0x0A, 0x06, 0x06, 0x03, 0x2B, 0x32, 0x43, 0x36, 0x11, 0x10, 0x2B, 0x32}, 14},
-    {0xE1, {0xF0, 0x08, 0x0C, 0x0B, 0x09, 0x24, 0x2B, 0x22, 0x43, 0x38, 0x15, 0x16, 0x2F, 0x37}, 14},
+  { 0x11, { 0 }, 0x80 },
+  { 0x3A, { 0x05 }, 1 },
+  { 0xB2, { 0x0B, 0x0B, 0x00, 0x33, 0x33 }, 5 },
+  { 0xB7, { 0x75 }, 1 },
+  { 0xBB, { 0x28 }, 1 },
+  { 0xC0, { 0x2C }, 1 },
+  { 0xC2, { 0x01 }, 1 },
+  { 0xC3, { 0x1F }, 1 },
+  { 0xC6, { 0x13 }, 1 },
+  { 0xD0, { 0xA7 }, 1 },
+  { 0xD0, { 0xA4, 0xA1 }, 2 },
+  { 0xD6, { 0xA1 }, 1 },
+  { 0xE0, { 0xF0, 0x05, 0x0A, 0x06, 0x06, 0x03, 0x2B, 0x32, 0x43, 0x36, 0x11, 0x10, 0x2B, 0x32 }, 14 },
+  { 0xE1, { 0xF0, 0x08, 0x0C, 0x0B, 0x09, 0x24, 0x2B, 0x22, 0x43, 0x38, 0x15, 0x16, 0x2F, 0x37 }, 14 },
 };
 
 static void st_set_window(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
   // +35 CGRAM offset for the 170-column visible area of the 240-wide panel.
   const uint16_t ox = 35;
-  uint8_t caset[4] = {uint8_t((ox + x1) >> 8), uint8_t(ox + x1),
-                      uint8_t((ox + x2) >> 8), uint8_t(ox + x2)};
-  uint8_t paset[4] = {uint8_t(y1 >> 8), uint8_t(y1), uint8_t(y2 >> 8), uint8_t(y2)};
+  uint8_t caset[4] = { uint8_t((ox + x1) >> 8), uint8_t(ox + x1),
+                       uint8_t((ox + x2) >> 8), uint8_t(ox + x2) };
+  uint8_t paset[4] = { uint8_t(y1 >> 8), uint8_t(y1), uint8_t(y2 >> 8), uint8_t(y2) };
   st_write_cmd_data(0x2A, caset, 4);
   st_write_cmd_data(0x2B, paset, 4);
   st_write_cmd(0x2C);
@@ -324,17 +334,29 @@ static bool st7789_init() {
 #if HEXWALLET_HAS_GXEPD2
 #if defined(HEXWALLET_EPD_DRIVER_CLASS)
 static GxEPD2_BW<HEXWALLET_EPD_DRIVER_CLASS, HEXWALLET_EPD_DRIVER_CLASS::HEIGHT> s_epd(
-    HEXWALLET_EPD_DRIVER_CLASS(HEXWALLET_EPD_PIN_CS, HEXWALLET_EPD_PIN_DC,
-                               HEXWALLET_EPD_PIN_RST, HEXWALLET_EPD_PIN_BUSY));
+  HEXWALLET_EPD_DRIVER_CLASS(HEXWALLET_EPD_PIN_CS, HEXWALLET_EPD_PIN_DC,
+                             HEXWALLET_EPD_PIN_RST, HEXWALLET_EPD_PIN_BUSY));
 #endif
 #endif
 
 // 4x4 Bayer ordered-dither threshold matrix for 16bpp -> 1bpp conversion.
 static const uint8_t kBayer4[16] = {
-    0,  8,  2, 10,
-    12, 4, 14, 6,
-    3, 11, 1,  9,
-    15, 7, 13, 5,
+  0,
+  8,
+  2,
+  10,
+  12,
+  4,
+  14,
+  6,
+  3,
+  11,
+  1,
+  9,
+  15,
+  7,
+  13,
+  5,
 };
 
 #endif  // e-ink section
@@ -359,7 +381,7 @@ static void cst816s_read() {
   Wire.beginTransmission(0x15);
   Wire.write(0x01);  // touch data starts at register 0x01
   if (Wire.endTransmission(false) != 0) return;
-  uint8_t buf[6] = {0};
+  uint8_t buf[6] = { 0 };
   if (Wire.requestFrom(static_cast<uint8_t>(0x15), static_cast<uint8_t>(6)) != 6) return;
   for (int i = 0; i < 6; ++i) buf[i] = Wire.read();
   const uint8_t fingers = buf[1];
@@ -379,8 +401,7 @@ static uint8_t *g_draw_buf = nullptr;
 
 #if defined(HEXWALLET_DISPLAY_KIND_COLOR)
 static void color_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
-#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || \
-    HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
   rm67162_push_pixels(area->x1, area->y1, uint16_t(area->x2 - area->x1 + 1),
                       uint16_t(area->y2 - area->y1 + 1), px_map);
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
@@ -440,11 +461,11 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 #endif
 
 static bool lvgl_register_display(
-    uint16_t width, uint16_t height, bool full_frame,
-    void (*flush_cb)(lv_display_t *, const lv_area_t *, uint8_t *)) {
+  uint16_t width, uint16_t height, bool full_frame,
+  void (*flush_cb)(lv_display_t *, const lv_area_t *, uint8_t *)) {
   const size_t buf_px =
-      full_frame ? size_t(width) * height
-                 : size_t(width) * (size_t(height) / 10 < 16 ? 16 : size_t(height) / 10);
+    full_frame ? size_t(width) * height
+               : size_t(width) * (size_t(height) / 10 < 16 ? 16 : size_t(height) / 10);
   // RGB565: 2 bytes per pixel.
   uint8_t *buf = static_cast<uint8_t *>(board_alloc(buf_px * 2));
   if (buf == nullptr) return false;
@@ -467,7 +488,9 @@ static bool lvgl_register_display(
 // ===========================================================================
 //  Public board port API
 // ===========================================================================
-const char *board_name() { return HEXWALLET_BOARD_NAME; }
+const char *board_name() {
+  return HEXWALLET_BOARD_NAME;
+}
 
 DisplayKind board_display_kind() {
 #if defined(HEXWALLET_DISPLAY_KIND_COLOR)
@@ -495,8 +518,12 @@ bool board_has_touch() {
 #endif
 }
 
-bool board_is_color() { return board_display_kind() == DisplayKind::Color; }
-bool board_is_eink() { return board_display_kind() == DisplayKind::MonoEink; }
+bool board_is_color() {
+  return board_display_kind() == DisplayKind::Color;
+}
+bool board_is_eink() {
+  return board_display_kind() == DisplayKind::MonoEink;
+}
 
 uint16_t board_display_width() {
 #if defined(HEXWALLET_DISPLAY_KIND_COLOR)
@@ -545,8 +572,7 @@ bool board_display_init() {
 #if !HEXWALLET_ENABLE_LVGL
   return false;
 #elif defined(HEXWALLET_DISPLAY_KIND_COLOR)
-#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || \
-    HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
   if (!rm67162_init()) return false;
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
   if (!st7789_init()) return false;
@@ -560,7 +586,7 @@ bool board_display_init() {
 #elif defined(HEXWALLET_DISPLAY_KIND_EINK)
 #if HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
   s_eink_bw = static_cast<uint8_t *>(
-      board_alloc(size_t(HEXWALLET_EPD_WIDTH) * HEXWALLET_EPD_HEIGHT / 8));
+    board_alloc(size_t(HEXWALLET_EPD_WIDTH) * HEXWALLET_EPD_HEIGHT / 8));
   if (s_eink_bw == nullptr) return false;
   s_epd.init(0, true, 10, false);
   s_epd.setRotation(0);

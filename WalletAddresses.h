@@ -17,8 +17,8 @@ struct UtxoAddressProfile {
   bool ripple_alphabet;
 };
 
-constexpr UtxoAddressProfile kBitcoinMainnet = {0x00, 0x05, "bc", false};
-constexpr UtxoAddressProfile kBitcoinTestnet = {0x6f, 0xc4, "tb", false};
+constexpr UtxoAddressProfile kBitcoinMainnet = { 0x00, 0x05, "bc", false };
+constexpr UtxoAddressProfile kBitcoinTestnet = { 0x6f, 0xc4, "tb", false };
 
 WalletError address_p2pkh(const UtxoAddressProfile &profile,
                           const uint8_t public_key[kCompressedPublicKeySize],

@@ -1,11 +1,3 @@
-/**
- * @file lv_conf.h
- * LVGL configuration for HexWallet (LVGL 9.x).
- *
- * Keep the widget set to exactly what WalletUi.cpp instantiates; every
- * enabled widget costs flash and every disabled one avoids surprises.
- */
-
 #ifndef LV_CONF_H
 #define LV_CONF_H
 

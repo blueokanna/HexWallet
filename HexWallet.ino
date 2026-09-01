@@ -1,7 +1,12 @@
 #include <Arduino.h>
 
 #ifndef HEXWALLET_LOOP_TASK_STACK_SIZE
-#define HEXWALLET_LOOP_TASK_STACK_SIZE (16 * 1024)
+// The loop task runs setup() and loop(): all eleven crypto self-test suites,
+// the display/LVGL init and the CLI init run on it. The EIP-2333 Lamport
+// derivation used to declare ~32 KB of stack arrays here and overflowed the
+// old 16 KB stack on hardware (LoadStoreError). The buffers are now on the
+// heap; 32 KB leaves comfortable headroom for LVGL rendering too.
+#define HEXWALLET_LOOP_TASK_STACK_SIZE (32 * 1024)
 #endif
 SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 
@@ -40,19 +45,29 @@ void setup() {
   const bool tokens = hexwallet::run_token_profile_self_tests();
   const bool transport = hexwallet::run_transport_policy_self_test();
   const bool bitcoin = hexwallet::run_bitcoin_transaction_self_test();
-  Serial.print("SELFTEST crypto="); Serial.print(crypto ? "pass" : "FAIL");
-  Serial.print(" extended="); Serial.print(extended ? "pass" : "FAIL");
-  Serial.print(" cryptonote="); Serial.print(cryptonote ? "pass" : "FAIL");
-  Serial.print(" evm="); Serial.print(evm ? "pass" : "FAIL");
-  Serial.print(" bip39="); Serial.print(bip39 ? "pass" : "FAIL");
-  Serial.print(" bip32="); Serial.print(bip32 ? "pass" : "FAIL");
-  Serial.print(" address="); Serial.print(address ? "pass" : "FAIL");
-  Serial.print(" networks="); Serial.print(networks ? "pass" : "FAIL");
-  Serial.print(" tokens="); Serial.print(tokens ? "pass" : "FAIL");
-  Serial.print(" transport="); Serial.print(transport ? "pass" : "FAIL");
-  Serial.print(" bitcoin="); Serial.println(bitcoin ? "pass" : "FAIL");
-  security_ready = crypto && extended && cryptonote && evm && bip39 && bip32 &&
-                   address && networks && tokens && transport && bitcoin;
+  Serial.print("SELFTEST crypto=");
+  Serial.print(crypto ? "pass" : "FAIL");
+  Serial.print(" extended=");
+  Serial.print(extended ? "pass" : "FAIL");
+  Serial.print(" cryptonote=");
+  Serial.print(cryptonote ? "pass" : "FAIL");
+  Serial.print(" evm=");
+  Serial.print(evm ? "pass" : "FAIL");
+  Serial.print(" bip39=");
+  Serial.print(bip39 ? "pass" : "FAIL");
+  Serial.print(" bip32=");
+  Serial.print(bip32 ? "pass" : "FAIL");
+  Serial.print(" address=");
+  Serial.print(address ? "pass" : "FAIL");
+  Serial.print(" networks=");
+  Serial.print(networks ? "pass" : "FAIL");
+  Serial.print(" tokens=");
+  Serial.print(tokens ? "pass" : "FAIL");
+  Serial.print(" transport=");
+  Serial.print(transport ? "pass" : "FAIL");
+  Serial.print(" bitcoin=");
+  Serial.println(bitcoin ? "pass" : "FAIL");
+  security_ready = crypto && extended && cryptonote && evm && bip39 && bip32 && address && networks && tokens && transport && bitcoin;
   if (!security_ready) {
     Serial.println("FATAL: cryptographic self-test failed; wallet services disabled");
     return;
