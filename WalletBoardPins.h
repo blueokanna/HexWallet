@@ -160,6 +160,20 @@
 #define HEXWALLET_BOARD_NAME "T-Echo Lite Kit"
 
 // ---------------------------------------------------------------------------
+// Headless - no display, no touch, no LVGL. Works on ANY supported MCU
+// (ESP32, ESP32-S3, nRF52, ...): the authenticated Serial CLI is the only
+// interface. Select with HEXWALLET_BOARD_HEADLESS (6), e.g. pass
+// `-DHEXWALLET_BOARD=6` as a build flag, or drop a `build_opt.h` containing
+// `-DHEXWALLET_BOARD=6` next to HexWallet.ino in the Arduino IDE.
+// LVGL is auto-disabled and HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION defaults
+// to 1 so transaction approval prints a confirm code over Serial.
+// ---------------------------------------------------------------------------
+#elif HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
+
+// Deliberately no HEXWALLET_HAS_DISPLAY / display pins / touch / battery.
+#define HEXWALLET_BOARD_NAME "Headless CLI"
+
+// ---------------------------------------------------------------------------
 // Default: no display hardware selected.
 // ---------------------------------------------------------------------------
 #else

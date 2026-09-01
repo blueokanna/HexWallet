@@ -118,6 +118,7 @@ The verified build target is the Espressif ESP32 core 3.3.10 with FQBN `esp32:es
 | `HEXWALLET_BOARD_T_DISPLAY_S3` | T-Display S3 | ST7789 | ST7789 | 8-bit parallel | 170×320 |
 | `HEXWALLET_BOARD_T_DECK_MAX` | T-Deck Max | GDEQ031T10 | UC8253 | SPI (e-paper) | 240×320 |
 | `HEXWALLET_BOARD_T_ECHO_LITE` | T-Echo Lite Kit | e-paper | — | SPI (e-paper) | 176×192 |
+| `HEXWALLET_BOARD_HEADLESS` | Any MCU (no display) | — | — | Serial CLI | — |
 
 Pin assignments live in `WalletBoardPins.h` and are taken from the official LilyGO pinout diagrams and factory code; the RM67162 init sequence and the ST7789 init sequence match the official LilyGO drivers byte for byte. Build for a specific board with `--build-property`:
 
@@ -136,6 +137,33 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3 \
 ```
 
 The port is fail-closed: a board with no display profile, or an e-paper profile without the `GxEPD2` library, prints the reason over Serial and runs the CLI only. The T-Echo Lite is an nRF52840 board (Adafruit nRF52 core, not ESP32); its pin profile is defined and the e-paper backend is shared with the T-Deck Max, but a separate nRF52 build target is required before it can run the full firmware.
+
+### Headless (no display, pure Serial CLI)
+
+For any board **without** a screen — a generic ESP32-S3 dev kit, a USB-stick
+wallet, etc. — select the headless target. It compiles no display driver, no
+touch driver and no LVGL, auto-sets `HEXWALLET_ENABLE_LVGL=0` and
+`HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION=1`, and runs the authenticated Serial
+CLI as the only interface (transaction approval prints a confirm code over
+Serial).
+
+```text
+arduino-cli compile --fqbn esp32:esp32:esp32s3 \
+  --build-property compiler.cpp.extra_flags=-DHEXWALLET_BOARD=6 \
+  --build-property compiler.c.extra_flags=-DHEXWALLET_BOARD=6 .
+```
+
+In the **Arduino IDE**, the same board pick is a plain `-D` flag. Create a
+`build_opt.h` next to `HexWallet.ino` containing exactly:
+
+```text
+-DHEXWALLET_BOARD=6
+```
+
+The ESP32 core picks `build_opt.h` up automatically on every compile (delete
+the file to go back to a display board). On boot the firmware prints
+`INFO no display detected; authenticated CLI is the active interface` and
+`help` lists every command.
 
 ## Test And Verification
 

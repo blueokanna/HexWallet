@@ -11,10 +11,26 @@
 #define HEXWALLET_BOARD_T_DISPLAY_S3 3
 #define HEXWALLET_BOARD_T_DECK_MAX 4
 #define HEXWALLET_BOARD_T_ECHO_LITE 5
+#define HEXWALLET_BOARD_HEADLESS 6
 
 #ifndef HEXWALLET_BOARD
 // Default target: the reference board the port was developed and validated on.
 #define HEXWALLET_BOARD HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED
+#endif
+
+// ---------------------------------------------------------------------------
+// Headless (no display) target - e.g. any generic ESP32-S3 dev board, or a
+// USB-stick wallet. Pure authenticated Serial CLI; no LVGL, no panel driver,
+// no touch. Transaction approval falls back to the host (serial) with a
+// printed confirm code (see HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION below).
+// ---------------------------------------------------------------------------
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
+#ifndef HEXWALLET_ENABLE_LVGL
+#define HEXWALLET_ENABLE_LVGL 0
+#endif
+#ifndef HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
+#define HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION 1
+#endif
 #endif
 
 #ifndef HEXWALLET_ENABLE_LVGL
@@ -95,6 +111,9 @@ inline const UiPolicy &ui_policy() {
     return UiPolicy{ DisplayKind::MonoEink, 900UL, false, 800, 480 };
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_ECHO_LITE
     return UiPolicy{ DisplayKind::MonoEink, 900UL, false, 176, 192 };
+#elif HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
+    // No UI surface on the headless target; values are unused.
+    return UiPolicy{ DisplayKind::Color, 0UL, false, 0, 0 };
 #else
     return UiPolicy{ DisplayKind::Color, 0UL, true, 240, 536 };
 #endif
