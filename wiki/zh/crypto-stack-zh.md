@@ -57,6 +57,47 @@ Chia/BLS 密钥树。规范已迁移到 ERC-2333；要点如下：
 `okm mod r`）都能通过，只有完整点运算才会暴露。修法：先约减 `|A|`，
 非零时再 `B − |A|`。
 
+## CryptoNote（Monero / Masari）
+
+- Spend key = `sc_reduce32(Keccak-256(seed))`，view key =
+  `sc_reduce32(Keccak-256(spend))`，与 32 字节 seed 下的
+  `crypto::generate_keys` 一致。
+- 公钥使用 Edwards25519 群和 Monero 编码（小端 `y` 加 `x` 的符号位）。
+  点解压、加法和标量乘实现在 `Ed25519.cpp`（`edwards_decompress`、
+  `edwards_add`、`scalarmult_point`），这条曲线不再依赖外部大数库。
+- 子地址遵循 `device_default.cpp`：`m = sc_reduce32(Keccak-256(
+  "SubAddr" ‖ view_secret ‖ major_le32 ‖ minor_le32))`、`D = B + mG`、
+  `C = view_secret · D`，主网前缀 `42`。集成地址追加 8 字节 payment ID，
+  前缀 `19`；`(0,0)` 即标准地址。
+- 标量乘始终执行加法并用常数时间掩码选择结果，标量位不控制分支。
+- 向量：零 seed 的 spend/view key 与标准地址、两个子地址、集成地址、
+  以及原有合成基点向量，均对照独立 Keccak/Edwards 参考实现。
+
+## QRL XMSS-SHAKE256
+
+- QRL 没有 BIP32 树。`qrl_seed_from_bip39` 用 SHAKE-256 和域字符串
+  `HexWallet/QRL/v1` 把 BIP39 seed 扩展为 48 字节。
+- `qrl_xmss_public_key` 执行高度 10 的 XMSS treehash：SHAKE-256 扩展出
+  `sk_seed ‖ sk_prf ‖ pub_seed`，WOTS+ `w=16`（67 条链）、L-tree 压缩、
+  Merkle 栈。公钥为 `descriptor ‖ root ‖ pub_seed`（67 字节）。
+- 地址为 `Q` + `descriptor ‖ SHA-256(pubkey) ‖ SHA-256(descriptor ‖
+  hash)[-4:]` 的十六进制（39 字节），与 `QRLHelper::getAddress` 一致。
+- 已对照 qrllib 的 `XmssBasicSHAKE256` 向量（48 字节零 seed、高度 4、
+  地址 `Q0202000f9ec8…`）。生产高度 10 约需三百万次 SHAKE-256；进度回调
+  让 MCU 调用方可以喂狗。有状态签名故意未实现。
+
+## 安全芯片托管
+
+`WalletCustody` 把每个 `AddressEncoding` 映射为 `KeyScheme`，回答安全芯片
+能否持有密钥并产生该链需要的精确签名。默认活动配置是纯 MCU；只有板级移植
+探测 applet 并调用 `set_active_secure_element_profile()` 后才会改变。保守的
+SE050C1H1 目标配置只声明 secp256k1 + ECDSA + seed 封装：BTC/LTC/ETH/Cosmos 类密钥可以导入并在
+applet 内签名；Kaspa（BIP340 Schnorr）、Monero/Masari（Keccak 约简
+Edwards）、QRL（XMSS）、Chia（BLS12-381），以及在硬件验证 Ed25519
+applet 路径之前的 Solana/Algorand/Cardano/Tezos/Qubic 密钥都保留在
+MCU RAM。BIP32/SLIP-0010 派生本身始终在 MCU 完成，因为 SE050 没有
+BIP32 引擎。该策略是代码而非宣传：`wallet custody <id>` 会输出结论与原因。
+
 ## Chia 标准地址
 
 `chia_standard_address(seed, address_index)`：

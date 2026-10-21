@@ -24,6 +24,67 @@ bool hmac(mbedtls_md_type_t type, const uint8_t *key, size_t key_size,
   return info != nullptr && mbedtls_md_hmac(info, key, key_size, data, data_size, out) == 0;
 }
 
+constexpr size_t kKeccakLanes = 25;
+constexpr size_t kMaxKeccakRate = 168;
+
+uint64_t load_le64(const uint8_t *data) {
+  uint64_t value = 0;
+  for (uint8_t index = 0; index < 8; ++index) {
+    value |= static_cast<uint64_t>(data[index]) << (index * 8U);
+  }
+  return value;
+}
+
+void store_le64(uint8_t *out, uint64_t value) {
+  for (uint8_t index = 0; index < 8; ++index) {
+    out[index] = static_cast<uint8_t>(value >> (index * 8U));
+  }
+}
+
+// One-shot Keccak sponge shared by Keccak-512 and SHAKE-256.  The rate is a
+// multiple of the lane size; domain is 0x01 for legacy Keccak and 0x1F for
+// SHAKE.  Output may span several squeeze blocks.
+bool keccak_sponge(const uint8_t *data, size_t size, size_t rate, uint8_t domain,
+                   uint8_t *out, size_t out_size) {
+  if (out == nullptr || (data == nullptr && size != 0) || rate == 0 ||
+      rate > kMaxKeccakRate || (rate % sizeof(uint64_t)) != 0) {
+    return false;
+  }
+  uint64_t state[kKeccakLanes] = {};
+  while (size >= rate) {
+    for (size_t lane = 0; lane < rate / sizeof(uint64_t); ++lane) {
+      state[lane] ^= load_le64(data + lane * sizeof(uint64_t));
+    }
+    keccak_permute(state);
+    data += rate;
+    size -= rate;
+  }
+  uint8_t block[kMaxKeccakRate] = {};
+  if (size != 0) memcpy(block, data, size);
+  block[size] ^= domain;
+  block[rate - 1] ^= 0x80;
+  for (size_t lane = 0; lane < rate / sizeof(uint64_t); ++lane) {
+    state[lane] ^= load_le64(block + lane * sizeof(uint64_t));
+  }
+  keccak_permute(state);
+
+  size_t produced = 0;
+  while (produced != out_size) {
+    const size_t take = (out_size - produced) < rate ? (out_size - produced) : rate;
+    for (size_t offset = 0; offset < take; offset += sizeof(uint64_t)) {
+      uint8_t lane[sizeof(uint64_t)];
+      store_le64(lane, state[offset / sizeof(uint64_t)]);
+      const size_t chunk = (take - offset) < sizeof(uint64_t) ? (take - offset) : sizeof(uint64_t);
+      memcpy(out + produced + offset, lane, chunk);
+    }
+    produced += take;
+    if (produced != out_size) keccak_permute(state);
+  }
+  mbedtls_platform_zeroize(state, sizeof(state));
+  mbedtls_platform_zeroize(block, sizeof(block));
+  return true;
+}
+
 }  // namespace
 
 bool crypto_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]) {
@@ -73,6 +134,14 @@ bool crypto_keccak256(const uint8_t *data, size_t size, uint8_t out[kKeccak256Si
   const bool ok = keccak_update(&context, data, size) && keccak_final(&context, out);
   mbedtls_platform_zeroize(&context, sizeof(context));
   return ok;
+}
+
+bool crypto_keccak512(const uint8_t *data, size_t size, uint8_t out[kKeccak512Size]) {
+  return keccak_sponge(data, size, 72, 0x01, out, kKeccak512Size);
+}
+
+bool crypto_shake256(const uint8_t *data, size_t size, uint8_t *out, size_t out_size) {
+  return keccak_sponge(data, size, 136, 0x1F, out, out_size);
 }
 
 bool crypto_constant_time_equal(const uint8_t *left, const uint8_t *right, size_t size) {
@@ -174,12 +243,31 @@ bool run_crypto_self_tests() {
     0x31,
   };
   static const uint8_t kAbc[] = { 'a', 'b', 'c' };
+  static const uint8_t kEmptyKeccak512[kKeccak512Size] = {
+    0x0e, 0xab, 0x42, 0xde, 0x4c, 0x3c, 0xeb, 0x92, 0x35, 0xfc, 0x91, 0xac, 0xff, 0xe7, 0x46, 0xb2,
+    0x9c, 0x29, 0xa8, 0xc3, 0x66, 0xb7, 0xc6, 0x0e, 0x4e, 0x67, 0xc4, 0x66, 0xf3, 0x6a, 0x43, 0x04,
+    0xc0, 0x0f, 0xa9, 0xca, 0xf9, 0xd8, 0x79, 0x76, 0xba, 0x46, 0x9b, 0xcb, 0xe0, 0x67, 0x13, 0xb4,
+    0x35, 0xf0, 0x91, 0xef, 0x27, 0x69, 0xfb, 0x16, 0x0c, 0xda, 0xb3, 0x3d, 0x36, 0x70, 0x68, 0x0e,
+  };
+  static const uint8_t kEmptyShake256[kShake256Size] = {
+    0x46, 0xb9, 0xdd, 0x2b, 0x0b, 0xa8, 0x8d, 0x13, 0x23, 0x3b, 0x3f, 0xeb, 0x74, 0x3e, 0xeb, 0x24,
+    0x3f, 0xcd, 0x52, 0xea, 0x62, 0xb8, 0x1b, 0x82, 0xb5, 0x0c, 0x27, 0x64, 0x6e, 0xd5, 0x76, 0x2f,
+  };
+  static const uint8_t kAbcShake256[kShake256Size] = {
+    0x48, 0x33, 0x66, 0x60, 0x13, 0x60, 0xa8, 0x77, 0x1c, 0x68, 0x63, 0x08, 0x0c, 0xc4, 0x11, 0x4d,
+    0x8d, 0xb4, 0x45, 0x30, 0xf8, 0xf1, 0xe1, 0xee, 0x4f, 0x94, 0xea, 0x37, 0xe7, 0x8b, 0x57, 0x39,
+  };
   uint8_t actual[kSha256Size];
   bool passed = crypto_sha256(kAbc, sizeof(kAbc), actual) && crypto_constant_time_equal(actual, kAbcSha, sizeof(actual));
   passed = passed && crypto_keccak256(nullptr, 0, actual) && crypto_constant_time_equal(actual, kEmptyKeccak, sizeof(actual));
   uint8_t short_actual[kRipemd160Size];
   local_ripemd160(nullptr, 0, short_actual);
   passed = passed && crypto_constant_time_equal(short_actual, kEmptyRipemd, sizeof(short_actual));
+  uint8_t wide[kKeccak512Size];
+  passed = passed && crypto_keccak512(nullptr, 0, wide) && crypto_constant_time_equal(wide, kEmptyKeccak512, sizeof(wide));
+  passed = passed && crypto_shake256(nullptr, 0, wide, kShake256Size) && crypto_constant_time_equal(wide, kEmptyShake256, kShake256Size);
+  passed = passed && crypto_shake256(kAbc, sizeof(kAbc), wide, kShake256Size) && crypto_constant_time_equal(wide, kAbcShake256, kShake256Size);
+  mbedtls_platform_zeroize(wide, sizeof(wide));
   mbedtls_platform_zeroize(actual, sizeof(actual));
   mbedtls_platform_zeroize(short_actual, sizeof(short_actual));
   return passed;

@@ -10,6 +10,8 @@ constexpr size_t kSha256Size = 32;
 constexpr size_t kSha512Size = 64;
 constexpr size_t kRipemd160Size = 20;
 constexpr size_t kKeccak256Size = 32;
+constexpr size_t kKeccak512Size = 64;
+constexpr size_t kShake256Size = 32;
 
 bool crypto_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
 bool crypto_double_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
@@ -22,6 +24,10 @@ bool crypto_pbkdf2_sha256(const uint8_t *password, size_t password_size,
                           uint8_t *out, size_t out_size);
 bool crypto_hash160(const uint8_t *data, size_t size, uint8_t out[kRipemd160Size]);
 bool crypto_keccak256(const uint8_t *data, size_t size, uint8_t out[kKeccak256Size]);
+// Legacy Keccak-512 (0x01 padding), required by CryptoNote subaddresses.
+bool crypto_keccak512(const uint8_t *data, size_t size, uint8_t out[kKeccak512Size]);
+// FIPS 202 SHAKE-256 (0x1F padding), arbitrary output length.
+bool crypto_shake256(const uint8_t *data, size_t size, uint8_t *out, size_t out_size);
 bool crypto_constant_time_equal(const uint8_t *left, const uint8_t *right, size_t size);
 bool run_crypto_self_tests();
 

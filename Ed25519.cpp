@@ -12,6 +12,8 @@ namespace {
 
 typedef int64_t fe[10];
 
+void fe_cmov(fe out, const fe a, const fe b, int flag);
+
 uint64_t load_le64_word(const uint8_t *data);
 
 // ---------------------------------------------------------------------------
@@ -588,28 +590,131 @@ void edwards_add(fe x3, fe y3, const fe x1, const fe y1, const fe x2,
 }
 
 // Multiply the base point by a 32-byte little-endian scalar (MSB-first walk).
-void scalarmult_base(fe rx, fe ry, const uint8_t *scalar) {
-  fe bx, by, tx, ty, dbl_x, dbl_y;
-  fe_frombytes(bx, kBaseX);
-  fe_frombytes(by, kBaseY);
+void scalarmult_point(fe rx, fe ry, const fe px, const fe py,
+                      const uint8_t *scalar) {
+  fe tx, ty, dbl_x, dbl_y;
   fe_0(rx);
   fe_1(ry);  // identity (0, 1)
   for (int bit = 255; bit >= 0; --bit) {
     edwards_add(dbl_x, dbl_y, rx, ry, rx, ry);
     fe_copy(rx, dbl_x);
     fe_copy(ry, dbl_y);
-    if ((scalar[bit / 8] >> (bit % 8)) & 1) {
-      edwards_add(tx, ty, rx, ry, bx, by);
-      fe_copy(rx, tx);
-      fe_copy(ry, ty);
-    }
+    // Always perform the addition and select with a mask: branching on a
+    // secret scalar bit would leak the key through timing.
+    edwards_add(tx, ty, rx, ry, px, py);
+    const int bit_value = (scalar[bit / 8] >> (bit % 8)) & 1;
+    fe_cmov(rx, rx, tx, bit_value);
+    fe_cmov(ry, ry, ty, bit_value);
   }
-  secure_zero(bx, sizeof(bx));
-  secure_zero(by, sizeof(by));
   secure_zero(tx, sizeof(tx));
   secure_zero(ty, sizeof(ty));
   secure_zero(dbl_x, sizeof(dbl_x));
   secure_zero(dbl_y, sizeof(dbl_y));
+}
+
+void scalarmult_base(fe rx, fe ry, const uint8_t *scalar) {
+  fe bx, by;
+  fe_frombytes(bx, kBaseX);
+  fe_frombytes(by, kBaseY);
+  scalarmult_point(rx, ry, bx, by, scalar);
+  secure_zero(bx, sizeof(bx));
+  secure_zero(by, sizeof(by));
+}
+
+void fe_neg(fe out, const fe value) {
+  fe zero;
+  fe_0(zero);
+  fe_sub(out, zero, value);
+}
+
+// Constant-time select: out = flag ? b : a.  flag must be 0 or 1.
+void fe_cmov(fe out, const fe a, const fe b, int flag) {
+  const int64_t mask = -static_cast<int64_t>(flag != 0);
+  for (int index = 0; index < 10; ++index) {
+    out[index] = (a[index] & ~mask) | (b[index] & mask);
+  }
+}
+
+bool fe_iszero(const fe value) {
+  uint8_t encoded[32];
+  fe_tobytes(encoded, value);
+  uint8_t combined = 0;
+  for (size_t index = 0; index < sizeof(encoded); ++index) combined |= encoded[index];
+  secure_zero(encoded, sizeof(encoded));
+  return combined == 0;
+}
+
+// out = base^exponent with a 32-byte little-endian exponent.
+void fe_pow(fe out, const fe base, const uint8_t exponent[32]) {
+  fe result, factor;
+  fe_1(result);
+  fe_copy(factor, base);
+  for (int bit = 255; bit >= 0; --bit) {
+    fe_sq(result, result);
+    if ((exponent[bit / 8] >> (bit % 8)) & 1) fe_mul(result, result, factor);
+  }
+  fe_copy(out, result);
+  secure_zero(result, sizeof(result));
+  secure_zero(factor, sizeof(factor));
+}
+
+bool edwards_decompress(fe x, fe y, const uint8_t point[32]) {
+  const bool sign = (point[31] & 0x80) != 0;
+  fe y2, u, v, v3, v7, t, check, one, two, d, sqrt_m1;
+  fe_frombytes(y, point);
+  uint8_t canonical[32];
+  fe_tobytes(canonical, y);
+  uint8_t expected[32];
+  memcpy(expected, point, sizeof(expected));
+  expected[31] &= 0x7f;
+  const bool canonical_y = memcmp(canonical, expected, sizeof(expected)) == 0;
+  secure_zero(canonical, sizeof(canonical));
+  secure_zero(expected, sizeof(expected));
+  if (!canonical_y) return false;
+  fe_1(one);
+  fe_sq(y2, y);
+  fe_sub(u, y2, one);
+  fe_frombytes(d, kEdwardsD);
+  fe_mul(v, d, y2);
+  fe_add(v, v, one);
+  if (fe_iszero(v)) return false;
+  fe_sq(v3, v);
+  fe_mul(v3, v3, v);
+  fe_sq(v7, v3);
+  fe_mul(v7, v7, v);
+  fe_mul(t, u, v7);
+
+  uint8_t exponent[32];
+  memset(exponent, 0xff, sizeof(exponent));
+  exponent[0] = 0xfd;  // (p-5)/8 = 2^252 - 3
+  exponent[31] = 0x0f;
+  fe_pow(t, t, exponent);
+  fe_mul(x, t, u);
+  fe_mul(x, x, v3);
+
+  fe_sq(check, x);
+  fe_mul(check, check, v);
+  fe_sub(check, check, u);
+  if (!fe_iszero(check)) {
+    memset(exponent, 0xff, sizeof(exponent));
+    exponent[0] = 0xfb;  // (p-1)/4 = 2^253 - 5
+    exponent[31] = 0x1f;
+    fe_1(two);
+    fe_add(two, two, two);
+    fe_pow(sqrt_m1, two, exponent);
+    fe_mul(x, x, sqrt_m1);
+    fe_sq(check, x);
+    fe_mul(check, check, v);
+    fe_sub(check, check, u);
+    if (!fe_iszero(check)) return false;
+  }
+  uint8_t encoded[32];
+  fe_tobytes(encoded, x);
+  const bool odd = (encoded[0] & 1) != 0;
+  secure_zero(encoded, sizeof(encoded));
+  if (!odd && sign && fe_iszero(x)) return false;
+  if (odd != sign) fe_neg(x, x);
+  return true;
 }
 
 void encode_point(uint8_t out[32], const fe x, const fe y) {
@@ -767,6 +872,45 @@ bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
   secure_zero(private_key, sizeof(private_key));
   secure_zero(chain_code, sizeof(chain_code));
   return true;
+}
+
+bool ed25519_point_add_compressed(const uint8_t left[32],
+                                  const uint8_t right[32],
+                                  uint8_t out[32]) {
+  if (left == nullptr || right == nullptr || out == nullptr) return false;
+  fe x1, y1, x2, y2, x3, y3;
+  if (!edwards_decompress(x1, y1, left) ||
+      !edwards_decompress(x2, y2, right)) {
+    return false;
+  }
+  edwards_add(x3, y3, x1, y1, x2, y2);
+  encode_point(out, x3, y3);
+  secure_zero(x1, sizeof(x1));
+  secure_zero(y1, sizeof(y1));
+  secure_zero(x2, sizeof(x2));
+  secure_zero(y2, sizeof(y2));
+  secure_zero(x3, sizeof(x3));
+  secure_zero(y3, sizeof(y3));
+  return true;
+}
+
+bool ed25519_point_mul_compressed(const uint8_t point[32],
+                                  const uint8_t scalar[32],
+                                  uint8_t out[32]) {
+  if (point == nullptr || scalar == nullptr || out == nullptr) return false;
+  fe px, py, rx, ry;
+  if (!edwards_decompress(px, py, point)) return false;
+  scalarmult_point(rx, ry, px, py, scalar);
+  encode_point(out, rx, ry);
+  secure_zero(px, sizeof(px));
+  secure_zero(py, sizeof(py));
+  secure_zero(rx, sizeof(rx));
+  secure_zero(ry, sizeof(ry));
+  return true;
+}
+
+void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]) {
+  if (scalar != nullptr) sc_reduce_32(scalar);
 }
 
 }  // namespace hexwallet

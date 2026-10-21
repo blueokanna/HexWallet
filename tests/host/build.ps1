@@ -6,17 +6,7 @@
 # Usage:  powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-# mbedtls headers come from the ESP32 Arduino core's esp32-libs tool.  CI sets
-# HEXWALLET_ESP32_LIBS to the esp32-libs tool's "include\mbedtls" directory;
-# locally we fall back to the default Arduino15 install location.
-$defaultEspLibs = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\tools\esp32-libs\3.3.10\include\mbedtls"
-$espLibs = if ($env:HEXWALLET_ESP32_LIBS -and (Test-Path $env:HEXWALLET_ESP32_LIBS)) {
-  $env:HEXWALLET_ESP32_LIBS
-} else {
-  $defaultEspLibs
-}
-$mbedtlsInclude = Join-Path $espLibs "mbedtls\include"
-$mbedtlsPort   = Join-Path $espLibs "port\include"
+. (Join-Path $PSScriptRoot "esp32_paths.ps1")
 
 # Locate the Visual Studio installation and import the MSVC dev environment.
 $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -57,6 +47,11 @@ $cppSources = @(
   "local_ripemd160.cpp",
   "WalletAddresses.cpp",
   "WalletAltAddresses.cpp",
+  "WalletNetworks.cpp",
+  "WalletCatalog.cpp",
+  "CryptoNoteAddress.cpp",
+  "QrlXmss.cpp",
+  "WalletCustody.cpp",
   "host_security.cpp",
   "host_test_main.cpp"
 )

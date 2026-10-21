@@ -27,6 +27,7 @@ enum class WalletError : uint8_t {
   InvalidChild,
   InvalidPath,
   HardenedPublicDerivation,
+  Aborted,
 };
 
 struct HdPrivateNode {
@@ -79,6 +80,20 @@ WalletError uncompressed_public_key_from_private(
 WalletError secp256k1_sign_digest_recoverable(
   const uint8_t private_key[kPrivateKeySize],
   const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature);
+
+// BIP340 Schnorr over secp256k1.  message is the 32-byte sighash; aux_rand
+// must be 32 fresh random bytes (or zeros only in known-answer tests).  The
+// signature is 64 bytes: x-only R || s.  Kaspa and Taproot verify this form.
+WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
+                                   const uint8_t message[kPrivateKeySize],
+                                   const uint8_t aux_rand[kPrivateKeySize],
+                                   uint8_t out_signature[64]);
+bool secp256k1_schnorr_verify(const uint8_t xonly_public_key[kPrivateKeySize],
+                              const uint8_t message[kPrivateKeySize],
+                              const uint8_t signature[64]);
+WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize],
+                                       uint8_t out_xonly[kPrivateKeySize],
+                                       uint8_t *out_parity);
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size,
                                  HdPrivateNode *out_node);
 WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index,
@@ -95,6 +110,7 @@ WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat form
 
 bool run_bip32_self_test();
 bool run_secp256k1_self_test();
+bool run_bip340_self_test();
 
 }  // namespace hexwallet
 

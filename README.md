@@ -10,8 +10,10 @@ For the complete CLI workflow, including Arduino CLI build/upload, serial settin
 - BIP32 private and public child derivation, extended-key serialization, and startup known-answer tests.
 - Bitcoin mainnet PSBT v0 review and signing for BIP84 P2WPKH and BIP49 P2SH-P2WPKH inputs using `SIGHASH_ALL`, BIP143, low-S RFC6979 ECDSA, fee limits, and one-time review confirmation.
 - Strict EIP-155 legacy and EIP-1559 type-2 review/signing for registered EVM networks. Only native transfers and `transfer(address,uint256)` calls to registered ERC-20 contracts are accepted.
-- Address derivation for Bitcoin, Litecoin, Dogecoin, Dash, Bitcoin Gold, Ravencoin, XRP Ledger, TRON, Monero, Masari, and the registered EVM networks in `WalletNetworks.cpp`.
-- CryptoNote standard-address construction for Monero and Masari: Keccak scalar derivation, Edwards25519 public keys, network prefixes, block Base58, and checksums. Transaction parsing and signing are not enabled.
+- Address derivation for Bitcoin, Litecoin, Dogecoin, Dash, Bitcoin Gold, Ravencoin, XRP Ledger, TRON, Monero, Masari, QRL, and the registered EVM networks in `WalletNetworks.cpp`.
+- CryptoNote address construction for Monero and Masari: Keccak scalar derivation, Edwards25519 public keys, network prefixes, block Base58, and checksums. Monero also supports integrated addresses (8-byte payment ID) and MRL-0006 subaddresses (`m/0/account/change/index` key algebra with the `SubAddr` domain separator). RingCT/CLSAG parsing, key images, decoy verification, and signing are not enabled.
+- QRL address derivation: XMSS with SHAKE-256, height 10, WOTS+ `w=16`, the QRL 3-byte descriptor, SHA-256 address commitment and checksum, verified against the QRL reference implementation's SHAKE-256 vector. XMSS signing (stateful BDS traversal) is not enabled, and the derivation is explicitly CPU-heavy.
+- An explicit secure-element custody plan (`WalletCustody`) that separates keys the SE can hold from keys that must stay in MCU RAM. The conservative SE050C1H1 profile claims only secp256k1 + ECDSA + seed sealing; Monero/Masari, Kaspa Schnorr, QRL XMSS, BLS12-381, and (until the applet is validated on hardware) Ed25519 keys are planned as MCU-resident rather than pretending a generic ECC engine can sign them.
 - Chia standard addresses via the EIP-2333/ERC-2333 BLS12-381 key tree (`m/12381/8444/0/index`), CLVM `shatree` puzzle hashing, the default hidden puzzle (`ff0980`) and synthetic-offset public key, and `bech32m` encoding. The BLS12-381 G1 stack (field/group arithmetic, canonical generator, 48-byte ZCash-style compression) is implemented and verified against the official ERC-2333 test vectors and an independent reference oracle. Chia coin-spend parsing, aggregate signatures, and signing are not enabled.
 - Token metadata and account-address lookup for registered ERC-20 assets. An ERC-20 token uses the same EVM account address as its network; the registry records the contract address and decimal precision.
 - A searchable SLIP-0044 catalog that distinguishes address support, token-account support, transaction review, and signing support.
@@ -22,7 +24,9 @@ For the complete CLI workflow, including Arduino CLI build/upload, serial settin
 | Module | Responsibility |
 | --- | --- |
 | `WalletSecurity` | BIP39, BIP32, secp256k1 operations, KDFs, secure zeroization |
-| `CryptoNoteAddress` | CryptoNote scalar derivation, Edwards25519 public keys, Base58 standard addresses |
+| `CryptoNoteAddress` | CryptoNote scalar derivation, Edwards25519 point algebra, Base58 standard/integrated/subaddress encodings |
+| `QrlXmss` | QRL XMSS-SHAKE256 treehash, descriptor/public key, address encoding, progress hook |
+| `WalletCustody` | Per-network key custody plan (SE-held vs MCU-held) and SE capability policy |
 | `EvmTransaction` | Canonical RLP parsing, EIP-155/EIP-1559 review, registered ERC-20 transfer signing |
 | `WalletNetworks` | Native-chain metadata, registered SLIP-0044 type, derivation type, address encoding, EVM chain ID |
 | `WalletTokens` | Token standard, owning network, contract or mint identifier, precision, real capability state |
@@ -43,7 +47,9 @@ The registries are intentionally data-only. Adding a SLIP-0044 number does not e
 - Native UTXO and non-EVM chains use their registered SLIP-0044 type as the derivation type.
 - Registered EVM networks use `m/44'/60'/account'/change/index`. Their own SLIP-0044 type and EVM chain ID remain metadata. This gives Ethereum, EVM networks, and their ERC-20 tokens one standard account address for a given derivation index.
 - Bitcoin selects BIP44, BIP49, or BIP84 through its explicit network profile.
-- Monero and Masari derive a BIP32 child at `m/44'/coin'/account'/change/index`, then use that 32-byte child as input to CryptoNote's Keccak-and-reduce spend/view key derivation. This is HexWallet's deterministic BIP39 policy, not the Monero 25-word seed format or an assertion of compatibility with another hardware wallet.
+- Monero and Masari derive a BIP32 child at `m/44'/coin'/account'/change/index`, then use that 32-byte child as input to CryptoNote's Keccak-and-reduce spend/view key derivation. This is HexWallet's deterministic BIP39 policy, not the Monero 25-word seed format or an assertion of compatibility with another hardware wallet. Subaddress `(major, minor)` is rendered from the same child with `m = Hs("SubAddr" || view_secret || major || minor)`, `D = B + mG`, `C = view_secret * D`; `(0,0)` is the standard address.
+- QRL has no BIP32 key tree. The BIP39 seed is expanded with SHAKE-256 and the domain string `HexWallet/QRL/v1` into the 48-byte XMSS seed, which is then used for the canonical height-10 tree. This is a HexWallet policy; QRL's native wallet uses its own 34-word mnemonic. QRL addresses are therefore not asserted to be restorable by another BIP39 wallet.
+- Monero `(major, minor)` and QRL derivation index are surfaced through the existing `wallet address <id> <index>` argument; the QRL tree is generated once per request and never cached.
 
 Changing derivation policy changes derived addresses. Existing wallets should record the path used for every funded address.
 
@@ -55,7 +61,13 @@ The token registry currently contains selected, fixed ERC-20 contracts for USDC,
 
 Solana and SPL transfer support is not implemented. It requires Ed25519 HD derivation, Solana base58 account encoding, associated-token-account derivation, message parsing, and Ed25519 signing. The SPL entry remains explicitly unavailable rather than producing an incorrect address or signature.
 
-Monero and Masari standard addresses are implemented, but RingCT/CLSAG transaction parsing, key images, decoy verification, subaddresses, multisig, and signing are not. Chia standard-address derivation is implemented and verified; Chia coin-spend parsing, aggregate signatures, and signing remain unavailable. Staking or validator messages are not accepted for any chain unless a chain-specific parser and review policy is explicitly listed as supported.
+Monero and Masari standard addresses are implemented; Monero additionally supports integrated addresses and MRL-0006 subaddresses, all verified against independent Keccak/Edwards reference computations. RingCT/CLSAG transaction parsing, key images, decoy verification, multisig, and signing are not. QRL address derivation is implemented against the QRL reference SHAKE-256 vector, but XMSS signing (stateful BDS traversal and leaf-index persistence) is not. Chia standard-address derivation is implemented and verified; Chia coin-spend parsing, aggregate signatures, and signing remain unavailable. Staking or validator messages are not accepted for any chain unless a chain-specific parser and review policy is explicitly listed as supported.
+
+### Coin coverage policy
+
+Neither the BIP39 community list nor miningpoolstats is a specification. Both contain hundreds of chains, dead forks, and coins whose only "documentation" is an unmaintained explorer. HexWallet therefore does not ship a list of guesses.
+
+A coin enters `WalletNetworks.cpp` only when all of the following exist: an address encoding with an independent reference vector, a derivation policy, a signature scheme the firmware can actually implement, and a custody plan. Coins that share a family (base58 versions, EVM chain ID, SLIP-0010, CryptoNote, XMSS) add data plus one vector, not new cryptography. Coins without a verifiable vector remain cataloged as unavailable with the exact missing piece in `WalletCatalog.cpp`; adding their SLIP-0044 number or ticker does not enable an address. This is why the catalog deliberately reports partial coverage instead of claiming "all miningpoolstats coins".
 
 ## Capability Matrix
 
@@ -65,8 +77,11 @@ Monero and Masari standard addresses are implemented, but RingCT/CLSAG transacti
 | Bitcoin addresses | BIP44 P2PKH, BIP49 P2SH-P2WPKH, BIP84 P2WPKH |
 | EVM addresses | Registered network derivation policy (coin type 60 for Ethereum-compatible networks; 61 for Ethereum Classic) |
 | EVM native signing | Canonical EIP-155 legacy and EIP-1559 type 2, bounded gas fee, simple transfer only |
-| Monero/Masari addresses | CryptoNote mainnet standard addresses under the documented HexWallet BIP39 policy |
+| Monero/Masari addresses | CryptoNote standard addresses, Monero integrated and MRL-0006 subaddresses, under the documented HexWallet BIP39 policy |
 | Monero/Masari transaction signing | Not implemented |
+| QRL addresses | XMSS-SHAKE256 height 10, QRL descriptor + SHA-256 address commitment — verified against the QRL reference vector; key generation is CPU-heavy |
+| QRL transaction signing | Not implemented (stateful XMSS BDS state and leaf-index persistence) |
+| Secure-element custody | `WalletCustody` plan per network. SE050C1H1: secp256k1/ECDSA may live in the SE; Monero, Kaspa Schnorr, QRL, BLS12-381 and (pending hardware validation) Ed25519 remain MCU-resident |
 | Chia addresses | EIP-2333/ERC-2333 key tree, BLS12-381 G1, CLVM shatree, bech32m — verified against official vectors |
 | Chia transaction signing | Not implemented |
 | ERC-20 account address | Registered token metadata on supported EVM networks |
@@ -94,6 +109,7 @@ After authentication and wallet loading:
 wallet generate
 wallet import <24-word-mnemonic>
 wallet address <network> [index]
+wallet custody <network>
 wallet token <token-id> [index]
 wallet addresses [index]
 tx inspect <psbt-v0-hex>
@@ -103,7 +119,7 @@ evm sign <six-digit-confirmation>
 tx reject
 ```
 
-`wallet token eth-usdc 0` returns the Ethereum BIP44 path and account address together with the registered contract. Transfers use the separate inspect/review/sign workflow. Secret export is disabled by default with `HEXWALLET_ENABLE_SECRET_EXPORT=0` and should remain disabled on production devices.
+`wallet token eth-usdc 0` returns the Ethereum BIP44 path and account address together with the registered contract. Transfers use the separate inspect/review/sign workflow. `wallet custody <network>` prints the active secure-element profile (MCU-only until the board port registers a probed SE050), the key scheme, whether the key can live in the SE, whether the SE can produce the required signature, and the reason; it never touches key material. Secret export is disabled by default with `HEXWALLET_ENABLE_SECRET_EXPORT=0` and should remain disabled on production devices.
 
 Authentication uses a one-use challenge and HMAC proof. Bitcoin inspection accepts bounded PSBT v0 requests only; every input must be a wallet-controlled BIP49 P2SH-P2WPKH or BIP84 P2WPKH output, with `SIGHASH_ALL` when present.
 
@@ -167,16 +183,17 @@ the file to go back to a display board). On boot the firmware prints
 
 ## Test And Verification
 
-The firmware runs crypto, secp256k1, CryptoNote, BIP39, BIP32, address, EIP-155/EIP-1559, transport-policy, and Bitcoin transaction self-tests during startup when `HEXWALLET_RUN_SELF_TESTS=1`. The EIP-155 test matches the official unsigned RLP, signing hash, `v/r/s`, and signed transaction.
+The firmware runs crypto, secp256k1, CryptoNote (including subaddresses and integrated addresses), QRL XMSS, custody-plan, BIP39, BIP32, address, EIP-155/EIP-1559, transport-policy, and Bitcoin transaction self-tests during startup when `HEXWALLET_RUN_SELF_TESTS=1`. The EIP-155 test matches the official unsigned RLP, signing hash, `v/r/s`, and signed transaction.
 
-The extended crypto stack (SHA-3, SHA-512/256, BLAKE2b, Ed25519, SLIP-10, EIP-2333/ERC-2333 BLS12-381, Chia addresses, and the alt-address encoders) is verified on the host by compiling every firmware source against the *exact* mbedtls headers bundled with the ESP32 Arduino core and running every embedded official vector:
+The extended crypto stack (Keccak-512, SHAKE-256, SHA-3, SHA-512/256, BLAKE2b, Ed25519, SLIP-10, EIP-2333/ERC-2333 BLS12-381, Chia addresses, Monero subaddresses, QRL XMSS, and the alt-address encoders) is verified on the host by compiling every firmware source against the *exact* mbedtls headers bundled with the ESP32 Arduino core and running every embedded official vector:
 
 ```text
 powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
-# expected: extended-crypto=pass  alt-addresses=pass
+# expected: crypto-primitives=pass extended-crypto=pass alt-addresses=pass
+#           cryptonote=pass qrl-xmss=pass custody=pass
 ```
 
-Verified against authoritative sources: RFC 8032 Ed25519 (TC1/TC2), SLIP-10, the official ERC-2333 test vectors (master SK, compressed Lamport PK, child SK), RFC 6979 low-S ECDSA, and an independent pure-Python BLS12-381/EIP-2333 oracle (Chia `v0`/`ones`/16-byte-seed addresses and the derived public key match byte-for-byte). A device-target smoke check additionally compiles the pure-C++ crypto core with the ESP32 Xtensa toolchain:
+Verified against authoritative sources: RFC 8032 Ed25519 (TC1/TC2), SLIP-10, the official ERC-2333 test vectors (master SK, compressed Lamport PK, child SK), RFC 6979 low-S ECDSA, the QRL reference `XmssBasicSHAKE256` vector (48 zero seed, height 4), the official rusty-kaspa mainnet address vectors, independent Monero key/subaddress/integrated-address reference computations, and an independent pure-Python BLS12-381/EIP-2333 oracle (Chia `v0`/`ones`/16-byte-seed addresses and the derived public key match byte-for-byte). A device-target smoke check additionally compiles the pure-C++ crypto core with the ESP32 Xtensa toolchain:
 
 ```text
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
@@ -212,9 +229,58 @@ CI (`.github/workflows/ci.yml`) runs all three host jobs plus a full
 
 Compile success and self-tests do not replace protocol test vectors, hardware-in-the-loop tests, fuzzing, side-channel evaluation, or an independent security audit.
 
+## Flash Layout, Secure OTA And eFuses
+
+`partitions/hexwallet-16mb-ota.csv` defines a 16 MB layout with a 3 MB
+factory/recovery image, two 5 MB OTA slots and a 2.875 MB resource partition:
+
+| Partition | Offset | Size | Purpose |
+| --- | --- | --- | --- |
+| `nvs` | `0x9000` | 24 KiB | PIN verifier, counters, provisioned flag |
+| `otadata` | `0xF000` | 8 KiB | active OTA slot + rollback state |
+| `phy_init` | `0x11000` | 4 KiB | RF calibration (unused when Wi-Fi/BLE are disabled) |
+| `recovery` | `0x20000` | 3 MiB | factory/recovery image, never overwritten by OTA |
+| `ota_0` | `0x320000` | 5 MiB | stable application slot |
+| `ota_1` | `0x820000` | 5 MiB | staging slot |
+| `storage` | `0xD20000` | 2.875 MiB | resources, labels, read-only data |
+
+To use it with the Arduino core, copy it to the sketch root as `partitions.csv`
+before `arduino-cli compile`; with ESP-IDF set
+`CONFIG_PARTITION_TABLE_CUSTOM=y` and `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME`.
+The table is deliberately not active by default: an 8 MB S3 module cannot hold
+two 5 MB slots, and silently changing the layout on an existing device can
+brick the boot chain.
+
+The update sequence is the only safe one:
+
+1. Write the signed image into the inactive slot (`ota_1` while `ota_0` runs).
+2. Verify the image hash/signature before `esp_ota_end()` returns success.
+3. Call `esp_ota_set_boot_partition()` and reboot.
+4. Let the new image call `esp_ota_mark_app_valid_cancel_rollback()` only
+   after its own self-tests pass; otherwise the bootloader rolls back.
+
+### Secure Boot v2 and Flash Encryption
+
+- **Secure Boot v2** puts the RSA/ECDSA public key digest into eFuse and makes
+  the bootloader reject any image without a valid signature. Keep the private
+  signing key offline; the eFuse digest is a one-way write.
+- **Flash Encryption** in release mode generates a per-device AES key in eFuse.
+  The bootloader encrypts OTA writes as they land in flash, so the server
+  publishes **one signed plaintext image**, not one encrypted image per device.
+- Development mode can be reversed by reflashing; release mode cannot. Do not
+  burn Secure Boot or Flash Encryption eFuses until the signing key backup,
+  recovery image, rollback path and provisioning flow have been tested on a
+  sacrificial module. A wrong eFuse write is not recoverable by OTA.
+
+Hardware note: the ESP32-P4 target has no Wi-Fi/BLE; the OTA transport is USB-C
+(from the desktop updater) or NFC. Neither transport is implemented in this
+firmware yet; the partition table and rollback rules are transport-independent.
+
 ## Security Boundaries
 
-The wallet mnemonic and PIN verifier currently use ordinary ESP32 RAM/NVS. Before any real-fund use, provide encrypted storage or a reviewed secure element, Secure Boot, Flash Encryption, anti-rollback, authenticated firmware updates, physical confirmation input, a trusted display path, fault-injection and side-channel evaluation, recovery testing, reproducible builds, and an independent audit.
+The wallet mnemonic and PIN verifier currently use ordinary ESP32 RAM/NVS. `WalletCustody` makes the SE boundary explicit instead of hand-waving it: the SE050C1H1 profile can hold imported secp256k1 keys and run ECDSA, and can seal a seed with an AES key, but it has no BIP32 engine, no BIP340 Schnorr, no SHAKE-256/XMSS, no CryptoNote key algebra and no BLS12-381. Consequently Monero, Kaspa, QRL, Chia and (until the applet is validated) Ed25519 private keys are derived in MCU RAM and zeroized after use. A seed that must be unwrapped into MCU RAM is only as protected as the MCU; the SE improves key-at-rest and ECDSA isolation, not the software-derivation paths. Do not describe this design as "all keys protected by the SE050".
+
+Before any real-fund use, provide the reviewed SE050 driver/SCP03 provisioning, Secure Boot, Flash Encryption, anti-rollback, authenticated firmware updates, physical confirmation input, a trusted display path, fault-injection and side-channel evaluation, recovery testing, reproducible builds, and an independent audit.
 
 A serial confirmation code protects against accidental commands only. By default the code is shown only on the trusted display and signing is refused when no display is available. Unknown Bitcoin scripts, PSBT v2, Taproot, multisig, arbitrary digests, arbitrary EVM calls, unknown token contracts, SPL transfers, and unsupported chains are rejected or unavailable by design.
 

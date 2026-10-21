@@ -31,6 +31,7 @@ bool wallet_catalog_at(size_t index, WalletCatalogEntry *out);
 bool wallet_catalog_find(const char *id_or_symbol, WalletCatalogEntry *out);
 bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query);
 bool wallet_catalog_has(const WalletCatalogEntry &entry, WalletCapability capability);
+bool run_catalog_self_tests();
 
 }
 

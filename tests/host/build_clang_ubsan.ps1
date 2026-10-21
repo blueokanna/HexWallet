@@ -4,9 +4,10 @@
 #   powershell -ExecutionPolicy Bypass -File tests/host/build_clang_ubsan.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$espLibs = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\tools\esp32-libs\3.3.10\include\mbedtls"
-$mbedtlsInclude = Join-Path $espLibs "mbedtls\include"
-$mbedtlsPort   = Join-Path $espLibs "port\include"
+. (Join-Path $PSScriptRoot "esp32_paths.ps1")
+$espLibs = $espLibsRoot
+$mbedtlsInclude = Join-Path $espLibs "include\mbedtls\mbedtls\include"
+$mbedtlsPort   = Join-Path $espLibs "include\mbedtls\port\include"
 
 $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -37,6 +38,8 @@ $cppSources = @(
   "CryptoPrimitives.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
+  "WalletNetworks.cpp", "CryptoNoteAddress.cpp", "QrlXmss.cpp",
+  "WalletCustody.cpp",
   "host_security.cpp", "host_test_main.cpp"
 )
 $cppObjs = @()

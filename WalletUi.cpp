@@ -282,8 +282,6 @@ void wallet_ui_service() {
 #if HEXWALLET_ENABLE_LVGL
   if (!initialized) return;
   const unsigned long now = millis();
-  // E-paper panels are slow to refresh; drive LVGL at the policy's minimum
-  // refresh interval instead of every loop pass.
   const unsigned long interval = eink_panel ? ui_policy().eink_min_refresh_ms : 16UL;
   if (eink_panel && last_service_ms != 0 && (now - last_service_ms) < interval) return;
   last_service_ms = now;

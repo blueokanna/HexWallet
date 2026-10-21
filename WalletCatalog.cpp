@@ -50,7 +50,7 @@ const CatalogSeed kCatalog[] = {
   { "dgb", "DGB", "DigiByte", 20, WalletCapabilityNone, nullptr, "address vectors pending" },
   { "ppc", "PPC", "Peercoin", 6, WalletCapabilityNone, nullptr, "address vectors pending" },
   { "nmc", "NMC", "Namecoin", 7, WalletCapabilityNone, nullptr, "address vectors pending" },
-  { "xmr", "XMR", "Monero", 128, WalletCapabilityAddress, "xmr", "CryptoNote standard address; RingCT/CLSAG transaction signing unavailable" },
+  { "xmr", "XMR", "Monero", 128, WalletCapabilityAddress, "xmr", "CryptoNote standard/subaddress/integrated addresses; RingCT/CLSAG transaction signing unavailable" },
   { "msr", "MSR", "Masari", 413, WalletCapabilityAddress, "msr", "CryptoNote standard address; transaction signing unavailable" },
   { "zec", "ZEC", "Zcash", 133, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zec", "transparent t1/t3 address and Bitcoin-sighash signing; shielded Sapling unavailable" },
   { "kas", "KAS", "Kaspa", 111111, WalletCapabilityAddress, "kas", "Kaspa bech32 address; Schnorr transaction signing unavailable" },
@@ -81,6 +81,7 @@ const CatalogSeed kCatalog[] = {
   { "croorg", "CRO", "Crypto.org Chain", 394, WalletCapabilityAddress, "croorg", "cro1 bech32 address; Cosmos transaction signing unavailable" },
   { "sei", "SEI", "SEI", 19000118, WalletCapabilityAddress, "sei", "sei1 bech32 address; Cosmos transaction signing unavailable" },
   { "qubic", "QUBIC", "Qubic", 83293, WalletCapabilityAddress, "qubic", "base26 identity from ed25519 key" },
+  { "qrl", "QRL", "Quantum Resistant Ledger", 0, WalletCapabilityAddress, "qrl", "XMSS-SHAKE256 address derivation (height 10, one-time CPU-heavy); stateful XMSS signing unavailable" },
   { "beam", "BEAM", "Beam", 1533, WalletCapabilityNone, nullptr, "Mimblewimble address-prefix constants pending reference-wallet verification" },
 };
 
@@ -146,6 +147,41 @@ bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query) 
 
 bool wallet_catalog_has(const WalletCatalogEntry &entry, WalletCapability capability) {
   return (entry.capabilities & static_cast<uint8_t>(capability)) != 0;
+}
+
+bool run_catalog_self_tests() {
+  for (size_t index = 0; index < wallet_catalog_count(); ++index) {
+    const WalletCatalogEntry entry = resolved_entry(index);
+    if (entry.id == nullptr || entry.symbol == nullptr || entry.name == nullptr ||
+        entry.status == nullptr) {
+      return false;
+    }
+    if ((entry.capabilities & static_cast<uint8_t>(WalletCapabilityAddress)) != 0 &&
+        entry.network == nullptr) {
+      return false;
+    }
+    if ((entry.capabilities & static_cast<uint8_t>(WalletCapabilitySigning)) != 0 &&
+        entry.network == nullptr) {
+      return false;
+    }
+    for (size_t other = index + 1; other < wallet_catalog_count(); ++other) {
+      const WalletCatalogEntry candidate = resolved_entry(other);
+      if (strcmp(entry.id, candidate.id) == 0) return false;
+    }
+  }
+  for (size_t index = 0; index < kNetworkProfileCount; ++index) {
+    const NetworkProfile &network = kNetworkProfiles[index];
+    bool cataloged = false;
+    for (size_t entry = 0; entry < wallet_catalog_count(); ++entry) {
+      const WalletCatalogEntry candidate = resolved_entry(entry);
+      if (candidate.network == &network) {
+        cataloged = true;
+        break;
+      }
+    }
+    if (!cataloged) return false;
+  }
+  return true;
 }
 
 }

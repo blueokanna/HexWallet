@@ -47,8 +47,8 @@ const NetworkProfile kNetworkProfiles[] = {
   // --- Other existing chains ---------------------------------------------
   { "xrp", "XRP", "XRP Ledger", 144, 144, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoXrp, 0, 0, 0, 0, nullptr },
   { "trx", "TRX", "TRON", 195, 195, 44, DerivationStyle::Bip44, AddressEncoding::Tron, { 0, 0, nullptr, false }, 0x41, 0, 0, 0, nullptr },
-  { "xmr", "XMR", "Monero", 128, 128, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, { 0, 0, nullptr, false }, 18, 0, 0, 0, nullptr },
-  { "msr", "MSR", "Masari", 413, 413, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, { 0, 0, nullptr, false }, 28, 0, 0, 0, nullptr },
+  { "xmr", "XMR", "Monero", 128, 128, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, { 0, 0, nullptr, false }, 18, 0, 0, 0, nullptr, 19, 42, false },
+  { "msr", "MSR", "Masari", 413, 413, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, { 0, 0, nullptr, false }, 28, 0, 0, 0, nullptr, 0, 0, false },
   // --- New multi-coin support (SLIP-0044) --------------------------------
   { "kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, { 0, 0, nullptr, false }, 0, 0, 0, 0, nullptr },
   { "zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, { 0, 0, nullptr, false }, 0, 0, 0x1cb8, 0x1cbd, nullptr },
@@ -66,6 +66,9 @@ const NetworkProfile kNetworkProfiles[] = {
   { "fil", "FIL", "Filecoin", 461, 461, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase32Filecoin, { 0, 0, nullptr, false }, 0, 0, 0, 0, nullptr },
   { "erg", "ERG", "Ergo", 429, 429, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase58Ergo, { 0, 0, nullptr, false }, 0, 0, 0, 0, nullptr },
   { "xch", "XCH", "Chia", 8444, 8444, 12381, DerivationStyle::ChiaEip2333, AddressEncoding::Bech32mBlsChia, { 0, 0, nullptr, false }, 0, 0, 0, 0, nullptr },
+  // QRL has no registered BIP44 coin type and no BIP32 key tree.  The BIP39
+  // seed is expanded by SHAKE-256 into the 48-byte XMSS seed; see QrlXmss.h.
+  { "qrl", "QRL", "Quantum Resistant Ledger", 0, 0, 0, DerivationStyle::QrlXmss, AddressEncoding::QrlXmss, { 0, 0, nullptr, false }, 0, 0, 0, 0, nullptr, 0, 0, true },
 };
 
 const size_t kNetworkProfileCount = sizeof(kNetworkProfiles) / sizeof(kNetworkProfiles[0]);
@@ -95,6 +98,12 @@ bool run_network_profile_self_tests() {
       return false;
     }
     if (network.encoding == AddressEncoding::CryptoNote && network.account_version == 0) return false;
+    if (network.encoding == AddressEncoding::CryptoNote &&
+        ((network.cryptonote_integrated_prefix == 0) !=
+         (network.cryptonote_subaddress_prefix == 0))) {
+      return false;
+    }
+    if (network.encoding == AddressEncoding::QrlXmss && !network.explicit_only_derivation) return false;
     if ((network.encoding == AddressEncoding::ZcashTransparent) && (network.alt_p2pkh_version == 0 || network.alt_p2sh_version == 0)) return false;
     if (network.encoding == AddressEncoding::CashAddr && network.alt_hrp == nullptr) return false;
     if (network.encoding == AddressEncoding::Bech32Cosmos && network.alt_hrp == nullptr) return false;
@@ -115,7 +124,8 @@ bool run_network_profile_self_tests() {
   const NetworkProfile *algorand = find_network_profile("algo");
   const NetworkProfile *solana = find_network_profile("sol");
   const NetworkProfile *chia = find_network_profile("xch");
-  return ethereum != nullptr && ethereum->evm_chain_id == 1 && ethereum_classic != nullptr && ethereum_classic->derivation_coin_type == 61 && ethereum_classic->evm_chain_id == 61 && bsc != nullptr && bsc->derivation_coin_type == 60 && bsc->evm_chain_id == 56 && monero != nullptr && monero->account_version == 18 && masari != nullptr && masari->account_version == 28 && kaspa != nullptr && kaspa->slip44_coin_type == 111111 && algorand != nullptr && algorand->slip44_coin_type == 283 && solana != nullptr && solana->slip44_coin_type == 501 && chia != nullptr && chia->slip44_coin_type == 8444 && chia->bip_purpose == 12381;
+  const NetworkProfile *qrl = find_network_profile("qrl");
+  return ethereum != nullptr && ethereum->evm_chain_id == 1 && ethereum_classic != nullptr && ethereum_classic->derivation_coin_type == 61 && ethereum_classic->evm_chain_id == 61 && bsc != nullptr && bsc->derivation_coin_type == 60 && bsc->evm_chain_id == 56 && monero != nullptr && monero->account_version == 18 && monero->cryptonote_integrated_prefix == 19 && monero->cryptonote_subaddress_prefix == 42 && masari != nullptr && masari->account_version == 28 && masari->cryptonote_subaddress_prefix == 0 && kaspa != nullptr && kaspa->slip44_coin_type == 111111 && algorand != nullptr && algorand->slip44_coin_type == 283 && solana != nullptr && solana->slip44_coin_type == 501 && chia != nullptr && chia->slip44_coin_type == 8444 && chia->bip_purpose == 12381 && qrl != nullptr && qrl->encoding == AddressEncoding::QrlXmss && qrl->explicit_only_derivation;
 }
 
 }  // namespace hexwallet

@@ -16,13 +16,12 @@
 # the 32-bit target.
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $PSScriptRoot "esp32_paths.ps1")
 
-$defaultLibs = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\tools\esp32-libs\3.3.10"
 $defaultS3Libs = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\tools\esp32s3-libs\3.3.10"
-$defaultCore = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\3.3.10"
-$libs = if ($env:HEXWALLET_ESP32_LIBS) { $env:HEXWALLET_ESP32_LIBS } else { $defaultLibs }
+$libs = $espLibsRoot
 $s3libs = if ($env:HEXWALLET_ESP32_S3_LIBS) { $env:HEXWALLET_ESP32_S3_LIBS } else { $defaultS3Libs }
-$core = if ($env:HEXWALLET_ESP32_CORE) { $env:HEXWALLET_ESP32_CORE } else { $defaultCore }
+$core = $coreCandidate
 
 $gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32s3-elf-g++.exe" -ErrorAction SilentlyContinue |
        Select-Object -First 1 -ExpandProperty FullName
@@ -52,8 +51,8 @@ $includes = @(
   (Join-Path $PSScriptRoot "mock"),
   (Join-Path $s3libs "include"),
   (Join-Path $libs "include"),
-  (Join-Path $libs "include\mbedtls\mbedtls\include"),
-  (Join-Path $libs "include\mbedtls\port\include"),
+  $mbedtlsInclude,
+  $mbedtlsPort,
   (Join-Path $libs "include\xtensa\include"),
   (Join-Path $libs "dio_qspi\include")
 )

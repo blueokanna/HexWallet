@@ -553,7 +553,7 @@ int mbedtls_mpi_write_binary(const mbedtls_mpi *X, unsigned char *buf, size_t bu
 }
 
 int mbedtls_mpi_read_string(mbedtls_mpi *X, int radix, const char *s) {
-  if (radix != 16) return MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
+  if (radix != 10 && radix != 16) return MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
   if (s == NULL) return MBEDTLS_ERR_MPI_BAD_INPUT_DATA;
   mbedtls_mpi_free(X);
   while (*s == ' ') s++;
@@ -565,10 +565,10 @@ int mbedtls_mpi_read_string(mbedtls_mpi *X, int radix, const char *s) {
   while (rc == 0 && *s) {
     int digit = -1;
     if (*s >= '0' && *s <= '9') digit = *s - '0';
-    else if (*s >= 'a' && *s <= 'f') digit = *s - 'a' + 10;
-    else if (*s >= 'A' && *s <= 'F') digit = *s - 'A' + 10;
-    if (digit < 0) { rc = MBEDTLS_ERR_MPI_INVALID_CHARACTER; break; }
-    rc = mbedtls_mpi_mul_int(&acc, &acc, 16);
+    else if (radix == 16 && *s >= 'a' && *s <= 'f') digit = *s - 'a' + 10;
+    else if (radix == 16 && *s >= 'A' && *s <= 'F') digit = *s - 'A' + 10;
+    if (digit < 0 || digit >= radix) { rc = MBEDTLS_ERR_MPI_INVALID_CHARACTER; break; }
+    rc = mbedtls_mpi_mul_int(&acc, &acc, (mbedtls_mpi_uint)radix);
     if (rc == 0) rc = mbedtls_mpi_add_int(&acc, &acc, digit);
     s++;
   }

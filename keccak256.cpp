@@ -66,7 +66,9 @@ void store_le64(uint8_t *out, uint64_t value) {
   }
 }
 
-void permutation(uint64_t state[kLaneCount]) {
+}  // namespace
+
+void keccak_permute(uint64_t state[kLaneCount]) {
   for (size_t round = 0; round < kRoundCount; ++round) {
     uint64_t column[5];
     uint64_t delta[5];
@@ -99,11 +101,13 @@ void permutation(uint64_t state[kLaneCount]) {
   }
 }
 
+namespace {
+
 void absorb_block(SHA3_CTX *context, const uint8_t block[kRateBytes]) {
   for (size_t lane = 0; lane < kRateBytes / sizeof(uint64_t); ++lane) {
     context->state[lane] ^= load_le64(block + lane * sizeof(uint64_t));
   }
-  permutation(context->state);
+  keccak_permute(context->state);
 }
 
 }  // namespace

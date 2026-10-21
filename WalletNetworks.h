@@ -32,6 +32,7 @@ enum class AddressEncoding : uint8_t {
   Blake2bBase32Filecoin,    // base32(0x01 + blake2b-160(secp256k1 pubkey)) (FIL)
   Blake2bBase58Ergo,        // base58check(0x01 + blake2b-256(secp256k1 pubkey)) (ERG)
   Bech32mBlsChia,           // bech32m(blake3-tree-hash puzzle of BLS12-381 G1 key) (XCH)
+  QrlXmss,                  // QRL: XMSS-SHAKE256 root committed by sha256 (QRL)
 };
 
 // BIP32-style derivation policy per network. `derive_address` selects the path
@@ -43,6 +44,7 @@ enum class DerivationStyle : uint8_t {
   SolanaBip44,       // m/44'/501'/account'/0'/index' (SLIP-0010 ed25519)
   CardanoBip1852,    // m/1852'/1815'/account'/role/index (SLIP-0010 ed25519, documented policy)
   ChiaEip2333,       // EIP-2333 master + [12381,8444,0,index]
+  QrlXmss,           // BIP39 seed -> SHAKE-256 -> XMSS(sk_seed, pub_seed); no BIP32 path
 };
 
 struct NetworkProfile {
@@ -60,6 +62,11 @@ struct NetworkProfile {
   uint16_t alt_p2pkh_version;  // ZcashTransparent 2-byte p2pkh (t1)
   uint16_t alt_p2sh_version;   // ZcashTransparent 2-byte p2sh (t3)
   const char *alt_hrp;         // cashaddr prefix / cosmos hrp / avalanche hrp
+  uint16_t cryptonote_integrated_prefix;
+  uint16_t cryptonote_subaddress_prefix;
+  // QRL XMSS key generation costs minutes on an MCU; bulk address listing must
+  // not trigger it implicitly.
+  bool explicit_only_derivation;
 };
 
 extern const NetworkProfile kNetworkProfiles[];

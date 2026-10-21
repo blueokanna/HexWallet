@@ -416,6 +416,16 @@ bool run_alt_address_self_tests() {
   passed = selftest_report("cosmos sei", address_cosmos_bech32("sei", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "sei1w508d6qejxtdg4y5r3zarvary0c5xw7kh3xvfe") == 0) && passed;
   passed = selftest_report("avax", address_avalanche_xp("avax", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "X-avax1qp63uahgrxged4z5jswyt5dn5v3lzsem6cl7ra9f") == 0) && passed;
   passed = selftest_report("kaspa pk1", address_kaspa(kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes4ypce9sf") == 0) && passed;
+  // Official rusty-kaspa address vectors (crypto/addresses/src/lib.rs).
+  static const uint8_t kKaspaZero[32] = {};
+  passed = selftest_report("kaspa zero", kaspa_bech32_encode("kaspa", 0, kKaspaZero, 32, address, sizeof(address)) && strcmp(address, "kaspa:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkx9awp4e") == 0) && passed;
+  static const uint8_t kKaspaOfficial[32] = {
+    0x5f, 0xff, 0x3c, 0x4d, 0xa1, 0x8f, 0x45, 0xad,
+    0xcd, 0xd4, 0x99, 0xe4, 0x46, 0x11, 0xe9, 0xff,
+    0xf1, 0x48, 0xba, 0x69, 0xdb, 0x3c, 0x4e, 0xa2,
+    0xdd, 0xd9, 0x55, 0xfc, 0x46, 0xa5, 0x95, 0x22,
+  };
+  passed = selftest_report("kaspa official", kaspa_bech32_encode("kaspa", 0, kKaspaOfficial, 32, address, sizeof(address)) && strcmp(address, "kaspa:qp0l70zd5x85ttwd6jv7g3s3a8llzj96d8dncn4zmhv4tlzx5k2jyqh70xmfj") == 0) && passed;
   passed = selftest_report("qubic ed01", address_qubic(kEdPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "3ho582fh18iq3rk2pj66j31p6kd432947reg87frgi13fe3aino2q4c") == 0) && passed;
   passed = selftest_report("filecoin", address_filecoin(kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "aep2ssiu2xjqkewe3yertg2adajt6sc6ma") == 0) && passed;
   address_size = sizeof(address);

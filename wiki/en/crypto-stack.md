@@ -64,6 +64,57 @@ all the time. If `mod` just returns the negative value (as a naive
 `P mod P`, `okm mod r`) pass while this is broken — only the full point
 arithmetic exposes it. Fix: reduce `|A|`, then `B − |A|` when nonzero.
 
+## CryptoNote (Monero / Masari)
+
+- Spend key = `sc_reduce32(Keccak-256(seed))`; view key =
+  `sc_reduce32(Keccak-256(spend))`, matching `crypto::generate_keys` for a
+  32-byte seed.
+- Public keys use the Edwards25519 group with Monero's encoding (little-endian
+  `y` plus the sign bit of `x`). Point decompression, addition and scalar
+  multiplication are implemented in `Ed25519.cpp` (`edwards_decompress`,
+  `edwards_add`, `scalarmult_point`) so the firmware does not depend on an
+  external bignum library for this curve.
+- Subaddresses follow `device_default.cpp`: `m = sc_reduce32(Keccak-256(
+  "SubAddr" ‖ view_secret ‖ major_le32 ‖ minor_le32))`, `D = B + mG`,
+  `C = view_secret · D`; prefix `42` mainnet. Integrated addresses append the
+  8-byte payment ID and use prefix `19`. `(0,0)` is the standard address.
+- Scalar multiplication always performs the addition and selects the result
+  with a constant-time mask, so the scalar bits do not steer control flow.
+- Vectors: spend/view keys and the standard address for a zero seed, two
+  subaddresses, the integrated address, and the existing synthetic base-point
+  vector, all cross-checked against an independent Keccak/Edwards oracle.
+
+## QRL XMSS-SHAKE256
+
+- QRL has no BIP32 tree. `qrl_seed_from_bip39` expands the BIP39 seed with
+  SHAKE-256 and the domain `HexWallet/QRL/v1` into 48 bytes.
+- `qrl_xmss_public_key` performs the height-10 XMSS treehash: SHAKE-256
+  expansion into `sk_seed ‖ sk_prf ‖ pub_seed`, WOTS+ `w=16` (67 chains),
+  L-tree compression, and the Merkle stack. The public key is
+  `descriptor ‖ root ‖ pub_seed` (67 bytes).
+- The address is `Q` + hex of `descriptor ‖ SHA-256(pubkey) ‖
+  SHA-256(descriptor ‖ hash)[-4:]` (39 bytes), matching
+  `QRLHelper::getAddress`.
+- Verified against qrllib's `XmssBasicSHAKE256` vector (48 zero seed, height
+  4, address `Q0202000f9ec8…`). Production height 10 costs roughly three
+  million SHAKE-256 calls; the progress hook exists so an MCU caller can feed
+  its watchdog. Stateful signing is deliberately not implemented.
+
+## Secure-element custody
+
+`WalletCustody` maps each `AddressEncoding` to a `KeyScheme` and answers
+whether the SE can hold the key and produce the exact signature. The active
+profile is MCU-only until the board port probes the applet and calls
+`set_active_secure_element_profile()`. The conservative SE050C1H1 target
+profile claims secp256k1 + ECDSA + seed sealing only.
+That means: BTC/LTC/ETH/Cosmos-style keys can be imported and signed in the
+applet, while Kaspa (BIP340 Schnorr), Monero/Masari (Keccak-reduced Edwards),
+QRL (XMSS), Chia (BLS12-381) and — until the Ed25519 applet path is validated
+on hardware — Solana/Algorand/Cardano/Tezos/Qubic keys stay in MCU RAM.
+BIP32/SLIP-0010 derivation itself is always MCU-side because the SE050 has no
+BIP32 engine. The plan is code, not marketing: `wallet custody <id>` prints
+the decision and reason.
+
 ## Chia standard addresses
 
 `chia_standard_address(seed, address_index)`:

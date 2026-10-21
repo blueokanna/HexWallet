@@ -34,7 +34,10 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 生成和校验英文 BIP39 助记词。
 - 使用 PBKDF2-HMAC-SHA512 派生 BIP39 seed。
 - 使用 BIP32 派生私钥、公钥和扩展密钥。
-- 为已实现的 Bitcoin、EVM、TRON、XRP、Litecoin、Dogecoin、Dash、Bitcoin Gold、Ravencoin、Monero、Masari 和 Chia 网络生成地址。
+- 为已实现的 Bitcoin、EVM、TRON、XRP、Litecoin、Dogecoin、Dash、Bitcoin Gold、Ravencoin、Monero、Masari、QRL 和 Chia 网络生成地址。
+- Monero 标准地址、集成地址（8 字节 payment ID）和 MRL-0006 子地址（`SubAddr` 域分隔、`D = B + mG`、`C = aD`），全部用独立的 Keccak/Edwards 参考计算核对。
+- QRL 地址：XMSS-SHAKE256、高度 10、WOTS+ `w=16`、QRL 三字节描述符和 SHA-256 地址承诺，已对照 QRL 官方 SHAKE-256 测试向量；密钥生成是 CPU 密集型一次性操作。
+- 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 只声明 secp256k1 + ECDSA + seed 封装能力；Monero/Masari、Kaspa Schnorr、QRL XMSS、BLS12-381 以及（在硬件验证之前）Ed25519 私钥保留在 MCU RAM，不把通用 ECC 引擎当成万能签名器。
 - 通过 EIP-2333/ERC-2333 的 BLS12-381 密钥树、CLVM `shatree` 谜题哈希和 `bech32m` 生成 Chia 标准地址（已对照官方 ERC-2333 测试向量和独立参考实现验证）。
 - 查询已登记 Token 的合约地址、精度和账户地址。
 - 审查并签名受限的 Bitcoin PSBT v0。
@@ -42,7 +45,9 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 
 以下能力明确不可用：
 
-- Monero/Masari RingCT、CLSAG、key image、子地址、多签和交易签名。
+- Monero/Masari RingCT、CLSAG、key image、多签和交易签名（标准地址、集成地址和子地址已实现）。
+- QRL XMSS 交易签名（有状态 BDS 遍历和 leaf index 持久化未实现）；QRL 地址已实现。
+- Kaspa 的 BIP340 Schnorr 交易签名（地址已实现）。
 - Solana/SPL 的地址派生、关联 Token 账户和签名。
 - Chia 交易能力（coin-spend 解析、聚合签名、签名）；Chia 地址已实现。
 - Cardano、Cosmos、Polkadot、Aptos、Sui 等目录项的交易能力。
@@ -51,6 +56,14 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 默认配置下的助记词、seed、私钥和 xprv 导出。
 
 目录中的网络或 Token 条目不等于完整实现。执行操作前必须检查 `coin show`、`token show` 输出的 `capabilities` 和 `status`。
+
+### 关于“支持所有币”
+
+BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入 `WalletNetworks.cpp` 的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种会在 `WalletCatalog.cpp` 中明确标记缺失项，而不会生成错误地址。
+
+### SE050 托管边界
+
+`WalletCustody` 把“哪些密钥能放进安全芯片”写成代码，而不是宣传语。默认的活动配置是纯 MCU；只有板级移植在探测并认证 SE050 applet 后调用 `set_active_secure_element_profile()`，`wallet custody <id>` 才会显示 secp256k1/ECDSA 可以由 SE 托管。保守的 SE050C1H1 目标配置只声明 secp256k1、ECDSA 和 seed 封装：BIP32 派生仍在 MCU 完成，secp256k1 子密钥经 SCP03 导入后可以留在 applet 内做 ECDSA。Monero 的 Keccak 约简 Edwards 密钥与子地址运算、Kaspa 的 BIP340 Schnorr、QRL 的 SHAKE-256/XMSS、Chia 的 BLS12-381 都不是 SE050 原语，这些私钥只能在 MCU RAM 中派生并在使用后清零。需要解密到 RAM 的 seed 只受 MCU 保护；SE 提升的是静态密钥和 ECDSA 隔离，不等于“所有私钥都由 SE050 保护”。
 
 ## 硬件和软件要求
 
@@ -211,7 +224,7 @@ arduino-cli monitor -p COM7 -c baudrate=115200
 启动后先等待自检完成。成功输出应类似：
 
 ```text
-SELFTEST crypto=pass cryptonote=pass evm=pass bip39=pass bip32=pass address=pass networks=pass tokens=pass transport=pass bitcoin=pass
+SELFTEST crypto=pass extended=pass cryptonote=pass qrl=pass custody=pass evm=pass bip39=pass bip32=pass address=pass networks=pass tokens=pass transport=pass bitcoin=pass
 ```
 
 只有所有项目都是 `pass`，钱包服务才会初始化。任何一项失败都会输出：
@@ -498,6 +511,8 @@ wallet address eth 1
 wallet address btc 1
 ```
 
+对 Monero，`index=0` 是标准地址，`index>0` 是 `(0, index)` 子地址。QRL 不经过 BIP32：`wallet address qrl 0` 会从 BIP39 seed 经 SHAKE-256 扩展出 48 字节 XMSS seed，再生成高度 10 的 Merkle 树，耗时可能达到分钟级，串口会输出 `INFO qrl-xmss-keygen=...` 进度。`wallet addresses 0` 会跳过 QRL，避免隐式触发该计算。
+
 当前账户和 change 固定为 `0`，一般路径为：
 
 ```text
@@ -678,6 +693,30 @@ auth begin
 auth unlock <proof-hex>
 wallet generate
 ```
+
+## Flash 分区、Secure OTA 与 eFuse
+
+`partitions/hexwallet-16mb-ota.csv` 是 16 MB 布局：3 MB recovery、两个 5 MB OTA 槽、2.875 MB 资源分区。
+
+| 分区 | 偏移 | 大小 | 用途 |
+| --- | --- | --- | --- |
+| `nvs` | `0x9000` | 24 KiB | PIN verifier、计数器、provisioned 标记 |
+| `otadata` | `0xF000` | 8 KiB | 当前 OTA 槽与回滚状态 |
+| `phy_init` | `0x11000` | 4 KiB | RF 校准（关闭 Wi-Fi/BLE 后不使用） |
+| `recovery` | `0x20000` | 3 MiB | factory/recovery 镜像，OTA 不会覆盖 |
+| `ota_0` | `0x320000` | 5 MiB | 稳定应用槽 |
+| `ota_1` | `0x820000` | 5 MiB | 新固件暂存槽 |
+| `storage` | `0xD20000` | 2.875 MiB | 资源、标签、只读数据 |
+
+Arduino 构建时把该文件复制到 sketch 根目录并命名为 `partitions.csv`；ESP-IDF 构建设置 `CONFIG_PARTITION_TABLE_CUSTOM=y` 和 `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME`。该表默认不启用：8 MB 的 S3 模块放不下两个 5 MB 槽，静默改分区会破坏已有设备的启动链。
+
+安全更新顺序只有一个：写入非活动槽 → 校验镜像哈希/签名 → `esp_ota_set_boot_partition()` → 重启 → 新固件自检通过后才调用 `esp_ota_mark_app_valid_cancel_rollback()`；否则 bootloader 自动回滚。
+
+- **Secure Boot v2** 把签名公钥摘要写进 eFuse，bootloader 拒绝无效签名镜像。私钥离线保存，eFuse 摘要不可逆。
+- **Flash Encryption** release 模式为每台设备生成 eFuse AES 密钥；OTA 写入时由 bootloader 自行加密，所以服务器只发布**一份签名的明文镜像**，不需要为每台设备生成不同固件。
+- development 模式可以重刷恢复，release 模式不能。签名私钥备份、recovery 镜像、回滚路径和产线 provisioning 没有在 sacrificial 模块上验证之前，不要烧 Secure Boot / Flash Encryption eFuse。烧错 eFuse 不能靠 OTA 救回。
+
+ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两个传输层当前都未实现，分区和回滚规则与传输层无关。
 
 ## 安全边界
 

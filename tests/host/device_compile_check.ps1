@@ -13,17 +13,14 @@
 # HEXWALLET_ESP32_CORE (core hardware dir) if they are not at the defaults.
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-
-$defaultLibs  = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\tools\esp32-libs\3.3.10"
-$defaultCore  = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\3.3.10"
-$libs = if ($env:HEXWALLET_ESP32_LIBS) { $env:HEXWALLET_ESP32_LIBS } else { $defaultLibs }
-$core = if ($env:HEXWALLET_ESP32_CORE) { $env:HEXWALLET_ESP32_CORE } else { $defaultCore }
+. (Join-Path $PSScriptRoot "esp32_paths.ps1")
+$libs = $espLibsRoot
+$core = $coreCandidate
 
 # Locate the xtensa compiler inside the esp-x32 toolchain.
 $gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32-elf-g++.exe" -ErrorAction SilentlyContinue |
        Select-Object -First 1 -ExpandProperty FullName
 if (-not $gcc) {
-  # Fall back to any xtensa g++ under the tools dir.
   $gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools" -Recurse -Filter "*esp32*g++.exe" -ErrorAction SilentlyContinue |
          Select-Object -First 1 -ExpandProperty FullName
 }
@@ -31,21 +28,13 @@ if (-not $gcc) { throw "xtensa-esp32 g++ not found; is the ESP32 core installed?
 
 $includes = @(
   $root,
-  (Join-Path $core "cores\esp32"),
-  (Join-Path $libs "include"),
-  (Join-Path $libs "include\mbedtls\mbedtls\include"),
-  (Join-Path $libs "include\mbedtls\port\include")
-)
-# Curated include set mirroring the esp32 Arduino build (the full ESP-IDF graph
-# cannot be hand-replicated; the arduino-cli firmware-build CI job owns that).
-$includes = @(
-  $root,
   (Join-Path $PSScriptRoot "mock"),
+  $PSScriptRoot,
   (Join-Path $core "cores\esp32"),
   (Join-Path $libs "include"),
   (Join-Path $libs "include\esp_hw_support\include"),
-  (Join-Path $libs "include\mbedtls\mbedtls\include"),
-  (Join-Path $libs "include\mbedtls\port\include"),
+  $mbedtlsInclude,
+  $mbedtlsPort,
   (Join-Path $libs "include\xtensa\include"),
   (Join-Path $libs "dio_qspi\include")
 )
@@ -62,7 +51,9 @@ $sources = @(
   "CryptoPrimitives.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoNoteAddress.cpp", "WalletNetworks.cpp",
+  "CryptoNoteAddress.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
+  "WalletCustody.cpp",
+  "WalletSecurity.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletSession.cpp",
   "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp"
 )

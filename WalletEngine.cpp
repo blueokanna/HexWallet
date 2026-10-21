@@ -6,6 +6,7 @@
 #include "CryptoExtended.h"
 #include "CryptoNoteAddress.h"
 #include "CryptoPrimitives.h"
+#include "QrlXmss.h"
 #include "WalletAddresses.h"
 #include "WalletAltAddresses.h"
 
@@ -52,6 +53,11 @@ bool build_path_text(const NetworkProfile &network, uint32_t account,
     case DerivationStyle::ChiaEip2333:
       written = snprintf(path, path_size, "m/12381'/%lu'/0'/%lu'",
                          static_cast<unsigned long>(network.derivation_coin_type),
+                         static_cast<unsigned long>(address_index));
+      break;
+    case DerivationStyle::QrlXmss:
+      written = snprintf(path, path_size, "qrl-xmss/h%u/%lu",
+                         static_cast<unsigned>(kQrlDefaultHeight),
                          static_cast<unsigned long>(address_index));
       break;
   }
@@ -166,10 +172,11 @@ WalletError derive_ed25519_address(const NetworkProfile &network,
 
 }  // namespace
 
-WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
-                           const NetworkProfile &network,
-                           uint32_t account, uint32_t change,
-                           uint32_t address_index, DerivedAddress *out) {
+WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
+                              const NetworkProfile &network,
+                              uint32_t account, uint32_t change,
+                              uint32_t address_index, QrlProgressHook progress,
+                              void *context, DerivedAddress *out) {
   if (out == nullptr || account >= kHardenedOffset || change >= kHardenedOffset || address_index >= kHardenedOffset || network.bip_purpose >= kHardenedOffset || network.derivation_coin_type >= kHardenedOffset) {
     return WalletError::InvalidArgument;
   }
@@ -179,6 +186,24 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
                        sizeof(out->path))) {
     clear_derived_address(out);
     return WalletError::BufferTooSmall;
+  }
+
+  // QRL derives an XMSS tree root straight from the BIP39 seed.  It has no
+  // BIP32 path and its public key cannot be produced by the SE050.
+  if (network.encoding == AddressEncoding::QrlXmss) {
+    if (seed == nullptr) {
+      clear_derived_address(out);
+      return WalletError::InvalidArgument;
+    }
+    uint8_t qrl_seed[kQrlSeedSize];
+    WalletError result = qrl_seed_from_bip39(seed, qrl_seed);
+    if (result == WalletError::Ok) {
+      result = qrl_xmss_address_ex(qrl_seed, kQrlDefaultHeight, progress,
+                                   context, out->address, sizeof(out->address));
+    }
+    secure_zero(qrl_seed, sizeof(qrl_seed));
+    if (result != WalletError::Ok) clear_derived_address(out);
+    return result;
   }
 
   // EIP-2333 networks derive straight from the BIP39 seed.
@@ -218,9 +243,15 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
   memcpy(out->private_key, child.private_key, kPrivateKeySize);
 
   if (network.encoding == AddressEncoding::CryptoNote) {
-    const CryptoNoteAddressProfile profile = { network.account_version };
-    result = cryptonote_address_from_seed(profile, child.private_key, out->address,
-                                          sizeof(out->address), out->private_key);
+    const CryptoNoteAddressProfile profile = {
+      network.account_version,
+      network.cryptonote_integrated_prefix,
+      network.cryptonote_subaddress_prefix,
+    };
+    result = cryptonote_address_from_seed_at(profile, child.private_key, account,
+                                             address_index, out->address,
+                                             sizeof(out->address),
+                                             out->private_key);
   } else if (network.encoding == AddressEncoding::Evm || network.encoding == AddressEncoding::Tron) {
     uint8_t public_key[kUncompressedPublicKeySize];
     result = uncompressed_public_key_from_private(child.private_key, public_key);
@@ -302,6 +333,14 @@ WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
 
 void clear_derived_address(DerivedAddress *address) {
   if (address != nullptr) secure_zero(address, sizeof(*address));
+}
+
+WalletError derive_address(const HdPrivateNode &master, const uint8_t *seed,
+                           const NetworkProfile &network,
+                           uint32_t account, uint32_t change,
+                           uint32_t address_index, DerivedAddress *out) {
+  return derive_address_ex(master, seed, network, account, change, address_index,
+                           nullptr, nullptr, out);
 }
 
 bool run_address_self_tests() {

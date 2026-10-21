@@ -65,6 +65,16 @@ bool ed25519_public_key(const uint8_t seed[32], uint8_t out_public[32]);
 bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
                   size_t message_size, uint8_t out_signature[64]);
 
+// Edwards25519 group operations on compressed points.  CryptoNote subaddress
+// derivation needs arbitrary-point addition and multiplication, which
+// Ed25519 signing alone does not expose.  Inputs must be canonical compressed
+// points; ed25519_point_mul_compressed expects a reduced scalar.
+bool ed25519_point_add_compressed(const uint8_t left[32],
+                                  const uint8_t right[32], uint8_t out[32]);
+bool ed25519_point_mul_compressed(const uint8_t point[32],
+                                  const uint8_t scalar[32], uint8_t out[32]);
+void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]);
+
 // SLIP-0010 Ed25519 derivation. seed may be any length (BIP-39 seeds are
 // typically 16-64 bytes). path contains hardened values (index | 0x80000000).
 bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,

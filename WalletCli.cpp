@@ -11,6 +11,7 @@
 #include "EvmTransaction.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
+#include "WalletCustody.h"
 #include "WalletEngine.h"
 #include "WalletSecurity.h"
 #include "WalletSession.h"
@@ -118,6 +119,7 @@ const char *error_text(WalletError error) {
     case WalletError::InvalidChild: return "invalid-child";
     case WalletError::InvalidPath: return "invalid-path";
     case WalletError::HardenedPublicDerivation: return "hardened-public-derivation";
+    case WalletError::Aborted: return "aborted";
   }
   return "unknown";
 }
@@ -195,7 +197,7 @@ uint32_t parse_index(const char *text, bool *ok) {
 void show_help() {
   Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
-  Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet token <id> [index] | wallet addresses [index]");
+  Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
   Serial.println("OK signing: tx inspect <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | tx reject");
 #if HEXWALLET_ENABLE_SECRET_EXPORT
   Serial.println("OK sensitive: wallet secret [index] | selftest");
@@ -430,12 +432,27 @@ void handle_token(char *command) {
   else Serial.println("ERR invalid-token-command");
 }
 
+bool qrl_progress_hook(uint32_t completed, uint32_t total, void *context) {
+  (void)context;
+  if (completed == total || (completed % 64U) == 0) {
+    Serial.print("INFO qrl-xmss-keygen=");
+    Serial.print(completed);
+    Serial.print("/");
+    Serial.println(total);
+  }
+  delay(1);
+  return true;
+}
+
 void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
                    const uint8_t *seed, uint32_t address_index,
                    bool include_private) {
   DerivedAddress derived;
   const WalletError result =
-    derive_address(master, seed, network, 0, 0, address_index, &derived);
+    network.encoding == AddressEncoding::QrlXmss
+      ? derive_address_ex(master, seed, network, 0, 0, address_index,
+                          qrl_progress_hook, nullptr, &derived)
+      : derive_address(master, seed, network, 0, 0, address_index, &derived);
   if (result != WalletError::Ok) {
     Serial.print("ERR network=");
     Serial.print(network.id);
@@ -493,7 +510,9 @@ void show_addresses(uint32_t address_index, const NetworkProfile *only_network, 
                   address_index, include_secrets);
   } else {
     for (size_t index = 0; index < kNetworkProfileCount; ++index) {
-      print_derived(kNetworkProfiles[index], master, have_seed ? seed : nullptr,
+      const NetworkProfile &network = kNetworkProfiles[index];
+      if (network.explicit_only_derivation) continue;
+      print_derived(network, master, have_seed ? seed : nullptr,
                     address_index, include_secrets);
     }
   }
@@ -525,6 +544,9 @@ void handle_wallet_address(char *arguments) {
   if (!valid_index) {
     Serial.println("ERR invalid-index");
     return;
+  }
+  if (entry.network->encoding == AddressEncoding::QrlXmss) {
+    Serial.println("INFO qrl-xmss height=10; key generation is CPU-heavy and may take minutes");
   }
   show_addresses(index, entry.network, false);
 }
@@ -590,6 +612,46 @@ void handle_wallet_token(char *arguments) {
   clear_derived_address(&derived);
 }
 
+const char *key_scheme_text(KeyScheme scheme) {
+  switch (scheme) {
+    case KeyScheme::Secp256k1Ecdsa: return "secp256k1-ecdsa";
+    case KeyScheme::KaspaSchnorr: return "secp256k1-schnorr";
+    case KeyScheme::Ed25519Eddsa: return "ed25519-eddsa";
+    case KeyScheme::CryptoNoteEdwards: return "cryptonote-edwards";
+    case KeyScheme::Bls12381G1: return "bls12-381-g1";
+    case KeyScheme::XmssShake256: return "xmss-shake256";
+  }
+  return "unknown";
+}
+
+void handle_wallet_custody(char *arguments) {
+  while (*arguments == ' ') ++arguments;
+  WalletCatalogEntry entry;
+  if (!wallet_catalog_find(arguments, &entry) || entry.network == nullptr) {
+    Serial.println("ERR unknown-coin");
+    return;
+  }
+  const CustodyPlan plan =
+    plan_key_custody(*entry.network, active_secure_element_profile());
+  Serial.print("secure-element=");
+  Serial.print(active_secure_element_profile().name);
+  Serial.print(" network=");
+  Serial.print(entry.network->id);
+  Serial.print(" scheme=");
+  Serial.print(key_scheme_text(plan.scheme));
+  Serial.print(" key-in-se=");
+  Serial.print(plan.key_can_live_in_se ? "yes" : "no");
+  Serial.print(" se-sign=");
+  Serial.print(plan.se_can_sign ? "yes" : "no");
+  Serial.print(" mcu-holds-key=");
+  Serial.print(plan.mcu_must_hold_key ? "yes" : "no");
+  Serial.print(" seed-in-mcu=");
+  Serial.print(plan.requires_seed_in_mcu ? "yes" : "no");
+  Serial.print(" reason=\"");
+  Serial.print(plan.reason);
+  Serial.println("\"");
+}
+
 void handle_wallet(char *command) {
   if (!require_authentication()) return;
   if (strcmp(command, "wallet generate") == 0) {
@@ -613,6 +675,11 @@ void handle_wallet(char *command) {
   constexpr char kTokenPrefix[] = "wallet token ";
   if (strncmp(command, kTokenPrefix, sizeof(kTokenPrefix) - 1) == 0) {
     handle_wallet_token(command + sizeof(kTokenPrefix) - 1);
+    return;
+  }
+  constexpr char kCustodyPrefix[] = "wallet custody ";
+  if (strncmp(command, kCustodyPrefix, sizeof(kCustodyPrefix) - 1) == 0) {
+    handle_wallet_custody(command + sizeof(kCustodyPrefix) - 1);
     return;
   }
   const bool secret = strncmp(command, "wallet secret", 13) == 0;

@@ -41,6 +41,42 @@ bool hash160(const uint8_t *data, size_t length, uint8_t out[20]) {
   return crypto_hash160(data, length, out);
 }
 
+int hex_nibble(char character) {
+  if (character >= '0' && character <= '9') return character - '0';
+  if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+  if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+  return -1;
+}
+
+bool parse_hex_fixed(const char *text, uint8_t *out, size_t size) {
+  if (text == nullptr || out == nullptr || strlen(text) != size * 2) return false;
+  for (size_t index = 0; index < size; ++index) {
+    const int high = hex_nibble(text[index * 2]);
+    const int low = hex_nibble(text[index * 2 + 1]);
+    if (high < 0 || low < 0) return false;
+    out[index] = static_cast<uint8_t>((high << 4) | low);
+  }
+  return true;
+}
+
+bool bip340_tagged_hash(const char *tag, const uint8_t *data, size_t size,
+                        uint8_t out[kSha256Size]) {  if (tag == nullptr || out == nullptr || (data == nullptr && size != 0) || size > 96) {
+    return false;
+  }
+  uint8_t tag_hash[kSha256Size];
+  uint8_t buffer[2 * kSha256Size + 96];
+  if (!crypto_sha256(reinterpret_cast<const uint8_t *>(tag), strlen(tag), tag_hash)) {
+    return false;
+  }
+  memcpy(buffer, tag_hash, kSha256Size);
+  memcpy(buffer + kSha256Size, tag_hash, kSha256Size);
+  if (size != 0) memcpy(buffer + 2 * kSha256Size, data, size);
+  const bool ok = crypto_sha256(buffer, 2 * kSha256Size + size, out);
+  secure_zero(tag_hash, sizeof(tag_hash));
+  secure_zero(buffer, sizeof(buffer));
+  return ok;
+}
+
 bool fingerprint(const uint8_t public_key[kCompressedPublicKeySize], uint32_t *out) {
   if (public_key == nullptr || out == nullptr) return false;
   uint8_t digest[20];
@@ -486,6 +522,255 @@ WalletError secp256k1_sign_digest_recoverable(
   return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
 }
 
+WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize],
+                                       uint8_t out_xonly[kPrivateKeySize],
+                                       uint8_t *out_parity) {
+  if (private_key == nullptr || out_xonly == nullptr || !valid_private_key(private_key)) {
+    return WalletError::InvalidArgument;
+  }
+  mbedtls_ecp_group group;
+  mbedtls_ecp_point point;
+  mbedtls_mpi scalar;
+  mbedtls_ecp_group_init(&group);
+  mbedtls_ecp_point_init(&point);
+  mbedtls_mpi_init(&scalar);
+  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
+  if (result == 0) result = mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize);
+  if (result == 0) {
+    result = mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr);
+  }
+  if (result == 0) {
+    result = mbedtls_mpi_write_binary(&point.MBEDTLS_PRIVATE(X), out_xonly, kPrivateKeySize);
+  }
+  if (result == 0 && out_parity != nullptr) {
+    *out_parity = static_cast<uint8_t>(mbedtls_mpi_get_bit(&point.MBEDTLS_PRIVATE(Y), 0));
+  }
+  mbedtls_mpi_free(&scalar);
+  mbedtls_ecp_point_free(&point);
+  mbedtls_ecp_group_free(&group);
+  if (result != 0) secure_zero(out_xonly, kPrivateKeySize);
+  return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
+}
+
+WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
+                                   const uint8_t message[kPrivateKeySize],
+                                   const uint8_t aux_rand[kPrivateKeySize],
+                                   uint8_t out_signature[64]) {
+  if (private_key == nullptr || message == nullptr || aux_rand == nullptr ||
+      out_signature == nullptr || !valid_private_key(private_key)) {
+    return WalletError::InvalidArgument;
+  }
+  memset(out_signature, 0, 64);
+  mbedtls_ecp_group group;
+  mbedtls_ecp_point public_point;
+  mbedtls_ecp_point nonce_point;
+  mbedtls_mpi scalar, adjusted, nonce, k, challenge, product, sum;
+  mbedtls_ecp_group_init(&group);
+  mbedtls_ecp_point_init(&public_point);
+  mbedtls_ecp_point_init(&nonce_point);
+  mbedtls_mpi_init(&scalar);
+  mbedtls_mpi_init(&adjusted);
+  mbedtls_mpi_init(&nonce);
+  mbedtls_mpi_init(&k);
+  mbedtls_mpi_init(&challenge);
+  mbedtls_mpi_init(&product);
+  mbedtls_mpi_init(&sum);
+
+  uint8_t public_x[kPrivateKeySize];
+  uint8_t nonce_hash[kSha256Size];
+  uint8_t aux_hash[kSha256Size];
+  uint8_t adjusted_bytes[kPrivateKeySize];
+  uint8_t nonce_input[3 * kPrivateKeySize];
+  uint8_t challenge_input[3 * kPrivateKeySize];
+  uint8_t nonce_x[kPrivateKeySize];
+  uint8_t signature_s[kPrivateKeySize];
+
+  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
+  if (result == 0) result = mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize);
+  if (result == 0) {
+    result = mbedtls_ecp_mul(&group, &public_point, &scalar, &group.G,
+                             random_callback, nullptr);
+  }
+  if (result == 0) {
+    result = mbedtls_mpi_write_binary(&public_point.MBEDTLS_PRIVATE(X), public_x,
+                                      kPrivateKeySize);
+  }
+  if (result == 0) {
+    if (mbedtls_mpi_get_bit(&public_point.MBEDTLS_PRIVATE(Y), 0) != 0) {
+      result = mbedtls_mpi_sub_mpi(&adjusted, &group.N, &scalar);
+    } else {
+      result = mbedtls_mpi_copy(&adjusted, &scalar);
+    }
+  }
+  if (result == 0) {
+    result = mbedtls_mpi_write_binary(&adjusted, adjusted_bytes, kPrivateKeySize);
+  }
+  if (result == 0) {
+    result = bip340_tagged_hash("BIP0340/aux", aux_rand, kPrivateKeySize, aux_hash)
+               ? 0 : -1;
+  }
+  for (size_t index = 0; index < kPrivateKeySize && result == 0; ++index) {
+    nonce_input[index] = adjusted_bytes[index] ^ aux_hash[index];
+  }
+  if (result == 0) {
+    memcpy(nonce_input + kPrivateKeySize, public_x, kPrivateKeySize);
+    memcpy(nonce_input + 2 * kPrivateKeySize, message, kPrivateKeySize);
+    result = bip340_tagged_hash("BIP0340/nonce", nonce_input, sizeof(nonce_input),
+                                nonce_hash) ? 0 : -1;
+  }
+  if (result == 0) result = mbedtls_mpi_read_binary(&nonce, nonce_hash, kSha256Size);
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&nonce, &nonce, &group.N);
+  if (result == 0 && mbedtls_mpi_cmp_int(&nonce, 0) == 0) result = -1;
+  if (result == 0) {
+    result = mbedtls_ecp_mul(&group, &nonce_point, &nonce, &group.G,
+                             random_callback, nullptr);
+  }
+  if (result == 0) {
+    result = mbedtls_mpi_write_binary(&nonce_point.MBEDTLS_PRIVATE(X), nonce_x,
+                                      kPrivateKeySize);
+  }
+  if (result == 0) {
+    if (mbedtls_mpi_get_bit(&nonce_point.MBEDTLS_PRIVATE(Y), 0) != 0) {
+      result = mbedtls_mpi_sub_mpi(&k, &group.N, &nonce);
+    } else {
+      result = mbedtls_mpi_copy(&k, &nonce);
+    }
+  }
+  if (result == 0) {
+    memcpy(challenge_input, nonce_x, kPrivateKeySize);
+    memcpy(challenge_input + kPrivateKeySize, public_x, kPrivateKeySize);
+    memcpy(challenge_input + 2 * kPrivateKeySize, message, kPrivateKeySize);
+    uint8_t challenge_hash[kSha256Size];
+    result = bip340_tagged_hash("BIP0340/challenge", challenge_input,
+                                sizeof(challenge_input), challenge_hash)
+               ? 0 : -1;
+    if (result == 0) {
+      result = mbedtls_mpi_read_binary(&challenge, challenge_hash, kSha256Size);
+    }
+    secure_zero(challenge_hash, sizeof(challenge_hash));
+  }
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&challenge, &challenge, &group.N);
+  if (result == 0) result = mbedtls_mpi_mul_mpi(&product, &challenge, &adjusted);
+  if (result == 0) result = mbedtls_mpi_add_mpi(&sum, &product, &k);
+  if (result == 0) result = mbedtls_mpi_mod_mpi(&sum, &sum, &group.N);
+  if (result == 0) result = mbedtls_mpi_write_binary(&sum, signature_s, kPrivateKeySize);
+  if (result == 0) {
+    memcpy(out_signature, nonce_x, kPrivateKeySize);
+    memcpy(out_signature + kPrivateKeySize, signature_s, kPrivateKeySize);
+  }
+
+  secure_zero(public_x, sizeof(public_x));
+  secure_zero(nonce_hash, sizeof(nonce_hash));
+  secure_zero(aux_hash, sizeof(aux_hash));
+  secure_zero(adjusted_bytes, sizeof(adjusted_bytes));
+  secure_zero(nonce_input, sizeof(nonce_input));
+  secure_zero(challenge_input, sizeof(challenge_input));
+  secure_zero(nonce_x, sizeof(nonce_x));
+  secure_zero(signature_s, sizeof(signature_s));
+  mbedtls_mpi_free(&sum);
+  mbedtls_mpi_free(&product);
+  mbedtls_mpi_free(&challenge);
+  mbedtls_mpi_free(&k);
+  mbedtls_mpi_free(&nonce);
+  mbedtls_mpi_free(&adjusted);
+  mbedtls_mpi_free(&scalar);
+  mbedtls_ecp_point_free(&nonce_point);
+  mbedtls_ecp_point_free(&public_point);
+  mbedtls_ecp_group_free(&group);
+  if (result != 0) {
+    secure_zero(out_signature, 64);
+    return WalletError::CryptoFailure;
+  }
+  return WalletError::Ok;
+}
+
+bool secp256k1_schnorr_verify(const uint8_t xonly_public_key[kPrivateKeySize],
+                              const uint8_t message[kPrivateKeySize],
+                              const uint8_t signature[64]) {
+  if (xonly_public_key == nullptr || message == nullptr || signature == nullptr) {
+    return false;
+  }
+  mbedtls_ecp_group group;
+  mbedtls_ecp_point public_point, nonce_point, check_point;
+  mbedtls_mpi s, e, neg_e;
+  mbedtls_ecp_group_init(&group);
+  mbedtls_ecp_point_init(&public_point);
+  mbedtls_ecp_point_init(&nonce_point);
+  mbedtls_ecp_point_init(&check_point);
+  mbedtls_mpi_init(&s);
+  mbedtls_mpi_init(&e);
+  mbedtls_mpi_init(&neg_e);
+  uint8_t compressed[33];
+  uint8_t challenge_input[3 * kPrivateKeySize];
+  uint8_t challenge_hash[kSha256Size];
+  uint8_t expected[33];
+  uint8_t actual[33];
+  size_t actual_size = 0;
+  bool ok = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) == 0;
+  if (ok) ok = mbedtls_mpi_read_binary(&s, signature + kPrivateKeySize,
+                                       kPrivateKeySize) == 0 &&
+               mbedtls_mpi_cmp_mpi(&s, &group.N) < 0;
+  if (ok) {
+    compressed[0] = 0x02;
+    memcpy(compressed + 1, xonly_public_key, kPrivateKeySize);
+    ok = mbedtls_ecp_point_read_binary(&group, &public_point, compressed,
+                                       sizeof(compressed)) == 0 &&
+         mbedtls_ecp_check_pubkey(&group, &public_point) == 0;
+  }
+  if (ok) {
+    compressed[0] = 0x02;
+    memcpy(compressed + 1, signature, kPrivateKeySize);
+    ok = mbedtls_ecp_point_read_binary(&group, &nonce_point, compressed,
+                                       sizeof(compressed)) == 0 &&
+         mbedtls_ecp_check_pubkey(&group, &nonce_point) == 0;
+  }
+  if (ok) {
+    memcpy(challenge_input, signature, kPrivateKeySize);
+    memcpy(challenge_input + kPrivateKeySize, xonly_public_key, kPrivateKeySize);
+    memcpy(challenge_input + 2 * kPrivateKeySize, message, kPrivateKeySize);
+    ok = bip340_tagged_hash("BIP0340/challenge", challenge_input,
+                            sizeof(challenge_input), challenge_hash);
+  }
+  if (ok) {
+    ok = mbedtls_mpi_read_binary(&e, challenge_hash, kSha256Size) == 0 &&
+         mbedtls_mpi_mod_mpi(&e, &e, &group.N) == 0;
+  }
+  if (ok) {
+    if (mbedtls_mpi_cmp_int(&e, 0) == 0) {
+      ok = mbedtls_ecp_mul(&group, &check_point, &s, &group.G,
+                           random_callback, nullptr) == 0;
+    } else {
+      ok = mbedtls_mpi_sub_mpi(&neg_e, &group.N, &e) == 0 &&
+           mbedtls_ecp_muladd(&group, &check_point, &s, &group.G, &neg_e,
+                              &public_point) == 0;
+    }
+  }
+  if (ok) {
+    ok = mbedtls_ecp_point_write_binary(&group, &check_point,
+                                        MBEDTLS_ECP_PF_COMPRESSED, &actual_size,
+                                        actual, sizeof(actual)) == 0 &&
+         actual_size == sizeof(actual);
+  }
+  if (ok) {
+    expected[0] = 0x02;
+    memcpy(expected + 1, signature, kPrivateKeySize);
+    ok = crypto_constant_time_equal(actual, expected, sizeof(expected));
+  }
+  secure_zero(compressed, sizeof(compressed));
+  secure_zero(challenge_input, sizeof(challenge_input));
+  secure_zero(challenge_hash, sizeof(challenge_hash));
+  secure_zero(expected, sizeof(expected));
+  secure_zero(actual, sizeof(actual));
+  mbedtls_mpi_free(&neg_e);
+  mbedtls_mpi_free(&e);
+  mbedtls_mpi_free(&s);
+  mbedtls_ecp_point_free(&check_point);
+  mbedtls_ecp_point_free(&nonce_point);
+  mbedtls_ecp_point_free(&public_point);
+  mbedtls_ecp_group_free(&group);
+  return ok;
+}
+
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivateNode *out_node) {
   if (seed == nullptr || out_node == nullptr || seed_size < 16 || seed_size > 64) {
     return WalletError::InvalidArgument;
@@ -819,6 +1104,88 @@ bool run_bip32_self_test() {
   secure_zero(&derived_public, sizeof(derived_public));
   secure_zero(&private_child, sizeof(private_child));
   secure_zero(&private_child_public, sizeof(private_child_public));
+  return passed;
+}
+
+bool run_bip340_self_test() {
+  struct Vector {
+    const char *secret;
+    const char *aux;
+    const char *message;
+    const char *public_key;
+    const char *signature;
+  };
+  static const Vector kVector[] = {
+    { "0000000000000000000000000000000000000000000000000000000000000003",
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9",
+      "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215"
+      "25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0" },
+    { "B7E151628AED2A6ABF7158809CF4F3C762E7160F38B4DA56A784D9045190CFEF",
+      "0000000000000000000000000000000000000000000000000000000000000001",
+      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+      "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+      "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE3341"
+      "8906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A" },
+    { "C90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B14E5C9",
+      "C87AA53824B4D7AE2EB035A2B5BBBCCC080E76CDC6D1692C4B0B62D798E6D906",
+      "7E2D58D8B3BCDF1ABADEC7829054F90DDA9805AAB56C77333024B9D0A508B75C",
+      "DD308AFEC5777E13121FA72B9CC1B7CC0139715309B086C960E18FD969774EB8",
+      "5831AAEED7B44BB74E5EAB94BA9D4294C49BCF2A60728D8B4C200F50DD313C1B"
+      "AB745879A5AD954A72C45A91C3A51D3C7ADEA98D82F8481E0E1E03674A6F3FB7" },
+    { "0B432B2677937381AEF05BB02A66ECD012773062CF3FA2549E44F58ED2401710",
+      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "25D1DFF95105F5253C4022F628A996AD3A0D95FBF21D468A1B33F8C160D8F517",
+      "7EB0509757E246F19449885651611CB965ECC1A187DD51B64FDA1EDC9637D5EC"
+      "97582B9CB13DB3933705B32BA982AF5AF25FD78881EBB32771FC5922EFC66EA3" },
+  };
+  bool passed = true;
+  for (size_t index = 0; index < sizeof(kVector) / sizeof(kVector[0]); ++index) {
+    const Vector &vector = kVector[index];
+    uint8_t secret[kPrivateKeySize];
+    uint8_t aux[kPrivateKeySize];
+    uint8_t message[kPrivateKeySize];
+    uint8_t public_key[kPrivateKeySize];
+    uint8_t expected[64];
+    uint8_t signature[64];
+    uint8_t xonly[kPrivateKeySize];
+    uint8_t parity = 0;
+    bool ok = parse_hex_fixed(vector.secret, secret, sizeof(secret)) &&
+              parse_hex_fixed(vector.aux, aux, sizeof(aux)) &&
+              parse_hex_fixed(vector.message, message, sizeof(message)) &&
+              parse_hex_fixed(vector.public_key, public_key, sizeof(public_key)) &&
+              parse_hex_fixed(vector.signature, expected, sizeof(expected));
+    ok = ok && secp256k1_xonly_public_key(secret, xonly, &parity) == WalletError::Ok &&
+         crypto_constant_time_equal(xonly, public_key, sizeof(xonly));
+    ok = ok && secp256k1_schnorr_sign(secret, message, aux, signature) == WalletError::Ok &&
+         crypto_constant_time_equal(signature, expected, sizeof(signature));
+    ok = ok && secp256k1_schnorr_verify(public_key, message, expected);
+    if (ok) {
+      uint8_t tampered[64];
+      memcpy(tampered, expected, sizeof(tampered));
+      tampered[0] ^= 0x01;
+      ok = !secp256k1_schnorr_verify(public_key, message, tampered);
+      secure_zero(tampered, sizeof(tampered));
+    }
+    if (ok) {
+      uint8_t changed_message[kPrivateKeySize];
+      memcpy(changed_message, message, sizeof(changed_message));
+      changed_message[0] ^= 0x01;
+      ok = !secp256k1_schnorr_verify(public_key, changed_message, expected);
+      secure_zero(changed_message, sizeof(changed_message));
+    }
+    passed = passed && ok;
+    secure_zero(secret, sizeof(secret));
+    secure_zero(aux, sizeof(aux));
+    secure_zero(message, sizeof(message));
+    secure_zero(public_key, sizeof(public_key));
+    secure_zero(expected, sizeof(expected));
+    secure_zero(signature, sizeof(signature));
+    secure_zero(xonly, sizeof(xonly));
+    (void)parity;
+  }
   return passed;
 }
 
