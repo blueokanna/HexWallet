@@ -198,7 +198,7 @@ void show_help() {
   Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
-  Serial.println("OK signing: tx inspect <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | tx reject");
+  Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | tx reject");
 #if HEXWALLET_ENABLE_SECRET_EXPORT
   Serial.println("OK sensitive: wallet secret [index] | selftest");
 #else
@@ -316,7 +316,7 @@ void show_catalog(const char *query) {
   size_t matches = 0;
   for (size_t index = 0; index < wallet_catalog_count(); ++index) {
     WalletCatalogEntry entry;
-    if (!wallet_catalog_at(index, &entry) || !wallet_catalog_matches(entry, query)) continue;
+    if (!wallet_catalog_at_sorted(index, &entry) || !wallet_catalog_matches(entry, query)) continue;
     Serial.print("coin=");
     Serial.print(entry.id);
     Serial.print(" symbol=");
@@ -594,6 +594,18 @@ void handle_wallet_token(char *arguments) {
     Serial.println(error_text(result));
     return;
   }
+  char token_account[64];
+  if (token->standard == TokenStandard::Spl) {
+    const WalletError ata = token_spl_account_address(*token, derived.private_key,
+                                                      token_account,
+                                                      sizeof(token_account));
+    if (ata != WalletError::Ok) {
+      Serial.print("ERR token-account ");
+      Serial.println(error_text(ata));
+      clear_derived_address(&derived);
+      return;
+    }
+  }
   Serial.print("OK token=");
   Serial.print(token->id);
   Serial.print(" network=");
@@ -607,7 +619,7 @@ void handle_wallet_token(char *arguments) {
   Serial.print(" path=");
   Serial.print(derived.path);
   Serial.print(" account-address=");
-  Serial.println(derived.address);
+  Serial.println(token->standard == TokenStandard::Spl ? token_account : derived.address);
   Serial.println(token_supports_transfer_signing(*token) ? "INFO transfer-signing=evm-inspect-workflow" : "INFO transfer-signing-unavailable");
   clear_derived_address(&derived);
 }
@@ -712,7 +724,10 @@ void handle_wallet(char *command) {
 
 void print_transaction_review() {
   Serial.println("BEGIN TRANSACTION REVIEW");
-  Serial.println("network=btc signing=P2WPKH,P2SH-P2WPKH sighash=ALL");
+  Serial.print("network=");
+  Serial.print(pending_transaction.chain.network_id == nullptr ? "?" : pending_transaction.chain.network_id);
+  Serial.print(" sighash=");
+  Serial.println(pending_transaction.chain.sighash == SighashFamily::ForkId ? "ALL|FORKID" : "ALL");
   Serial.print("inputs=");
   Serial.print(pending_transaction.input_count);
   Serial.print(" input-sats=");
@@ -742,7 +757,7 @@ void print_transaction_review() {
   Serial.println("END TRANSACTION REVIEW");
 }
 
-void inspect_transaction(const char *psbt_hex) {
+void inspect_transaction(char *arguments) {
   if (!require_authentication()) return;
   const WalletTransportState transport_state = { true, false, display_is_available };
   if (!wallet_transport_allows(WalletTransport::SerialUsb,
@@ -750,6 +765,32 @@ void inspect_transaction(const char *psbt_hex) {
     Serial.println("ERR trusted-display-required-for-signing");
     return;
   }
+  const NetworkProfile *network = find_network_profile("btc");
+  char *separator = strchr(arguments, ' ');
+  const char *psbt_hex = arguments;
+  if (separator != nullptr) {
+    *separator++ = '\0';
+    psbt_hex = separator;
+    WalletCatalogEntry entry;
+    if (!wallet_catalog_find(arguments, &entry) || entry.network == nullptr) {
+      Serial.println("ERR unknown-coin");
+      return;
+    }
+    network = entry.network;
+  }
+  const NetworkSigningPolicy *policy = network == nullptr ? nullptr : find_network_signing_policy(network->id);
+  WalletCatalogEntry signing_entry;
+  if (network == nullptr || policy == nullptr ||
+      !wallet_catalog_find(network->id, &signing_entry) ||
+      !wallet_catalog_has(signing_entry, WalletCapabilitySigning) ||
+      !wallet_catalog_has(signing_entry, WalletCapabilityTransactionReview)) {
+    Serial.println("ERR tx-inspect network-signing-unsupported");
+    return;
+  }
+  const BitcoinChainParams chain = {
+      network->id,
+      network->encoding == AddressEncoding::CashAddr ? network->alt_hrp : nullptr,
+      network->utxo, policy->family, policy->fork_id};
   HdPrivateNode master;
   if (!load_master(&master)) return;
   static uint8_t psbt[HEXWALLET_MAX_PSBT_BYTES];
@@ -760,7 +801,7 @@ void inspect_transaction(const char *psbt_hex) {
     return;
   }
   clear_pending_transaction();
-  const TransactionError result = bitcoin_parse_psbt(psbt, psbt_size, master, &pending_transaction);
+  const TransactionError result = bitcoin_parse_psbt(psbt, psbt_size, master, chain, &pending_transaction);
   secure_zero(psbt, sizeof(psbt));
   secure_zero(&master, sizeof(master));
   if (result != TransactionError::Ok) {
@@ -786,7 +827,7 @@ void inspect_transaction(const char *psbt_hex) {
     Serial.println(" expires-ms=120000; compare every output before tx sign");
   }
   WalletUiTransactionReview review = {};
-  review.network = "BITCOIN";
+  review.network = network->name;
   review.output_count = pending_transaction.output_count;
   review.fee = pending_transaction.fee;
   review.fee_rate = pending_transaction.estimated_vbytes == 0 ? 0 : pending_transaction.fee / pending_transaction.estimated_vbytes;
@@ -930,7 +971,13 @@ void inspect_evm_transaction(char *arguments) {
   transaction_expires_at = millis() + kTransactionApprovalMs;
   transaction_pending = true;
   pending_transaction_kind = PendingTransactionKind::Evm;
-  const char *asset = pending_evm_transaction.token == nullptr ? network->symbol : pending_evm_transaction.token->symbol;
+  const bool contract_call = pending_evm_transaction.has_call;
+  const char *asset = network->symbol;
+  if (contract_call) {
+    asset = pending_evm_transaction.token != nullptr
+                ? pending_evm_transaction.token->symbol
+                : evm_token_standard_name(pending_evm_transaction.call.standard);
+  }
   Serial.println("BEGIN TRANSACTION REVIEW");
   Serial.print("network=");
   Serial.print(network->id);
@@ -938,17 +985,78 @@ void inspect_evm_transaction(char *arguments) {
   Serial.println(pending_evm_transaction.type == EvmTransactionType::Eip1559 ? "EIP-1559" : "EIP-155");
   Serial.print("from=");
   Serial.println(pending_evm_transaction.from_address);
+  bool recipient_is_zero = true;
+  for (size_t index = 0; index < kEvmAddressSize; ++index) {
+    if (pending_evm_transaction.call.recipient[index] != 0) recipient_is_zero = false;
+  }
+  const bool layer_zero_peer =
+      pending_evm_transaction.call.standard == EvmTokenStandard::LayerZeroOft ||
+      pending_evm_transaction.call.standard == EvmTokenStandard::LayerZeroOnft;
+  const char *review_recipient =
+      layer_zero_peer && recipient_is_zero
+          ? pending_evm_transaction.remote_address_text
+          : pending_evm_transaction.recipient_address;
   Serial.print("asset=");
   Serial.print(asset);
   Serial.print(" recipient=");
-  Serial.println(pending_evm_transaction.recipient_address);
+  Serial.println(review_recipient);
   Serial.print("amount=");
   Serial.print(pending_evm_transaction.amount_text);
   Serial.print(" ");
   Serial.println(asset);
-  if (pending_evm_transaction.token != nullptr) {
-    Serial.print("contract=");
-    Serial.println(pending_evm_transaction.token->contract_or_mint);
+  if (contract_call) {
+    Serial.print("call=");
+    Serial.print(evm_token_standard_name(pending_evm_transaction.call.standard));
+    Serial.print(".");
+    Serial.println(token_function_name(pending_evm_transaction.call.function));
+    Serial.print("contract=0x");
+    print_hex(pending_evm_transaction.contract, kEvmAddressSize);
+    Serial.println();
+    if (pending_evm_transaction.call.has_token_id) {
+      Serial.print("token-id=");
+      Serial.println(pending_evm_transaction.token_id_text);
+    }
+    if (pending_evm_transaction.call.has_value) {
+      Serial.print("call-value=");
+      Serial.println(pending_evm_transaction.value_text);
+    }
+    if (pending_evm_transaction.call.has_min_amount) {
+      Serial.print("min-amount=");
+      Serial.println(pending_evm_transaction.min_amount_text);
+    }
+    if (pending_evm_transaction.call.standard == EvmTokenStandard::LayerZeroOft) {
+      Serial.print("dst-eid=");
+      Serial.println(static_cast<unsigned long>(pending_evm_transaction.call.remote_eid));
+    }
+    if (pending_evm_transaction.call.standard == EvmTokenStandard::LayerZeroOft ||
+        pending_evm_transaction.call.standard == EvmTokenStandard::LayerZeroOnft) {
+      if (pending_evm_transaction.call.remote_chain_id != 0) {
+        Serial.print("remote-chain=");
+        Serial.println(static_cast<unsigned long>(pending_evm_transaction.call.remote_chain_id));
+      }
+      Serial.print("remote=");
+      Serial.println(pending_evm_transaction.remote_address_text);
+    }
+    if (pending_evm_transaction.call.has_nested_call) {
+      Serial.print("nested-target=0x");
+      print_hex(pending_evm_transaction.call.nested_target, kEvmAddressSize);
+      Serial.println();
+      Serial.print("nested-selector=0x");
+      print_hex(pending_evm_transaction.call.nested_selector, kTokenSelectorSize);
+      Serial.println();
+      Serial.print("nested-data-bytes=");
+      Serial.println(static_cast<unsigned long>(pending_evm_transaction.call.nested_data_size));
+    }
+    if (pending_evm_transaction.call.has_bytes_tail) {
+      Serial.print("call-data-bytes=");
+      Serial.println(static_cast<unsigned long>(pending_evm_transaction.call.bytes_tail_size));
+    }
+  }
+  if (pending_evm_transaction.has_native_value) {
+    Serial.print("native-value=");
+    Serial.print(pending_evm_transaction.native_value_text);
+    Serial.print(" ");
+    Serial.println(network->symbol);
   }
   Serial.print("nonce=");
   Serial.print(static_cast<unsigned long long>(pending_evm_transaction.nonce));
@@ -971,21 +1079,36 @@ void inspect_evm_transaction(char *arguments) {
     Serial.print(approval);
     Serial.println(" expires-ms=120000");
   }
-  char display_amount[112];
+  char display_amount[256];
   char display_fee[112];
-  snprintf(display_amount, sizeof(display_amount), "%s %s", pending_evm_transaction.amount_text, asset);
+  char output_label[96];
+  if (pending_evm_transaction.call.has_token_id) {
+    snprintf(display_amount, sizeof(display_amount), "%s %s #%s",
+             pending_evm_transaction.amount_text, asset,
+             pending_evm_transaction.token_id_text);
+  } else {
+    snprintf(display_amount, sizeof(display_amount), "%s %s",
+             pending_evm_transaction.amount_text, asset);
+  }
+  if (contract_call) {
+    snprintf(output_label, sizeof(output_label), "%s %s",
+             evm_token_standard_name(pending_evm_transaction.call.standard),
+             token_function_name(pending_evm_transaction.call.function));
+  } else {
+    snprintf(output_label, sizeof(output_label), "NATIVE TRANSFER");
+  }
   snprintf(display_fee, sizeof(display_fee), "%s %s", pending_evm_transaction.maximum_fee_text,
            network->symbol);
   WalletUiTransactionReview review = {};
   review.network = network->name;
   review.output_count = 1;
-  review.outputs[0] = { 0, display_amount, pending_evm_transaction.recipient_address,
-                        pending_evm_transaction.token == nullptr ? "NATIVE TRANSFER" : "REGISTERED ERC-20" };
+  review.outputs[0] = { 0, display_amount, review_recipient, output_label };
   review.fee_text = display_fee;
   review.approval_code = approval;
   wallet_ui_show_transaction(review);
   secure_zero(display_amount, sizeof(display_amount));
   secure_zero(display_fee, sizeof(display_fee));
+  secure_zero(output_label, sizeof(output_label));
   secure_zero(approval, sizeof(approval));
 }
 

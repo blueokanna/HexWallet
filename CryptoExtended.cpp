@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "Blake2b.h"
 #include "CryptoPrimitives.h"
 #include "WalletSecurity.h"
 
@@ -67,12 +68,6 @@ uint64_t load_le64(const uint8_t *data) {
     value |= static_cast<uint64_t>(data[index]) << (index * 8U);
   }
   return value;
-}
-
-void store_le64(uint8_t *out, uint64_t value) {
-  for (uint8_t index = 0; index < 8; ++index) {
-    out[index] = static_cast<uint8_t>(value >> (index * 8U));
-  }
 }
 
 void store_be64_into(uint8_t *out, uint64_t value) {
@@ -350,139 +345,7 @@ bool crypto_sha512_256(const uint8_t *data, size_t size, uint8_t out[32]) {
 
 bool crypto_blake2b(const uint8_t *data, size_t size, uint8_t *out,
                     size_t out_size) {
-  if (out == nullptr || out_size == 0 || out_size > 64 || (data == nullptr && size != 0)) {
-    return false;
-  }
-  static const uint64_t kIv[8] = {
-    UINT64_C(0x6a09e667f3bcc908),
-    UINT64_C(0xbb67ae8584caa73b),
-    UINT64_C(0x3c6ef372fe94f82b),
-    UINT64_C(0xa54ff53a5f1d36f1),
-    UINT64_C(0x510e527fade682d1),
-    UINT64_C(0x9b05688c2b3e6c1f),
-    UINT64_C(0x1f83d9abfb41bd6b),
-    UINT64_C(0x5be0cd19137e2179),
-  };
-  static const uint8_t kSigma[12][16] = {
-    { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-    { 14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 },
-    { 11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4 },
-    { 7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8 },
-    { 9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13 },
-    { 2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9 },
-    { 12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11 },
-    { 13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10 },
-    { 6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5 },
-    { 10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0 },
-    { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-    { 14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 },
-  };
-
-  uint64_t h[8];
-  memcpy(h, kIv, sizeof(h));
-  h[0] ^= UINT64_C(0x01010000) ^ static_cast<uint64_t>(out_size);
-
-  constexpr size_t kBlockSize = 128;
-  uint64_t t0 = 0;
-  uint64_t t1 = 0;
-  uint8_t block[kBlockSize] = { 0 };
-
-  size_t remaining = size;
-  const uint8_t *cursor = data;
-  while (remaining >= kBlockSize) {
-    memcpy(block, cursor, kBlockSize);
-    t0 += kBlockSize;
-    if (t0 < kBlockSize)
-      t1 += 1;
-    uint64_t m[16];
-    for (size_t index = 0; index < 16; ++index) {
-      m[index] = load_le64(block + index * 8);
-    }
-    uint64_t v[16];
-    memcpy(v, h, sizeof(h));
-    memcpy(v + 8, kIv, sizeof(kIv));
-    v[12] ^= t0;
-    v[13] ^= t1;
-    for (size_t round = 0; round < 12; ++round) {
-      const uint8_t *s = kSigma[round];
-#define BLAKE2B_G(a, b, c, d, x, y) \
-  do { \
-    v[a] = v[a] + v[b] + x; \
-    v[d] = rotate_right64(v[d] ^ v[a], 32); \
-    v[c] = v[c] + v[d]; \
-    v[b] = rotate_right64(v[b] ^ v[c], 24); \
-    v[a] = v[a] + v[b] + y; \
-    v[d] = rotate_right64(v[d] ^ v[a], 16); \
-    v[c] = v[c] + v[d]; \
-    v[b] = rotate_right64(v[b] ^ v[c], 63); \
-  } while (0)
-      BLAKE2B_G(0, 4, 8, 12, m[s[0]], m[s[1]]);
-      BLAKE2B_G(1, 5, 9, 13, m[s[2]], m[s[3]]);
-      BLAKE2B_G(2, 6, 10, 14, m[s[4]], m[s[5]]);
-      BLAKE2B_G(3, 7, 11, 15, m[s[6]], m[s[7]]);
-      BLAKE2B_G(0, 5, 10, 15, m[s[8]], m[s[9]]);
-      BLAKE2B_G(1, 6, 11, 12, m[s[10]], m[s[11]]);
-      BLAKE2B_G(2, 7, 8, 13, m[s[12]], m[s[13]]);
-      BLAKE2B_G(3, 4, 9, 14, m[s[14]], m[s[15]]);
-#undef BLAKE2B_G
-    }
-    for (size_t index = 0; index < 8; ++index) {
-      h[index] ^= v[index] ^ v[index + 8];
-    }
-    cursor += kBlockSize;
-    remaining -= kBlockSize;
-  }
-
-  // final block (possibly empty)
-  memset(block, 0, sizeof(block));
-  if (remaining != 0)
-    memcpy(block, cursor, remaining);
-  t0 += remaining;
-  // RFC 7693: last-block flag lives in f0 (v[14] ^= all-ones), the
-  // message block itself is zero-padded (no 0x80 marker byte).
-  uint64_t m[16];
-  for (size_t index = 0; index < 16; ++index) {
-    m[index] = load_le64(block + index * 8);
-  }
-  uint64_t v[16];
-  memcpy(v, h, sizeof(h));
-  memcpy(v + 8, kIv, sizeof(kIv));
-  v[12] ^= t0;
-  v[13] ^= t1;
-  v[14] ^= UINT64_MAX;  // f0: last block
-  for (size_t round = 0; round < 12; ++round) {
-    const uint8_t *s = kSigma[round];
-#define BLAKE2B_G2(a, b, c, d, x, y) \
-  do { \
-    v[a] = v[a] + v[b] + x; \
-    v[d] = rotate_right64(v[d] ^ v[a], 32); \
-    v[c] = v[c] + v[d]; \
-    v[b] = rotate_right64(v[b] ^ v[c], 24); \
-    v[a] = v[a] + v[b] + y; \
-    v[d] = rotate_right64(v[d] ^ v[a], 16); \
-    v[c] = v[c] + v[d]; \
-    v[b] = rotate_right64(v[b] ^ v[c], 63); \
-  } while (0)
-    BLAKE2B_G2(0, 4, 8, 12, m[s[0]], m[s[1]]);
-    BLAKE2B_G2(1, 5, 9, 13, m[s[2]], m[s[3]]);
-    BLAKE2B_G2(2, 6, 10, 14, m[s[4]], m[s[5]]);
-    BLAKE2B_G2(3, 7, 11, 15, m[s[6]], m[s[7]]);
-    BLAKE2B_G2(0, 5, 10, 15, m[s[8]], m[s[9]]);
-    BLAKE2B_G2(1, 6, 11, 12, m[s[10]], m[s[11]]);
-    BLAKE2B_G2(2, 7, 8, 13, m[s[12]], m[s[13]]);
-    BLAKE2B_G2(3, 4, 9, 14, m[s[14]], m[s[15]]);
-#undef BLAKE2B_G2
-  }
-  for (size_t index = 0; index < 8; ++index) {
-    h[index] ^= v[index] ^ v[index + 8];
-  }
-
-  for (size_t index = 0; index < out_size; ++index) {
-    out[index] = static_cast<uint8_t>(h[index / 8] >> (8U * (index % 8)));
-  }
-  secure_zero(h, sizeof(h));
-  secure_zero(block, sizeof(block));
-  return true;
+  return blake2b_keyed_hash(nullptr, 0, data, size, out, out_size);
 }
 
 // Base encodings -------------------------------------------------------------
@@ -804,8 +667,79 @@ bool kaspa_bech32_encode(const char *hrp, uint8_t version,
   return true;
 }
 
+bool kaspa_bech32_decode(const char *expected_hrp, const char *address,
+                         uint8_t *out_version, uint8_t *out_payload,
+                         size_t *in_out_payload_size) {
+  if (expected_hrp == nullptr || address == nullptr || out_version == nullptr ||
+      out_payload == nullptr || in_out_payload_size == nullptr) {
+    return false;
+  }
+  const size_t hrp_size = strlen(expected_hrp);
+  if (strlen(address) < hrp_size + 2 ||
+      strncmp(address, expected_hrp, hrp_size) != 0 ||
+      address[hrp_size] != ':') {
+    return false;
+  }
+  const char *data = address + hrp_size + 1;
+  const size_t data_chars = strlen(data);
+  if (data_chars < 8) return false;
+  uint8_t values[128];
+  if (data_chars > sizeof(values)) return false;
+  for (size_t index = 0; index < data_chars; ++index) {
+    const char *found = strchr(kBase32Charset, data[index]);
+    if (found == nullptr) return false;
+    values[index] = static_cast<uint8_t>(found - kBase32Charset);
+  }
+  // polymod over hrp[0..] & 0x1f, separator 0, data, then 8 zero symbols.
+  uint8_t poly_input[256];
+  size_t poly_size = 0;
+  if (hrp_size + 1 + data_chars + 8 > sizeof(poly_input)) return false;
+  for (size_t index = 0; index < hrp_size; ++index) {
+    poly_input[poly_size++] = static_cast<uint8_t>(expected_hrp[index] & 0x1f);
+  }
+  poly_input[poly_size++] = 0;
+  memcpy(poly_input + poly_size, values, data_chars);
+  poly_size += data_chars;
+  // No checksum padding here: verification includes the received checksum
+  // symbols. The eight zero symbols belong to the encoder only.
+  const uint64_t polymod = cashaddr_polymod(poly_input, poly_size);
+  // cashaddr_polymod already folds in the "^1" that a plain Bech32 verifier
+  // compares against, so a valid Kaspa checksum yields 0 here.
+  if (polymod != 0) return false;
+
+  // Drop the 8-symbol checksum, then convert 5->8.
+  const size_t body_symbols = data_chars - 8;
+  uint8_t bytes[128];
+  size_t byte_count = 0;
+  uint32_t accumulator = 0;
+  uint8_t bits = 0;
+  for (size_t index = 0; index < body_symbols; ++index) {
+    accumulator = (accumulator << 5) | values[index];
+    bits = static_cast<uint8_t>(bits + 5);
+    if (bits >= 8) {
+      bits = static_cast<uint8_t>(bits - 8);
+      if (byte_count >= sizeof(bytes)) return false;
+      bytes[byte_count++] = static_cast<uint8_t>((accumulator >> bits) & 0xff);
+    }
+  }
+  // Reject non-zero padding bits so two encodings cannot share a payload.
+  if (bits >= 5 || (bits != 0 && (accumulator & ((1U << bits) - 1U)) != 0)) {
+    return false;
+  }
+  if (byte_count < 2) return false;
+  const size_t payload_size = byte_count - 1;
+  if (*in_out_payload_size < payload_size) {
+    *in_out_payload_size = payload_size;
+    return false;
+  }
+  *out_version = bytes[0];
+  memcpy(out_payload, bytes + 1, payload_size);
+  *in_out_payload_size = payload_size;
+  secure_zero(bytes, sizeof(bytes));
+  return true;
+}
+
 bool run_crypto_extended_self_tests() {
-  // FIPS 202 SHA3-256 vectors.
   static const uint8_t kSha3Empty[kSha3RateBytes] = { 0 };
   (void)kSha3Empty;
   uint8_t digest[32];

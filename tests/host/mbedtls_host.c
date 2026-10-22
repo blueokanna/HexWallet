@@ -972,3 +972,43 @@ void mbedtls_platform_zeroize(void *buf, size_t len) {
   volatile unsigned char *p = (volatile unsigned char *)buf;
   while (len--) *p++ = 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* secp256k1 group/ECDSA stubs                                         */
+/*                                                                     */
+/* The host suite only exercises the digest (SHA-256) path of the       */
+/* Bitcoin signing code, so these return MBEDTLS_ERR_ECP_BAD_INPUT_DATA */
+/* instead of implementing the curve. An accidental host-side attempt   */
+/* to sign therefore fails loudly rather than producing a signature.    */
+/* ------------------------------------------------------------------ */
+#include "mbedtls/ecp.h"
+#include "mbedtls/ecdsa.h"
+
+void mbedtls_ecp_group_init(mbedtls_ecp_group *grp) { if (grp) memset(grp, 0, sizeof(*grp)); }
+void mbedtls_ecp_group_free(mbedtls_ecp_group *grp) { if (grp) memset(grp, 0, sizeof(*grp)); }
+void mbedtls_ecp_point_init(mbedtls_ecp_point *pt) { if (pt) memset(pt, 0, sizeof(*pt)); }
+void mbedtls_ecp_point_free(mbedtls_ecp_point *pt) { if (pt) memset(pt, 0, sizeof(*pt)); }
+int mbedtls_ecp_group_load(mbedtls_ecp_group *grp, mbedtls_ecp_group_id id) {
+  (void)grp; (void)id; return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+}
+int mbedtls_ecp_mul(mbedtls_ecp_group *grp, mbedtls_ecp_point *R, const mbedtls_mpi *m,
+                    const mbedtls_ecp_point *P, int (*f_rng)(void *, unsigned char *, size_t),
+                    void *p_rng) {
+  (void)grp; (void)R; (void)m; (void)P; (void)f_rng; (void)p_rng;
+  return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+}
+int mbedtls_ecdsa_sign_det_ext(mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+                               const mbedtls_mpi *d, const unsigned char *buf, size_t blen,
+                               mbedtls_md_type_t md_alg,
+                               int (*f_rng_blind)(void *, unsigned char *, size_t),
+                               void *p_rng_blind) {
+  (void)grp; (void)r; (void)s; (void)d; (void)buf; (void)blen; (void)md_alg;
+  (void)f_rng_blind; (void)p_rng_blind;
+  return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+}
+int mbedtls_ecdsa_verify(mbedtls_ecp_group *grp, const unsigned char *buf, size_t blen,
+                         const mbedtls_ecp_point *Q, const mbedtls_mpi *r,
+                         const mbedtls_mpi *s) {
+  (void)grp; (void)buf; (void)blen; (void)Q; (void)r; (void)s;
+  return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+}

@@ -8,6 +8,7 @@
 *.a
 *.pdb
 *.ilk
+__pycache__/
 build/
 tests/host/obj/
 tests/host/obj-clang/

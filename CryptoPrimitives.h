@@ -15,6 +15,12 @@ constexpr size_t kShake256Size = 32;
 
 bool crypto_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
 bool crypto_double_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
+// Concatenates up to three segments before hashing.  Needed to compute the
+// txid of a segwit previous transaction without materialising a stripped copy.
+bool crypto_double_sha256_segments(const uint8_t *a, size_t a_size,
+                                   const uint8_t *b, size_t b_size,
+                                   const uint8_t *c, size_t c_size,
+                                   uint8_t out[kSha256Size]);
 bool crypto_hmac_sha256(const uint8_t *key, size_t key_size, const uint8_t *data,
                         size_t data_size, uint8_t out[kSha256Size]);
 bool crypto_hmac_sha512(const uint8_t *key, size_t key_size, const uint8_t *data,

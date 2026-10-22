@@ -171,9 +171,9 @@ bool serialize_transaction(const EvmSigningRequest &request,
                            const RecoverableSignature *signature,
                            uint8_t *out, size_t capacity, size_t *out_size) {
   uint8_t payload[kEvmMaxSignedTransactionSize];
-  uint8_t zero_value[kEvmUint256Size] = {};
   Writer writer = {payload, sizeof(payload), 0};
-  const uint8_t *native_value = request.token == nullptr ? request.amount : zero_value;
+  const bool contract_call = request.has_call || request.token != nullptr;
+  const uint8_t *native_value = contract_call ? request.native_value : request.amount;
   bool ok;
   if (request.type == EvmTransactionType::Eip1559) {
     ok = write_rlp_u64(&writer, request.network->evm_chain_id) &&
@@ -212,7 +212,6 @@ bool serialize_transaction(const EvmSigningRequest &request,
                              request.type == EvmTransactionType::Eip1559,
                              out, capacity, &serialized_size);
   if (ok) *out_size = serialized_size;
-  secure_zero(zero_value, sizeof(zero_value));
   secure_zero(payload, sizeof(payload));
   return ok;
 }
@@ -259,6 +258,74 @@ const TokenProfile *find_token(const NetworkProfile &network,
   }
   secure_zero(candidate, sizeof(candidate));
   return nullptr;
+}
+
+bool find_contract_standard(const NetworkProfile &network,
+                            const uint8_t contract[kEvmAddressSize],
+                            EvmTokenStandard *out) {
+  if (out == nullptr) return false;
+  uint8_t candidate[kEvmAddressSize];
+  for (size_t index = 0; index < kTokenProfileCount; ++index) {
+    const TokenProfile &token = kTokenProfiles[index];
+    if (token.standard == TokenStandard::Spl ||
+        strcmp(token.network_id, network.id) != 0 ||
+        !decode_contract(token.contract_or_mint, candidate) ||
+        !crypto_constant_time_equal(candidate, contract, sizeof(candidate))) {
+      continue;
+    }
+    *out = token_evm_standard(token.standard);
+    secure_zero(candidate, sizeof(candidate));
+    return *out != EvmTokenStandard::Unknown;
+  }
+  secure_zero(candidate, sizeof(candidate));
+  return false;
+}
+
+int compare_uint256(const uint8_t left[kEvmUint256Size],
+                    const uint8_t right[kEvmUint256Size]) {
+  for (size_t index = 0; index < kEvmUint256Size; ++index) {
+    if (left[index] != right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+bool call_requires_wallet_sender(const DecodedTokenCalldata &call) {
+  switch (call.standard) {
+    case EvmTokenStandard::Erc20:
+      return call.function == TokenFunction::TransferFrom;
+    case EvmTokenStandard::Erc721:
+    case EvmTokenStandard::Erc1155:
+    case EvmTokenStandard::Erc3525:
+      return call.function == TokenFunction::TransferFrom ||
+             call.function == TokenFunction::SafeTransferFrom ||
+             call.function == TokenFunction::SafeTransferFromWithData ||
+             call.function == TokenFunction::SafeTransferFromValue ||
+             call.function == TokenFunction::SafeTransferFromValueWithData ||
+             call.function == TokenFunction::SafeBatchTransferFrom;
+    case EvmTokenStandard::Erc4626:
+      return call.function == TokenFunction::Withdraw ||
+             call.function == TokenFunction::Redeem;
+    case EvmTokenStandard::Erc777:
+      return call.function == TokenFunction::OperatorSend;
+    case EvmTokenStandard::LayerZeroOft:
+      // OFT v2 send() has no from field; v1 sendFrom() does.
+      return call.function == TokenFunction::OnftSendFrom;
+    case EvmTokenStandard::LayerZeroOnft:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void bytes32_text(const uint8_t value[kEvmUint256Size], char out[kEvmBytes32TextSize]) {
+  static constexpr char kHex[] = "0123456789abcdef";
+  out[0] = '0';
+  out[1] = 'x';
+  for (size_t index = 0; index < kEvmUint256Size; ++index) {
+    out[2 + index * 2] = kHex[value[index] >> 4];
+    out[3 + index * 2] = kHex[value[index] & 0x0f];
+  }
+  out[kEvmBytes32TextSize - 1] = '\0';
 }
 
 bool uint256_to_text(const uint8_t value[kEvmUint256Size], uint8_t decimals,
@@ -405,7 +472,7 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   }
   parsed.maximum_fee = parsed.gas_limit * parsed.gas_price_or_max_fee;
   memcpy(parsed.contract, to->data, sizeof(parsed.contract));
-  parsed.data_size = static_cast<uint8_t>(data->size);
+  parsed.data_size = static_cast<uint16_t>(data->size);
   if (data->size != 0) memcpy(parsed.data, data->data, data->size);
 
   if (data->size == 0) {
@@ -416,20 +483,86 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     memcpy(parsed.recipient, parsed.contract, sizeof(parsed.recipient));
     memcpy(parsed.amount, native_value, sizeof(parsed.amount));
   } else {
-    if (data->size != kEvmMaxDataSize ||
-        memcmp(data->data, kErc20TransferSelector, sizeof(kErc20TransferSelector)) != 0 ||
-        !is_zero(data->data + 4, 12) || !is_zero(native_value, sizeof(native_value))) {
-      secure_zero(native_value, sizeof(native_value));
-      return EvmTransactionError::Unsupported;
-    }
     parsed.token = find_token(network, parsed.contract);
-    if (parsed.token == nullptr) {
+    EvmTokenStandard standard = parsed.token != nullptr
+                                    ? token_evm_standard(parsed.token->standard)
+                                    : EvmTokenStandard::Unknown;
+    if (standard == EvmTokenStandard::Unknown) {
+      find_contract_standard(network, parsed.contract, &standard);
+    }
+    DecodedTokenCalldata decoded = {};
+    if (!token_decode_calldata(data->data, data->size, standard, &decoded)) {
       secure_zero(native_value, sizeof(native_value));
       return EvmTransactionError::Unsupported;
     }
-    memcpy(parsed.recipient, data->data + 16, sizeof(parsed.recipient));
-    memcpy(parsed.amount, data->data + 36, sizeof(parsed.amount));
-    if (is_zero(parsed.amount, sizeof(parsed.amount))) {
+    // Fungible amounts need the registered symbol and decimals; an unknown
+    // ERC-20 selector is not reviewable as a token transfer.
+    if (decoded.standard == EvmTokenStandard::Erc20 && parsed.token == nullptr) {
+      secure_zero(native_value, sizeof(native_value));
+      return EvmTransactionError::Unsupported;
+    }
+    // The trusted display cannot itemise an arbitrary ERC-1155 batch, and an
+    // opaque receiver hook is code execution hidden inside a transfer. Both
+    // are refused rather than displayed as something they are not.
+    const bool batch_transfer =
+        decoded.function == TokenFunction::SafeBatchTransferFrom;
+    const bool opaque_transfer_tail =
+        (decoded.standard == EvmTokenStandard::Erc721 ||
+         decoded.standard == EvmTokenStandard::Erc1155 ||
+         decoded.standard == EvmTokenStandard::Erc3525 ||
+         decoded.standard == EvmTokenStandard::Erc777 ||
+         decoded.standard == EvmTokenStandard::Erc6551) &&
+        ((decoded.has_bytes_tail && decoded.bytes_tail_size != 0) ||
+         (decoded.has_second_bytes_tail && decoded.second_bytes_tail_size != 0));
+    if (batch_transfer || opaque_transfer_tail) {
+      secure_zero(native_value, sizeof(native_value));
+      return EvmTransactionError::Unsupported;
+    }
+    const bool payable_call =
+        decoded.standard == EvmTokenStandard::LayerZeroOft ||
+        decoded.standard == EvmTokenStandard::LayerZeroOnft ||
+        decoded.standard == EvmTokenStandard::Erc6551;
+    if (!is_zero(native_value, sizeof(native_value))) {
+      if (!payable_call) {
+        secure_zero(native_value, sizeof(native_value));
+        return EvmTransactionError::Unsupported;
+      }
+      memcpy(parsed.native_value, native_value, sizeof(parsed.native_value));
+      parsed.has_native_value = true;
+    }
+    if (decoded.standard == EvmTokenStandard::LayerZeroOft) {
+      // Only native-fee settlement is supported; LZ-token payment changes the
+      // fee asset and is deliberately out of scope.
+      if (!is_zero(decoded.fee_lz_token, sizeof(decoded.fee_lz_token)) ||
+          compare_uint256(native_value, decoded.fee_native) < 0) {
+        secure_zero(native_value, sizeof(native_value));
+        return EvmTransactionError::FeePolicy;
+      }
+    }
+    parsed.call = decoded;
+    parsed.has_call = true;
+    memcpy(parsed.recipient, decoded.recipient, sizeof(parsed.recipient));
+    if (decoded.has_token_id) {
+      if (!uint256_to_text(decoded.token_id, 0, parsed.token_id_text)) {
+        secure_zero(native_value, sizeof(native_value));
+        return EvmTransactionError::InvalidAmount;
+      }
+      if (decoded.standard == EvmTokenStandard::Erc1155 ||
+          decoded.standard == EvmTokenStandard::Erc3525 ||
+          (decoded.standard == EvmTokenStandard::LayerZeroOnft &&
+           decoded.amount_fits_u64)) {
+        memcpy(parsed.amount, decoded.amount, sizeof(parsed.amount));
+      } else {
+        memset(parsed.amount, 0, sizeof(parsed.amount));
+        parsed.amount[kEvmUint256Size - 1] = 1;
+      }
+    } else {
+      memcpy(parsed.amount, decoded.amount, sizeof(parsed.amount));
+    }
+    if ((decoded.standard == EvmTokenStandard::Erc20 ||
+         decoded.standard == EvmTokenStandard::LayerZeroOft ||
+         decoded.standard == EvmTokenStandard::LayerZeroOnft) &&
+        is_zero(parsed.amount, sizeof(parsed.amount))) {
       secure_zero(native_value, sizeof(native_value));
       return EvmTransactionError::InvalidAmount;
     }
@@ -437,8 +570,29 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   secure_zero(native_value, sizeof(native_value));
 
   address_text(parsed.recipient, parsed.recipient_address);
-  if (!uint256_to_text(parsed.amount, parsed.token == nullptr ? 18 : parsed.token->decimals,
-                       parsed.amount_text)) return EvmTransactionError::InvalidAmount;
+  const uint8_t decimals = parsed.token == nullptr ? 0 : parsed.token->decimals;
+  if (!uint256_to_text(parsed.amount, decimals, parsed.amount_text)) {
+    return EvmTransactionError::InvalidAmount;
+  }
+  if (parsed.has_native_value &&
+      !uint256_to_text(parsed.native_value, 18, parsed.native_value_text)) {
+    return EvmTransactionError::InvalidAmount;
+  }
+  if (parsed.has_call && parsed.call.has_value &&
+      !uint256_to_text(parsed.call.value,
+                       parsed.call.standard == EvmTokenStandard::Erc6551 ? 18 : 0,
+                       parsed.value_text)) {
+    return EvmTransactionError::InvalidAmount;
+  }
+  if (parsed.has_call && parsed.call.has_min_amount &&
+      !uint256_to_text(parsed.call.min_amount, 0, parsed.min_amount_text)) {
+    return EvmTransactionError::InvalidAmount;
+  }
+  if (parsed.has_call &&
+      (parsed.call.standard == EvmTokenStandard::LayerZeroOft ||
+       parsed.call.standard == EvmTokenStandard::LayerZeroOnft)) {
+    bytes32_text(parsed.call.remote_address, parsed.remote_address_text);
+  }
   uint8_t maximum_fee[kEvmUint256Size];
   uint64_to_uint256(parsed.maximum_fee, maximum_fee);
   const bool fee_text_ok = uint256_to_text(maximum_fee, 18, parsed.maximum_fee_text);
@@ -482,6 +636,23 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   if (!public_hashed) {
     secure_zero(binding, sizeof(binding)); secure_zero(public_hash, sizeof(public_hash));
     clear_evm_request(&parsed); return EvmTransactionError::CryptoFailure;
+  }
+  // A caller-supplied `from`/`owner` must be this wallet. Otherwise the review
+  // would describe an allowance-driven transfer of somebody else's asset.
+  if (parsed.has_call && call_requires_wallet_sender(parsed.call)) {
+    const bool sender_matches = crypto_constant_time_equal(
+        parsed.call.secondary, public_hash + 12, kEvmAddressSize);
+    const bool operator_matches =
+        parsed.call.standard != EvmTokenStandard::Erc777 ||
+        parsed.call.function != TokenFunction::OperatorSend ||
+        crypto_constant_time_equal(parsed.call.tertiary, public_hash + 12,
+                                   kEvmAddressSize);
+    if (!sender_matches || !operator_matches) {
+      secure_zero(binding, sizeof(binding));
+      secure_zero(public_hash, sizeof(public_hash));
+      clear_evm_request(&parsed);
+      return EvmTransactionError::WrongWallet;
+    }
   }
   memcpy(binding + kKeccak256Size, public_hash + 12, kEvmAddressSize);
   binding[kKeccak256Size + kEvmAddressSize] = static_cast<uint8_t>(address_index >> 24);
@@ -646,7 +817,7 @@ bool run_evm_transaction_self_test() {
   token_transfer.amount[30] = 0x42;
   token_transfer.amount[31] = 0x40;
   if (usdc != nullptr) decode_contract(usdc->contract_or_mint, token_transfer.contract);
-  token_transfer.data_size = kEvmMaxDataSize;
+  token_transfer.data_size = kTokenSelectorSize + 2 * kTokenWordSize;
   memcpy(token_transfer.data, kErc20TransferSelector, sizeof(kErc20TransferSelector));
   memset(token_transfer.data + 16, 0x11, kEvmAddressSize);
   memcpy(token_transfer.data + 36, token_transfer.amount, kEvmUint256Size);
@@ -656,6 +827,46 @@ bool run_evm_transaction_self_test() {
       evm_parse_transaction(actual, actual_size, *ethereum, master, 0, &parsed) ==
           EvmTransactionError::Ok && parsed.token == usdc && strcmp(parsed.amount_text, "1") == 0;
   clear_evm_request(&parsed);
+
+  // ERC-721 safeTransferFrom through the untyped whitelist path. The `from`
+  // field must match the derived wallet or evm_parse_transaction rejects it.
+  DerivedAddress nft_wallet;
+  uint8_t nft_from[kEvmAddressSize] = {};
+  uint8_t nft_to[kEvmAddressSize];
+  uint8_t nft_id[kEvmUint256Size] = {};
+  char expected_nft_recipient[kAddressTextSize];
+  memset(nft_to, 0x22, sizeof(nft_to));
+  nft_id[kEvmUint256Size - 1] = 7;
+  address_text(nft_to, expected_nft_recipient);
+  const bool nft_derived =
+      derive_address(master, nullptr, *ethereum, 0, 0, 0, &nft_wallet) == WalletError::Ok &&
+      decode_contract(nft_wallet.address, nft_from);
+  clear_derived_address(&nft_wallet);
+  EvmSigningRequest nft_transfer = type_two;
+  nft_transfer.token = nullptr;
+  nft_transfer.gas_limit = 65000;
+  memset(nft_transfer.amount, 0, sizeof(nft_transfer.amount));
+  memset(nft_transfer.contract, 0x33, sizeof(nft_transfer.contract));
+  const bool nft_built =
+      token_build_erc721_safe_transfer(nft_from, nft_to, nft_id,
+                                       nft_transfer.data,
+                                       sizeof(nft_transfer.data));
+  nft_transfer.data_size = kTokenSelectorSize + 3 * kTokenWordSize;
+  actual_size = 0;
+  passed = passed && nft_derived && nft_built &&
+      serialize_transaction(nft_transfer, nullptr, actual, sizeof(actual), &actual_size) &&
+      evm_parse_transaction(actual, actual_size, *ethereum, master, 0, &parsed) ==
+          EvmTransactionError::Ok && parsed.has_call &&
+      parsed.call.standard == EvmTokenStandard::Erc721 &&
+      strcmp(parsed.token_id_text, "7") == 0 &&
+      strcmp(parsed.amount_text, "1") == 0 &&
+      strcmp(parsed.recipient_address, expected_nft_recipient) == 0;
+  clear_evm_request(&parsed);
+  secure_zero(&nft_transfer, sizeof(nft_transfer));
+  secure_zero(nft_from, sizeof(nft_from));
+  secure_zero(nft_to, sizeof(nft_to));
+  secure_zero(nft_id, sizeof(nft_id));
+  secure_zero(expected_nft_recipient, sizeof(expected_nft_recipient));
 
   // Ethereum Classic uses derivation coin type 61. Compare against a signature
   // produced directly by that derived key to prevent a hard-coded type-60 path.

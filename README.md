@@ -2,20 +2,20 @@
 
 HexWallet is an offline ESP32 wallet firmware foundation. It derives addresses from a volatile BIP39 wallet, provides an authenticated serial interface, reviews bounded Bitcoin PSBT requests, keeps network and token metadata in explicit registries, and now drives real display hardware (RM67162 AMOLED, ST7789 parallel, and GxEPD2 e-paper) through a per-board LVGL port with resolution-adaptive layouts. It remains beta firmware, not a production hardware wallet, and must not hold real funds until the security controls listed under "Security Boundaries" are complete.
 
-For the complete CLI workflow, including Arduino CLI build/upload, serial settings, challenge-response authentication, wallet lifecycle, address lookup, transaction review, signing restrictions, and troubleshooting, see the [detailed Chinese CLI guide](README-zh.md).
+For the complete CLI workflow, including Arduino CLI build/upload, serial settings, challenge-response authentication, wallet lifecycle, address lookup, transaction review, signing restrictions, and troubleshooting, see the [detailed Chinese CLI guide](README_CN.md).
 
 ## What Is Implemented
 
 - BIP39 English 24-word generation, validation, and PBKDF2-HMAC-SHA512 seed derivation.
 - BIP32 private and public child derivation, extended-key serialization, and startup known-answer tests.
-- Bitcoin mainnet PSBT v0 review and signing for BIP84 P2WPKH and BIP49 P2SH-P2WPKH inputs using `SIGHASH_ALL`, BIP143, low-S RFC6979 ECDSA, fee limits, and one-time review confirmation.
-- Strict EIP-155 legacy and EIP-1559 type-2 review/signing for registered EVM networks. Only native transfers and `transfer(address,uint256)` calls to registered ERC-20 contracts are accepted.
+- Bitcoin and Bitcoin-family PSBT v0 review and signing: BIP84 P2WPKH, BIP49 P2SH-P2WPKH and BIP44 legacy P2PKH under `SIGHASH_ALL`, plus the `SIGHASH_FORKID` variant for BCH/eCash/BSV, with low-S RFC6979 ECDSA, fee limits, and one-time review confirmation.
+- Strict EIP-155 legacy and EIP-1559 type-2 review/signing for registered EVM networks. Native transfers and whitelisted `ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT` calldata are accepted after canonical ABI traversal; unknown selectors, non-canonical offsets, unreviewable nested calls and unregistered fungible contracts are rejected.
 - Address derivation for Bitcoin, Litecoin, Dogecoin, Dash, Bitcoin Gold, Ravencoin, XRP Ledger, TRON, Monero, Masari, QRL, and the registered EVM networks in `WalletNetworks.cpp`.
 - CryptoNote address construction for Monero and Masari: Keccak scalar derivation, Edwards25519 public keys, network prefixes, block Base58, and checksums. Monero also supports integrated addresses (8-byte payment ID) and MRL-0006 subaddresses (`m/0/account/change/index` key algebra with the `SubAddr` domain separator). RingCT/CLSAG parsing, key images, decoy verification, and signing are not enabled.
 - QRL address derivation: XMSS with SHAKE-256, height 10, WOTS+ `w=16`, the QRL 3-byte descriptor, SHA-256 address commitment and checksum, verified against the QRL reference implementation's SHAKE-256 vector. XMSS signing (stateful BDS traversal) is not enabled, and the derivation is explicitly CPU-heavy.
 - An explicit secure-element custody plan (`WalletCustody`) that separates keys the SE can hold from keys that must stay in MCU RAM. The conservative SE050C1H1 profile claims only secp256k1 + ECDSA + seed sealing; Monero/Masari, Kaspa Schnorr, QRL XMSS, BLS12-381, and (until the applet is validated on hardware) Ed25519 keys are planned as MCU-resident rather than pretending a generic ECC engine can sign them.
 - Chia standard addresses via the EIP-2333/ERC-2333 BLS12-381 key tree (`m/12381/8444/0/index`), CLVM `shatree` puzzle hashing, the default hidden puzzle (`ff0980`) and synthetic-offset public key, and `bech32m` encoding. The BLS12-381 G1 stack (field/group arithmetic, canonical generator, 48-byte ZCash-style compression) is implemented and verified against the official ERC-2333 test vectors and an independent reference oracle. Chia coin-spend parsing, aggregate signatures, and signing are not enabled.
-- Token metadata and account-address lookup for registered ERC-20 assets. An ERC-20 token uses the same EVM account address as its network; the registry records the contract address and decimal precision.
+- Token metadata and account-address lookup for registered EVM assets. ERC-20/721/1155/4626/777 tokens use the same EVM account address as their network; the registry records contract identity, standard and decimal precision. Solana SPL remains account-address-only.
 - A searchable SLIP-0044 catalog that distinguishes address support, token-account support, transaction review, and signing support.
 - Authenticated CLI sessions with challenge-response authentication, persistent retry counters, exponential backoff, timeout, and volatile wallet clearing.
 
@@ -27,12 +27,14 @@ For the complete CLI workflow, including Arduino CLI build/upload, serial settin
 | `CryptoNoteAddress` | CryptoNote scalar derivation, Edwards25519 point algebra, Base58 standard/integrated/subaddress encodings |
 | `QrlXmss` | QRL XMSS-SHAKE256 treehash, descriptor/public key, address encoding, progress hook |
 | `WalletCustody` | Per-network key custody plan (SE-held vs MCU-held) and SE capability policy |
-| `EvmTransaction` | Canonical RLP parsing, EIP-155/EIP-1559 review, registered ERC-20 transfer signing |
+| `EvmTransaction` | Canonical RLP parsing, EIP-155/EIP-1559 review, whitelisted token-call review and signing |
+| `TokenCalldata` | Selector whitelist and canonical ABI decoder for ERC-20/721/1155/4626/777/3525/6551 and LayerZero OFT/ONFT |
 | `WalletNetworks` | Native-chain metadata, registered SLIP-0044 type, derivation type, address encoding, EVM chain ID |
 | `WalletTokens` | Token standard, owning network, contract or mint identifier, precision, real capability state |
 | `WalletEngine` | Derivation path construction and address encoding |
 | `WalletCatalog` | Searchable user-facing capability catalog |
-| `BitcoinTransaction` | Strict PSBT v0 parser, transaction review, BIP143 signing, final serialization |
+| `BitcoinTransaction` | Strict PSBT v0 parser (witness and non-witness UTXO), transaction review, legacy/BIP143/fork-id sighash, final serialization |
+| `MoneroScan` | View-key output scanning, subaddress attribution, plain-amount recovery |
 | `WalletCli` | Authenticated serial command parsing and output |
 | `WalletBoardPort` | Board profile (pins, panel driver, LVGL buffers, flush + touch callbacks, power sequencing) |
 | `WalletBoardPins` | Verified per-board pin assignments for all five supported LilyGO boards |
@@ -55,11 +57,11 @@ Changing derivation policy changes derived addresses. Existing wallets should re
 
 ## Networks And Tokens
 
-The network registry includes Ethereum, Ethereum Classic, BSC, Polygon, Optimism, Arbitrum One, Base, Avalanche C-Chain, Fantom, Cronos, Gnosis Chain, Celo, Kava EVM, Core, Moonbeam, and Moonriver. These support addresses plus standard EIP-155/EIP-1559 native transfers and registered ERC-20 transfers. Contract creation, arbitrary calldata, unknown contracts, non-empty access lists, and typed transactions other than type 2 are rejected.
+The network registry includes Ethereum, Ethereum Classic, Rootstock, BSC, Polygon, Optimism, Arbitrum One, Base, Avalanche C-Chain, Fantom, Cronos, Gnosis Chain, Celo, Kava EVM, Core, Moonbeam, and Moonriver. These support addresses plus standard EIP-155/EIP-1559 native transfers and the whitelisted token-call set above. Contract creation, arbitrary calldata, unknown selectors, non-empty access lists, and typed transactions other than type 2 are rejected. LayerZero OFT/ONFT are payable calls: the native value is reviewed as the cross-chain fee, `lzTokenFee` must be zero, and the native fee must cover `nativeFee`.
 
-The token registry currently contains selected, fixed ERC-20 contracts for USDC, USDT, DAI, WBTC, and BUSD across supported EVM networks, plus a registered SPL USDC mint. Contract and mint identifiers are metadata, not balances. Always independently verify the identifier and network before using an asset.
+The token registry contains selected, fixed ERC-20 contracts for USDC, USDT, DAI, WBTC, and BUSD across supported EVM networks, plus a registered SPL USDC mint. NFT/4626/777/3525/6551/OFT/ONFT contracts can be reviewed through the unique-selector path; shared selectors such as `transferFrom(address,address,uint256)` require a registered contract standard. Contract and mint identifiers are metadata, not balances. Always independently verify the identifier and network before using an asset.
 
-Solana and SPL transfer support is not implemented. It requires Ed25519 HD derivation, Solana base58 account encoding, associated-token-account derivation, message parsing, and Ed25519 signing. The SPL entry remains explicitly unavailable rather than producing an incorrect address or signature.
+Solana and SPL transfer signing is not implemented. It requires Solana message parsing, recent-blockhash handling, compute-budget instructions and Ed25519 signing. The registered SPL mint now resolves to its associated token account address (`owner || Tokenkeg... || mint`, PDA with the `AToke...` program and the "ProgramDerivedAddress" marker); the owner address is still the plain Ed25519 base58 account. The SPL entry stays account-address-only rather than producing a fake transfer.
 
 Monero and Masari standard addresses are implemented; Monero additionally supports integrated addresses and MRL-0006 subaddresses, all verified against independent Keccak/Edwards reference computations. RingCT/CLSAG transaction parsing, key images, decoy verification, multisig, and signing are not. QRL address derivation is implemented against the QRL reference SHAKE-256 vector, but XMSS signing (stateful BDS traversal and leaf-index persistence) is not. Chia standard-address derivation is implemented and verified; Chia coin-spend parsing, aggregate signatures, and signing remain unavailable. Staking or validator messages are not accepted for any chain unless a chain-specific parser and review policy is explicitly listed as supported.
 
@@ -67,18 +69,35 @@ Monero and Masari standard addresses are implemented; Monero additionally suppor
 
 Neither the BIP39 community list nor miningpoolstats is a specification. Both contain hundreds of chains, dead forks, and coins whose only "documentation" is an unmaintained explorer. HexWallet therefore does not ship a list of guesses.
 
-A coin enters `WalletNetworks.cpp` only when all of the following exist: an address encoding with an independent reference vector, a derivation policy, a signature scheme the firmware can actually implement, and a custody plan. Coins that share a family (base58 versions, EVM chain ID, SLIP-0010, CryptoNote, XMSS) add data plus one vector, not new cryptography. Coins without a verifiable vector remain cataloged as unavailable with the exact missing piece in `WalletCatalog.cpp`; adding their SLIP-0044 number or ticker does not enable an address. This is why the catalog deliberately reports partial coverage instead of claiming "all miningpoolstats coins".
+A coin enters the signing-capable set only when all of the following exist: an address encoding with an independent reference vector, a derivation policy, a signature scheme the firmware can actually implement, and a custody plan. Coins that share a family (base58 versions, EVM chain ID, SLIP-0010, CryptoNote, XMSS) add data plus one vector, not new cryptography. Coins without a verifiable vector remain cataloged as unavailable with the exact missing piece in `WalletCatalog.cpp`; adding their SLIP-0044 number or ticker does not enable an address. This is why the catalog deliberately reports partial coverage instead of claiming "all miningpoolstats coins". Address-only compatibility profiles are a separate, explicitly labeled tier described below; they never inherit signing capability.
+
+### Compatibility fork registry
+
+`tools/fork_registry.json` contains 144 compatibility rows and generates 151 profiles (legacy, native SegWit and nested SegWit where the official chainparams declare a bech32 HRP). Run `python tools/generate_fork_profiles.py` to regenerate `WalletForkProfiles.inc` and `WalletForkCatalog.inc` in chain-name order. Rows carrying `source_verified` are marked as official-chainparams parameters; the rest are explicitly labelled imported metadata.
+
+Imported profiles never enable signing. Historical `sighash` annotations are not consensus evidence and are ignored by the generator. Signing requires an explicitly reviewed policy and independent transaction fixtures. A repository's ancestry and an address prefix are insufficient to establish transaction format, replay protection or signature rules.
+
+`tools/graveyard_registry.json` is the GRAVEYARD discovery and verification ledger. Of 148 discovered entries, 20 have readable official chainparams and are marked `verified`; the rest keep their exact refusal reason and generate no address profile. A missing GitHub repository or unreadable chainparams is a hard stop, not an invitation to guess parameters.
+
+Every row's encoder is exercised with a fixed public key by `run_network_profile_self_tests()`, with exact vectors for Adcoin, ANON, DigiByte, Peercoin, Namecoin, BSV and Cosmos Hub. Verify the first receive address against the coin's own reference wallet before committing funds: a wrong version byte produces a valid-looking but unusable address.
 
 ## Capability Matrix
 
 | Capability | Current scope |
 | --- | --- |
-| Bitcoin signing | PSBT v0 BIP49 P2SH-P2WPKH and BIP84 P2WPKH, mainnet, `SIGHASH_ALL` only |
+| Bitcoin signing | PSBT v0: BIP84 P2WPKH, BIP49 P2SH-P2WPKH and BIP44 legacy P2PKH, `SIGHASH_ALL` only. Legacy inputs must carry `non_witness_utxo`, whose txid is verified against the outpoint |
 | Bitcoin addresses | BIP44 P2PKH, BIP49 P2SH-P2WPKH, BIP84 P2WPKH |
+| Bitcoin-family fork signing | Chains with a row in `kNetworkSigningPolicies` sign their inherited rule: Litecoin, Dogecoin, Dash, DigiByte, Bitcoin Gold, Peercoin, Namecoin, Vertcoin and Axe use the original legacy sighash; Sugarchain and Ravencoin Classic were source-verified as unchanged Bitcoin-0.16 forks; BCH, eCash and BSV use the BIP143 preimage with `SIGHASH_FORKID` (`0x41`) and the fork id in the sighash-type high bits |
+| Bitcoin-family fork addresses | 151 generated profiles from `tools/fork_registry.json`, ordered by chain name |
 | EVM addresses | Registered network derivation policy (coin type 60 for Ethereum-compatible networks; 61 for Ethereum Classic) |
 | EVM native signing | Canonical EIP-155 legacy and EIP-1559 type 2, bounded gas fee, simple transfer only |
 | Monero/Masari addresses | CryptoNote standard addresses, Monero integrated and MRL-0006 subaddresses, under the documented HexWallet BIP39 policy |
-| Monero/Masari transaction signing | Not implemented |
+| Monero receive scanning | View-key scanning: `8*a*R` derivation, `Hs = sc_reduce32(keccak256(derivation || varint(index)))`, one-time key match against every tracked subaddress, and plain-amount recovery. RingCT commitments are flagged as undecoded rather than guessed |
+| Kaspa signing | BLAKE2b-256 keyed sighash (`SIGHASH_ALL`), keyed transaction ID, KIP-0009 compute/transient/storage mass, BIP340 Schnorr signature, protobuf `TransactionMessage` encoding. Verified against the rusty-kaspa sighash vectors, its transaction ID, its mass parameters and a prost-encoded broadcast payload. Version 0 transactions only ? v1 compute-budget/covenant transactions are refused |
+| Cosmos staking | `MsgDelegate` with `SIGN_MODE_DIRECT`: hand-written protobuf TxBody/Any/AuthInfo/SignDoc, SHA-256 digest for secp256k1 ECDSA. Verified byte-for-byte against a prost encoder |
+| EVM token calldata | Whitelist of ERC-20, ERC-721, ERC-1155, ERC-4626, ERC-777, ERC-3525, ERC-6551 and LayerZero OFT/ONFT selectors, each recomputed from its signature at self-test time. ERC-2981/4337/3643/1400/1410/5528 remain explicit refusals; ERC-6551 batch execution, ERC-1155 batch transfers and non-empty ERC-721/1155/3525/777 callback hooks are refused because they are not faithfully reviewable on the trusted display |
+| Monero/Masari transaction signing | Not implemented (RingCT/CLSAG) |
+| Algorand / Tezos signing | Not implemented |
 | QRL addresses | XMSS-SHAKE256 height 10, QRL descriptor + SHA-256 address commitment — verified against the QRL reference vector; key generation is CPU-heavy |
 | QRL transaction signing | Not implemented (stateful XMSS BDS state and leaf-index persistence) |
 | Secure-element custody | `WalletCustody` plan per network. SE050C1H1: secp256k1/ECDSA may live in the SE; Monero, Kaspa Schnorr, QRL, BLS12-381 and (pending hardware validation) Ed25519 remain MCU-resident |
@@ -86,7 +105,10 @@ A coin enters `WalletNetworks.cpp` only when all of the following exist: an addr
 | Chia transaction signing | Not implemented |
 | ERC-20 account address | Registered token metadata on supported EVM networks |
 | ERC-20 transfer signing | Registered contracts only, exact `transfer(address,uint256)` calldata |
-| Solana/SPL address or signing | Not implemented |
+| NFT / vault / OFT signing | Whitelisted selectors with canonical ABI traversal; `from`/`owner` must equal the derived wallet; OFT native-fee policy is enforced |
+| Solana owner address | Ed25519 SLIP-0010, base58 account address |
+| SPL associated token account | Registered mints only; PDA derivation, verified against an independent Solana-compatible curve/ATA oracle |
+| Solana/SPL transfer signing | Not implemented |
 | Other SLIP-0044 entries | Cataloged only when no complete implementation exists |
 
 ## Serial Commands
@@ -112,7 +134,7 @@ wallet address <network> [index]
 wallet custody <network>
 wallet token <token-id> [index]
 wallet addresses [index]
-tx inspect <psbt-v0-hex>
+tx inspect [<coin>] <psbt-v0-hex>
 tx sign <six-digit-confirmation>
 evm inspect <network> <index> <unsigned-rlp-hex>
 evm sign <six-digit-confirmation>
@@ -121,7 +143,7 @@ tx reject
 
 `wallet token eth-usdc 0` returns the Ethereum BIP44 path and account address together with the registered contract. Transfers use the separate inspect/review/sign workflow. `wallet custody <network>` prints the active secure-element profile (MCU-only until the board port registers a probed SE050), the key scheme, whether the key can live in the SE, whether the SE can produce the required signature, and the reason; it never touches key material. Secret export is disabled by default with `HEXWALLET_ENABLE_SECRET_EXPORT=0` and should remain disabled on production devices.
 
-Authentication uses a one-use challenge and HMAC proof. Bitcoin inspection accepts bounded PSBT v0 requests only; every input must be a wallet-controlled BIP49 P2SH-P2WPKH or BIP84 P2WPKH output, with `SIGHASH_ALL` when present.
+Authentication uses a one-use challenge and HMAC proof. Bitcoin inspection accepts bounded PSBT v0 requests only; every input must be a wallet-controlled BIP44 P2PKH, BIP49 P2SH-P2WPKH or BIP84 P2WPKH output, with `SIGHASH_ALL` (or `SIGHASH_FORKID` for fork-id chains) when present. `tx inspect <coin> <psbt>` selects the chain; the review prints the network and the exact sighash that will be produced.
 
 ## Build
 

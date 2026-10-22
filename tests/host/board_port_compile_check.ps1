@@ -18,7 +18,7 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $PSScriptRoot "esp32_paths.ps1")
 
-$defaultS3Libs = "C:\Users\blueo\AppData\Local\Arduino15\packages\esp32\tools\esp32s3-libs\3.3.10"
+$defaultS3Libs = Join-Path (Split-Path (Split-Path $espLibsRoot -Parent) -Parent) "esp32s3-libs\$coreVersion"
 $libs = $espLibsRoot
 $s3libs = if ($env:HEXWALLET_ESP32_S3_LIBS) { $env:HEXWALLET_ESP32_S3_LIBS } else { $defaultS3Libs }
 $core = $coreCandidate

@@ -18,8 +18,6 @@ const char kGroupOrderHex[] =
 const char kGeneratorXHex[] =
   "17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb";
 
-constexpr size_t kBlsFieldBytes = 48;
-constexpr size_t kBlsScalarBytes = 32;
 
 struct BlsPoint {
   mbedtls_mpi x;
@@ -202,7 +200,6 @@ bool point_compress(const BlsPoint *point, const mbedtls_mpi *p,
   const bool ok = mbedtls_mpi_sub_mpi(&neg, p, &point->y) == 0;
   if (ok) {
     const bool sort = mbedtls_mpi_cmp_mpi(&point->y, &neg) > 0;
-    size_t written = 0;
     mbedtls_mpi compressed;
     mbedtls_mpi_init(&compressed);
     mbedtls_mpi_copy(&compressed, &point->x);

@@ -41,39 +41,6 @@ void fe_sub(fe out, const fe left, const fe right) {
   for (int index = 0; index < 10; ++index) out[index] = left[index] - right[index];
 }
 
-int64_t load_26(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16) | (static_cast<int64_t>(data[3]) << 24) | (static_cast<int64_t>(data[4]) << 32);
-}
-
-int64_t load_25(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16) | (static_cast<int64_t>(data[3]) << 24);
-}
-
-int64_t load_3(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16);
-}
-
-int64_t load_4(const uint8_t *data) {
-  return static_cast<int64_t>(data[0]) | (static_cast<int64_t>(data[1]) << 8) | (static_cast<int64_t>(data[2]) << 16) | (static_cast<int64_t>(data[3]) << 24);
-}
-
-void store_26(uint8_t *out, int64_t value) {
-  const uint32_t v = static_cast<uint32_t>(value);
-  out[0] = static_cast<uint8_t>(v);
-  out[1] = static_cast<uint8_t>(v >> 8);
-  out[2] = static_cast<uint8_t>(v >> 16);
-  out[3] = static_cast<uint8_t>(v >> 24);
-  out[4] = 0;  // 26-bit value never occupies byte 4
-}
-
-void store_25(uint8_t *out, int64_t value) {
-  const uint32_t v = static_cast<uint32_t>(value);
-  out[0] = static_cast<uint8_t>(v);
-  out[1] = static_cast<uint8_t>(v >> 8);
-  out[2] = static_cast<uint8_t>(v >> 16);
-  out[3] = static_cast<uint8_t>(v >> 24);
-}
-
 // Decode a canonical little-endian 32-byte field element (sign bit ignored).
 // The 256-bit value is split into four 64-bit words and each limb is extracted
 // by its exact bit range (ref10 layout: 26/25/26/25/26/25/26/25/26/25). This
@@ -599,8 +566,6 @@ void scalarmult_point(fe rx, fe ry, const fe px, const fe py,
     edwards_add(dbl_x, dbl_y, rx, ry, rx, ry);
     fe_copy(rx, dbl_x);
     fe_copy(ry, dbl_y);
-    // Always perform the addition and select with a mask: branching on a
-    // secret scalar bit would leak the key through timing.
     edwards_add(tx, ty, rx, ry, px, py);
     const int bit_value = (scalar[bit / 8] >> (bit % 8)) & 1;
     fe_cmov(rx, rx, tx, bit_value);
@@ -911,6 +876,15 @@ bool ed25519_point_mul_compressed(const uint8_t point[32],
 
 void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]) {
   if (scalar != nullptr) sc_reduce_32(scalar);
+}
+
+bool ed25519_point_is_valid_compressed(const uint8_t point[32]) {
+  if (point == nullptr) return false;
+  fe x, y;
+  const bool ok = edwards_decompress(x, y, point);
+  secure_zero(x, sizeof(x));
+  secure_zero(y, sizeof(y));
+  return ok;
 }
 
 }  // namespace hexwallet

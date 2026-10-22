@@ -109,6 +109,7 @@ WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat form
                                 char *out, size_t *in_out_size);
 
 bool run_bip32_self_test();
+bool run_bip84_self_test();
 bool run_secp256k1_self_test();
 bool run_bip340_self_test();
 

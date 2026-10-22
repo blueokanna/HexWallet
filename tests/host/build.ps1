@@ -28,6 +28,8 @@ $common = @(
   "/nologo", "/O2", "/W3",
   "/D_CRT_SECURE_NO_WARNINGS",
   "/DMBEDTLS_ALLOW_PRIVATE_ACCESS",
+  "/DHEXWALLET_ENABLE_LVGL=0",
+  "/DHEXWALLET_BOARD=0",
   "/I$PSScriptRoot", "/I$root", "/I$mbedtlsInclude", "/I$mbedtlsPort"
 )
 
@@ -37,6 +39,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $cppSources = @(
   "CryptoPrimitives.cpp",
+  "Blake2b.cpp",
   "CryptoExtended.cpp",
   "Ed25519.cpp",
   "BlsG1.cpp",
@@ -49,9 +52,15 @@ $cppSources = @(
   "WalletAltAddresses.cpp",
   "WalletNetworks.cpp",
   "WalletCatalog.cpp",
+  "WalletTokens.cpp",
   "CryptoNoteAddress.cpp",
   "QrlXmss.cpp",
   "WalletCustody.cpp",
+  "BitcoinTransaction.cpp",
+  "KaspaTransaction.cpp",
+  "TokenCalldata.cpp",
+  "CosmosTransaction.cpp",
+  "MoneroScan.cpp",
   "host_security.cpp",
   "host_test_main.cpp"
 )

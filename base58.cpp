@@ -91,6 +91,41 @@ bool b58enc(char *b58, size_t *b58sz, const void *bin, size_t binsz) {
   return encode_base58(kBitcoinAlphabet, b58, b58sz, bin, binsz);
 }
 
+bool b58dec(uint8_t *bin, size_t *binsz, const char *b58, size_t b58sz) {
+  if (bin == nullptr || binsz == nullptr || b58 == nullptr) return false;
+  size_t zeroes = 0;
+  while (zeroes < b58sz && b58[zeroes] == '1') ++zeroes;
+  uint8_t work[kDecodeBufferSize];
+  memset(work, 0, sizeof(work));
+  size_t length = 0;
+  for (size_t index = zeroes; index < b58sz; ++index) {
+    const char *position = strchr(kBitcoinAlphabet, b58[index]);
+    if (position == nullptr) return false;
+    int carry = static_cast<int>(position - kBitcoinAlphabet);
+    size_t cursor = 0;
+    for (; cursor < length; ++cursor) {
+      carry += 58 * work[cursor];
+      work[cursor] = static_cast<uint8_t>(carry & 0xff);
+      carry >>= 8;
+    }
+    while (carry != 0) {
+      if (cursor >= sizeof(work)) return false;
+      work[cursor++] = static_cast<uint8_t>(carry & 0xff);
+      carry >>= 8;
+    }
+    length = cursor;
+  }
+  const size_t required = zeroes + length;
+  if (*binsz < required) return false;
+  memset(bin, 0, zeroes);
+  for (size_t index = 0; index < length; ++index) {
+    bin[zeroes + index] = work[length - 1 - index];
+  }
+  *binsz = required;
+  mbedtls_platform_zeroize(work, sizeof(work));
+  return true;
+}
+
 bool ripple_b58enc(char *b58, size_t *b58sz, const void *bin, size_t binsz) {
   return encode_base58(kRippleAlphabet, b58, b58sz, bin, binsz);
 }

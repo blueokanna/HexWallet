@@ -10,6 +10,7 @@
 
 #include "base58.h"
 #include "CryptoPrimitives.h"
+#include "WalletAddresses.h"
 #include "word_list.h"
 
 namespace hexwallet {
@@ -1104,6 +1105,51 @@ bool run_bip32_self_test() {
   secure_zero(&derived_public, sizeof(derived_public));
   secure_zero(&private_child, sizeof(private_child));
   secure_zero(&private_child_public, sizeof(private_child_public));
+  return passed;
+}
+
+bool run_bip84_self_test() {
+  // Published BIP84 vectors, including account serialization and change.
+  const char *mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  const char *paths[] = {"m/84'/0'/0'/0/0", "m/84'/0'/0'/0/1", "m/84'/0'/0'/1/0"};
+  const char *addresses[] = {
+    "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+    "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g",
+    "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el"
+  };
+  uint8_t seed[kSeedSize] = {};
+  HdPrivateNode master = {}, child = {};
+  HdPublicNode pub = {};
+  char text[kExtendedKeyTextSize] = {};
+  size_t size = sizeof(text);
+  bool passed = bip39_seed_from_english(mnemonic, "", seed) == WalletError::Ok &&
+      hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
+      hd_serialize_private(&master, ExtendedKeyFormat::Zprv, text, &size) == WalletError::Ok &&
+      strcmp(text, "zprvAWgYBBk7JR8Gjrh4UJQ2uJdG1r3WNRRfURiABBE3RvMXYSrRJL62XuezvGdPvG6GFBZduosCc1YP5wixPox7zhZLfiUm8aunE96BBa4Kei5") == 0;
+  size = sizeof(text);
+  passed = passed && hd_public_neuter(&master, &pub) == WalletError::Ok &&
+      hd_serialize_public(&pub, ExtendedKeyFormat::Zpub, text, &size) == WalletError::Ok &&
+      strcmp(text, "zpub6jftahH18ngZxLmXaKw3GSZzZsszmt9WqedkyZdezFtWRFBZqsQH5hyUmb4pCEeZGmVfQuP5bedXTB8is6fTv19U1GQRyQUKQGUTzyHACMF") == 0;
+  size = sizeof(text);
+  passed = passed && hd_private_derive_path(&master, "m/84'/0'/0'", &child) == WalletError::Ok &&
+      hd_serialize_private(&child, ExtendedKeyFormat::Zprv, text, &size) == WalletError::Ok &&
+      strcmp(text, "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE") == 0;
+  size = sizeof(text);
+  passed = passed && hd_public_neuter(&child, &pub) == WalletError::Ok &&
+      hd_serialize_public(&pub, ExtendedKeyFormat::Zpub, text, &size) == WalletError::Ok &&
+      strcmp(text, "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs") == 0;
+  for (size_t i = 0; i < 3; ++i) {
+    const bool valid = hd_private_derive_path(&master, paths[i], &child) == WalletError::Ok &&
+        hd_public_neuter(&child, &pub) == WalletError::Ok &&
+        address_p2wpkh(kBitcoinMainnet, pub.public_key, text, sizeof(text)) == WalletError::Ok &&
+        strcmp(text, addresses[i]) == 0;
+    passed = valid && passed;
+  }
+  secure_zero(seed, sizeof(seed));
+  secure_zero(&master, sizeof(master));
+  secure_zero(&child, sizeof(child));
+  secure_zero(&pub, sizeof(pub));
+  secure_zero(text, sizeof(text));
   return passed;
 }
 

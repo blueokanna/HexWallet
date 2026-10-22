@@ -72,6 +72,25 @@ struct NetworkProfile {
 extern const NetworkProfile kNetworkProfiles[];
 extern const size_t kNetworkProfileCount;
 
+// Transaction signing policy.  Deliberately separate from NetworkProfile so an
+// address profile can never imply a signing capability: a network may be
+// signed only when it has an explicit row here.
+enum class SighashFamily : uint8_t {
+  None = 0,   // no transaction signing
+  Bitcoin,    // legacy sighash for P2PKH inputs, BIP143 for witness inputs
+  ForkId,     // BIP143 preimage with SIGHASH_FORKID (0x41) plus fork id bits
+};
+
+struct NetworkSigningPolicy {
+  const char *network_id;
+  SighashFamily family;
+  uint32_t fork_id;  // ForkId family only; mainnet BCH/BSV/XEC use 0
+};
+
+extern const NetworkSigningPolicy kNetworkSigningPolicies[];
+extern const size_t kNetworkSigningPolicyCount;
+const NetworkSigningPolicy *find_network_signing_policy(const char *network_id);
+
 const NetworkProfile *find_network_profile(const char *id);
 bool network_supports_token_accounts(const NetworkProfile &network);
 bool run_network_profile_self_tests();

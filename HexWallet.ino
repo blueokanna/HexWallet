@@ -7,11 +7,16 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 
 #include "WalletBoardPort.h"
 #include "BitcoinTransaction.h"
+#include "KaspaTransaction.h"
+#include "CosmosTransaction.h"
+#include "TokenCalldata.h"
 #include "CryptoExtended.h"
+#include "WalletCatalog.h"
 #include "WalletCli.h"
 #include "WalletConfig.h"
 #include "CryptoPrimitives.h"
 #include "CryptoNoteAddress.h"
+#include "MoneroScan.h"
 #include "EvmTransaction.h"
 #include "QrlXmss.h"
 #include "WalletCustody.h"
@@ -40,9 +45,15 @@ void setup() {
   const bool evm = hexwallet::run_evm_transaction_self_test();
   const bool bip39 = hexwallet::run_bip39_self_test();
   const bool bip32 = hexwallet::run_bip32_self_test();
+  const bool bip84 = hexwallet::run_bip84_self_test();
   const bool bip340 = hexwallet::run_bip340_self_test();
   const bool address = hexwallet::run_address_self_tests();
   const bool networks = hexwallet::run_network_profile_self_tests();
+  const bool sighash = hexwallet::run_bitcoin_sighash_self_tests();
+  const bool monero = hexwallet::run_monero_scan_self_tests();
+  const bool kaspa = hexwallet::run_kaspa_self_tests();
+  const bool cosmos = hexwallet::run_cosmos_self_tests();
+  const bool calldata = hexwallet::run_token_calldata_self_tests();
   const bool tokens = hexwallet::run_token_profile_self_tests();
   const bool transport = hexwallet::run_transport_policy_self_test();
   const bool bitcoin = hexwallet::run_bitcoin_transaction_self_test();
@@ -64,19 +75,31 @@ void setup() {
   Serial.print(bip39 ? "pass" : "FAIL");
   Serial.print(" bip32=");
   Serial.print(bip32 ? "pass" : "FAIL");
+  Serial.print(" bip84=");
+  Serial.print(bip84 ? "pass" : "FAIL");
   Serial.print(" bip340=");
   Serial.print(bip340 ? "pass" : "FAIL");
   Serial.print(" address=");
   Serial.print(address ? "pass" : "FAIL");
   Serial.print(" networks=");
   Serial.print(networks ? "pass" : "FAIL");
+  Serial.print(" sighash=");
+  Serial.print(sighash ? "pass" : "FAIL");
+  Serial.print(" monero=");
+  Serial.print(monero ? "pass" : "FAIL");
+  Serial.print(" kaspa=");
+  Serial.print(kaspa ? "pass" : "FAIL");
+  Serial.print(" cosmos=");
+  Serial.print(cosmos ? "pass" : "FAIL");
+  Serial.print(" calldata=");
+  Serial.print(calldata ? "pass" : "FAIL");
   Serial.print(" tokens=");
   Serial.print(tokens ? "pass" : "FAIL");
   Serial.print(" transport=");
   Serial.print(transport ? "pass" : "FAIL");
   Serial.print(" bitcoin=");
   Serial.println(bitcoin ? "pass" : "FAIL");
-  security_ready = crypto && extended && cryptonote && qrl && custody && catalog && evm && bip39 && bip32 && bip340 && address && networks && tokens && transport && bitcoin;
+  security_ready = crypto && extended && cryptonote && qrl && custody && catalog && evm && bip39 && bip32 && bip84 && bip340 && address && networks && sighash && monero && kaspa && cosmos && calldata && tokens && transport && bitcoin;
   if (!security_ready) {
     Serial.println("FATAL: cryptographic self-test failed; wallet services disabled");
     return;

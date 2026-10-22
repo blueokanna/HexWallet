@@ -61,7 +61,7 @@ void set_clean_container(lv_obj_t *object) {
 void coin_clicked(lv_event_t *event) {
   const size_t index = reinterpret_cast<size_t>(lv_event_get_user_data(event));
   WalletCatalogEntry entry;
-  if (!wallet_catalog_at(index, &entry) || status_label == nullptr) return;
+  if (!wallet_catalog_at_sorted(index, &entry) || status_label == nullptr) return;
   char status[160];
   snprintf(status, sizeof(status), "%s | SLIP-0044 %lu | %s", entry.name,
            static_cast<unsigned long>(entry.slip44_coin_type), entry.status);
@@ -74,7 +74,7 @@ void populate_catalog(const char *query) {
   size_t matches = 0;
   for (size_t index = 0; index < wallet_catalog_count(); ++index) {
     WalletCatalogEntry entry;
-    if (!wallet_catalog_at(index, &entry) || !wallet_catalog_matches(entry, query)) continue;
+    if (!wallet_catalog_at_sorted(index, &entry) || !wallet_catalog_matches(entry, query)) continue;
     char row[128];
     const bool signs = wallet_catalog_has(entry, WalletCapabilitySigning);
     const bool addresses = wallet_catalog_has(entry, WalletCapabilityAddress);
@@ -88,6 +88,10 @@ void populate_catalog(const char *query) {
     lv_obj_set_style_text_color(button, theme_fg(), 0);
     lv_obj_add_event_cb(button, coin_clicked, LV_EVENT_CLICKED, reinterpret_cast<void *>(index));
     ++matches;
+    if (*query == '\0' && matches >= 40) {
+      lv_list_add_text(coin_list, "TYPE TO NARROW");
+      break;
+    }
   }
   if (matches == 0) lv_list_add_text(coin_list, "NO MATCHES");
 }

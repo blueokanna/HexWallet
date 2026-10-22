@@ -54,6 +54,13 @@ bool kaspa_bech32_encode(const char *hrp, uint8_t version,
                          const uint8_t *payload, size_t payload_size, char *out,
                          size_t out_size);
 
+// Inverse of kaspa_bech32_encode. `expected_hrp` is compared before parsing so
+// a testnet address can never be accepted on mainnet. Returns false when the
+// checksum, the encoding or the buffer size is wrong.
+bool kaspa_bech32_decode(const char *expected_hrp, const char *address,
+                         uint8_t *out_version, uint8_t *out_payload,
+                         size_t *in_out_payload_size);
+
 // ---------------------------------------------------------------------------
 // Ed25519 (RFC 8032) and SLIP-0010 hardened derivation.
 // ---------------------------------------------------------------------------
@@ -73,6 +80,7 @@ bool ed25519_point_add_compressed(const uint8_t left[32],
                                   const uint8_t right[32], uint8_t out[32]);
 bool ed25519_point_mul_compressed(const uint8_t point[32],
                                   const uint8_t scalar[32], uint8_t out[32]);
+bool ed25519_point_is_valid_compressed(const uint8_t point[32]);
 void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]);
 
 // SLIP-0010 Ed25519 derivation. seed may be any length (BIP-39 seeds are

@@ -19,6 +19,20 @@ static bool selftest_report(const char *name, bool ok) {
 
 constexpr size_t kAltMaxPayloadSize = 64;
 
+constexpr uint8_t kSolanaTokenProgram[32] = {
+  0x06, 0xdd, 0xf6, 0xe1, 0xd7, 0x65, 0xa1, 0x93,
+  0xd9, 0xcb, 0xe1, 0x46, 0xce, 0xeb, 0x79, 0xac,
+  0x1c, 0xb4, 0x85, 0xed, 0x5f, 0x5b, 0x37, 0x91,
+  0x3a, 0x8c, 0xf5, 0x85, 0x7e, 0xff, 0x00, 0xa9,
+};
+constexpr uint8_t kSolanaAssociatedTokenProgram[32] = {
+  0x8c, 0x97, 0x25, 0x8f, 0x4e, 0x24, 0x89, 0xf1,
+  0xbb, 0x3d, 0x10, 0x29, 0x14, 0x8e, 0x0d, 0x83,
+  0x0b, 0x5a, 0x13, 0x99, 0xda, 0xff, 0x10, 0x84,
+  0x04, 0x8e, 0x7b, 0xd8, 0xdb, 0xe9, 0xf8, 0x59,
+};
+constexpr char kSolanaPdaMarker[] = "ProgramDerivedAddress";
+
 // base58check with a double-SHA256 checksum (Bitcoin family).
 bool base58check_sha256(const uint8_t *payload, size_t payload_size,
                         char *out, size_t *in_out_size) {
@@ -95,6 +109,29 @@ WalletError address_cashaddr(const char *prefix,
   return ok ? WalletError::Ok : WalletError::BufferTooSmall;
 }
 
+WalletError address_cashaddr_from_script(const char *prefix, const uint8_t *script,
+                                         size_t script_size, char *out,
+                                         size_t out_size) {
+  if (prefix == nullptr || script == nullptr || out == nullptr) {
+    return WalletError::InvalidArgument;
+  }
+  uint8_t type_bits;
+  const uint8_t *hash;
+  if (script_size == 25 && script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
+      script[23] == 0x88 && script[24] == 0xac) {
+    type_bits = 0;
+    hash = script + 3;
+  } else if (script_size == 23 && script[0] == 0xa9 && script[1] == 0x14 && script[22] == 0x87) {
+    type_bits = 8;
+    hash = script + 2;
+  } else {
+    return WalletError::InvalidArgument;
+  }
+  return cashaddr_encode(prefix, type_bits, hash, kRipemd160Size, out, out_size)
+             ? WalletError::Ok
+             : WalletError::BufferTooSmall;
+}
+
 WalletError address_solana(const uint8_t public_key[32], char *out,
                            size_t *in_out_size) {
   if (public_key == nullptr || out == nullptr || in_out_size == nullptr) {
@@ -102,6 +139,38 @@ WalletError address_solana(const uint8_t public_key[32], char *out,
   }
   const bool ok = b58enc(out, in_out_size, public_key, 32);
   return ok ? WalletError::Ok : WalletError::BufferTooSmall;
+}
+
+WalletError address_solana_associated_token(const uint8_t owner[32],
+                                            const uint8_t mint[32],
+                                            char *out, size_t out_size) {
+  if (owner == nullptr || mint == nullptr || out == nullptr) {
+    return WalletError::InvalidArgument;
+  }
+  uint8_t input[32 + 32 + 32 + 1 + 32 + sizeof(kSolanaPdaMarker) - 1];
+  memcpy(input, owner, 32);
+  memcpy(input + 32, kSolanaTokenProgram, 32);
+  memcpy(input + 64, mint, 32);
+  memcpy(input + 97, kSolanaAssociatedTokenProgram, 32);
+  memcpy(input + 129, kSolanaPdaMarker, sizeof(kSolanaPdaMarker) - 1);
+  for (int bump = 255; bump >= 0; --bump) {
+    input[96] = static_cast<uint8_t>(bump);
+    uint8_t digest[32];
+    if (!crypto_sha256(input, sizeof(input), digest)) {
+      secure_zero(digest, sizeof(digest));
+      return WalletError::CryptoFailure;
+    }
+    if (!ed25519_point_is_valid_compressed(digest)) {
+      size_t encoded_size = out_size;
+      const bool ok = b58enc(out, &encoded_size, digest, sizeof(digest));
+      secure_zero(digest, sizeof(digest));
+      secure_zero(input, sizeof(input));
+      return ok ? WalletError::Ok : WalletError::BufferTooSmall;
+    }
+    secure_zero(digest, sizeof(digest));
+  }
+  secure_zero(input, sizeof(input));
+  return WalletError::CryptoFailure;
 }
 
 WalletError address_algorand(const uint8_t public_key[32], char *out,
@@ -368,6 +437,19 @@ bool run_alt_address_self_tests() {
   bool passed = true;
 
   passed = selftest_report("solana", address_solana(kEdPk, address, &address_size) == WalletError::Ok && strcmp(address, "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9") == 0) && passed;
+  static const uint8_t kSolanaOwner[32] = {
+    0x8a, 0x88, 0xe3, 0xdd, 0x74, 0x09, 0xf1, 0x95,
+    0xfd, 0x52, 0xdb, 0x2d, 0x3c, 0xba, 0x5d, 0x72,
+    0xca, 0x67, 0x09, 0xbf, 0x1d, 0x94, 0x12, 0x1b,
+    0xf3, 0x74, 0x88, 0x01, 0xb4, 0x0f, 0x6f, 0x5c,
+  };
+  static const uint8_t kSolanaUsdcMint[32] = {
+    0xc6, 0xfa, 0x7a, 0xf3, 0xbe, 0xdb, 0xad, 0x3a,
+    0x3d, 0x65, 0xf3, 0x6a, 0xab, 0xc9, 0x74, 0x31,
+    0xb1, 0xbb, 0xe4, 0xc2, 0xd2, 0xf6, 0xe0, 0xe4,
+    0x7c, 0xa6, 0x02, 0x03, 0x45, 0x2f, 0x5d, 0x61,
+  };
+  passed = selftest_report("solana ata", address_solana_associated_token(kSolanaOwner, kSolanaUsdcMint, address, sizeof(address)) == WalletError::Ok && strcmp(address, "3wvJdyFnGvaMWpbq93NU91SggiVRveULUXL6iX5VZDGP") == 0) && passed;
   address_size = sizeof(address);
   passed = selftest_report("tezos", address_tezos_tz1(kEdPk, address, &address_size) == WalletError::Ok && strcmp(address, "tz1c8PEDNfj6UxoQM2XCyfTHM5KbGGgoqDrH") == 0) && passed;
   passed = selftest_report("algorand ed01", address_algorand(kEdPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "RKEOHXLUBHYZL7KS3MWTZOS5OLFGOCN7DWKBEG7TOSEADNAPN5OOTUNSLE") == 0) && passed;

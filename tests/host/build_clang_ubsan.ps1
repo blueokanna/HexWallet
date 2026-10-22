@@ -28,6 +28,7 @@ $common = @(
   "/nologo", "/O2", "/W3", "/GS-", "-m64",
   "/D_CRT_SECURE_NO_WARNINGS",
   "/DMBEDTLS_ALLOW_PRIVATE_ACCESS",
+  "/DHEXWALLET_ENABLE_LVGL=0",
   "/I$PSScriptRoot", "/I$root", "/I$mbedtlsInclude", "/I$mbedtlsPort"
 )
 
@@ -35,11 +36,14 @@ $common = @(
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $cppSources = @(
-  "CryptoPrimitives.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
+  "CryptoPrimitives.cpp",
+  "Blake2b.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "WalletNetworks.cpp", "CryptoNoteAddress.cpp", "QrlXmss.cpp",
-  "WalletCustody.cpp",
+  "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
+  "CryptoNoteAddress.cpp", "QrlXmss.cpp", "WalletCustody.cpp",
+  "MoneroScan.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "CosmosTransaction.cpp",
+  "BitcoinTransaction.cpp",
   "host_security.cpp", "host_test_main.cpp"
 )
 $cppObjs = @()

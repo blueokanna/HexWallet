@@ -1,6 +1,10 @@
 #ifndef HEXWALLET_CONFIG_H
 #define HEXWALLET_CONFIG_H
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <sdkconfig.h>
+#endif
+
 // ---------------------------------------------------------------------------
 // Board selection. Compile-time hardware target; every board profile lives in
 // WalletBoardPins.h and the drivers in WalletBoardPort.cpp.
@@ -14,22 +18,28 @@
 #define HEXWALLET_BOARD_HEADLESS 6
 
 #ifndef HEXWALLET_BOARD
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+// P4 requires its own board port; never apply an S3 display pin map to it.
+#define HEXWALLET_BOARD HEXWALLET_BOARD_HEADLESS
+#else
 // Default target: the reference board the port was developed and validated on.
 #define HEXWALLET_BOARD HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED
+#endif
+#endif
+
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && HEXWALLET_BOARD != HEXWALLET_BOARD_NONE && HEXWALLET_BOARD != HEXWALLET_BOARD_HEADLESS
+#error "No ESP32-P4 display board port is registered. Select HEADLESS until a verified P4 board port is available."
 #endif
 
 // ---------------------------------------------------------------------------
 // Headless (no display) target - e.g. any generic ESP32-S3 dev board, or a
 // USB-stick wallet. Pure authenticated Serial CLI; no LVGL, no panel driver,
-// no touch. Transaction approval falls back to the host (serial) with a
-// printed confirm code (see HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION below).
+// no touch. Signing remains disabled without a trusted local display unless
+// host-only confirmation is explicitly enabled for development.
 // ---------------------------------------------------------------------------
 #if HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
 #ifndef HEXWALLET_ENABLE_LVGL
 #define HEXWALLET_ENABLE_LVGL 0
-#endif
-#ifndef HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
-#define HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION 1
 #endif
 #endif
 

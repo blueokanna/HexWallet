@@ -41,14 +41,14 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 通过 EIP-2333/ERC-2333 的 BLS12-381 密钥树、CLVM `shatree` 谜题哈希和 `bech32m` 生成 Chia 标准地址（已对照官方 ERC-2333 测试向量和独立参考实现验证）。
 - 查询已登记 Token 的合约地址、精度和账户地址。
 - 审查并签名受限的 Bitcoin PSBT v0。
-- 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 的精确 `transfer(address,uint256)` 调用。
+- 审查并签名已登记 EVM 网络上的原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。选择器由固件用 Keccak-256 现场重算；ABI 必须严格符合规范偏移，未知选择器、非规范偏移、无法审阅的嵌套批量调用和未登记的 ERC-20 合约一律拒绝。
 
 以下能力明确不可用：
 
 - Monero/Masari RingCT、CLSAG、key image、多签和交易签名（标准地址、集成地址和子地址已实现）。
 - QRL XMSS 交易签名（有状态 BDS 遍历和 leaf index 持久化未实现）；QRL 地址已实现。
 - Kaspa 的 BIP340 Schnorr 交易签名（地址已实现）。
-- Solana/SPL 的地址派生、关联 Token 账户和签名。
+- Solana/SPL 的转账签名（需要 Solana 消息解析、recent blockhash、compute budget 指令和 Ed25519 签名）；已登记的 SPL mint 现在可以推导 associated token account 地址（owner ‖ Tokenkeg… ‖ mint，`AToke…` 程序 + `ProgramDerivedAddress` 的 PDA）。
 - Chia 交易能力（coin-spend 解析、聚合签名、签名）；Chia 地址已实现。
 - Cardano、Cosmos、Polkadot、Aptos、Sui 等目录项的交易能力。
 - 任意 EVM calldata、合约创建、未知 Token、非标准 typed transaction、非空 access list。
@@ -59,7 +59,11 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 
 ### 关于“支持所有币”
 
-BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入 `WalletNetworks.cpp` 的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种会在 `WalletCatalog.cpp` 中明确标记缺失项，而不会生成错误地址。
+BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入“可签名”集合的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种会在 `WalletCatalog.cpp` 中明确标记缺失项，而不会生成错误地址。
+
+`tools/fork_registry.json` 收录 144 行 Bitcoin 系分叉参数，生成 151 个 profile：基础 P2PKH，以及在官方 chainparams 明确声明 bech32 HRP 时生成的 native/nested SegWit profile。运行 `python tools/generate_fork_profiles.py` 生成 `WalletForkProfiles.inc` 和 `WalletForkCatalog.inc`。带 `source_verified` 的行会显示为“官方 chainparams 参数”；其余行明确标注为导入元数据，不冒充逐链审计。`run_network_profile_self_tests()` 会用固定公钥跑通每一条编码器，并对 Adcoin、ANON、DigiByte、Litecoin、Bitcoin Gold、Vertcoin、Sugarchain、Ravencoin Classic、Cosmos Hub 给出精确向量。首次收款前仍应使用该币种自己的参考钱包核对地址。要把某个分叉升级为可签名，必须核对共识代码和交易序列化，而不是只加一行表；目前只有 Sugarchain、Ravencoin Classic 和主表列出的链有显式签名策略。
+
+`tools/graveyard_registry.json` 是 GRAVEYARD 的发现与核验账本：148 个条目中 20 个有可读的官方 chainparams 并标记为 `verified`；其余条目保留具体拒绝原因，不生成地址 profile。官方仓库不存在或 chainparams 不可读时直接停止，不猜测参数。
 
 ### SE050 托管边界
 
@@ -269,7 +273,7 @@ wallet import <24-word-mnemonic>
 wallet address <id> [index]
 wallet token <token-id> [index]
 wallet addresses [index]
-tx inspect <psbt-v0-hex>
+tx inspect [<coin>] <psbt-v0-hex>
 tx sign <six-digit-confirmation>
 evm inspect <network> <index> <unsigned-rlp-hex>
 evm sign <six-digit-confirmation>
@@ -543,16 +547,19 @@ ERC-20 Token 使用所属 EVM 网络的同一个账户地址，不要把 Token �
 
 - 已认证并加载钱包。
 - 输入是十六进制 PSBT v0。
-- 网络为 Bitcoin mainnet。
-- 输入属于支持的 BIP49 或 BIP84 地址。
-- 交易满足金额、费率、输入输出和 `SIGHASH_ALL` 限制。
+- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、Dash、DigiByte、Bitcoin Gold、Peercoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、Ravencoin Classic，以及各自的 SegWit profile）。`tools/fork_registry.json` 中的 `sighash` 字段不会被生成器采信。
+- 输入属于该网络支持的 BIP44 P2PKH、BIP49 P2SH-P2WPKH 或 BIP84 P2WPKH 地址。
+- legacy 输入必须带 `non_witness_utxo`，其 txid 会与 outpoint 校验。这是 BIP-174 的强制要求；缺少它，恶意 PSBT 可以伪造被花费金额，从而污染手续费审查。
+- 交易满足金额、费率、输入输出和 sighash 限制（Bitcoin 系为 `SIGHASH_ALL`，BCH/eCash/BSV 为 `SIGHASH_FORKID`）。
 - 默认需要可信显示器。
 
 审查：
 
 ```text
-tx inspect <psbt-v0-hex>
+tx inspect [<coin>] <psbt-v0-hex>
 ```
+
+省略 `<coin>` 时按 Bitcoin 处理；其他链必须显式给出，例如 `tx inspect ltc <hex>`、`tx inspect bch <hex>`。审查首行会打印 `network=` 与实际使用的 sighash；BCH 类链的地址按 CashAddr 渲染，不会伪装成 base58。
 
 审查输出会包含输入总额、输出金额、地址、wallet/change/external 归属、review ID 和一次性确认码。必须在可信显示器上核对地址、找零、金额、手续费和网络，不能只检查 review ID。
 
@@ -578,7 +585,7 @@ ERR trusted-display-required-for-signing
 
 ## EVM 交易审查和签名
 
-当前只接受已登记网络上的 EIP-155 legacy、EIP-1559 type-2 原生转账，以及已登记 ERC-20 的精确 `transfer(address,uint256)`。任意 calldata、合约创建、未知合约、非空 access list 和未实现 typed transaction 会被拒绝。
+当前接受已登记网络上的 EIP-155 legacy、EIP-1559 type-2 原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、非空 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 operator 必须等于本钱包地址。
 
 审查 unsigned RLP：
 
@@ -741,10 +748,12 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `WalletEngine` | 派生路径和地址生成 |
 | `WalletNetworks` | 网络、派生类型、地址编码、EVM chain ID |
 | `WalletTokens` | 已登记 Token、合约地址、精度和能力 |
-| `BitcoinTransaction` | PSBT v0 解析、审查、BIP143 签名 |
+| `BitcoinTransaction` | PSBT v0 解析（witness/non-witness UTXO）、审查、legacy/BIP143/fork-id sighash、最终序列化 |
+| `MoneroScan` | view-key 输出扫描、子地址归属识别、明文金额恢复 |
 | `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序） |
 | `WalletBoardPins` | 全部五块受支持 LilyGO 板卡的逐引脚定义 |
-| `EvmTransaction` | EIP-155、EIP-1559、原生转账和登记 ERC-20 |
+| `EvmTransaction` | EIP-155、EIP-1559、原生转账和白名单 Token 调用 |
+| `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 与 LayerZero OFT/ONFT 的选择器白名单和规范 ABI 解码 |
 | `WalletBoardPort` | 板级显示器、输入和电源适配 |
 | `WalletTransportPolicy` | Serial、BLE、Wi-Fi 的 fail-closed 策略 |
 

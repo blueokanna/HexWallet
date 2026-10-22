@@ -48,14 +48,15 @@ $includes = @(
 # EvmTransaction.cpp and only the device build caught it, so any source that
 # can compile with the curated include set is kept in this list.
 $sources = @(
-  "CryptoPrimitives.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
+  "CryptoPrimitives.cpp",
+  "Blake2b.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "CryptoNoteAddress.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
   "WalletCustody.cpp",
   "WalletSecurity.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletSession.cpp",
-  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp"
+  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "MoneroScan.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "CosmosTransaction.cpp"
 )
 
 $objDir = Join-Path $PSScriptRoot "obj-device"

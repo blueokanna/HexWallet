@@ -2,6 +2,10 @@
 
 #include <string.h>
 
+#include "base58.h"
+#include "CryptoExtended.h"
+#include "WalletAltAddresses.h"
+
 namespace hexwallet {
 namespace {
 
@@ -10,7 +14,7 @@ bool is_hex(char value) {
          (value >= 'A' && value <= 'F');
 }
 
-bool valid_erc20_contract(const char *contract) {
+bool valid_evm_contract(const char *contract) {
   if (contract == nullptr || strlen(contract) != 42 || contract[0] != '0' || contract[1] != 'x') return false;
   for (size_t index = 2; index < 42; ++index) {
     if (!is_hex(contract[index])) return false;
@@ -74,8 +78,8 @@ const TokenProfile kTokenProfiles[] = {
      "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 account address and transfer signing supported"},
     {"sol-usdc", "sol", "USDC", "USD Coin", TokenStandard::Spl,
-     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6, TokenCapabilityNone,
-     "SPL mint registered; Solana address and transfer signing unavailable"},
+     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6, TokenCapabilityAccountAddress,
+     "SPL mint registered; associated token account address supported; transfer signing unavailable"},
 };
 
 const size_t kTokenProfileCount = sizeof(kTokenProfiles) / sizeof(kTokenProfiles[0]);
@@ -99,16 +103,65 @@ bool token_supports_account_address(const TokenProfile &token) {
 }
 
 bool token_supports_transfer_signing(const TokenProfile &token) {
-  return token.standard == TokenStandard::Erc20 &&
+  return token.standard != TokenStandard::Spl &&
          (token.capabilities & TokenCapabilityTransferSigning) != 0;
+}
+
+WalletError token_spl_account_address(const TokenProfile &token,
+                                      const uint8_t owner_seed[32],
+                                      char *out, size_t out_size) {
+  if (token.standard != TokenStandard::Spl || owner_seed == nullptr ||
+      out == nullptr || !token_supports_account_address(token)) {
+    return WalletError::InvalidArgument;
+  }
+  uint8_t mint[32];
+  size_t mint_size = sizeof(mint);
+  if (!b58dec(mint, &mint_size, token.contract_or_mint,
+              strlen(token.contract_or_mint)) ||
+      mint_size != sizeof(mint)) {
+    secure_zero(mint, sizeof(mint));
+    return WalletError::InvalidArgument;
+  }
+  uint8_t owner[32];
+  const bool derived = ed25519_public_key(owner_seed, owner);
+  const WalletError result = derived
+    ? address_solana_associated_token(owner, mint, out, out_size)
+    : WalletError::CryptoFailure;
+  secure_zero(owner, sizeof(owner));
+  secure_zero(mint, sizeof(mint));
+  return result;
 }
 
 const char *token_standard_text(TokenStandard standard) {
   switch (standard) {
     case TokenStandard::Erc20: return "ERC-20";
+    case TokenStandard::Erc721: return "ERC-721";
+    case TokenStandard::Erc1155: return "ERC-1155";
+    case TokenStandard::Erc4626: return "ERC-4626";
+    case TokenStandard::Erc777: return "ERC-777";
+    case TokenStandard::Erc3525: return "ERC-3525";
+    case TokenStandard::Erc6551: return "ERC-6551";
+    case TokenStandard::LayerZeroOft: return "LayerZero OFT";
+    case TokenStandard::LayerZeroOnft: return "LayerZero ONFT";
     case TokenStandard::Spl: return "SPL";
   }
   return "unknown";
+}
+
+EvmTokenStandard token_evm_standard(TokenStandard standard) {
+  switch (standard) {
+    case TokenStandard::Erc20: return EvmTokenStandard::Erc20;
+    case TokenStandard::Erc721: return EvmTokenStandard::Erc721;
+    case TokenStandard::Erc1155: return EvmTokenStandard::Erc1155;
+    case TokenStandard::Erc4626: return EvmTokenStandard::Erc4626;
+    case TokenStandard::Erc777: return EvmTokenStandard::Erc777;
+    case TokenStandard::Erc3525: return EvmTokenStandard::Erc3525;
+    case TokenStandard::Erc6551: return EvmTokenStandard::Erc6551;
+    case TokenStandard::LayerZeroOft: return EvmTokenStandard::LayerZeroOft;
+    case TokenStandard::LayerZeroOnft: return EvmTokenStandard::LayerZeroOnft;
+    case TokenStandard::Spl: return EvmTokenStandard::Unknown;
+  }
+  return EvmTokenStandard::Unknown;
 }
 
 bool run_token_profile_self_tests() {
@@ -118,11 +171,19 @@ bool run_token_profile_self_tests() {
         token.network_id[0] == '\0' || token.symbol == nullptr || token.symbol[0] == '\0' ||
         token.name == nullptr || token.name[0] == '\0' || token.contract_or_mint == nullptr ||
         token.contract_or_mint[0] == '\0' || token.status == nullptr || token.status[0] == '\0') return false;
-    if (token.standard == TokenStandard::Erc20) {
-      if (!valid_erc20_contract(token.contract_or_mint) || !token_supports_account_address(token) ||
-          !token_supports_transfer_signing(token)) return false;
+    if (token.standard != TokenStandard::Spl) {
+      if (!valid_evm_contract(token.contract_or_mint) ||
+          !token_supports_account_address(token) ||
+          !token_supports_transfer_signing(token) ||
+          token_evm_standard(token.standard) == EvmTokenStandard::Unknown) {
+        return false;
+      }
     } else if (token.standard == TokenStandard::Spl) {
-      if (!valid_spl_mint(token.contract_or_mint) || token_supports_account_address(token)) return false;
+      if (!valid_spl_mint(token.contract_or_mint) ||
+          !token_supports_account_address(token) ||
+          token_supports_transfer_signing(token)) {
+        return false;
+      }
     } else {
       return false;
     }
@@ -132,8 +193,23 @@ bool run_token_profile_self_tests() {
   }
   const TokenProfile *usdc = find_token_profile("eth-usdc");
   const TokenProfile *solana_usdc = find_token_profile("sol-usdc");
-  return usdc != nullptr && token_supports_account_address(*usdc) && solana_usdc != nullptr &&
-         !token_supports_account_address(*solana_usdc);
+  if (usdc == nullptr || !token_supports_account_address(*usdc) ||
+      solana_usdc == nullptr || !token_supports_account_address(*solana_usdc) ||
+      token_supports_transfer_signing(*solana_usdc)) {
+    return false;
+  }
+  static const uint8_t kOwnerSeed[32] = {
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+  };
+  char account[64];
+  const bool ata = token_spl_account_address(*solana_usdc, kOwnerSeed, account,
+                                             sizeof(account)) == WalletError::Ok &&
+                   strcmp(account, "3wvJdyFnGvaMWpbq93NU91SggiVRveULUXL6iX5VZDGP") == 0;
+  secure_zero(account, sizeof(account));
+  return ata;
 }
 
 }  // namespace hexwallet

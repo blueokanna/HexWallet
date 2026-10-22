@@ -24,9 +24,23 @@ WalletError address_cashaddr(const char *prefix,
                              const uint8_t public_key[kCompressedPublicKeySize],
                              char *out, size_t out_size);
 
+// CashAddr rendered straight from a P2PKH/P2SH scriptPubKey, used by the PSBT
+// reviewer so a BCH input/output is never displayed as a base58 address.
+WalletError address_cashaddr_from_script(const char *prefix, const uint8_t *script,
+                                         size_t script_size, char *out,
+                                         size_t out_size);
+
 // Solana: plain base58 of the ed25519 public key.
 WalletError address_solana(const uint8_t public_key[32], char *out,
                            size_t *in_out_size);
+
+// Solana associated token account for (owner, mint):
+// PDA seeds = owner || Tokenkeg... || mint, program = AToke...,
+// bump searched from 255 down until SHA-256(seeds || bump || program ||
+// "ProgramDerivedAddress") is not a valid Ed25519 point.
+WalletError address_solana_associated_token(const uint8_t owner[32],
+                                            const uint8_t mint[32],
+                                            char *out, size_t out_size);
 
 // Algorand: base32(ed25519 pubkey || last-4-bytes of sha512/256(pubkey)).
 WalletError address_algorand(const uint8_t public_key[32], char *out,

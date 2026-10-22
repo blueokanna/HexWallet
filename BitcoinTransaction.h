@@ -7,6 +7,7 @@
 #include "CryptoPrimitives.h"
 #include "WalletConfig.h"
 #include "WalletEngine.h"
+#include "WalletNetworks.h"
 
 namespace hexwallet {
 
@@ -19,6 +20,18 @@ constexpr size_t kBitcoinMaxDerSignatureSize = 72;
 enum class BitcoinSpendType : uint8_t {
   NativeP2wpkh,
   NestedP2shP2wpkh,
+  LegacyP2pkh,
+};
+
+// Address family plus the consensus sighash rules the chain inherited.  The
+// caller supplies this from the network signing policy so the review that the
+// user approves and the digest that gets signed can never drift apart.
+struct BitcoinChainParams {
+  const char *network_id;
+  const char *cashaddr_prefix;  // non-null when the chain renders CashAddr
+  UtxoAddressProfile address;
+  SighashFamily sighash;
+  uint32_t fork_id;
 };
 
 enum class TransactionError : uint8_t {
@@ -62,6 +75,7 @@ struct BitcoinOutput {
 struct BitcoinSigningRequest {
   uint32_t version;
   uint32_t lock_time;
+  BitcoinChainParams chain;
   BitcoinInput inputs[kBitcoinMaxInputs];
   BitcoinOutput outputs[kBitcoinMaxOutputs];
   uint8_t input_count;
@@ -75,6 +89,7 @@ struct BitcoinSigningRequest {
 
 TransactionError bitcoin_parse_psbt(const uint8_t *psbt, size_t psbt_size,
                                     const HdPrivateNode &master,
+                                    const BitcoinChainParams &chain,
                                     BitcoinSigningRequest *out);
 TransactionError bitcoin_sign_request(const BitcoinSigningRequest &request,
                                       const HdPrivateNode &master,
@@ -83,6 +98,17 @@ TransactionError bitcoin_sign_request(const BitcoinSigningRequest &request,
 const char *transaction_error_text(TransactionError error);
 void clear_bitcoin_request(BitcoinSigningRequest *request);
 bool run_bitcoin_transaction_self_test();
+// Digest-only vectors (legacy, BIP143 and SIGHASH_FORKID). Safe to run on the
+// host: no ECDSA, no key derivation.
+bool run_bitcoin_sighash_self_tests();
+// Exposed so external tooling can audit the exact bytes an approval covers.
+TransactionError bitcoin_sighash_legacy(const BitcoinSigningRequest &request,
+                                        size_t input_index, uint32_t sighash_type,
+                                        uint8_t out[kSha256Size]);
+TransactionError bitcoin_sighash_bip143(const BitcoinSigningRequest &request,
+                                       size_t input_index, uint32_t sighash_type,
+                                       uint8_t out[kSha256Size]);
+uint32_t bitcoin_estimated_vbytes(const BitcoinSigningRequest &request);
 
 }
 

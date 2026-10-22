@@ -30,6 +30,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check imported fork signing policy
+        run: python tests/test_fork_registry.py
+
       - name: Install arduino-cli ${{ env.ARDUINO_CLI_VERSION }}
         shell: pwsh
         run: |
@@ -103,8 +106,12 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
 
   firmware-build:
-    name: Device build (ESP32-S3)
+    name: Device build (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32s3, esp32p4]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -134,14 +141,14 @@ jobs:
           # The sketch uses the LVGL 9 API (lv_screen_active, LV_OS_NONE, ...).
           git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git
 
-      - name: Compile firmware for ESP32-S3 (T-Display S3 AMOLED profile)
+      - name: Compile firmware (S3 display / P4 headless)
         run: |
           export PATH="$HOME/bin:$PATH"
           # LV_CONF_INCLUDE_SIMPLE makes lvgl pick up lv_conf.h from the
           # sketch root (which arduino-cli puts on the include path); without
           # it LVGL falls back to its built-in defaults and the UI widgets
           # (list, textarea, keyboard, ...) are not compiled in.
-          arduino-cli compile --fqbn esp32:esp32:esp32s3 --library "$HOME/Arduino/libraries/lvgl" \
+          arduino-cli compile --fqbn esp32:esp32:${{ matrix.target }} --library "$HOME/Arduino/libraries/lvgl" \
             --build-property compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE \
             --build-property compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE \
             .
