@@ -22,6 +22,10 @@ struct Blake2bState {
 // equivalent to the unkeyed function.
 bool blake2b_init(Blake2bState *state, size_t out_size, const uint8_t *key,
                   size_t key_size);
+// BLAKE2b personalization (RFC 7693 parameter block bytes 48..63). Zcash
+// ZIP-243 hashes are unkeyed but personalized, so keying cannot substitute.
+bool blake2b_init_personal(Blake2bState *state, size_t out_size,
+                           const uint8_t personal[16]);
 void blake2b_update(Blake2bState *state, const uint8_t *data, size_t size);
 // Wipes the state; out must have room for out_size bytes.
 bool blake2b_final(Blake2bState *state, uint8_t *out);

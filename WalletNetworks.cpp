@@ -16,6 +16,18 @@ namespace hexwallet
     constexpr UtxoAddressProfile kUtxoVertcoin = {0x47, 0x05, "vtc", false};
     constexpr UtxoAddressProfile kUtxoAxe = {0x8c, 0x13, "axe", false};
     constexpr UtxoAddressProfile kUtxoXrp = {0x00, 0x00, nullptr, true};
+
+    #if defined(HEXWALLET_HOST_TEST)
+    struct ForkAddressVector
+    {
+      const char *id;
+      const char *address;
+    };
+
+    const ForkAddressVector kForkAddressVectors[] = {
+#include "tests/fixtures/WalletForkAddressVectors.inc"
+    };
+    #endif
   } // namespace
 
   const NetworkProfile kNetworkProfiles[] = {
@@ -46,6 +58,9 @@ namespace hexwallet
       {"matic", "MATIC", "Polygon", 966, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 137, 0, 0, nullptr},
       {"ftm", "FTM", "Fantom", 1007, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 250, 0, 0, nullptr},
       {"core", "CORE", "Core", 1116, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1116, 0, 0, nullptr},
+      // Conflux eSpace mainnet chain id 1030 (doc.confluxnetwork.org/docs/espace/network-endpoints).
+      // SLIP-0044 coin type 503, matching the official Conflux Ledger app path m/44'/503'/...
+      {"cfx", "CFX", "Conflux eSpace", 503, 503, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1030, 0, 0, nullptr},
       {"glmr", "GLMR", "Moonbeam", 1284, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1284, 0, 0, nullptr},
       {"movr", "MOVR", "Moonriver", 1285, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1285, 0, 0, nullptr},
       {"base", "BASE", "Base", 8453, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 8453, 0, 0, nullptr},
@@ -54,6 +69,33 @@ namespace hexwallet
       {"bsc", "BSC", "Binance Smart Chain", 9006, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 56, 0, 0, nullptr},
       {"celo", "CELO", "Celo", 52752, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 42220, 0, 0, nullptr},
       {"rsk", "RBTC", "Rootstock", 137, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 30, 0, 0, nullptr},
+      {"linea", "ETH", "Linea", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 59144, 0, 0, nullptr},
+      {"scroll", "ETH", "Scroll", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 534352, 0, 0, nullptr},
+      {"blast", "ETH", "Blast", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 81457, 0, 0, nullptr},
+      {"mantle", "MNT", "Mantle", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 5000, 0, 0, nullptr},
+      {"opbnb", "BNB", "opBNB", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 204, 0, 0, nullptr},
+      {"zkevm", "ETH", "Polygon zkEVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1101, 0, 0, nullptr},
+      {"aurora", "ETH", "Aurora", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1313161554, 0, 0, nullptr},
+      {"metis", "METIS", "Metis Andromeda", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1088, 0, 0, nullptr},
+      {"kaia", "KAIA", "Kaia", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 8217, 0, 0, nullptr},
+      {"astar", "ASTR", "Astar", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 592, 0, 0, nullptr},
+      {"canto", "CANTO", "Canto", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 7700, 0, 0, nullptr},
+      {"dogechain", "DOGE", "Dogechain EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 2000, 0, 0, nullptr},
+      {"fuse", "FUSE", "Fuse", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 122, 0, 0, nullptr},
+      {"evmos", "EVMOS", "Evmos EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 9001, 0, 0, nullptr},
+      {"harmony", "ONE", "Harmony EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1666600000, 0, 0, nullptr},
+      {"telos", "TLOS", "Telos EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 40, 0, 0, nullptr},
+      {"seievm", "SEI", "Sei EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1329, 0, 0, nullptr},
+      {"ethw", "ETHW", "EthereumPoW", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 10001, 0, 0, nullptr},
+      {"clo", "CLO", "Callisto Network", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 820, 0, 0, nullptr},
+      {"etho", "ETHO", "Etho Protocol", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1313114, 0, 0, nullptr},
+      {"octa", "OCTA", "OctaSpace", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 800001, 0, 0, nullptr},
+      {"egaz", "EGAZ", "Etica", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 61803, 0, 0, nullptr},
+      {"avs", "AVS", "Aves", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 33333, 0, 0, nullptr},
+      {"cau", "CAU", "Canxium", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 3003, 0, 0, nullptr},
+      {"btn", "BTN", "Bitnet", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 210, 0, 0, nullptr},
+      {"lrs", "LRS", "Larissa Chain", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 9898, 0, 0, nullptr},
+      {"vbc", "VBC", "VirBiCoin", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 329, 0, 0, nullptr},
       // --- Other existing chains ---------------------------------------------
       {"xrp", "XRP", "XRP Ledger", 144, 144, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoXrp, 0, 0, 0, 0, nullptr},
       {"trx", "TRX", "TRON", 195, 195, 44, DerivationStyle::Bip44, AddressEncoding::Tron, {0, 0, nullptr, false}, 0x41, 0, 0, 0, nullptr},
@@ -62,7 +104,6 @@ namespace hexwallet
       // --- New multi-coin support (SLIP-0044) --------------------------------
       {"kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
-      {"flux", "FLUX", "Flux (transparent)", 19167, 19167, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
       {"bch", "BCH", "Bitcoin Cash", 145, 145, 44, DerivationStyle::Bip44, AddressEncoding::CashAddr, {0, 0, nullptr, false}, 0, 0, 0, 0, "bitcoincash"},
       {"xec", "XEC", "eCash", 899, 899, 44, DerivationStyle::Bip44, AddressEncoding::CashAddr, {0, 0, nullptr, false}, 0, 0, 0, 0, "ecash"},
       {"bsv", "BSV", "Bitcoin SV", 236, 236, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x00, 0x05, nullptr, false}, 0, 0, 0, 0, nullptr},
@@ -84,15 +125,10 @@ namespace hexwallet
       {"erg", "ERG", "Ergo", 429, 429, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase58Ergo, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xch", "XCH", "Chia", 8444, 8444, 12381, DerivationStyle::ChiaEip2333, AddressEncoding::Bech32mBlsChia, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"qrl", "QRL", "Quantum Resistant Ledger", 0, 0, 0, DerivationStyle::QrlXmss, AddressEncoding::QrlXmss, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, true},
-#include "WalletForkProfiles.inc"
+#include "src/generated/WalletForkProfiles.inc"
   };
 
   const size_t kNetworkProfileCount = sizeof(kNetworkProfiles) / sizeof(kNetworkProfiles[0]);
-
-  // A row here is a claim that the chains's consensus code accepts the sighash
-  // this firmware produces for the listed address family.  Rows are added only
-  // after a signed transaction from the chain's own reference wallet has been
-  // reproduced bit-for-bit; an address profile alone never earns a row.
   const NetworkSigningPolicy kNetworkSigningPolicies[] = {
       {"btc", SighashFamily::Bitcoin, 0},
       {"btc49", SighashFamily::Bitcoin, 0},
@@ -108,7 +144,7 @@ namespace hexwallet
       {"btg", SighashFamily::Bitcoin, 0},
       {"btg49", SighashFamily::Bitcoin, 0},
       {"btg84", SighashFamily::Bitcoin, 0},
-      {"ppc", SighashFamily::Bitcoin, 0},
+      {"rvn", SighashFamily::Bitcoin, 0},
       {"nmc", SighashFamily::Bitcoin, 0},
       {"vtc", SighashFamily::Bitcoin, 0},
       {"vtc49", SighashFamily::Bitcoin, 0},
@@ -117,17 +153,35 @@ namespace hexwallet
       {"bch", SighashFamily::ForkId, 0},
       {"xec", SighashFamily::ForkId, 0},
       {"bsv", SighashFamily::ForkId, 0},
-      // Source-verified Bitcoin-0.16 forks: standard legacy sighash and
-      // BIP143 are inherited unchanged from their consensus code.
-      {"fork_sugarchain", SighashFamily::Bitcoin, 0},
-      {"fork_sugarchain84", SighashFamily::Bitcoin, 0},
-      {"fork_sugarchain49", SighashFamily::Bitcoin, 0},
-      {"fork_ravencoinclassic", SighashFamily::Bitcoin, 0},
-      {"fork_ravencoinclassic49", SighashFamily::Bitcoin, 0},
+      // Zcash mainnet NU6.2. Updating the branch id is a consensus change and
+      // requires a firmware release plus new ZIP-243 vectors, never a config
+      // flag.
+      {"zec", SighashFamily::ZcashZip243, 0},
+#include "src/generated/WalletForkSigningPolicies.inc"
   };
 
   const size_t kNetworkSigningPolicyCount =
       sizeof(kNetworkSigningPolicies) / sizeof(kNetworkSigningPolicies[0]);
+
+  const ZcashNetworkPolicy kZcashNetworkPolicies[] = {
+      // NU6.2 (zcash/src/consensus/upgrades.cpp, mainnet activation 3364600).
+      {"zec", 0x5437f330},
+  };
+
+  const size_t kZcashNetworkPolicyCount =
+      sizeof(kZcashNetworkPolicies) / sizeof(kZcashNetworkPolicies[0]);
+
+  const ZcashNetworkPolicy *find_zcash_network_policy(const char *network_id)
+  {
+    if (network_id == nullptr)
+      return nullptr;
+    for (size_t index = 0; index < kZcashNetworkPolicyCount; ++index)
+    {
+      if (strcmp(kZcashNetworkPolicies[index].network_id, network_id) == 0)
+        return &kZcashNetworkPolicies[index];
+    }
+    return nullptr;
+  }
 
   const NetworkSigningPolicy *find_network_signing_policy(const char *network_id)
   {
@@ -159,6 +213,32 @@ namespace hexwallet
            network.encoding == AddressEncoding::Ed25519Base58;
   }
 
+  bool network_supports_eip1559(const NetworkProfile &network)
+  {
+    if (network.encoding != AddressEncoding::Evm)
+      return false;
+    static const char *const kEip1559Networks[] = {
+        "eth",
+        "matic",
+        "opt",
+        "arb1",
+        "base",
+        "avaxc",
+        "xdai",
+        "glmr",
+        "movr",
+        "cro",
+        "kava",
+        "core",
+    };
+    for (const char *id : kEip1559Networks)
+    {
+      if (strcmp(network.id, id) == 0)
+        return true;
+    }
+    return false;
+  }
+
   bool run_network_profile_self_tests()
   {
     for (size_t left = 0; left < kNetworkProfileCount; ++left)
@@ -168,7 +248,10 @@ namespace hexwallet
         return false;
       if (network.encoding == AddressEncoding::Evm)
       {
-        const uint32_t expected_derivation_type = strcmp(network.id, "etc") == 0 ? 61 : 60;
+        const uint32_t expected_derivation_type =
+            strcmp(network.id, "etc") == 0   ? 61
+            : strcmp(network.id, "cfx") == 0 ? 503
+                                             : 60;
         if (network.derivation_coin_type != expected_derivation_type || network.evm_chain_id == 0)
         {
           return false;
@@ -210,6 +293,7 @@ namespace hexwallet
     const NetworkProfile *ethereum = find_network_profile("eth");
     const NetworkProfile *ethereum_classic = find_network_profile("etc");
     const NetworkProfile *bsc = find_network_profile("bsc");
+    const NetworkProfile *conflux = find_network_profile("cfx");
     const NetworkProfile *monero = find_network_profile("xmr");
     const NetworkProfile *masari = find_network_profile("msr");
     const NetworkProfile *kaspa = find_network_profile("kas");
@@ -223,63 +307,48 @@ namespace hexwallet
         0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98};
     char test_address[128];
     size_t test_size = sizeof(test_address);
-    const NetworkProfile *adcoin = find_network_profile("fork_adcoin");
+    const NetworkProfile *komodo = find_network_profile("fork_komodo");
     const NetworkProfile *anon = find_network_profile("fork_anon");
     const NetworkProfile *digibyte = find_network_profile("dgb");
     const NetworkProfile *cosmos = find_network_profile("atom");
-    if (adcoin == nullptr || address_p2pkh(adcoin->utxo, test_public_key,
-                                          test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "AST9CekEhDWuxHPynRmeyjg5biNFSijvb3") != 0) {
+    if (komodo == nullptr || address_p2pkh(komodo->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "RKxTdfmtxtfLDKZBgx6SvNkBtNu9jRYnLh") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (anon == nullptr || address_zcash_transparent(anon->alt_p2pkh_version,
-                                                     anon->alt_p2sh_version,
-                                                     test_public_key, test_address,
-                                                     &test_size) != WalletError::Ok ||
-        strcmp(test_address, "AnYEktGAqUSEAGTn8jKkhZeCFZNibUjnYxN") != 0) {
+    if (anon == nullptr || address_zcash_transparent(anon->alt_p2pkh_version, anon->alt_p2sh_version, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "AnYEktGAqUSEAGTn8jKkhZeCFZNibUjnYxN") != 0)
+    {
       return false;
     }
     const NetworkProfile *sugar = find_network_profile("fork_sugarchain");
     const NetworkProfile *sugar84 = find_network_profile("fork_sugarchain84");
     const NetworkProfile *sugar49 = find_network_profile("fork_sugarchain49");
-    const NetworkProfile *rvc = find_network_profile("fork_ravencoinclassic");
-    const NetworkProfile *rvc49 = find_network_profile("fork_ravencoinclassic49");
     test_size = sizeof(test_address);
-    if (sugar == nullptr || address_p2pkh(sugar->utxo, test_public_key,
-                                          test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "SXyGazfm6S3xfcySmD6QNkZYmtfysC2jvc") != 0) {
+    if (sugar == nullptr || address_p2pkh(sugar->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "SXyGazfm6S3xfcySmD6QNkZYmtfysC2jvc") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (sugar49 == nullptr || address_p2sh_p2wpkh(sugar49->utxo, test_public_key,
-                                                  test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "sbUiFaYTL16erD6g8Tmkf9SkApHVf8vGjP") != 0) {
+    if (sugar49 == nullptr || address_p2sh_p2wpkh(sugar49->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "sbUiFaYTL16erD6g8Tmkf9SkApHVf8vGjP") != 0)
+    {
       return false;
     }
     if (sugar84 == nullptr ||
         address_p2wpkh(sugar84->utxo, test_public_key, test_address,
                        sizeof(test_address)) != WalletError::Ok ||
         strcmp(test_address,
-               "sugar1qw508d6qejxtdg4y5r3zarvary0c5xw7kjjlkp2") != 0) {
+               "sugar1qw508d6qejxtdg4y5r3zarvary0c5xw7kjjlkp2") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (rvc == nullptr || address_p2pkh(rvc->utxo, test_public_key,
-                                        test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "RKxTdfmtxtfLDKZBgx6SvNkBtNu9jRYnLh") != 0) {
-      return false;
-    }
-    test_size = sizeof(test_address);
-    if (rvc49 == nullptr || address_p2sh_p2wpkh(rvc49->utxo, test_public_key,
-                                                test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "rPTuJFebCTi2PugR4CmoCmdPHJWfVh28Ha") != 0) {
-      return false;
-    }
-    test_size = sizeof(test_address);
-    if (digibyte == nullptr || address_p2pkh(digibyte->utxo, test_public_key,
-                                             test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "DFpN6QqFfUm3gKNaxN6tNcab1FArL9cZLE") != 0) {
+    if (digibyte == nullptr || address_p2pkh(digibyte->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "DFpN6QqFfUm3gKNaxN6tNcab1FArL9cZLE") != 0)
+    {
       return false;
     }
     const NetworkProfile *litecoin = find_network_profile("ltc");
@@ -293,136 +362,216 @@ namespace hexwallet
     const NetworkProfile *vertcoin49 = find_network_profile("vtc49");
     const NetworkProfile *vertcoin84 = find_network_profile("vtc84");
     test_size = sizeof(test_address);
-    if (litecoin == nullptr || address_p2pkh(litecoin->utxo, test_public_key,
-                                             test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "LVuDpNCSSj6pQ7t9Pv6d6sUkLKoqDEVUnJ") != 0) {
+    if (litecoin == nullptr || address_p2pkh(litecoin->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "LVuDpNCSSj6pQ7t9Pv6d6sUkLKoqDEVUnJ") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (litecoin49 == nullptr || address_p2sh_p2wpkh(litecoin49->utxo, test_public_key,
-                                                     test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "MR8UQSBr5ULwWheBHznrHk2jxyxkHQu8vB") != 0) {
+    if (litecoin49 == nullptr || address_p2sh_p2wpkh(litecoin49->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "MR8UQSBr5ULwWheBHznrHk2jxyxkHQu8vB") != 0)
+    {
       return false;
     }
     if (litecoin84 == nullptr ||
         address_p2wpkh(litecoin84->utxo, test_public_key, test_address,
                        sizeof(test_address)) != WalletError::Ok ||
-        strcmp(test_address, "ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9") != 0) {
+        strcmp(test_address, "ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (digibyte49 == nullptr || address_p2sh_p2wpkh(digibyte49->utxo, test_public_key,
-                                                     test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "SeXKCr4bJpNL9LTJcT7zbNZy9YK1Vihyox") != 0) {
+    if (digibyte49 == nullptr || address_p2sh_p2wpkh(digibyte49->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "SeXKCr4bJpNL9LTJcT7zbNZy9YK1Vihyox") != 0)
+    {
       return false;
     }
     if (digibyte84 == nullptr ||
         address_p2wpkh(digibyte84->utxo, test_public_key, test_address,
                        sizeof(test_address)) != WalletError::Ok ||
-        strcmp(test_address, "dgb1qw508d6qejxtdg4y5r3zarvary0c5xw7kmudfnm") != 0) {
+        strcmp(test_address, "dgb1qw508d6qejxtdg4y5r3zarvary0c5xw7kmudfnm") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (bitcoin_gold == nullptr || address_p2pkh(bitcoin_gold->utxo, test_public_key,
-                                                 test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "GUXByHDZLvU4DnVH9imSFckt3HEQ5cFgE5") != 0) {
+    if (bitcoin_gold == nullptr || address_p2pkh(bitcoin_gold->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "GUXByHDZLvU4DnVH9imSFckt3HEQ5cFgE5") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
     if (bitcoin_gold49 == nullptr ||
         address_p2sh_p2wpkh(bitcoin_gold49->utxo, test_public_key, test_address,
                             &test_size) != WalletError::Ok ||
-        strcmp(test_address, "AZ1BpW94ubqHRzsqdfoFCMgVyN1H4CnSEp") != 0) {
+        strcmp(test_address, "AZ1BpW94ubqHRzsqdfoFCMgVyN1H4CnSEp") != 0)
+    {
       return false;
     }
     if (bitcoin_gold84 == nullptr ||
         address_p2wpkh(bitcoin_gold84->utxo, test_public_key, test_address,
                        sizeof(test_address)) != WalletError::Ok ||
-        strcmp(test_address, "btg1qw508d6qejxtdg4y5r3zarvary0c5xw7k6w057a") != 0) {
+        strcmp(test_address, "btg1qw508d6qejxtdg4y5r3zarvary0c5xw7k6w057a") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (vertcoin49 == nullptr || address_p2sh_p2wpkh(vertcoin49->utxo, test_public_key,
-                                                     test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "3JvL6Ymt8MVWiCNHC7oWU6nLeHNJKLZGLN") != 0) {
+    if (vertcoin49 == nullptr || address_p2sh_p2wpkh(vertcoin49->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "3JvL6Ymt8MVWiCNHC7oWU6nLeHNJKLZGLN") != 0)
+    {
       return false;
     }
     if (vertcoin84 == nullptr ||
         address_p2wpkh(vertcoin84->utxo, test_public_key, test_address,
                        sizeof(test_address)) != WalletError::Ok ||
-        strcmp(test_address, "vtc1qw508d6qejxtdg4y5r3zarvary0c5xw7kuk9r06") != 0) {
+        strcmp(test_address, "vtc1qw508d6qejxtdg4y5r3zarvary0c5xw7kuk9r06") != 0)
+    {
       return false;
     }
     const NetworkProfile *peercoin = find_network_profile("ppc");
     const NetworkProfile *namecoin = find_network_profile("nmc");
     const NetworkProfile *bitcoin_sv = find_network_profile("bsv");
+    const NetworkProfile *zcash = find_network_profile("zec");
+    const ZcashNetworkPolicy *zcash_policy = find_zcash_network_policy("zec");
     test_size = sizeof(test_address);
-    if (peercoin == nullptr || address_p2pkh(peercoin->utxo, test_public_key,
-                                              test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "PKGSi8HTQzLx89rkZrRrVkPFjrcSC55NP9") != 0) {
+    if (peercoin == nullptr || address_p2pkh(peercoin->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "PKGSi8HTQzLx89rkZrRrVkPFjrcSC55NP9") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (namecoin == nullptr || address_p2pkh(namecoin->utxo, test_public_key,
-                                              test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "N7FdkoPbHSxKfrSVVbRu3NZtrLqc1oKpAR") != 0) {
+    if (namecoin == nullptr || address_p2pkh(namecoin->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "N7FdkoPbHSxKfrSVVbRu3NZtrLqc1oKpAR") != 0)
+    {
       return false;
     }
     test_size = sizeof(test_address);
-    if (bitcoin_sv == nullptr || address_p2pkh(bitcoin_sv->utxo, test_public_key,
-                                               test_address, &test_size) != WalletError::Ok ||
-        strcmp(test_address, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH") != 0) {
+    if (bitcoin_sv == nullptr || address_p2pkh(bitcoin_sv->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH") != 0)
+    {
       return false;
     }
     if (cosmos == nullptr || cosmos->alt_hrp == nullptr ||
         address_cosmos_bech32(cosmos->alt_hrp, test_public_key, test_address,
                               sizeof(test_address)) != WalletError::Ok ||
-        strcmp(test_address, "cosmos1w508d6qejxtdg4y5r3zarvary0c5xw7k6ah60c") != 0) {
+        strcmp(test_address, "cosmos1w508d6qejxtdg4y5r3zarvary0c5xw7k6ah60c") != 0)
+    {
       return false;
     }
-    for (size_t index = 0; index < kNetworkProfileCount; ++index) {
+    for (size_t index = 0; index < kNetworkProfileCount; ++index)
+    {
       const NetworkProfile &network = kNetworkProfiles[index];
       test_size = sizeof(test_address);
       if (network.encoding == AddressEncoding::P2pkh &&
           address_p2pkh(network.utxo, test_public_key, test_address,
-                        &test_size) != WalletError::Ok) {
+                        &test_size) != WalletError::Ok)
+      {
         return false;
       }
       if (network.encoding == AddressEncoding::ZcashTransparent &&
           address_zcash_transparent(network.alt_p2pkh_version,
                                     network.alt_p2sh_version, test_public_key,
-                                    test_address, &test_size) != WalletError::Ok) {
+                                    test_address, &test_size) != WalletError::Ok)
+      {
         return false;
       }
       if (network.encoding == AddressEncoding::Bech32Cosmos &&
           address_cosmos_bech32(network.alt_hrp, test_public_key, test_address,
-                                sizeof(test_address)) != WalletError::Ok) {
+                                sizeof(test_address)) != WalletError::Ok)
+      {
         return false;
       }
     }
-    for (size_t index = 0; index < kNetworkSigningPolicyCount; ++index) {
+    for (size_t index = 0; index < kNetworkSigningPolicyCount; ++index)
+    {
       const NetworkSigningPolicy &policy = kNetworkSigningPolicies[index];
       const NetworkProfile *network = find_network_profile(policy.network_id);
-      if (network == nullptr || policy.family == SighashFamily::None) return false;
+      if (network == nullptr || policy.family == SighashFamily::None)
+        return false;
       const bool utxo_family = network->encoding == AddressEncoding::P2pkh ||
                                network->encoding == AddressEncoding::P2shP2wpkh ||
                                network->encoding == AddressEncoding::P2wpkh;
       const bool cashaddr_family = network->encoding == AddressEncoding::CashAddr &&
                                    network->alt_hrp != nullptr;
-      if (!utxo_family && !cashaddr_family) return false;
-      if (policy.family == SighashFamily::ForkId) {
-        const bool p2pkh = network->encoding == AddressEncoding::P2pkh;
-        if (!p2pkh && !cashaddr_family) return false;
-      } else if (cashaddr_family) {
-        return false;
+      if (policy.family == SighashFamily::ZcashZip243)
+      {
+        if (network->encoding != AddressEncoding::ZcashTransparent ||
+            find_zcash_network_policy(network->id) == nullptr)
+        {
+          return false;
+        }
       }
-      for (size_t other = index + 1; other < kNetworkSigningPolicyCount; ++other) {
-        if (strcmp(kNetworkSigningPolicies[other].network_id, policy.network_id) == 0) {
+      else
+      {
+        if (!utxo_family && !cashaddr_family)
+          return false;
+        if (policy.family == SighashFamily::ForkId)
+        {
+          const bool p2pkh = network->encoding == AddressEncoding::P2pkh;
+          if (!p2pkh && !cashaddr_family)
+            return false;
+        }
+        else if (cashaddr_family)
+        {
+          return false;
+        }
+      }
+      for (size_t other = index + 1; other < kNetworkSigningPolicyCount; ++other)
+      {
+        if (strcmp(kNetworkSigningPolicies[other].network_id, policy.network_id) == 0)
+        {
           return false;
         }
       }
     }
-    return ethereum != nullptr && ethereum->evm_chain_id == 1 && ethereum_classic != nullptr && ethereum_classic->derivation_coin_type == 61 && ethereum_classic->evm_chain_id == 61 && bsc != nullptr && bsc->derivation_coin_type == 60 && bsc->evm_chain_id == 56 && monero != nullptr && monero->account_version == 18 && monero->cryptonote_integrated_prefix == 19 && monero->cryptonote_subaddress_prefix == 42 && masari != nullptr && masari->account_version == 28 && masari->cryptonote_subaddress_prefix == 0 && kaspa != nullptr && kaspa->slip44_coin_type == 111111 && algorand != nullptr && algorand->slip44_coin_type == 283 && solana != nullptr && solana->slip44_coin_type == 501 && chia != nullptr && chia->slip44_coin_type == 8444 && chia->bip_purpose == 12381 && qrl != nullptr && qrl->encoding == AddressEncoding::QrlXmss && qrl->explicit_only_derivation;
+    // Peercoin v<3 transactions serialize nTime; the Bitcoin legacy path cannot sign them.
+    if (find_network_signing_policy("ppc") != nullptr)
+      return false;
+    #if defined(HEXWALLET_HOST_TEST)
+    for (const ForkAddressVector &vector : kForkAddressVectors)
+    {
+      const NetworkProfile *network = find_network_profile(vector.id);
+      test_size = sizeof(test_address);
+      if (network == nullptr ||
+          address_p2pkh(network->utxo, test_public_key, test_address,
+                        &test_size) != WalletError::Ok ||
+          strcmp(test_address, vector.address) != 0)
+      {
+        return false;
+      }
+    }
+    #endif
+    const NetworkProfile *rootstock = find_network_profile("rsk");
+    if (ethereum == nullptr || ethereum->evm_chain_id != 1 ||
+        ethereum_classic == nullptr ||
+        ethereum_classic->derivation_coin_type != 61 ||
+        ethereum_classic->evm_chain_id != 61 || bsc == nullptr ||
+        bsc->derivation_coin_type != 60 || bsc->evm_chain_id != 56 ||
+        conflux == nullptr || conflux->slip44_coin_type != 503 ||
+        conflux->derivation_coin_type != 503 || conflux->evm_chain_id != 1030 ||
+        rootstock == nullptr || rootstock->evm_chain_id != 30 ||
+        monero == nullptr || monero->account_version != 18 ||
+        monero->cryptonote_integrated_prefix != 19 ||
+        monero->cryptonote_subaddress_prefix != 42 || masari == nullptr ||
+        masari->account_version != 28 || masari->cryptonote_subaddress_prefix != 0 ||
+        zcash == nullptr || zcash->encoding != AddressEncoding::ZcashTransparent ||
+        zcash->alt_p2pkh_version != 0x1cb8 || zcash->alt_p2sh_version != 0x1cbd ||
+        zcash_policy == nullptr || zcash_policy->branch_id != 0x5437f330 ||
+        kaspa == nullptr || kaspa->slip44_coin_type != 111111 ||
+        algorand == nullptr || algorand->slip44_coin_type != 283 ||
+        solana == nullptr || solana->slip44_coin_type != 501 || chia == nullptr ||
+        chia->slip44_coin_type != 8444 || chia->bip_purpose != 12381 ||
+        qrl == nullptr || qrl->encoding != AddressEncoding::QrlXmss ||
+        !qrl->explicit_only_derivation)
+    {
+      return false;
+    }
+    // Type-2 support is chain policy: Ethereum accepts it, ETC/BSC/Rootstock
+    // must stay on legacy EIP-155 transactions.
+    return network_supports_eip1559(*ethereum) &&
+           !network_supports_eip1559(*ethereum_classic) &&
+           !network_supports_eip1559(*bsc) &&
+           !network_supports_eip1559(*conflux) &&
+           !network_supports_eip1559(*rootstock);
   }
 
 } // namespace hexwallet

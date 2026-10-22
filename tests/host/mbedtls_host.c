@@ -997,6 +997,15 @@ int mbedtls_ecp_mul(mbedtls_ecp_group *grp, mbedtls_ecp_point *R, const mbedtls_
   (void)grp; (void)R; (void)m; (void)P; (void)f_rng; (void)p_rng;
   return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
 }
+int mbedtls_ecp_point_read_binary(const mbedtls_ecp_group *grp, mbedtls_ecp_point *pt,
+                                  const unsigned char *buf, size_t ilen) {
+  (void)grp; (void)pt; (void)buf; (void)ilen;
+  return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+}
+int mbedtls_ecp_check_pubkey(const mbedtls_ecp_group *grp, const mbedtls_ecp_point *pt) {
+  (void)grp; (void)pt;
+  return MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+}
 int mbedtls_ecdsa_sign_det_ext(mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
                                const mbedtls_mpi *d, const unsigned char *buf, size_t blen,
                                mbedtls_md_type_t md_alg,

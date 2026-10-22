@@ -43,6 +43,23 @@ void board_power(bool on);
 // the reading is not available yet.
 uint16_t board_battery_millivolts();
 
+// Physical user button (BOOT on the ESP32 boards). Active-low, debounced by
+// the caller. Returns false when the board has no verified user button.
+bool board_has_user_button();
+bool board_user_button_pressed();
+
+// SE050 presence probe. "PresentUnverified" means an I2C device answered at
+// 0x48; it does not prove the part is an SE050C1H1, that SCP03 was
+// established, or that a key was imported. The wallet therefore keeps the
+// MCU-only custody profile until a real applet driver verifies the device.
+enum class SecureElementProbeState : uint8_t {
+  NotConfigured = 0,
+  NoResponse,
+  PresentUnverified,
+};
+
+SecureElementProbeState board_secure_element_probe();
+
 }  // namespace hexwallet
 
 #endif

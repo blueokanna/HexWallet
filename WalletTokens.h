@@ -19,7 +19,6 @@ enum class TokenStandard : uint8_t {
   Erc6551,
   LayerZeroOft,
   LayerZeroOnft,
-  Spl,
 };
 
 enum TokenCapability : uint8_t {
@@ -47,9 +46,6 @@ const TokenProfile *find_token_profile(const char *id);
 const NetworkProfile *token_network(const TokenProfile &token);
 bool token_supports_account_address(const TokenProfile &token);
 bool token_supports_transfer_signing(const TokenProfile &token);
-WalletError token_spl_account_address(const TokenProfile &token,
-                                      const uint8_t owner_seed[32],
-                                      char *out, size_t out_size);
 const char *token_standard_text(TokenStandard standard);
 EvmTokenStandard token_evm_standard(TokenStandard standard);
 bool run_token_profile_self_tests();

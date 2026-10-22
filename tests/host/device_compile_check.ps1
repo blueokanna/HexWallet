@@ -1,7 +1,7 @@
 # Device-side compile smoke check.
 #
 # Compiles every firmware C++ source (excluding the Arduino-sketch-only files)
-# with the ESP32 Xtensa toolchain that the ESP32 Arduino core 3.3.10 bundles,
+# with the selected Xtensa or P4 RISC-V toolchain from Arduino core 3.3.10,
 # to prove the code compiles for the 32-bit target (catches 64-bit-only
 # assumptions, non-portable printf formats, etc.) before flashing hardware.
 #
@@ -11,20 +11,29 @@
 # Requires the esp32 core 3.3.10 installed under Arduino15. Override the
 # toolchain/include roots with HEXWALLET_ESP32_LIBS (esp32-libs tool dir) and
 # HEXWALLET_ESP32_CORE (core hardware dir) if they are not at the defaults.
-$ErrorActionPreference = "Continue"
+param([ValidateSet("esp32", "esp32p4")][string]$Target = "esp32")
+$ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $PSScriptRoot "esp32_paths.ps1")
 $libs = $espLibsRoot
+if ($Target -eq "esp32p4") {
+  $libs = Join-Path (Split-Path (Split-Path $espLibsRoot -Parent) -Parent) "esp32p4-libs\$coreVersion"
+  if (-not (Test-Path $libs)) { throw "P4 SDK not found: $libs" }
+  $mbedtlsInclude = Join-Path $libs "include\mbedtls\mbedtls\include"
+  $mbedtlsPort = Join-Path $libs "include\mbedtls\port\include"
+}
 $core = $coreCandidate
 
-# Locate the xtensa compiler inside the esp-x32 toolchain.
-$gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32-elf-g++.exe" -ErrorAction SilentlyContinue |
+# Never fall back to a different architecture when a compiler is absent.
+$toolName = if ($Target -eq "esp32p4") { "esp-rv32" } else { "esp-x32" }
+$compilerName = if ($Target -eq "esp32p4") { "riscv32-esp-elf-g++.exe" } else { "xtensa-esp32-elf-g++.exe" }
+$toolRoot = Join-Path (Split-Path (Split-Path $espLibsRoot -Parent) -Parent) $toolName
+$gcc = Get-ChildItem $toolRoot -Recurse -Filter $compilerName |
        Select-Object -First 1 -ExpandProperty FullName
-if (-not $gcc) {
-  $gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools" -Recurse -Filter "*esp32*g++.exe" -ErrorAction SilentlyContinue |
-         Select-Object -First 1 -ExpandProperty FullName
-}
-if (-not $gcc) { throw "xtensa-esp32 g++ not found; is the ESP32 core installed?" }
+if (-not $gcc) { throw "$compilerName not found" }
+$architectureFlags = if ($Target -eq "esp32p4") {
+  @("-march=rv32imafc_zicsr_zifencei_xesploop_xespv", "-mabi=ilp32f", "-DARDUINO_ARCH_ESP32")
+} else { @() }
 
 $includes = @(
   $root,
@@ -35,7 +44,7 @@ $includes = @(
   (Join-Path $libs "include\esp_hw_support\include"),
   $mbedtlsInclude,
   $mbedtlsPort,
-  (Join-Path $libs "include\xtensa\include"),
+  (Join-Path $libs "include"),
   (Join-Path $libs "dio_qspi\include")
 )
 
@@ -50,16 +59,17 @@ $includes = @(
 $sources = @(
   "CryptoPrimitives.cpp",
   "Blake2b.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
+  "WalletLinkCrypto.cpp", "WalletLink.cpp", "WalletNfcApdu.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoNoteAddress.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
+  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
   "WalletCustody.cpp",
   "WalletSecurity.cpp",
-  "WalletTokens.cpp", "WalletCatalog.cpp", "WalletSession.cpp",
-  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "MoneroScan.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "CosmosTransaction.cpp"
+  "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",
+  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp"
 )
 
-$objDir = Join-Path $PSScriptRoot "obj-device"
+$objDir = Join-Path $PSScriptRoot "obj-device/$Target"
 New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 # Include flags are passed directly (the curated set is small; the xtensa g++
@@ -69,10 +79,15 @@ $log = Join-Path $objDir "compile.log"
 $fail = 0
 foreach ($s in $sources) {
   $src = Join-Path $root $s
-  if (-not (Test-Path $src)) { Write-Output "SKIP (missing): $s"; continue }
+  if (-not (Test-Path $src)) { throw "Missing required source: $s" }
   $obj = Join-Path $objDir ($s -replace '\.cpp$', '.o')
-  & $gcc -std=c++17 -O2 -Wall -Wno-unused-parameter -DMBEDTLS_ALLOW_PRIVATE_ACCESS $incArgs -c $src -o $obj *> $log
+  # Windows PowerShell wraps stderr warnings as non-terminating errors.
+  # Judge native compilation by its exit status, not by the presence of stderr.
+  $LASTEXITCODE = $null
+  $ErrorActionPreference = "Continue"
+  & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter -DMBEDTLS_ALLOW_PRIVATE_ACCESS $incArgs -c $src -o $obj *> $log
   $rc = $LASTEXITCODE
+  $ErrorActionPreference = "Stop"
   Write-Output ("  {0} => rc={1}" -f $s, $rc)
   if ($rc -ne 0) {
     $fail++
@@ -84,5 +99,5 @@ if ($fail -gt 0) {
   Write-Output "DEVICE COMPILE: $fail source(s) FAILED"
   exit 1
 }
-Write-Output "DEVICE COMPILE: all sources OK"
+Write-Output "DEVICE COMPILE ($Target): all sources OK"
 exit 0

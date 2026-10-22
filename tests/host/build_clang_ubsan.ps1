@@ -26,7 +26,7 @@ New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 $common = @(
   "/nologo", "/O2", "/W3", "/GS-", "-m64",
-  "/D_CRT_SECURE_NO_WARNINGS",
+  "/D_CRT_SECURE_NO_WARNINGS", "/DHEXWALLET_HOST_TEST=1",
   "/DMBEDTLS_ALLOW_PRIVATE_ACCESS",
   "/DHEXWALLET_ENABLE_LVGL=0",
   "/I$PSScriptRoot", "/I$root", "/I$mbedtlsInclude", "/I$mbedtlsPort"
@@ -37,12 +37,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $cppSources = @(
   "CryptoPrimitives.cpp",
+  "WalletLinkCrypto.cpp", "WalletLink.cpp", "WalletNfcApdu.cpp",
   "Blake2b.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
-  "CryptoNoteAddress.cpp", "QrlXmss.cpp", "WalletCustody.cpp",
-  "MoneroScan.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "CosmosTransaction.cpp",
+  "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletTokens.cpp",
+  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "QrlXmss.cpp", "WalletCustody.cpp",
+  "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp",
   "BitcoinTransaction.cpp",
   "host_security.cpp", "host_test_main.cpp"
 )

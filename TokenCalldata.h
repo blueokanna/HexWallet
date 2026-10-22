@@ -16,7 +16,7 @@ namespace hexwallet {
 // A table entry describes an ABI, not permission to sign a transaction.
 // Contract identity, chain, review rendering and signing policy are separate.
 // Standards that are recognised but deliberately refused are enumerated in
-// `EvmTokenStandard` with the reason carried by `evm_token_standard_status`,
+// `EvmTokenStandard` with the reason carried by `evm_token_standard_refusal`,
 // because producing calldata for an ABI this code cannot verify would be worse
 // than refusing.
 
@@ -56,8 +56,6 @@ enum class TokenFunction : uint8_t {
   TransferFrom,
   SafeTransferFrom,
   SafeTransferFromWithData,
-  SafeTransferFromValue,
-  SafeTransferFromValueWithData,
   SafeBatchTransferFrom,
   SetApprovalForAll,
   Deposit,
@@ -66,10 +64,11 @@ enum class TokenFunction : uint8_t {
   Redeem,
   Send777,
   OperatorSend,
-  ExecuteCall,
-  ExecuteBatchCall,
   OftSend,
   OnftSendFrom,
+  TransferValueToAddress,
+  TransferValueToToken,
+  Execute,
   Unknown,
 };
 
@@ -79,10 +78,6 @@ struct TokenCalldataSelector {
   const char *signature;
   uint32_t selector;
   uint8_t argument_words;  // ABI head words after the selector
-  // True when another standard uses the same selector with the identical ABI,
-  // so an untyped decode remains semantically safe (ERC-1155/ERC-3525 share
-  // safeTransferFrom(address,address,uint256,uint256,bytes)).
-  bool generic = false;
 };
 
 extern const TokenCalldataSelector kTokenCalldataSelectors[];
@@ -103,13 +98,15 @@ struct DecodedTokenCalldata {
   const TokenCalldataSelector *selector;
   uint8_t recipient[20];        // primary receiver / `to`
   uint8_t secondary[20];        // `from`, owner, or operator depending on ABI
-  uint8_t tertiary[20];         // refund address or ERC-777 operator
+  uint8_t tertiary[20];         // refund address
   uint8_t payment_address[20];  // LayerZero zroPaymentAddress
   uint8_t amount[kTokenWordSize];  // full 256-bit word, big-endian
   bool amount_fits_u64;
   uint64_t amount_u64;
   bool has_token_id;
   uint8_t token_id[kTokenWordSize];
+  bool has_destination_token_id;
+  uint8_t destination_token_id[kTokenWordSize];
   bool has_value;          // ERC-3525 value, ERC-6551 call value
   uint8_t value[kTokenWordSize];
   bool has_min_amount;     // LayerZero OFT minAmountLD

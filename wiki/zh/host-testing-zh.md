@@ -17,7 +17,14 @@ powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 ```text
 extended-crypto=pass
 alt-addresses=pass
+zcash=pass
 ```
+
+`zcash` 用例校验官方 ZIP-243 透明向量，以及覆盖 shielded spend、shielded
+output 和 JoinSplit 的 `zcash-test-vectors` 行。主机 shim 故意不实现
+secp256k1 签名，因此完整签名回环由 MCU 上的
+`run_zcash_transaction_self_test()` 执行（ECDSA 签名、scriptSig 布局、重新
+解析和签名验签）。
 
 `mbedtls_host.c` shim 实现了固件用到的 mbedtls 子集（SHA-256/512、HMAC、
 PBKDF2、64 位 limb 大数及 `mod_mpi`/`inv_mod`/`exp_mod`），目的是让 API

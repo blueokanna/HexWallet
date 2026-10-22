@@ -19,6 +19,23 @@ bool initialized = false;
 bool session_authenticated = false;
 bool eink_panel = false;
 unsigned long last_service_ms = 0;
+WalletUiDecisionCallback decision_callback = nullptr;
+bool decision_pending = false;
+bool decision_value = false;
+
+void approve_event(lv_event_t *) {
+  if (decision_callback != nullptr) {
+    decision_value = true;
+    decision_pending = true;
+  }
+}
+
+void reject_event(lv_event_t *) {
+  if (decision_callback != nullptr) {
+    decision_value = false;
+    decision_pending = true;
+  }
+}
 
 // Resolution-adaptive scale factor. The UI is laid out against a 240px-wide
 // reference; every fixed dimension goes through sc() so a 170px or 176px
@@ -189,6 +206,14 @@ bool wallet_ui_init() {
 #endif
 }
 
+bool wallet_ui_ready() {
+#if HEXWALLET_ENABLE_LVGL
+  return initialized;
+#else
+  return false;
+#endif
+}
+
 void wallet_ui_show_port_error() {
 #if HEXWALLET_ENABLE_LVGL
   lv_obj_t *screen = lv_screen_active();
@@ -222,6 +247,15 @@ void wallet_ui_set_status(const char *status) {
 #endif
 }
 
+void wallet_ui_set_decision_callback(WalletUiDecisionCallback callback) {
+#if HEXWALLET_ENABLE_LVGL
+  decision_callback = callback;
+  decision_pending = false;
+#else
+  (void)callback;
+#endif
+}
+
 void wallet_ui_show_catalog() {
 #if HEXWALLET_ENABLE_LVGL
   if (!initialized) return;
@@ -232,7 +266,11 @@ void wallet_ui_show_catalog() {
 
 void wallet_ui_show_transaction(const WalletUiTransactionReview &review) {
 #if HEXWALLET_ENABLE_LVGL
-  if (!initialized || screen_content == nullptr || review.approval_code == nullptr) return;
+  if (!initialized || screen_content == nullptr ||
+      (review.approval_code == nullptr && !review.show_decision_buttons)) {
+    return;
+  }
+  if (!review.show_decision_buttons) decision_callback = nullptr;
   lv_obj_clean(screen_content);
   search_field = nullptr;
   coin_list = nullptr;
@@ -272,19 +310,115 @@ void wallet_ui_show_transaction(const WalletUiTransactionReview &review) {
   lv_label_set_text(fee, line);
   lv_obj_set_style_text_color(fee, lv_color_hex(0x8a241e), 0);
 
-  snprintf(line, sizeof(line), "CONFIRM  %s", review.approval_code);
-  lv_obj_t *confirmation = lv_label_create(screen_content);
-  lv_label_set_text(confirmation, line);
-  lv_obj_set_style_text_color(confirmation, lv_color_hex(0x161916), 0);
+  if (review.approval_code != nullptr) {
+    snprintf(line, sizeof(line), "CONFIRM  %s", review.approval_code);
+    lv_obj_t *confirmation = lv_label_create(screen_content);
+    lv_label_set_text(confirmation, line);
+    lv_obj_set_style_text_color(confirmation, lv_color_hex(0x161916), 0);
+  }
+  if (review.show_decision_buttons) {
+    lv_obj_t *actions = lv_obj_create(screen_content);
+    lv_obj_set_width(actions, LV_PCT(100));
+    lv_obj_set_height(actions, sc(52));
+    set_clean_container(actions);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_SPACE_EVENLY,
+                         LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(actions, sc(8), 0);
+
+    lv_obj_t *reject = lv_button_create(actions);
+    lv_obj_set_height(reject, sc(44));
+    lv_obj_set_flex_grow(reject, 1);
+    lv_obj_set_style_bg_color(reject, theme_warn(), 0);
+    lv_obj_add_event_cb(reject, reject_event, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *reject_label = lv_label_create(reject);
+    lv_label_set_text(reject_label, "REJECT");
+    lv_obj_center(reject_label);
+
+    lv_obj_t *approve = lv_button_create(actions);
+    lv_obj_set_height(approve, sc(44));
+    lv_obj_set_flex_grow(approve, 1);
+    lv_obj_set_style_bg_color(approve, theme_accent(), 0);
+    lv_obj_add_event_cb(approve, approve_event, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *approve_label = lv_label_create(approve);
+    lv_label_set_text(approve_label, "APPROVE");
+    lv_obj_center(approve_label);
+  }
   wallet_ui_set_status("Transaction review active");
 #else
   (void)review;
 #endif
 }
 
+void wallet_ui_show_pairing(uint32_t code, const char *fingerprint) {
+#if HEXWALLET_ENABLE_LVGL
+  if (!initialized || screen_content == nullptr) return;
+  lv_obj_clean(screen_content);
+  search_field = nullptr;
+  coin_list = nullptr;
+  keyboard = nullptr;
+  lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_row(screen_content, sc(10), 0);
+
+  lv_obj_t *title = lv_label_create(screen_content);
+  lv_label_set_text(title, "PAIR PHONE");
+  lv_obj_set_style_text_color(title, theme_accent(), 0);
+
+  char line[128];
+  snprintf(line, sizeof(line), "CODE  %06lu",
+           static_cast<unsigned long>(code % 1000000UL));
+  lv_obj_t *code_label = lv_label_create(screen_content);
+  lv_label_set_text(code_label, line);
+  lv_obj_set_style_text_color(code_label, lv_color_hex(0x161916), 0);
+
+  snprintf(line, sizeof(line), "PHONE %s", fingerprint == nullptr ? "?" : fingerprint);
+  lv_obj_t *fingerprint_label = lv_label_create(screen_content);
+  lv_label_set_long_mode(fingerprint_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(fingerprint_label, LV_PCT(100));
+  lv_label_set_text(fingerprint_label, line);
+
+  lv_obj_t *actions = lv_obj_create(screen_content);
+  lv_obj_set_width(actions, LV_PCT(100));
+  lv_obj_set_height(actions, sc(52));
+  set_clean_container(actions);
+  lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_SPACE_EVENLY,
+                       LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(actions, sc(8), 0);
+
+  lv_obj_t *reject = lv_button_create(actions);
+  lv_obj_set_height(reject, sc(44));
+  lv_obj_set_flex_grow(reject, 1);
+  lv_obj_set_style_bg_color(reject, theme_warn(), 0);
+  lv_obj_add_event_cb(reject, reject_event, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *reject_label = lv_label_create(reject);
+  lv_label_set_text(reject_label, "REJECT");
+  lv_obj_center(reject_label);
+
+  lv_obj_t *approve = lv_button_create(actions);
+  lv_obj_set_height(approve, sc(44));
+  lv_obj_set_flex_grow(approve, 1);
+  lv_obj_set_style_bg_color(approve, theme_accent(), 0);
+  lv_obj_add_event_cb(approve, approve_event, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *approve_label = lv_label_create(approve);
+  lv_label_set_text(approve_label, "APPROVE");
+  lv_obj_center(approve_label);
+  wallet_ui_set_status("Confirm this phone on the trusted display");
+#else
+  (void)code;
+  (void)fingerprint;
+#endif
+}
+
 void wallet_ui_service() {
 #if HEXWALLET_ENABLE_LVGL
   if (!initialized) return;
+  if (decision_pending) {
+    decision_pending = false;
+    WalletUiDecisionCallback callback = decision_callback;
+    const bool value = decision_value;
+    if (callback != nullptr) callback(value);
+  }
   const unsigned long now = millis();
   const unsigned long interval = eink_panel ? ui_policy().eink_min_refresh_ms : 16UL;
   if (eink_panel && last_service_ms != 0 && (now - last_service_ms) < interval) return;

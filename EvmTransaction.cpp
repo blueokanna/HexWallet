@@ -267,8 +267,7 @@ bool find_contract_standard(const NetworkProfile &network,
   uint8_t candidate[kEvmAddressSize];
   for (size_t index = 0; index < kTokenProfileCount; ++index) {
     const TokenProfile &token = kTokenProfiles[index];
-    if (token.standard == TokenStandard::Spl ||
-        strcmp(token.network_id, network.id) != 0 ||
+    if (strcmp(token.network_id, network.id) != 0 ||
         !decode_contract(token.contract_or_mint, candidate) ||
         !crypto_constant_time_equal(candidate, contract, sizeof(candidate))) {
       continue;
@@ -295,12 +294,9 @@ bool call_requires_wallet_sender(const DecodedTokenCalldata &call) {
       return call.function == TokenFunction::TransferFrom;
     case EvmTokenStandard::Erc721:
     case EvmTokenStandard::Erc1155:
-    case EvmTokenStandard::Erc3525:
       return call.function == TokenFunction::TransferFrom ||
              call.function == TokenFunction::SafeTransferFrom ||
              call.function == TokenFunction::SafeTransferFromWithData ||
-             call.function == TokenFunction::SafeTransferFromValue ||
-             call.function == TokenFunction::SafeTransferFromValueWithData ||
              call.function == TokenFunction::SafeBatchTransferFrom;
     case EvmTokenStandard::Erc4626:
       return call.function == TokenFunction::Withdraw ||
@@ -417,6 +413,9 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   if (transaction[0] == kEip1559Type) {
     parsed.type = EvmTransactionType::Eip1559;
     cursor.position = 1;
+    if (!network_supports_eip1559(network)) {
+      return EvmTransactionError::Unsupported;
+    }
   } else {
     parsed.type = EvmTransactionType::LegacyEip155;
   }
@@ -514,7 +513,9 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
          decoded.standard == EvmTokenStandard::Erc6551) &&
         ((decoded.has_bytes_tail && decoded.bytes_tail_size != 0) ||
          (decoded.has_second_bytes_tail && decoded.second_bytes_tail_size != 0));
-    if (batch_transfer || opaque_transfer_tail) {
+    // Token-ID destinations need their own review fields and trusted owner
+    // resolution. Never display them as the zero address.
+    if (batch_transfer || opaque_transfer_tail || decoded.has_destination_token_id) {
       secure_zero(native_value, sizeof(native_value));
       return EvmTransactionError::Unsupported;
     }
@@ -642,12 +643,8 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   if (parsed.has_call && call_requires_wallet_sender(parsed.call)) {
     const bool sender_matches = crypto_constant_time_equal(
         parsed.call.secondary, public_hash + 12, kEvmAddressSize);
-    const bool operator_matches =
-        parsed.call.standard != EvmTokenStandard::Erc777 ||
-        parsed.call.function != TokenFunction::OperatorSend ||
-        crypto_constant_time_equal(parsed.call.tertiary, public_hash + 12,
-                                   kEvmAddressSize);
-    if (!sender_matches || !operator_matches) {
+    // ERC-777's operator is msg.sender, not a calldata argument.
+    if (!sender_matches) {
       secure_zero(binding, sizeof(binding));
       secure_zero(public_hash, sizeof(public_hash));
       clear_evm_request(&parsed);

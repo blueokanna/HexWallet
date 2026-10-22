@@ -7,6 +7,9 @@
 
 #define SPI_MODE0 0
 #define MSBFIRST 0
+#define FSPI 0
+#define HSPI 1
+#define VSPI 2
 
 class SPISettings {
  public:
@@ -22,6 +25,8 @@ class SPISettings {
 
 class SPIClass {
  public:
+  SPIClass() : _bus(0) {}
+  explicit SPIClass(uint8_t bus) : _bus(bus) {}
   void begin(int8_t sck, int8_t miso, int8_t mosi, int8_t ss) {
     (void)sck; (void)miso; (void)mosi; (void)ss;
   }
@@ -31,7 +36,17 @@ class SPIClass {
   void write(uint8_t data) { (void)data; }
   void write16(uint16_t data) { (void)data; }
   void writeBytes(const uint8_t *data, size_t size) { (void)data; (void)size; }
-  uint8_t transfer(uint8_t data) { return data; }
+  uint8_t transfer(uint8_t data) {
+#ifdef HEXWALLET_NFC_RUNTIME_TEST
+    extern uint8_t nfc_test_transfer(uint8_t);
+    return nfc_test_transfer(data);
+#else
+    return data;
+#endif
+  }
+
+ private:
+  uint8_t _bus;
 };
 
 extern SPIClass SPI;

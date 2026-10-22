@@ -10,9 +10,6 @@ constexpr size_t kRateBytes = kKeccak256RateBytes;
 constexpr size_t kDigestBytes = kKeccak256DigestBytes;
 constexpr uint8_t kKeccakDomainSuffix = 0x01;
 constexpr uint8_t kFinalBit = 0x80;
-
-// Keccak-f[1600] constants from FIPS 202 section 3.2.  They are algorithm
-// parameters, kept immutable and isolated from wallet/network policy.
 constexpr uint64_t kRoundConstants[kRoundCount] = {
   UINT64_C(0x0000000000000001),
   UINT64_C(0x0000000000008082),

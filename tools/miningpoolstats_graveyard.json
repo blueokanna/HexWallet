@@ -1,0 +1,613 @@
+{
+  "source": "https://miningpoolstats.stream/data/coin_list.1792332829.min.js",
+  "checked_date": "2026-10-23",
+  "coins": {
+    "graft": {
+      "n": "Graft",
+      "s": "GRFT"
+    },
+    "blocmoney": {
+      "n": "BLOC.money",
+      "s": "BLOC"
+    },
+    "pluracoin": {
+      "n": "PluraCoin",
+      "s": "PLURA"
+    },
+    "dogemone": {
+      "n": "Dogemone",
+      "s": "DME"
+    },
+    "novo": {
+      "n": "Novo",
+      "s": "NOVO"
+    },
+    "gcncoin": {
+      "n": "GCN Coin",
+      "s": "GCN"
+    },
+    "redecoin": {
+      "n": "Redecoin",
+      "s": "REDEV2"
+    },
+    "foxdcoin": {
+      "n": "FoxDcoin",
+      "s": "FOXD"
+    },
+    "nexellai": {
+      "n": "Nexell-AI",
+      "s": "NXL"
+    },
+    "cryptoescudo": {
+      "n": "CryptoEscudo",
+      "s": "CESC"
+    },
+    "campuscoin": {
+      "n": "CampusCoin",
+      "s": "CC"
+    },
+    "monerov": {
+      "n": "MoneroV",
+      "s": "XMV"
+    },
+    "traaittxtcash": {
+      "n": "traaittXTCASH",
+      "s": "XTCASH"
+    },
+    "fiurycoin": {
+      "n": "Fiurycoin",
+      "s": "FIURY"
+    },
+    "litebar": {
+      "n": "LiteBar",
+      "s": "LTB"
+    },
+    "digitalprice": {
+      "n": "DigitalPrice",
+      "s": "DP"
+    },
+    "cirquity": {
+      "n": "Cirquity",
+      "s": "CIRQ"
+    },
+    "bitcoinmono": {
+      "n": "BitcoinMono",
+      "s": "BTCMZ"
+    },
+    "tenzura": {
+      "n": "Tenzura",
+      "s": "TENZ"
+    },
+    "cheesecoin": {
+      "n": "CheeseCoin",
+      "s": "CHEESE"
+    },
+    "collidercoin": {
+      "n": "Collidercoin",
+      "s": "CLC"
+    },
+    "ogvacoin": {
+      "n": "Ogvacoin",
+      "s": "OGVA"
+    },
+    "cannabiscoin": {
+      "n": "Cannabiscoin",
+      "s": "CANN"
+    },
+    "ravencash": {
+      "n": "Ravencash",
+      "s": "RVH"
+    },
+    "bugna": {
+      "n": "Bugna",
+      "s": "BGA"
+    },
+    "tuske": {
+      "n": "Tuske",
+      "s": "TSK"
+    },
+    "kingpepe": {
+      "n": "KingPepe",
+      "s": "KPEPE"
+    },
+    "thoreum": {
+      "n": "Thoreum",
+      "s": "THR"
+    },
+    "distrix": {
+      "n": "Distrix",
+      "s": "DSTX"
+    },
+    "bggchain": {
+      "n": "BGGChain",
+      "s": "BGG"
+    },
+    "r5network": {
+      "n": "R5 Network",
+      "s": "R5"
+    },
+    "nilu": {
+      "n": "Nilu",
+      "s": "NILU"
+    },
+    "moac": {
+      "n": "MOAC",
+      "s": "MOAC"
+    },
+    "dogether": {
+      "n": "Dogether",
+      "s": "DOGETHER"
+    },
+    "masari": {
+      "n": "Masari",
+      "s": "MSR"
+    },
+    "powlayer": {
+      "n": "PowLayer",
+      "s": "XPW"
+    },
+    "spectre": {
+      "n": "Spectre",
+      "s": "SPR"
+    },
+    "traaitt": {
+      "n": "traaitt",
+      "s": "XTE"
+    },
+    "moneroclassic": {
+      "n": "Monero Classic",
+      "s": "XMC"
+    },
+    "blocx": {
+      "n": "BLOCX",
+      "s": "BLOCX"
+    },
+    "etherify": {
+      "n": "Etherify",
+      "s": "ETY"
+    },
+    "hypra": {
+      "n": "Hypra",
+      "s": "HYP"
+    },
+    "gemma": {
+      "n": "Gemma",
+      "s": "GEMMA"
+    },
+    "procyoncoin": {
+      "n": "Procyon Coin",
+      "s": "PRCO"
+    },
+    "ultronai": {
+      "n": "UltronAI",
+      "s": "UTO"
+    },
+    "6zip": {
+      "n": "6Zip",
+      "s": "6ZIP"
+    },
+    "aidepin": {
+      "n": "Ai-DePIN",
+      "s": "AIDP"
+    },
+    "kitehcoin": {
+      "n": "Kitehcoin",
+      "s": "KITEH"
+    },
+    "broccolicoin": {
+      "n": "BroccoliCoin",
+      "s": "BROCCOLI"
+    },
+    "moirai": {
+      "n": "Moirai",
+      "s": "MOI"
+    },
+    "frogecoin": {
+      "n": "FrogeCoin",
+      "s": "FROGE"
+    },
+    "rilcoin": {
+      "n": "Rilcoin",
+      "s": "RIL"
+    },
+    "zilliqa": {
+      "n": "Zilliqa",
+      "s": "ZIL"
+    },
+    "clore": {
+      "n": "Clore",
+      "s": "CLORE"
+    },
+    "taboprotocol": {
+      "n": "TaBoProtocol",
+      "s": "TABO"
+    },
+    "croatcoin": {
+      "n": "CroatCoin",
+      "s": "CROAT"
+    },
+    "cicoin": {
+      "n": "CiCoin",
+      "s": "CICX"
+    },
+    "ronpaulcoin": {
+      "n": "RonPaulCoin",
+      "s": "RPC"
+    },
+    "coinye": {
+      "n": "Coinye",
+      "s": "COYE"
+    },
+    "xechain": {
+      "n": "XeChain",
+      "s": "XE"
+    },
+    "blobfish": {
+      "n": "Blobfish",
+      "s": "SQSH"
+    },
+    "ethereumfair": {
+      "n": "EthereumFair",
+      "s": "ETHF"
+    },
+    "binarybit": {
+      "n": "BinaryBit",
+      "s": "BNRY"
+    },
+    "zapchain": {
+      "n": "Zapchain",
+      "s": "ZAP"
+    },
+    "metaverse": {
+      "n": "Metaverse",
+      "s": "ETP"
+    },
+    "zenyx": {
+      "n": "Zenyx",
+      "s": "ZENYX"
+    },
+    "slyvex": {
+      "n": "Slyvex",
+      "s": "SVX"
+    },
+    "netsis": {
+      "n": "Netsis",
+      "s": "NET"
+    },
+    "smartloopai": {
+      "n": "SmartLoopAI",
+      "s": "SMLP"
+    },
+    "mass": {
+      "n": "Mass",
+      "s": "MASS"
+    },
+    "realichain": {
+      "n": "Realichain",
+      "s": "REALI"
+    },
+    "aittcoin": {
+      "n": "Aittcoin",
+      "s": "AITT"
+    },
+    "mergex": {
+      "n": "MergeX",
+      "s": "MGE"
+    },
+    "russellcoin": {
+      "n": "RussellCoin",
+      "s": "RC"
+    },
+    "lethean": {
+      "n": "Lethean",
+      "s": "LTHN"
+    },
+    "tubopay": {
+      "n": "TuboPay",
+      "s": "TUBO"
+    },
+    "datromax": {
+      "n": "DatroMax",
+      "s": "DTRX"
+    },
+    "liberty": {
+      "n": "Liberty",
+      "s": "LBRT"
+    },
+    "vortexa": {
+      "n": "Vortexa",
+      "s": "VOA"
+    },
+    "paprikacoin": {
+      "n": "Paprikacoin",
+      "s": "PAPRY"
+    },
+    "zether": {
+      "n": "Zether",
+      "s": "ZTH"
+    },
+    "altcoinchain": {
+      "n": "Altcoinchain",
+      "s": "ALT"
+    },
+    "flux": {
+      "n": "Flux",
+      "s": "FLUX"
+    },
+    "teslachain": {
+      "n": "TeslaChain",
+      "s": "TESLA"
+    },
+    "talleo": {
+      "n": "Talleo",
+      "s": "TLO"
+    },
+    "gamepass": {
+      "n": "GamePass",
+      "s": "GPN"
+    },
+    "ravencoinclassic": {
+      "n": "Ravencoin Classic",
+      "s": "RVC"
+    },
+    "grimm": {
+      "n": "Grimm",
+      "s": "GRIMM"
+    },
+    "vultaic": {
+      "n": "Vultaic",
+      "s": "VLC"
+    },
+    "entropyx": {
+      "n": "EntropyX",
+      "s": "ENX"
+    },
+    "jossnetwork": {
+      "n": "Joss Network",
+      "s": "JOSS"
+    },
+    "potrerocoin": {
+      "n": "PotreroCoin",
+      "s": "POTR"
+    },
+    "imagecoin": {
+      "n": "ImageCoin",
+      "s": "IMG"
+    },
+    "shahepay": {
+      "n": "Shahepay",
+      "s": "SHAHE"
+    },
+    "xenixchain": {
+      "n": "XenixChain",
+      "s": "XNXI"
+    },
+    "anokas": {
+      "n": "Anokas",
+      "s": "ANOK"
+    },
+    "ceilingcat": {
+      "n": "CeilingCatCoin",
+      "s": "CCC"
+    },
+    "sispop": {
+      "n": "Sispop",
+      "s": "SISPOP"
+    },
+    "rogucoin": {
+      "n": "Rogucoin",
+      "s": "ROGU"
+    },
+    "griffion": {
+      "n": "Griffion",
+      "s": "GRIFF"
+    },
+    "curvehash": {
+      "n": "Curvehash",
+      "s": "CURVE"
+    },
+    "unifyroom": {
+      "n": "Unifyroom",
+      "s": "UNFY"
+    },
+    "kobradag": {
+      "n": "Kobradag",
+      "s": "KODA"
+    },
+    "zdeex": {
+      "n": "Zdeex",
+      "s": "ZDEEX"
+    },
+    "elhereum": {
+      "n": "Elhereum",
+      "s": "ELH"
+    },
+    "amoveo": {
+      "n": "Amoveo",
+      "s": "VEO"
+    },
+    "aiblockchain": {
+      "n": "AIBlockchain",
+      "s": "AIBC"
+    },
+    "reflect": {
+      "n": "Reflect",
+      "s": "REET"
+    },
+    "vulkan": {
+      "n": "Vulkan",
+      "s": "VUK"
+    },
+    "anuma": {
+      "n": "Anuma",
+      "s": "ANUM"
+    },
+    "kaspaclassic": {
+      "n": "Kaspa Classic",
+      "s": "CAS"
+    },
+    "astrix": {
+      "n": "Astrix",
+      "s": "AIX"
+    },
+    "horizen": {
+      "n": "Horizen",
+      "s": "ZEN"
+    },
+    "evoai": {
+      "n": "EvoAI",
+      "s": "EVO"
+    },
+    "tiltcoin": {
+      "n": "TILTCoin",
+      "s": "TLT"
+    },
+    "weacoin": {
+      "n": "Weacoin",
+      "s": "WEAC"
+    },
+    "mochimo": {
+      "n": "Mochimo",
+      "s": "MCM"
+    },
+    "kaspav2": {
+      "n": "KaspaV2",
+      "s": "KASV2"
+    },
+    "startcoin": {
+      "n": "Startcoin",
+      "s": "START"
+    },
+    "widecoin": {
+      "n": "Widecoin",
+      "s": "WCN"
+    },
+    "expanse": {
+      "n": "Expanse",
+      "s": "EXP"
+    },
+    "elicoin": {
+      "n": "Elicoin",
+      "s": "ELI"
+    },
+    "nimiq": {
+      "n": "Nimiq",
+      "s": "NIM"
+    },
+    "gram": {
+      "n": "Gram",
+      "s": "GRAM"
+    },
+    "sakuracoin": {
+      "n": "Sakuracoin",
+      "s": "SKR"
+    },
+    "kumacoin": {
+      "n": "KumaCoin",
+      "s": "KUMA"
+    },
+    "lightningcashr": {
+      "n": "LightningCash-R",
+      "s": "LNCR"
+    },
+    "safeminex": {
+      "n": "Safeminex",
+      "s": "SMX"
+    },
+    "privatepay": {
+      "n": "PrivatePay",
+      "s": "XPP"
+    },
+    "etispatnet": {
+      "n": "EtisPatNet",
+      "s": "EPN"
+    },
+    "argoneum": {
+      "n": "Argoneum",
+      "s": "AGM"
+    },
+    "healthcarecoin": {
+      "n": "HealthCareCoin",
+      "s": "HCC"
+    },
+    "bitcoindiamond": {
+      "n": "Bitcoin Diamond",
+      "s": "BCD"
+    },
+    "veriumreserve": {
+      "n": "VeriumReserve",
+      "s": "VRM"
+    },
+    "sexcoin": {
+      "n": "SexCoin",
+      "s": "SXC"
+    },
+    "c0ban": {
+      "n": "c0ban",
+      "s": "RYO"
+    },
+    "kronecoin": {
+      "n": "Kronecoin",
+      "s": "KRONE"
+    },
+    "megacoin": {
+      "n": "Megacoin",
+      "s": "MEC"
+    },
+    "scriv": {
+      "n": "Scriv Network",
+      "s": "SCRIV"
+    },
+    "denarius": {
+      "n": "Denarius",
+      "s": "D"
+    },
+    "aurumcoin": {
+      "n": "AurumCoin",
+      "s": "AU"
+    },
+    "deltacoin": {
+      "n": "Deltacoin",
+      "s": "DECO"
+    },
+    "argentum-lyra": {
+      "n": "Argentum",
+      "s": "ARG",
+      "a": "Lyra2REv2",
+      "m": true
+    },
+    "argentum-groestl": {
+      "n": "Argentum",
+      "s": "ARG",
+      "a": "Myriad-Groestl",
+      "m": true
+    },
+    "argentum-yescrypt": {
+      "n": "Argentum",
+      "s": "ARG",
+      "a": "Yescrypt",
+      "m": true
+    },
+    "argentum-argon2d": {
+      "n": "Argentum",
+      "s": "ARG",
+      "a": "Argon2d",
+      "m": true
+    },
+    "argentum-scrypt": {
+      "n": "Argentum",
+      "s": "ARG",
+      "a": "Scrypt",
+      "m": true
+    },
+    "argentum-sha": {
+      "n": "Argentum",
+      "s": "ARG",
+      "a": "SHA-256",
+      "m": true
+    }
+  },
+  "exceptions": [
+    "masari"
+  ]
+}

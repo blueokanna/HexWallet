@@ -6,6 +6,10 @@ The extended crypto stack lives in `Ed25519.cpp`, `BlsG1.cpp`,
 Every primitive is verified on the host against official vectors before the
 firmware ever boots.
 
+Strict-build note: CryptoNote, QRL, Chia/BLS and the other address-only
+primitives are internal, vector-tested libraries. They are not exposed as
+wallets unless a complete receive/review/sign path is shipped.
+
 ## Ed25519 (RFC 8032)
 
 - Pure field/group arithmetic in `Ed25519.cpp`, no external bignum.
@@ -64,6 +68,26 @@ all the time. If `mod` just returns the negative value (as a naive
 `P mod P`, `okm mod r`) pass while this is broken — only the full point
 arithmetic exposes it. Fix: reduce `|A|`, then `B − |A|` when nonzero.
 
+## Zcash transparent v4 / ZIP-243
+
+- `ZcashTransaction` signs only Overwinter/Sapling v4 transparent t1 P2PKH
+  inputs. Shielded spends/outputs, JoinSplits, v3/v5 and non-empty scriptSigs
+  are rejected before any key is derived.
+- The digest is BLAKE2b-256 personalized with `"ZcashSigHash" || branch_id_le`
+  over the v4 header, `hashPrevouts`, `hashSequence`, `hashOutputs`,
+  `hashJoinSplits`, `hashShieldedSpends`, `hashShieldedOutputs`, lock time,
+  expiry height, value balance and hash type, followed by the per-input
+  outpoint/scriptCode/amount/sequence. BLAKE2b personalization was added to
+  `Blake2b`; keyed hashing is not a substitute.
+- The mainnet branch id is an explicit network policy (`0x5437f330`, NU6.2),
+  not a host-supplied free parameter. `zec inspect` reviews a compact payload
+  with each prevout value and scriptPubKey; `zec sign` re-derives
+  `m/44'/133'/account'/change/index`, verifies the prevout HASH160 and emits a
+  v4 transaction plus txid.
+- The boot self-test checks official ZIP-243 test vector 3
+  (`f3148f80…`) and the parser/fee failure paths. The full signing path is
+  exercised by `run_zcash_transaction_self_test()` on the device.
+
 ## CryptoNote (Monero / Masari)
 
 - Spend key = `sc_reduce32(Keccak-256(seed))`; view key =
@@ -107,10 +131,9 @@ whether the SE can hold the key and produce the exact signature. The active
 profile is MCU-only until the board port probes the applet and calls
 `set_active_secure_element_profile()`. The conservative SE050C1H1 target
 profile claims secp256k1 + ECDSA + seed sealing only.
-That means: BTC/LTC/ETH/Cosmos-style keys can be imported and signed in the
-applet, while Kaspa (BIP340 Schnorr), Monero/Masari (Keccak-reduced Edwards),
-QRL (XMSS), Chia (BLS12-381) and — until the Ed25519 applet path is validated
-on hardware — Solana/Algorand/Cardano/Tezos/Qubic keys stay in MCU RAM.
+That means BTC/LTC/ETH-style keys can be imported and signed in the applet,
+while Kaspa (BIP340 Schnorr) and the internal Ed25519/BLS/XMSS primitives stay
+in MCU RAM until a verified applet path exists.
 BIP32/SLIP-0010 derivation itself is always MCU-side because the SE050 has no
 BIP32 engine. The plan is code, not marketing: `wallet custody <id>` prints
 the decision and reason.

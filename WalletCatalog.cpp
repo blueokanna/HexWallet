@@ -25,73 +25,69 @@ const CatalogSeed kCatalog[] = {
   { "ltc84", "LTC", "Litecoin Native SegWit", 2, WalletCapabilityAddress, "ltc84", "P2WPKH address and BIP143 signing" },
   { "doge", "DOGE", "Dogecoin", 3, WalletCapabilityAddress, "doge", "address only" },
   { "dash", "DASH", "Dash", 5, WalletCapabilityAddress, "dash", "address only" },
-  { "eth", "ETH", "Ethereum", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "eth", "EVM address and ERC-20 account support; signing unavailable" },
-  { "etc", "ETC", "Ethereum Classic", 61, WalletCapabilityAddress | WalletCapabilityTokenAccount, "etc", "EVM address and token account support; signing unavailable" },
-  { "xrp", "XRP", "XRP Ledger", 144, WalletCapabilityAddress, "xrp", "address only" },
+  { "eth", "ETH", "Ethereum", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "eth", "EVM address and token account support; EIP-155 signing" },
+  { "etc", "ETC", "Ethereum Classic", 61, WalletCapabilityAddress | WalletCapabilityTokenAccount, "etc", "EVM address and token account support; EIP-155 signing" },
   { "btg", "BTG", "Bitcoin Gold Legacy", 156, WalletCapabilityAddress, "btg", "P2PKH address and Bitcoin-sighash signing" },
   { "btg49", "BTG", "Bitcoin Gold Nested SegWit", 156, WalletCapabilityAddress, "btg49", "P2SH-P2WPKH address and BIP143 signing" },
   { "btg84", "BTG", "Bitcoin Gold Native SegWit", 156, WalletCapabilityAddress, "btg84", "P2WPKH address and BIP143 signing" },
-  { "rvn", "RVN", "Ravencoin", 175, WalletCapabilityAddress, "rvn", "address only" },
-  { "trx", "TRX", "TRON", 195, WalletCapabilityAddress, "trx", "address only" },
-  { "cro", "CRO", "Cronos", 394, WalletCapabilityAddress | WalletCapabilityTokenAccount, "cro", "EVM address and token account support; signing unavailable" },
-  { "kava", "KAVA", "Kava EVM", 459, WalletCapabilityAddress | WalletCapabilityTokenAccount, "kava", "EVM address and token account support; signing unavailable" },
-  { "opt", "OPT", "Optimism", 614, WalletCapabilityAddress | WalletCapabilityTokenAccount, "opt", "EVM address and ERC-20 account support; signing unavailable" },
-  { "xdai", "XDAI", "Gnosis Chain", 700, WalletCapabilityAddress | WalletCapabilityTokenAccount, "xdai", "EVM address and token account support; signing unavailable" },
-  { "matic", "MATIC", "Polygon", 966, WalletCapabilityAddress | WalletCapabilityTokenAccount, "matic", "EVM address and ERC-20 account support; signing unavailable" },
-  { "ftm", "FTM", "Fantom", 1007, WalletCapabilityAddress | WalletCapabilityTokenAccount, "ftm", "EVM address and token account support; signing unavailable" },
-  { "core", "CORE", "Core", 1116, WalletCapabilityAddress | WalletCapabilityTokenAccount, "core", "EVM address and token account support; signing unavailable" },
-  { "glmr", "GLMR", "Moonbeam", 1284, WalletCapabilityAddress | WalletCapabilityTokenAccount, "glmr", "EVM address and token account support; signing unavailable" },
-  { "movr", "MOVR", "Moonriver", 1285, WalletCapabilityAddress | WalletCapabilityTokenAccount, "movr", "EVM address and token account support; signing unavailable" },
-  { "base", "BASE", "Base", 8453, WalletCapabilityAddress | WalletCapabilityTokenAccount, "base", "EVM address and ERC-20 account support; signing unavailable" },
-  { "avax", "AVAX", "Avalanche X/P Chain", 9000, WalletCapabilityAddress, "avax", "X/P bech32 address" },
-  { "arb1", "ARB1", "Arbitrum One", 9001, WalletCapabilityAddress | WalletCapabilityTokenAccount, "arb1", "EVM address and ERC-20 account support; signing unavailable" },
-  { "avaxc", "AVAXC", "Avalanche C-Chain", 9005, WalletCapabilityAddress | WalletCapabilityTokenAccount, "avaxc", "EVM address and ERC-20 account support; signing unavailable" },
-  { "bsc", "BSC", "Binance Smart Chain", 9006, WalletCapabilityAddress | WalletCapabilityTokenAccount, "bsc", "EVM address and ERC-20 account support; signing unavailable" },
-  { "celo", "CELO", "Celo", 52752, WalletCapabilityAddress | WalletCapabilityTokenAccount, "celo", "EVM address and token account support; signing unavailable" },
-  { "rsk", "RBTC", "Rootstock", 137, WalletCapabilityAddress | WalletCapabilityTokenAccount, "rsk", "EVM address and token account support; signing unavailable" },
+  { "rvn", "RVN", "Ravencoin", 175, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "rvn", "P2PKH address and Bitcoin-sighash signing" },
+  { "cro", "CRO", "Cronos", 394, WalletCapabilityAddress | WalletCapabilityTokenAccount, "cro", "EVM address and token account support; EIP-155 signing" },
+  { "kava", "KAVA", "Kava EVM", 459, WalletCapabilityAddress | WalletCapabilityTokenAccount, "kava", "EVM address and token account support; EIP-155 signing" },
+  { "opt", "OPT", "Optimism", 614, WalletCapabilityAddress | WalletCapabilityTokenAccount, "opt", "EVM address and token account support; EIP-155 signing" },
+  { "xdai", "XDAI", "Gnosis Chain", 700, WalletCapabilityAddress | WalletCapabilityTokenAccount, "xdai", "EVM address and token account support; EIP-155 signing" },
+  { "matic", "MATIC", "Polygon", 966, WalletCapabilityAddress | WalletCapabilityTokenAccount, "matic", "EVM address and token account support; EIP-155 signing" },
+  { "ftm", "FTM", "Fantom", 1007, WalletCapabilityAddress | WalletCapabilityTokenAccount, "ftm", "EVM address and token account support; EIP-155 signing" },
+  { "core", "CORE", "Core", 1116, WalletCapabilityAddress | WalletCapabilityTokenAccount, "core", "EVM address and token account support; EIP-155 signing" },
+  { "cfx", "CFX", "Conflux eSpace", 503, WalletCapabilityAddress | WalletCapabilityTokenAccount, "cfx", "EVM address and token account support; EIP-155 signing" },
+  { "glmr", "GLMR", "Moonbeam", 1284, WalletCapabilityAddress | WalletCapabilityTokenAccount, "glmr", "EVM address and token account support; EIP-155 signing" },
+  { "movr", "MOVR", "Moonriver", 1285, WalletCapabilityAddress | WalletCapabilityTokenAccount, "movr", "EVM address and token account support; EIP-155 signing" },
+  { "base", "BASE", "Base", 8453, WalletCapabilityAddress | WalletCapabilityTokenAccount, "base", "EVM address and token account support; EIP-155 signing" },
+  { "arb1", "ARB1", "Arbitrum One", 9001, WalletCapabilityAddress | WalletCapabilityTokenAccount, "arb1", "EVM address and token account support; EIP-155 signing" },
+  { "avaxc", "AVAXC", "Avalanche C-Chain", 9005, WalletCapabilityAddress | WalletCapabilityTokenAccount, "avaxc", "EVM address and token account support; EIP-155 signing" },
+  { "bsc", "BSC", "Binance Smart Chain", 9006, WalletCapabilityAddress | WalletCapabilityTokenAccount, "bsc", "EVM address and token account support; EIP-155 signing" },
+  { "celo", "CELO", "Celo", 52752, WalletCapabilityAddress | WalletCapabilityTokenAccount, "celo", "EVM address and token account support; EIP-155 signing" },
+  { "rsk", "RBTC", "Rootstock", 137, WalletCapabilityAddress | WalletCapabilityTokenAccount, "rsk", "EVM address and token account support; EIP-155 signing" },
+  { "linea", "ETH", "Linea", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "linea", "EVM address and token account support; EIP-155 signing" },
+  { "scroll", "ETH", "Scroll", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "scroll", "EVM address and token account support; EIP-155 signing" },
+  { "blast", "ETH", "Blast", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "blast", "EVM address and token account support; EIP-155 signing" },
+  { "mantle", "MNT", "Mantle", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "mantle", "EVM address and token account support; EIP-155 signing" },
+  { "opbnb", "BNB", "opBNB", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "opbnb", "EVM address and token account support; EIP-155 signing" },
+  { "zkevm", "ETH", "Polygon zkEVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "zkevm", "EVM address and token account support; EIP-155 signing" },
+  { "aurora", "ETH", "Aurora", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "aurora", "EVM address and token account support; EIP-155 signing" },
+  { "metis", "METIS", "Metis Andromeda", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "metis", "EVM address and token account support; EIP-155 signing" },
+  { "kaia", "KAIA", "Kaia", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "kaia", "EVM address and token account support; EIP-155 signing" },
+  { "astar", "ASTR", "Astar", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "astar", "EVM address and token account support; EIP-155 signing" },
+  { "canto", "CANTO", "Canto", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "canto", "EVM address and token account support; EIP-155 signing" },
+  { "dogechain", "DOGE", "Dogechain EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "dogechain", "EVM address and token account support; EIP-155 signing" },
+  { "fuse", "FUSE", "Fuse", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "fuse", "EVM address and token account support; EIP-155 signing" },
+  { "evmos", "EVMOS", "Evmos EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "evmos", "EVM address and token account support; EIP-155 signing" },
+  { "harmony", "ONE", "Harmony EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "harmony", "EVM address and token account support; EIP-155 signing" },
+  { "telos", "TLOS", "Telos EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "telos", "EVM address and token account support; EIP-155 signing" },
+  { "seievm", "SEI", "Sei EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "seievm", "EVM address and token account support; EIP-155 signing" },
+  { "ethw", "ETHW", "EthereumPoW", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "ethw", "EVM address and token account support; EIP-155 signing" },
+  { "clo", "CLO", "Callisto Network", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "clo", "EVM address and token account support; EIP-155 signing" },
+  { "etho", "ETHO", "Etho Protocol", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "etho", "EVM address and token account support; EIP-155 signing" },
+  { "octa", "OCTA", "OctaSpace", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "octa", "EVM address and token account support; EIP-155 signing" },
+  { "egaz", "EGAZ", "Etica", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "egaz", "EVM address and token account support; EIP-155 signing" },
+  { "avs", "AVS", "Aves", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "avs", "EVM address and token account support; EIP-155 signing" },
+  { "cau", "CAU", "Canxium", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "cau", "EVM address and token account support; EIP-155 signing" },
+  { "btn", "BTN", "Bitnet", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "btn", "EVM address and token account support; EIP-155 signing" },
+  { "lrs", "LRS", "Larissa Chain", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "lrs", "EVM address and token account support; EIP-155 signing" },
+  { "vbc", "VBC", "VirBiCoin", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "vbc", "EVM address and token account support; EIP-155 signing" },
   { "bch", "BCH", "Bitcoin Cash", 145, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "bch", "CashAddr; forkid sighash signing" },
-  { "bsv", "BSV", "Bitcoin SV", 236, WalletCapabilityAddress, "bsv", "P2PKH address only; BSV sighash signing unavailable" },
+  { "bsv", "BSV", "Bitcoin SV", 236, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "bsv", "P2PKH PSBT signing, BIP143 + SIGHASH_FORKID" },
   { "xec", "XEC", "eCash", 899, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xec", "CashAddr; forkid sighash signing" },
   { "dgb", "DGB", "DigiByte Legacy", 20, WalletCapabilityAddress, "dgb", "P2PKH address and Bitcoin-sighash signing" },
   { "dgb49", "DGB", "DigiByte Nested SegWit", 20, WalletCapabilityAddress, "dgb49", "P2SH-P2WPKH address and BIP143 signing" },
   { "dgb84", "DGB", "DigiByte Native SegWit", 20, WalletCapabilityAddress, "dgb84", "P2WPKH address and BIP143 signing" },
-  { "ppc", "PPC", "Peercoin", 6, WalletCapabilityAddress, "ppc", "P2PKH address only; signing unavailable" },
-  { "nmc", "NMC", "Namecoin", 7, WalletCapabilityAddress, "nmc", "P2PKH address only; signing unavailable" },
-  { "xmr", "XMR", "Monero", 128, WalletCapabilityAddress, "xmr", "CryptoNote standard/subaddress/integrated addresses; RingCT/CLSAG transaction signing unavailable" },
-  { "msr", "MSR", "Masari", 413, WalletCapabilityAddress, "msr", "CryptoNote standard address; transaction signing unavailable" },
-  { "zec", "ZEC", "Zcash", 133, WalletCapabilityAddress, "zec", "transparent t1/t3 address; Zcash Overwinter/ZIP-243 transaction format not implemented" },
-  { "kas", "KAS", "Kaspa", 111111, WalletCapabilityAddress, "kas", "Kaspa bech32 address; Schnorr transaction signing unavailable" },
-  { "erg", "ERG", "Ergo", 429, WalletCapabilityAddress, "erg", "Ergo P2PK address; transaction signing unavailable" },
-  { "ckb", "CKB", "Nervos CKB", 309, WalletCapabilityNone, nullptr, "CKB transaction stack not implemented" },
-  { "flux", "FLUX", "Flux", 19167, WalletCapabilityAddress, "flux", "transparent t1 address; Flux transaction format not implemented" },
-  { "xch", "XCH", "Chia", 8444, WalletCapabilityAddress, "xch", "standard-coin bech32m address; BLS signing unavailable" },
-  { "ada", "ADA", "Cardano", 1815, WalletCapabilityAddress, "ada", "Shelley base address (documented SLIP-0010 policy)" },
-  { "algo", "ALGO", "Algorand", 283, WalletCapabilityAddress, "algo", "ed25519 base32 address" },
-  { "aptos", "APTOS", "Aptos", 637, WalletCapabilityNone, nullptr, "Aptos ed25519 transaction stack not implemented" },
-  { "atom", "ATOM", "Cosmos Hub", 118, WalletCapabilityAddress, "atom", "cosmos1 bech32 address; staking and transaction signing unavailable" },
-  { "dot", "DOT", "Polkadot", 354, WalletCapabilityNone, nullptr, "Substrate address and transaction stack not implemented" },
-  { "eos", "EOS", "EOS", 194, WalletCapabilityNone, nullptr, "EOS address and transaction stack not implemented" },
-  { "fil", "FIL", "Filecoin", 461, WalletCapabilityAddress, "fil", "f1 base32 address" },
-  { "hbar", "HBAR", "Hedera HBAR", 3030, WalletCapabilityNone, nullptr, "Hedera address and transaction stack not implemented" },
-  { "icp", "ICP", "Internet Computer", 223, WalletCapabilityNone, nullptr, "Internet Computer account stack not implemented" },
-  { "ksm", "KSM", "Kusama", 434, WalletCapabilityNone, nullptr, "Substrate address and transaction stack not implemented" },
-  { "near", "NEAR", "NEAR Protocol", 397, WalletCapabilityNone, nullptr, "NEAR ed25519 transaction stack not implemented" },
-  { "sol", "SOL", "Solana", 501, WalletCapabilityAddress, "sol", "ed25519 base58 address" },
-  { "sui", "SUI", "Sui", 784, WalletCapabilityNone, nullptr, "Sui ed25519 transaction stack not implemented" },
-  { "ton", "TON", "TON", 607, WalletCapabilityNone, nullptr, "TON address and transaction stack not implemented" },
-  { "vet", "VET", "VeChain Token", 818, WalletCapabilityNone, nullptr, "VeChain address and transaction stack not implemented" },
-  { "xlm", "XLM", "Stellar Lumens", 148, WalletCapabilityNone, nullptr, "Stellar ed25519 transaction stack not implemented" },
-  { "xtz", "XTZ", "Tezos", 1729, WalletCapabilityAddress, "xtz", "tz1 ed25519 address; operation signing unavailable" },
+  { "nmc", "NMC", "Namecoin", 7, WalletCapabilityAddress, "nmc", "P2PKH address and Bitcoin-sighash signing" },
+  { "zec", "ZEC", "Zcash", 133, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zec", "transparent t1/t3 address; v4 transparent ZIP-243 review and signing (NU6.2)" },
+  { "kas", "KAS", "Kaspa", 111111, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "kas", "Kaspa bech32 address; BIP340 Schnorr v0 transaction review and signing" },
   { "vtc", "VTC", "Vertcoin Legacy", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc", "P2PKH address and Bitcoin-sighash signing" },
   { "vtc49", "VTC", "Vertcoin Nested SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc49", "P2SH-P2WPKH address and BIP143 signing" },
   { "vtc84", "VTC", "Vertcoin Native SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc84", "P2WPKH address and Bitcoin-sighash signing" },
   { "axe", "AXE", "Axe", 4242, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "axe", "P2PKH address and Bitcoin-sighash signing" },
-  { "croorg", "CRO", "Crypto.org Chain", 394, WalletCapabilityAddress, "croorg", "cro1 bech32 address; Cosmos transaction signing unavailable" },
-  { "sei", "SEI", "SEI", 19000118, WalletCapabilityAddress, "sei", "sei1 bech32 address; Cosmos transaction signing unavailable" },
-  { "qubic", "QUBIC", "Qubic", 83293, WalletCapabilityAddress, "qubic", "base26 identity from ed25519 key" },
-  { "qrl", "QRL", "Quantum Resistant Ledger", 0, WalletCapabilityAddress, "qrl", "XMSS-SHAKE256 address derivation (height 10, one-time CPU-heavy); stateful XMSS signing unavailable" },
-  { "beam", "BEAM", "Beam", 1533, WalletCapabilityNone, nullptr, "Mimblewimble address-prefix constants pending reference-wallet verification" },
-#include "WalletForkCatalog.inc"
+#include "src/generated/WalletForkCatalog.inc"
 };
 
 WalletCatalogEntry resolved_entry(size_t index) {
@@ -105,7 +101,9 @@ WalletCatalogEntry resolved_entry(size_t index) {
   const char *status = seed.status;
   if (network != nullptr && network->encoding == AddressEncoding::Evm) {
     capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
-    status = "EIP-155/EIP-1559 native and whitelisted ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT call signing";
+    status = network_supports_eip1559(*network)
+                 ? "EIP-155/EIP-1559 native and whitelisted ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT call signing"
+                 : "EIP-155 legacy native and whitelisted token-call signing; type-2 rejected by chain policy";
   }
   const NetworkSigningPolicy *policy =
       network == nullptr ? nullptr : find_network_signing_policy(network->id);
@@ -116,6 +114,8 @@ WalletCatalogEntry resolved_entry(size_t index) {
     } else if (network != nullptr &&
                network->encoding == AddressEncoding::P2shP2wpkh) {
       status = "BIP49 nested SegWit PSBT signing (BIP143)";
+    } else if (policy->family == SighashFamily::ZcashZip243) {
+      status = "Zcash v4 transparent ZIP-243 review and signing (NU6.2)";
     } else {
       status = policy->family == SighashFamily::ForkId
                    ? "P2PKH PSBT signing, BIP143 + SIGHASH_FORKID"
@@ -242,7 +242,13 @@ bool run_catalog_self_tests() {
     if ((entry.capabilities & static_cast<uint8_t>(WalletCapabilitySigning)) != 0) {
       const bool evm = entry.network->encoding == AddressEncoding::Evm;
       const bool utxo_policy = find_network_signing_policy(entry.network->id) != nullptr;
-      if (!evm && !utxo_policy) return false;
+      const bool kaspa = entry.network->encoding == AddressEncoding::KaspaBech32;
+      if (!evm && !utxo_policy && !kaspa) return false;
+      // CryptoNote signing stays gated until Bulletproofs+, full RingCT
+      // serialization, decoy selection, wallet scanning and a real node
+      // acceptance run exist. A catalog entry that claims otherwise would be
+      // a lie, so the guard is enforced here rather than in a comment.
+      if (entry.network->encoding == AddressEncoding::CryptoNote) return false;
     }
     for (size_t other = index + 1; other < wallet_catalog_count(); ++other) {
       const WalletCatalogEntry candidate = resolved_entry(other);
@@ -259,7 +265,21 @@ bool run_catalog_self_tests() {
         break;
       }
     }
-    if (!cataloged) return false;
+    if (cataloged) continue;
+    const bool signable =
+        network.encoding == AddressEncoding::Evm ||
+        network.encoding == AddressEncoding::KaspaBech32 ||
+        find_network_signing_policy(network.id) != nullptr;
+    if (signable) return false;
+  }
+  // XMR/MSR must not be reachable as a wallet at all while their signing path
+  // is incomplete: the phone link and the CLI both resolve through the catalog.
+  for (size_t index = 0; index < kNetworkProfileCount; ++index) {
+    const NetworkProfile &network = kNetworkProfiles[index];
+    if (network.encoding != AddressEncoding::CryptoNote) continue;
+    for (size_t entry = 0; entry < wallet_catalog_count(); ++entry) {
+      if (resolved_entry(entry).network == &network) return false;
+    }
   }
   return true;
 }

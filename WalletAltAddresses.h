@@ -19,6 +19,14 @@ WalletError address_zcash_transparent(uint16_t p2pkh_version,
                                       const uint8_t public_key[kCompressedPublicKeySize],
                                       char *out, size_t *in_out_size);
 
+// Render a t1/t3 address from the 25-byte P2PKH or 23-byte P2SH transparent
+// scriptPubKey carried by a v4 transaction.
+WalletError address_zcash_transparent_from_script(uint16_t p2pkh_version,
+                                                  uint16_t p2sh_version,
+                                                  const uint8_t *script,
+                                                  size_t script_size,
+                                                  char *out, size_t out_size);
+
 // CashAddr (BCH/XEC) P2PKH from a compressed public key.
 WalletError address_cashaddr(const char *prefix,
                              const uint8_t public_key[kCompressedPublicKeySize],
@@ -33,14 +41,6 @@ WalletError address_cashaddr_from_script(const char *prefix, const uint8_t *scri
 // Solana: plain base58 of the ed25519 public key.
 WalletError address_solana(const uint8_t public_key[32], char *out,
                            size_t *in_out_size);
-
-// Solana associated token account for (owner, mint):
-// PDA seeds = owner || Tokenkeg... || mint, program = AToke...,
-// bump searched from 255 down until SHA-256(seeds || bump || program ||
-// "ProgramDerivedAddress") is not a valid Ed25519 point.
-WalletError address_solana_associated_token(const uint8_t owner[32],
-                                            const uint8_t mint[32],
-                                            char *out, size_t out_size);
 
 // Algorand: base32(ed25519 pubkey || last-4-bytes of sha512/256(pubkey)).
 WalletError address_algorand(const uint8_t public_key[32], char *out,

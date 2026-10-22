@@ -1,5 +1,7 @@
 # HexWallet CLI 使用与构建指南
 
+> 当前版本尚未完成生产验收，XMR/MSR 完整收发未实现。验证结果与未完成项见 [AUDIT.md](AUDIT.md)；Arduino 目录说明见 [docs/arduino-layout.md](docs/arduino-layout.md)。
+
 HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供 BIP39/BIP32 密钥派生、地址生成、受限的 Bitcoin PSBT 审查、受限的 EVM 交易审查，以及经过认证的 USB 串口 CLI。
 
 本文档以实际源码中的命令和安全策略为准，目标是让你可以从编译、刷写、打开串口，到完成认证、生成或导入钱包、查询地址和执行交易审查。命令必须逐行发送，并以换行结束。
@@ -9,7 +11,8 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 ## 目录
 
 1. [功能边界](#功能边界)
-2. [硬件和软件要求](#硬件和软件要求)
+2. [手机 App 连接（NFC / USB）](#手机-app-连接nfc--usb)
+3. [硬件和软件要求](#硬件和软件要求)
 3. [使用 Arduino CLI 编译](#使用-arduino-cli-编译)
 4. [刷写固件和打开串口](#刷写固件和打开串口)
 5. [启动自检](#启动自检)
@@ -34,40 +37,62 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 生成和校验英文 BIP39 助记词。
 - 使用 PBKDF2-HMAC-SHA512 派生 BIP39 seed。
 - 使用 BIP32 派生私钥、公钥和扩展密钥。
-- 为已实现的 Bitcoin、EVM、TRON、XRP、Litecoin、Dogecoin、Dash、Bitcoin Gold、Ravencoin、Monero、Masari、QRL 和 Chia 网络生成地址。
-- Monero 标准地址、集成地址（8 字节 payment ID）和 MRL-0006 子地址（`SubAddr` 域分隔、`D = B + mG`、`C = aD`），全部用独立的 Keccak/Edwards 参考计算核对。
-- QRL 地址：XMSS-SHAKE256、高度 10、WOTS+ `w=16`、QRL 三字节描述符和 SHA-256 地址承诺，已对照 QRL 官方 SHAKE-256 测试向量；密钥生成是 CPU 密集型一次性操作。
-- 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 只声明 secp256k1 + ECDSA + seed 封装能力；Monero/Masari、Kaspa Schnorr、QRL XMSS、BLS12-381 以及（在硬件验证之前）Ed25519 私钥保留在 MCU RAM，不把通用 ECC 引擎当成万能签名器。
-- 通过 EIP-2333/ERC-2333 的 BLS12-381 密钥树、CLVM `shatree` 谜题哈希和 `bech32m` 生成 Chia 标准地址（已对照官方 ERC-2333 测试向量和独立参考实现验证）。
-- 查询已登记 Token 的合约地址、精度和账户地址。
+- 为 Bitcoin 系、45 个 EVM 网络、Kaspa 和 Zcash transparent 生成地址；只有这些链会出现在钱包目录中。
+- 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 目标只声明 secp256k1 + ECDSA + seed 封装能力（SCP03/applet 驱动尚未实现）；Kaspa Schnorr 和 Ed25519/BLS/XMSS 私钥保留在 MCU RAM。
+- 查询已登记 EVM Token 的合约地址、精度和账户地址。
 - 审查并签名受限的 Bitcoin PSBT v0。
+- 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 输入、t1/t3 输出）：`zec inspect <ZEC4-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在启动自检中校验。
 - 审查并签名已登记 EVM 网络上的原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。选择器由固件用 Keccak-256 现场重算；ABI 必须严格符合规范偏移，未知选择器、非规范偏移、无法审阅的嵌套批量调用和未登记的 ERC-20 合约一律拒绝。
 
-以下能力明确不可用：
+以下能力明确不可用，也不会出现在钱包目录中：
 
-- Monero/Masari RingCT、CLSAG、key image、多签和交易签名（标准地址、集成地址和子地址已实现）。
-- QRL XMSS 交易签名（有状态 BDS 遍历和 leaf index 持久化未实现）；QRL 地址已实现。
-- Kaspa 的 BIP340 Schnorr 交易签名（地址已实现）。
-- Solana/SPL 的转账签名（需要 Solana 消息解析、recent blockhash、compute budget 指令和 Ed25519 签名）；已登记的 SPL mint 现在可以推导 associated token account 地址（owner ‖ Tokenkeg… ‖ mint，`AToke…` 程序 + `ProgramDerivedAddress` 的 PDA）。
-- Chia 交易能力（coin-spend 解析、聚合签名、签名）；Chia 地址已实现。
-- Cardano、Cosmos、Polkadot、Aptos、Sui 等目录项的交易能力。
+- Monero/Masari 交易签名：CryptoNote 地址层与 RingCT key 层（hash-to-scalar、key derivation、一次性公钥、key image、view tag）已实现并固定 Monero 官方向量；CLSAG 签名/验证和篡改拒绝已实现并自测，但 Bulletproofs+、ECDH 金额编码、decoy 选择和完整交易序列化尚未完成。CLSAG 还没有固定到外部 Monero 交易向量，因此不进入钱包目录。
+- Ergo、Hathor、Quai、Chia、QRL、Solana、Cardano、Cosmos、Algorand、Tezos、Filecoin、XRP、TRON 的交易签名。
+- Zcash shielded、JoinSplit、v3/v5，以及 t3 P2SH 花费。
+- Peercoin 交易签名：PPC v<3 交易在版本号后序列化 `nTime`，Bitcoin legacy 签名器会构造无效交易；在独立的 Peercoin sighash 模块和向量完成前，PPC 只作为内部地址原语，不进入钱包目录。
+- Kaspa v1 计算预算/covenant 交易；v0 的 `kaspa inspect` / `kaspa sign` 已实现。
 - 任意 EVM calldata、合约创建、未知 Token、非标准 typed transaction、非空 access list。
-- 未实现网络的地址或签名。
 - 默认配置下的助记词、seed、私钥和 xprv 导出。
 
-目录中的网络或 Token 条目不等于完整实现。执行操作前必须检查 `coin show`、`token show` 输出的 `capabilities` 和 `status`。
+严格规则：只有同时具备地址、审查、签名、官方/独立向量和失败路径的链才会进入 `WalletCatalog`。仅地址 profile 只作为内部测试数据存在，不是钱包。
 
 ### 关于“支持所有币”
 
-BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入“可签名”集合的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种会在 `WalletCatalog.cpp` 中明确标记缺失项，而不会生成错误地址。
+BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入“可签名”集合的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种不会进入钱包目录，只在 `tools/fork_registry.json` 和内部 profile 中保留地址原语，绝不会生成带签名的假钱包。
 
-`tools/fork_registry.json` 收录 144 行 Bitcoin 系分叉参数，生成 151 个 profile：基础 P2PKH，以及在官方 chainparams 明确声明 bech32 HRP 时生成的 native/nested SegWit profile。运行 `python tools/generate_fork_profiles.py` 生成 `WalletForkProfiles.inc` 和 `WalletForkCatalog.inc`。带 `source_verified` 的行会显示为“官方 chainparams 参数”；其余行明确标注为导入元数据，不冒充逐链审计。`run_network_profile_self_tests()` 会用固定公钥跑通每一条编码器，并对 Adcoin、ANON、DigiByte、Litecoin、Bitcoin Gold、Vertcoin、Sugarchain、Ravencoin Classic、Cosmos Hub 给出精确向量。首次收款前仍应使用该币种自己的参考钱包核对地址。要把某个分叉升级为可签名，必须核对共识代码和交易序列化，而不是只加一行表；目前只有 Sugarchain、Ravencoin Classic 和主表列出的链有显式签名策略。
+`tools/fork_registry.json` 保留 104 行有官方来源或仍在 MiningPoolStats 活跃列表中的 Bitcoin 系参数，生成 130 个内部 profile；`WalletForkCatalog.inc` 只暴露其中 82 个同时通过地址来源核对和 legacy sighash 审计的 profile。其余 profile 仍用于地址向量测试，但不是用户钱包。`WalletForkAddressVectors.inc` 用独立的 base58check/hash160 固定了 97 个 P2PKH 向量。`python tools/verify_utxo_sighash.py` 逐个读取上游 `chainparams.cpp`、`script/interpreter.cpp` 和 `primitives/transaction.h`：base58 版本不一致、存在活动 fork-id 代码、legacy serializer 写入 `nTime`、交易头额外序列化 `nTime`、或使用宽 `nType` 的链一律不进入签名目录；Ravencoin Classic（fork-id）、TrezarCoin/PulsarCoin/DeepOnion/Verge（`nTime` sighash）因此只保留内部地址 profile。运行 `python tools/generate_fork_profiles.py` 重新生成 profile、catalog、签名策略和向量。`run_network_profile_self_tests()` 会跑通每一条编码器和这些向量；首次收款前仍应使用该币种自己的参考钱包核对地址。
 
-`tools/graveyard_registry.json` 是 GRAVEYARD 的发现与核验账本：148 个条目中 20 个有可读的官方 chainparams 并标记为 `verified`；其余条目保留具体拒绝原因，不生成地址 profile。官方仓库不存在或 chainparams 不可读时直接停止，不猜测参数。
+没有 SLIP-0044 coin type、可读官方 chainparams 或受支持地址编码的币种已从钱包删除，不再生成占位目录项。重新加入必须附官方证据，不能猜 version byte。
+
+`tools/build_utxo_candidates.py` 会抓取每个 MiningPoolStats 币页面的官方 GitHub 仓库，解析主网 `chainparams.cpp`，拒绝 CashAddr、Zcash、fork-id 和多字节前缀，再与 SLIP-0044 匹配。候选只写入 `tools/utxo_candidates.json`，不会直接进入钱包：必须先通过 `tools/verify_utxo_sighash.py` 的地址版本和 sighash 审计，再人工确认派生路径、费用上限和托管策略。
+
+`python tools/miningpool_coverage.py` 拉取 MiningPoolStats 当前列表，按 ASIC/GPU/CPU/HDD 统计固件已支持的行数与缺口；它只审计，不把尚未实现的币写进钱包。当前审计：**518 个活跃条目中支持 111 个**（ASIC 62/212，GPU 30/181，CPU 19/121，HDD 0/4）。缺口是显式的，不用占位行伪装。
+
+`python tools/generate_mining_catalog.py` 生成随固件发布的 `WalletMiningCatalog.inc`，只保留能解析到完整签名钱包的行。未支持条目保留在 `tools/miningpoolstats_coin_list.json` 供后续按家族扩展，不进入固件。CLI 提供 `mining stats`、`mining list [ASIC|GPU|CPU|HDD] [offset]` 和 `mining show <symbol>`。
 
 ### SE050 托管边界
 
-`WalletCustody` 把“哪些密钥能放进安全芯片”写成代码，而不是宣传语。默认的活动配置是纯 MCU；只有板级移植在探测并认证 SE050 applet 后调用 `set_active_secure_element_profile()`，`wallet custody <id>` 才会显示 secp256k1/ECDSA 可以由 SE 托管。保守的 SE050C1H1 目标配置只声明 secp256k1、ECDSA 和 seed 封装：BIP32 派生仍在 MCU 完成，secp256k1 子密钥经 SCP03 导入后可以留在 applet 内做 ECDSA。Monero 的 Keccak 约简 Edwards 密钥与子地址运算、Kaspa 的 BIP340 Schnorr、QRL 的 SHAKE-256/XMSS、Chia 的 BLS12-381 都不是 SE050 原语，这些私钥只能在 MCU RAM 中派生并在使用后清零。需要解密到 RAM 的 seed 只受 MCU 保护；SE 提升的是静态密钥和 ECDSA 隔离，不等于“所有私钥都由 SE050 保护”。
+`WalletCustody` 把“哪些密钥能放进安全芯片”写成代码，而不是宣传语。默认的活动配置是纯 MCU；`wallet custody <id>` 会先打印 SE050 I2C 探测结果（`not-configured`、`no-response`、`present-unverified`）。只有在板级移植建立 SCP03 并认证 applet 后调用 `set_active_secure_element_profile()`，才会显示 secp256k1/ECDSA 可以由 SE 托管；仅检测到 0x48 有器件不会启用“密钥在 SE 内”的声明。保守的 SE050C1H1 目标配置只声明 secp256k1、ECDSA 和 seed 封装：BIP32 派生仍在 MCU 完成，secp256k1 子密钥经 SCP03 导入后可以留在 applet 内做 ECDSA。Kaspa 的 BIP340 Schnorr 以及内部保留的 Ed25519/BLS/XMSS 原语都不是 SE050 原语，私钥只能在 MCU RAM 中派生并在使用后清零。需要解密到 RAM 的 seed 只受 MCU 保护；SE 提升的是静态密钥和 ECDSA 隔离，不等于“所有私钥都由 SE050 保护”。
+
+## 手机 App 连接（NFC / USB）
+
+HexWallet 的“发送”由手机发起：手机构造未签名交易，硬件钱包只做**审阅 + 授权 + 签名**，然后把已签名字节交回手机广播。设备不联网，也不保存交易。完整线格式见 [docs/phone-link-protocol.md](docs/phone-link-protocol.md)，手机端参考实现见 `tools/phone_link_reference.py`。
+
+- **接收**：手机通过链路调用 `ADDRESS`，设备派生并返回地址（仅公钥/地址，不含私钥）。
+- **发送**：手机调用 `BEGIN_SIGN` → 设备解析并校验（输入归属、找零派生、手续费上限、合约白名单）→ 在可信屏幕显示收款地址/金额/手续费并给出 `APPROVE` / `REJECT` 按钮 → 用户按键后，手机再次调用 `RESULT` 取回签名。
+- **配对**：首次连接在设备屏幕显示 6 位配对码与手机指纹，必须现场确认。手机公钥被固定，之后换成其他手机一律拒绝。
+- **链路保护**：握手是 Ed25519 双向签名 + 临时 ECDH（HKDF-SHA256 派生会话密钥）；每帧 ChaCha20 加密 + HMAC-SHA256 认证，并带单调递增序号。伪造、重放、乱序、篡改都会失败并销毁会话。
+- **USB 默认关闭**：只有长按 BOOT/用户按键 3 秒才开启（默认 10 分钟窗口），再次长按、超时、上锁都会关闭；关闭时丢弃一切串口输入。
+- **NFC**：PN7161（NCI 2.0）ISO-DEP 卡模拟，手机作为读卡器。引脚必须来自原理图，在板级 profile 中定义 `HEXWALLET_NFC_PN7161` 与 `HEXWALLET_NFC_PIN_*`；未定义时 `link status` 显示 `nfc=not-configured`，固件不会猜测引脚。该驱动尚未在实机上做射频一致性验证。
+- **无显示屏的板子**：不提供签名审阅，链路会返回 `unsupported`，不会退化成“主机确认”。
+
+CLI 辅助命令（需解锁）：
+
+```text
+link status          # link/nfc/usb-data 状态
+link pair confirm    # 等价于在屏幕上按 APPROVE（无屏幕调试用）
+link pair reject
+```
 
 ## 硬件和软件要求
 
@@ -228,8 +253,12 @@ arduino-cli monitor -p COM7 -c baudrate=115200
 启动后先等待自检完成。成功输出应类似：
 
 ```text
-SELFTEST crypto=pass extended=pass cryptonote=pass qrl=pass custody=pass evm=pass bip39=pass bip32=pass address=pass networks=pass tokens=pass transport=pass bitcoin=pass
+SELFTEST crypto=pass extended=pass cryptonote=pass cryptonote-ringct=pass qrl=pass custody=pass catalog=pass evm=pass bip39=pass bip32=pass bip84=pass evm-derive=pass bip340=pass address=pass networks=pass sighash=pass kaspa=pass calldata=pass tokens=pass transport=pass bitcoin=pass zcash-sighash=pass zcash=pass
 ```
+
+`evm-derive` 使用 Conflux 官方 Ledger app 的 `m/44'/503'/0'/0/0` 向量，同时校验未压缩公钥和 `0x` 地址；host 侧 `address` 自检会用同一公钥独立重算地址。
+
+`cryptonote-ringct` 固定 Monero `tests/crypto/tests.txt` 的 hash_to_scalar、generate_key_derivation、derive_public_key、derive_secret_key、generate_key_image 和 derive_view_tag 向量。CLSAG 另有 3 成员确定性环的签名/验证与 `s`、`I`、message 篡改拒绝自测；它仍需要外部 Monero 交易向量才能在钱包目录中启用。
 
 只有所有项目都是 `pass`，钱包服务才会初始化。任何一项失败都会输出：
 
@@ -277,6 +306,8 @@ tx inspect [<coin>] <psbt-v0-hex>
 tx sign <six-digit-confirmation>
 evm inspect <network> <index> <unsigned-rlp-hex>
 evm sign <six-digit-confirmation>
+zec inspect <ZEC4-payload-hex>
+zec sign <six-digit-confirmation>
 tx reject
 selftest
 ```
@@ -498,8 +529,8 @@ wallet address btc49 0
 wallet address btc44 0
 wallet address eth 0
 wallet address bsc 0
-wallet address xmr 0
-wallet address trx 0
+wallet address zec 0
+wallet address kas 0
 ```
 
 输出包含：
@@ -515,7 +546,7 @@ wallet address eth 1
 wallet address btc 1
 ```
 
-对 Monero，`index=0` 是标准地址，`index>0` 是 `(0, index)` 子地址。QRL 不经过 BIP32：`wallet address qrl 0` 会从 BIP39 seed 经 SHAKE-256 扩展出 48 字节 XMSS seed，再生成高度 10 的 Merkle 树，耗时可能达到分钟级，串口会输出 `INFO qrl-xmss-keygen=...` 进度。`wallet addresses 0` 会跳过 QRL，避免隐式触发该计算。
+钱包目录现在只暴露完整收/发/签名链。Monero、QRL、Chia 等仅地址 profile 不再出现在 `coin list` / `wallet address` 中；它们的编码器只作为内部测试原语保留。
 
 当前账户和 change 固定为 `0`，一般路径为：
 
@@ -523,7 +554,7 @@ wallet address btc 1
 m/<purpose>'/<coin-type>'/0'/0/<index>
 ```
 
-EVM 网络通常使用 coin type `60`，Ethereum Classic 使用 `61`。修改派生策略会改变地址，已有资金必须记录实际路径。
+EVM 网络通常使用 coin type `60`，Ethereum Classic 使用 `61`，Conflux eSpace 按官方 Ledger app 使用 `503`。修改派生策略会改变地址，已有资金必须记录实际路径。
 
 查询所有已实现网络：
 
@@ -547,7 +578,7 @@ ERC-20 Token 使用所属 EVM 网络的同一个账户地址，不要把 Token �
 
 - 已认证并加载钱包。
 - 输入是十六进制 PSBT v0。
-- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、Dash、DigiByte、Bitcoin Gold、Peercoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、Ravencoin Classic，以及各自的 SegWit profile）。`tools/fork_registry.json` 中的 `sighash` 字段不会被生成器采信。
+- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、Dash、DigiByte、Bitcoin Gold、Ravencoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、e-Gulden、LBRY、MazaCoin、Myriad、NewYorkCoin、Auroracoin、Bitcore、CPUchain、DigitalCoin、Einsteinium、Feathercoin、GoByte、Monacoin、Ritocoin、VIVO，以及各自的 SegWit profile）。生成器只接受带 `sighash_source`、且上游 `chainparams.cpp` 与 `script/interpreter.cpp` 已通过 `tools/verify_utxo_sighash.py` 核对的 `legacy` 行；fork-id 和 `nTime` sighash 链不会套用 Bitcoin legacy 签名。共享的 legacy/BIP143 算法由 Bitcoin 向量覆盖，但策略行不代表已经在对应主网广播验证。
 - 输入属于该网络支持的 BIP44 P2PKH、BIP49 P2SH-P2WPKH 或 BIP84 P2WPKH 地址。
 - legacy 输入必须带 `non_witness_utxo`，其 txid 会与 outpoint 校验。这是 BIP-174 的强制要求；缺少它，恶意 PSBT 可以伪造被花费金额，从而污染手续费审查。
 - 交易满足金额、费率、输入输出和 sighash 限制（Bitcoin 系为 `SIGHASH_ALL`，BCH/eCash/BSV 为 `SIGHASH_FORKID`）。
@@ -583,9 +614,19 @@ ERR trusted-display-required-for-signing
 
 不要为了绕过该错误而打开 `HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION`。
 
+## Kaspa 交易审查和签名
+
+`kaspa inspect <payload-hex>` 使用紧凑的小端 review payload：`u16 version, u64 lock_time, u8 payload_len + payload, u8 input_count, {txid[32], u32 index, u64 sequence, u64 value, u16 script_version, u8 script_len + script, u32 account_index, u8 change, u32 address_index, u8 sigop_count}*, u8 output_count, {u64 value, u16 script_version, u8 script_len + script}*`。解析器先调用 `kaspa_review()` 计算输入/输出总额、手续费、KIP-0009 mass 和输出地址，再进入确认码流程；`kaspa sign <code>` 只接受 version 0，v1 计算预算/covenant 交易拒绝。签名输出是 gRPC `SubmitTransaction` 使用的 protobuf `TransactionMessage`。
+
+## Zcash 透明交易审查和签名
+
+`zec inspect <payload-hex>` 使用 `magic "ZEC4", u32 branch_id, u32 unsigned_transaction_size, unsigned_v4_transaction, u8 input_count, {u64 value, u8 script_len + scriptPubKey, u32 account, u8 change, u32 address_index}*`。交易必须是透明-only v4，且所有 scriptSig 为空；任何 valueBalance、shielded spend/output 或 JoinSplit 都会返回 `unsupported`，不会降级成“看起来像透明交易”的签名。`tools/build_zcash_review_payload.py` 可以从未签名 v4 交易生成该 payload，并为每个输入打印 ZIP-243 摘要，供独立实现交叉核对。
+
+审查界面显示分支 ID、输入/输出总额、手续费、估计 vbytes、expiry height、lock time 和每个 t1/t3 输出地址。`zec sign <code>` 会从设备种子重新推导 `m/44'/133'/account'/change/index`，校验 prevout 的 P2PKH 哈希，再用 ZIP-243 摘要生成 ECDSA DER 签名并输出完整 v4 交易和 `txid`。签名只使用 `SIGHASH_ALL`；分支 ID 固定在 `WalletNetworks` 的主网 NU6.2 策略 `0x5437f330`，升级网络时必须发布新固件并补充官方向量，不能由主机任意指定。
+
 ## EVM 交易审查和签名
 
-当前接受已登记网络上的 EIP-155 legacy、EIP-1559 type-2 原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、非空 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 operator 必须等于本钱包地址。
+当前接受已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。45 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace 保持 legacy-only。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、非空 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
 
 审查 unsigned RLP：
 
@@ -732,7 +773,7 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 - 不要把 `wallet generate` 的成功输出理解为助记词已备份。
 - 不要通过关闭 `HEXWALLET_RUN_SELF_TESTS` 解决自检错误。
 - 不要通过打开 `HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION` 绕过可信显示器要求。
-- 不要向只有 `address` 能力的网络发送交易。
+- 不要绕过可信显示器审查，也不要在没有确认码的情况下签名。
 - 不要把 Token 合约地址当作账户收款地址。
 - 编译通过和自检通过都不等于生产安全认证。
 - 使用真实资产前，必须完成板级测试、恢复测试、故障注入、固件升级保护、Secure Boot、Flash Encryption、可信显示器和独立安全审计。
@@ -747,15 +788,28 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `WalletCli` | 认证状态、串口命令、审查和确认流程 |
 | `WalletEngine` | 派生路径和地址生成 |
 | `WalletNetworks` | 网络、派生类型、地址编码、EVM chain ID |
-| `WalletTokens` | 已登记 Token、合约地址、精度和能力 |
+| `WalletCatalog` | 严格钱包目录：只暴露完整收/发/签名链 |
+| `WalletMiningCatalog` | 仅包含完整支持链的 MiningPoolStats 覆盖表 |
+| `WalletTokens` | 已登记 EVM Token、合约地址、精度和能力 |
+| `WalletUi` | 可信显示器的交易审查界面 |
+| `WalletCustody` | MCU/SE 托管策略 |
 | `BitcoinTransaction` | PSBT v0 解析（witness/non-witness UTXO）、审查、legacy/BIP143/fork-id sighash、最终序列化 |
-| `MoneroScan` | view-key 输出扫描、子地址归属识别、明文金额恢复 |
+| `ZcashTransaction` | v4 透明交易、ZIP-243、t1 签名、t1/t3 输出 |
+| `CryptoNoteRingCt` | Monero hash-to-scalar、key derivation、一次性公钥、key image、view tag、CLSAG 签名/验证；key 层官方向量固定 |
+| `CryptoNoteOutputScan` | 用 view secret 在设备内判定输出归属，不导出查看密钥 |
+| `CryptoNoteTransaction` | RCT type 6 严格解析/逐字节重写 + 承诺平衡校验（尚不含 Bulletproofs+ 验证与 CLSAG 签名接入） |
 | `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序） |
 | `WalletBoardPins` | 全部五块受支持 LilyGO 板卡的逐引脚定义 |
 | `EvmTransaction` | EIP-155、EIP-1559、原生转账和白名单 Token 调用 |
 | `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 与 LayerZero OFT/ONFT 的选择器白名单和规范 ABI 解码 |
 | `WalletBoardPort` | 板级显示器、输入和电源适配 |
-| `WalletTransportPolicy` | Serial、BLE、Wi-Fi 的 fail-closed 策略 |
+| `WalletLink` | 手机链路：配对、Ed25519 握手、会话、重放防护 |
+| `WalletLinkCrypto` | 链路的 HKDF-SHA256、ChaCha20、Encrypt-then-MAC |
+| `WalletNfcApdu` | 承载链路帧的 ISO 7816-4 APDU 应用 |
+| `WalletNfcPort` | PN7161 NCI 卡模拟端口（需板级引脚） |
+| `WalletLinkService` | 链路请求分发：地址、目录、开始签名、取签名 |
+| `WalletSigning` | 设备内共享的“审阅 → 授权 → 签名”会话 |
+| `WalletTransportPolicy` | Serial、NFC、BLE、Wi-Fi 的 fail-closed 策略 |
 
 ## 许可证
 

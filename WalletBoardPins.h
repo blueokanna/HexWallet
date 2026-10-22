@@ -14,6 +14,26 @@
 #include "WalletConfig.h"
 
 // ---------------------------------------------------------------------------
+// NFC (phone link) - NXP PN7161 over SPI.
+//
+// The PN7161 pin map is BOARD-SPECIFIC and must come from the schematic. It is
+// intentionally NOT defined for any board profile, because guessing pins would
+// silently drive an unrelated peripheral. To enable NFC, add to the board
+// profile below:
+//
+//   #define HEXWALLET_NFC_PN7161 1
+//   #define HEXWALLET_NFC_PIN_SCK  <gpio>
+//   #define HEXWALLET_NFC_PIN_MOSI <gpio>
+//   #define HEXWALLET_NFC_PIN_MISO <gpio>
+//   #define HEXWALLET_NFC_PIN_CS   <gpio>
+//   #define HEXWALLET_NFC_PIN_IRQ  <gpio>
+//   #define HEXWALLET_NFC_PIN_VEN  <gpio>
+//
+// Until then WalletNfcPort reports NotConfigured, the firmware logs it, and
+// only the USB link is available.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // T-Display S3 AMOLED / AMOLED Plus  (ESP32-S3, RM67162, 240x536, SPI)
 // ---------------------------------------------------------------------------
 #if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
@@ -37,6 +57,8 @@
 #define HEXWALLET_PIN_BAT_VOLT 4
 #define HEXWALLET_PIN_BUTTON_1 0
 #define HEXWALLET_PIN_BUTTON_2 21
+// BOOT button: long-press enables the USB data transport for one window.
+#define HEXWALLET_PIN_USER_BUTTON HEXWALLET_PIN_BUTTON_1
 
 // Capacitive touch (CST816S) on the touch variant; I2C bus is shared with RTC.
 #define HEXWALLET_TOUCH_CST816S 1
@@ -89,6 +111,7 @@
 #define HEXWALLET_PIN_BAT_VOLT 4
 #define HEXWALLET_PIN_BUTTON_1 0
 #define HEXWALLET_PIN_BUTTON_2 14
+#define HEXWALLET_PIN_USER_BUTTON HEXWALLET_PIN_BUTTON_1
 
 // CST816S touch controller on I2C.
 #define HEXWALLET_TOUCH_CST816S 1
@@ -126,6 +149,9 @@
 #define HEXWALLET_PIN_TOUCH_SDA 13
 #define HEXWALLET_PIN_TOUCH_INT 12
 #define HEXWALLET_PIN_BAT_VOLT 4
+// The BOOT strap button is the only physical key available without the
+// XL9555 expander. Long-press gates the USB data transport.
+#define HEXWALLET_PIN_USER_BUTTON 0
 #define HEXWALLET_BOARD_NAME "T-Deck Max"
 
 // NOTE: the T-Deck Max touch controller is NOT a CST816S (it sits behind the
@@ -157,6 +183,8 @@
 
 #define HEXWALLET_PIN_KEY_SDA 36  // P1.4  (TCA8418 keyboard)
 #define HEXWALLET_PIN_KEY_SCL 34  // P1.2
+// No verified user button is exposed on this board (P0.00 is the reset strap),
+// so board_has_user_button() stays false and USB data cannot be opened there.
 #define HEXWALLET_BOARD_NAME "T-Echo Lite Kit"
 
 // ---------------------------------------------------------------------------
@@ -171,12 +199,15 @@
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
 
 // Deliberately no HEXWALLET_HAS_DISPLAY / display pins / touch / battery.
+// The BOOT strap button is the physical USB-enable control.
+#define HEXWALLET_PIN_USER_BUTTON 0
 #define HEXWALLET_BOARD_NAME "Headless CLI"
 
 // ---------------------------------------------------------------------------
 // Default: no display hardware selected.
 // ---------------------------------------------------------------------------
 #else
+#define HEXWALLET_PIN_USER_BUTTON -1
 #define HEXWALLET_BOARD_NAME "None"
 #endif
 

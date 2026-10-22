@@ -1,0 +1,31 @@
+{
+  "reviewed_date": "2026-10-22",
+  "scope": "Amount encoding, commitment generator and RingCT type declarations; not complete consensus validation",
+  "masari_commit_note": "GitHub API resolution failed; source content hashes recorded, master remains a moving reference",
+  "sources": [
+    {
+      "source": "https://raw.githubusercontent.com/monero-project/monero/v0.18.4.0/src/ringct/rctOps.cpp",
+      "sha256": "6a7c9856d05708b1b3df2397b5062c41de264dfc71113f34870fff7ed96ba882",
+      "reference": "v0.18.4.0",
+      "commit": "f1311d4237404ab7da76241dbf10e92a65132cc4"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/monero-project/monero/v0.18.4.0/src/ringct/rctTypes.h",
+      "sha256": "b0fe45f4c4e978be7f31342a6f73bc0f5bf20cc75ec6770c80c3916e1103d0d7",
+      "reference": "v0.18.4.0",
+      "commit": "f1311d4237404ab7da76241dbf10e92a65132cc4"
+    },
+    {
+      "source": "https://raw.githubusercontent.com/masari-project/masari/master/src/ringct/rctOps.cpp",
+      "sha256": "212b5cb864290c2e469bd0062cb6d20e90312d61aab0c68273ae52fc8916d499",
+      "reference": "master",
+      "commit": null
+    },
+    {
+      "source": "https://raw.githubusercontent.com/masari-project/masari/master/src/ringct/rctTypes.h",
+      "sha256": "5a30cd662aacf8a81cab9dd05cf363f63e3a97d4dd1fb8ca015aaf4709bd6583",
+      "reference": "master",
+      "commit": null
+    }
+  ]
+}

@@ -7,6 +7,7 @@ namespace hexwallet {
 
 enum class WalletTransport : uint8_t {
   SerialUsb,
+  Nfc,
   BluetoothLowEnergy,
   Wifi,
 };

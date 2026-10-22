@@ -7,12 +7,18 @@
 
 #include "BitcoinTransaction.h"
 #include "CryptoNoteAddress.h"
+#include "CryptoNoteRingCt.h"
 #include "CryptoPrimitives.h"
 #include "EvmTransaction.h"
+#include "KaspaTransaction.h"
+#include "ZcashTransaction.h"
+#include "WalletBoardPort.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
 #include "WalletCustody.h"
 #include "WalletEngine.h"
+#include "WalletLinkService.h"
+#include "WalletMiningCatalog.h"
 #include "WalletSecurity.h"
 #include "WalletSession.h"
 #include "WalletTokens.h"
@@ -52,13 +58,29 @@ char line_buffer[kLineSize];
 size_t line_used = 0;
 BitcoinSigningRequest pending_transaction;
 EvmSigningRequest pending_evm_transaction;
+KaspaTransaction pending_kaspa_transaction;
+ZcashSigningRequest pending_zcash_transaction;
 enum class PendingTransactionKind : uint8_t { None,
                                               Bitcoin,
-                                              Evm };
+                                              Evm,
+                                              Kaspa,
+                                              Zcash };
 PendingTransactionKind pending_transaction_kind = PendingTransactionKind::None;
 bool transaction_pending = false;
 uint32_t transaction_approval = 0;
 uint32_t transaction_expires_at = 0;
+bool usb_data_enabled = HEXWALLET_USB_DATA_DEFAULT != 0;
+uint32_t usb_data_enabled_at = 0;
+bool usb_button_down = false;
+bool usb_button_long_handled = false;
+uint32_t usb_button_down_at = 0;
+constexpr uint8_t kUsbApduMagic0 = 0xa5;
+constexpr uint8_t kUsbApduMagic1 = 0x5a;
+constexpr size_t kUsbApduMax = 5000;
+uint8_t usb_apdu_frame[kUsbApduMax + 4];
+size_t usb_apdu_used = 0;
+size_t usb_apdu_expected = 0;
+bool usb_apdu_mode = false;
 
 bool deadline_reached(uint32_t now, uint32_t deadline) {
   return static_cast<int32_t>(now - deadline) >= 0;
@@ -127,6 +149,8 @@ const char *error_text(WalletError error) {
 void clear_pending_transaction() {
   clear_bitcoin_request(&pending_transaction);
   clear_evm_request(&pending_evm_transaction);
+  clear_kaspa_transaction(&pending_kaspa_transaction);
+  clear_zcash_request(&pending_zcash_transaction);
   pending_transaction_kind = PendingTransactionKind::None;
   transaction_pending = false;
   transaction_approval = 0;
@@ -195,10 +219,11 @@ uint32_t parse_index(const char *text, bool *ok) {
 }
 
 void show_help() {
-  Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | token list [network] | token show <id>");
+  Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD] [offset] | mining show <symbol> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
-  Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | tx reject");
+  Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
+  Serial.println("OK link: link status | link pair confirm | link pair reject");
 #if HEXWALLET_ENABLE_SECRET_EXPORT
   Serial.println("OK sensitive: wallet secret [index] | selftest");
 #else
@@ -364,6 +389,144 @@ void handle_coin(char *command) {
   else if (strncmp(command, "coin search ", 12) == 0 && command[12] != '\0') show_catalog(command + 12);
   else if (strncmp(command, "coin show ", 10) == 0 && command[10] != '\0') show_coin(command + 10);
   else Serial.println("ERR invalid-coin-command");
+}
+
+bool parse_mining_type(const char *text, MiningCoinType *out) {
+  if (text == nullptr || out == nullptr) return false;
+  if (strcmp(text, "ASIC") == 0) *out = MiningCoinType::Asic;
+  else if (strcmp(text, "GPU") == 0) *out = MiningCoinType::Gpu;
+  else if (strcmp(text, "CPU") == 0) *out = MiningCoinType::Cpu;
+  else if (strcmp(text, "HDD") == 0) *out = MiningCoinType::Hdd;
+  else return false;
+  return true;
+}
+
+void print_mining_support(const MiningCoinEntry &coin) {
+  WalletCatalogEntry entry;
+  if (mining_coin_lookup(coin, &entry)) print_capabilities(entry);
+}
+
+void show_mining_coin(const char *symbol) {
+  const MiningCoinEntry *coin = mining_coin_find(symbol);
+  if (coin == nullptr) {
+    Serial.println("ERR unknown-mining-coin");
+    return;
+  }
+  Serial.print("OK symbol=");
+  Serial.print(coin->symbol);
+  Serial.print(" name=\"");
+  Serial.print(coin->name);
+  Serial.print("\" type=");
+  Serial.print(mining_coin_type_name(coin->type));
+  Serial.print(" algorithm=\"");
+  Serial.print(coin->algorithm);
+  Serial.print("\" catalog=");
+  Serial.print(coin->catalog_id == nullptr ? "none" : coin->catalog_id);
+  Serial.print(" capabilities=");
+  print_mining_support(*coin);
+  Serial.println();
+}
+
+void show_mining_list(bool has_type, MiningCoinType type, size_t offset) {
+  size_t matches = 0;
+  for (size_t index = 0; index < mining_coin_count(); ++index) {
+    MiningCoinEntry coin;
+    if (!mining_coin_at(index, &coin)) continue;
+    if (has_type && coin.type != type) continue;
+    ++matches;
+  }
+  const size_t end = offset + 25 > matches ? matches : offset + 25;
+  Serial.print("BEGIN MINING total=");
+  Serial.print(static_cast<unsigned long>(matches));
+  Serial.print(" offset=");
+  Serial.print(static_cast<unsigned long>(offset));
+  Serial.print(" end=");
+  Serial.println(static_cast<unsigned long>(end));
+  size_t position = 0;
+  for (size_t index = 0; index < mining_coin_count() && position < end; ++index) {
+    MiningCoinEntry coin;
+    if (!mining_coin_at(index, &coin)) continue;
+    if (has_type && coin.type != type) continue;
+    if (position++ < offset) continue;
+    Serial.print(coin.symbol);
+    Serial.print(' ');
+    Serial.print(mining_coin_type_name(coin.type));
+    Serial.print(' ');
+    Serial.print(coin.algorithm);
+    Serial.print(' ');
+    print_mining_support(coin);
+    Serial.print(' ');
+    Serial.println(coin.catalog_id);
+  }
+  Serial.println("END MINING");
+}
+
+void show_mining_stats() {
+  size_t signable = 0;
+  for (size_t index = 0; index < mining_coin_count(); ++index) {
+    MiningCoinEntry coin;
+    if (!mining_coin_at(index, &coin)) continue;
+    WalletCatalogEntry entry;
+    if (mining_coin_lookup(coin, &entry) &&
+        wallet_catalog_has(entry, WalletCapabilitySigning)) {
+      ++signable;
+    }
+  }
+  Serial.print("OK mining total=");
+  Serial.print(static_cast<unsigned long>(mining_coin_count()));
+  Serial.print(" signable=");
+  Serial.println(static_cast<unsigned long>(signable));
+}
+
+void handle_mining(char *command) {
+  if (strcmp(command, "mining stats") == 0) {
+    show_mining_stats();
+    return;
+  }
+  if (strncmp(command, "mining show ", 12) == 0 && command[12] != '\0') {
+    show_mining_coin(command + 12);
+    return;
+  }
+  if (strncmp(command, "mining list", 11) == 0) {
+    char *arguments = command + 11;
+    while (*arguments == ' ') ++arguments;
+    bool has_type = false;
+    MiningCoinType type = MiningCoinType::Asic;
+    size_t offset = 0;
+    if (*arguments != '\0') {
+      char token[8] = {};
+      size_t length = 0;
+      while (arguments[length] != '\0' && arguments[length] != ' ' &&
+             length + 1 < sizeof(token)) {
+        token[length] = arguments[length];
+        ++length;
+      }
+      token[length] = '\0';
+      if (parse_mining_type(token, &type)) {
+        has_type = true;
+      } else {
+        bool ok = false;
+        offset = parse_index(token, &ok);
+        if (!ok) {
+          Serial.println("ERR invalid-mining-filter");
+          return;
+        }
+      }
+      arguments += length;
+      while (*arguments == ' ') ++arguments;
+      if (*arguments != '\0') {
+        bool ok = false;
+        offset = parse_index(arguments, &ok);
+        if (!ok) {
+          Serial.println("ERR invalid-mining-page");
+          return;
+        }
+      }
+    }
+    show_mining_list(has_type, type, offset);
+    return;
+  }
+  Serial.println("ERR invalid-mining-command");
 }
 
 void show_tokens(const char *network_filter) {
@@ -594,18 +757,6 @@ void handle_wallet_token(char *arguments) {
     Serial.println(error_text(result));
     return;
   }
-  char token_account[64];
-  if (token->standard == TokenStandard::Spl) {
-    const WalletError ata = token_spl_account_address(*token, derived.private_key,
-                                                      token_account,
-                                                      sizeof(token_account));
-    if (ata != WalletError::Ok) {
-      Serial.print("ERR token-account ");
-      Serial.println(error_text(ata));
-      clear_derived_address(&derived);
-      return;
-    }
-  }
   Serial.print("OK token=");
   Serial.print(token->id);
   Serial.print(" network=");
@@ -619,7 +770,7 @@ void handle_wallet_token(char *arguments) {
   Serial.print(" path=");
   Serial.print(derived.path);
   Serial.print(" account-address=");
-  Serial.println(token->standard == TokenStandard::Spl ? token_account : derived.address);
+  Serial.println(derived.address);
   Serial.println(token_supports_transfer_signing(*token) ? "INFO transfer-signing=evm-inspect-workflow" : "INFO transfer-signing-unavailable");
   clear_derived_address(&derived);
 }
@@ -645,7 +796,14 @@ void handle_wallet_custody(char *arguments) {
   }
   const CustodyPlan plan =
     plan_key_custody(*entry.network, active_secure_element_profile());
-  Serial.print("secure-element=");
+  const SecureElementProbeState probe = board_secure_element_probe();
+  Serial.print("se050-probe=");
+  Serial.print(probe == SecureElementProbeState::NotConfigured
+                   ? "not-configured"
+                   : (probe == SecureElementProbeState::NoResponse
+                          ? "no-response"
+                          : "present-unverified"));
+  Serial.print(" secure-element=");
   Serial.print(active_secure_element_profile().name);
   Serial.print(" network=");
   Serial.print(entry.network->id);
@@ -781,6 +939,8 @@ void inspect_transaction(char *arguments) {
   const NetworkSigningPolicy *policy = network == nullptr ? nullptr : find_network_signing_policy(network->id);
   WalletCatalogEntry signing_entry;
   if (network == nullptr || policy == nullptr ||
+      (policy->family != SighashFamily::Bitcoin &&
+       policy->family != SighashFamily::ForkId) ||
       !wallet_catalog_find(network->id, &signing_entry) ||
       !wallet_catalog_has(signing_entry, WalletCapabilitySigning) ||
       !wallet_catalog_has(signing_entry, WalletCapabilityTransactionReview)) {
@@ -1176,6 +1336,402 @@ void sign_evm_transaction(const char *approval_text) {
   wallet_ui_show_catalog();
 }
 
+void format_sompi(uint64_t sompi, char *out, size_t out_size) {
+  const uint64_t whole = sompi / kKaspaSompiPerKaspa;
+  const uint32_t fraction = static_cast<uint32_t>(sompi % kKaspaSompiPerKaspa);
+  snprintf(out, out_size, "%llu.%08lu", static_cast<unsigned long long>(whole),
+           static_cast<unsigned long>(fraction));
+}
+
+void inspect_kaspa_transaction(char *arguments) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = { true, false, display_is_available };
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::SigningRequest, transport_state)) {
+    Serial.println("ERR trusted-display-required-for-signing");
+    return;
+  }
+  uint8_t payload[4096];
+  size_t payload_size = 0;
+  if (!decode_hex(arguments, payload, sizeof(payload), &payload_size)) {
+    secure_zero(payload, sizeof(payload));
+    Serial.println("ERR invalid-kaspa-payload-hex");
+    return;
+  }
+  clear_pending_transaction();
+  const KaspaError error = kaspa_parse_review_payload(
+      payload, payload_size, &pending_kaspa_transaction);
+  secure_zero(payload, sizeof(payload));
+  if (error != KaspaError::Ok) {
+    clear_pending_transaction();
+    Serial.print("ERR kaspa-inspect ");
+    Serial.println(kaspa_error_text(error));
+    return;
+  }
+  uint32_t random_value;
+  esp_fill_random(&random_value, sizeof(random_value));
+  transaction_approval = random_value % 1000000U;
+  transaction_expires_at = millis() + kTransactionApprovalMs;
+  transaction_pending = true;
+  pending_transaction_kind = PendingTransactionKind::Kaspa;
+  Serial.println("BEGIN TRANSACTION REVIEW");
+  Serial.println("network=kas type=KASPA-V0");
+  Serial.print("inputs=");
+  Serial.print(static_cast<unsigned long>(pending_kaspa_transaction.input_count));
+  Serial.print(" outputs=");
+  Serial.println(static_cast<unsigned long>(pending_kaspa_transaction.output_count));
+  Serial.print("input-total=");
+  Serial.print(static_cast<unsigned long long>(pending_kaspa_transaction.input_total));
+  Serial.println(" sompi");
+  Serial.print("output-total=");
+  Serial.print(static_cast<unsigned long long>(pending_kaspa_transaction.output_total));
+  Serial.println(" sompi");
+  char amount[32];
+  format_sompi(pending_kaspa_transaction.fee, amount, sizeof(amount));
+  Serial.print("fee=");
+  Serial.print(static_cast<unsigned long long>(pending_kaspa_transaction.fee));
+  Serial.print(" sompi (");
+  Serial.print(amount);
+  Serial.println(" KAS)");
+  Serial.print("mass=");
+  Serial.print(static_cast<unsigned long long>(
+      pending_kaspa_transaction.compute_mass +
+      pending_kaspa_transaction.storage_mass));
+  Serial.println();
+  for (size_t index = 0; index < pending_kaspa_transaction.output_count; ++index) {
+    const KaspaOutput &output = pending_kaspa_transaction.outputs[index];
+    Serial.print("output[");
+    Serial.print(static_cast<unsigned long>(index));
+    Serial.print("]=");
+    Serial.print(static_cast<unsigned long long>(output.value));
+    Serial.print(" sompi ");
+    Serial.println(output.address);
+  }
+  Serial.print("review-id=");
+  Serial.print(static_cast<unsigned long>(pending_kaspa_transaction.request_hash), HEX);
+  Serial.println();
+  Serial.println("END TRANSACTION REVIEW");
+  char approval[7];
+  snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+  if (display_is_available) {
+    Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
+  } else {
+    Serial.print("OK confirm-code=");
+    Serial.print(approval);
+    Serial.println(" expires-ms=120000");
+  }
+  char amount_texts[kWalletUiMaxTransactionOutputs][32];
+  WalletUiTransactionReview review = {};
+  review.network = "KASPA";
+  review.fee = pending_kaspa_transaction.fee;
+  review.fee_text = amount;
+  review.approval_code = approval;
+  review.output_count = pending_kaspa_transaction.output_count;
+  for (size_t index = 0; index < pending_kaspa_transaction.output_count; ++index) {
+    format_sompi(pending_kaspa_transaction.outputs[index].value,
+                 amount_texts[index], sizeof(amount_texts[index]));
+    review.outputs[index] = {
+      0, amount_texts[index], pending_kaspa_transaction.outputs[index].address,
+      pending_kaspa_transaction.outputs[index].script_size == 34 ? "KASPA P2PK" : "KASPA P2SH"
+    };
+  }
+  wallet_ui_show_transaction(review);
+  secure_zero(amount_texts, sizeof(amount_texts));
+  secure_zero(amount, sizeof(amount));
+  secure_zero(approval, sizeof(approval));
+}
+
+void sign_kaspa_transaction(const char *approval_text) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = { true, false, display_is_available };
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::ApprovalResponse, transport_state)) {
+    clear_pending_transaction();
+    Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+    return;
+  }
+  if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Kaspa) {
+    Serial.println("ERR no-reviewed-kaspa-transaction");
+    return;
+  }
+  if (deadline_reached(millis(), transaction_expires_at) ||
+      approval_text == nullptr || strlen(approval_text) != 6) {
+    clear_pending_transaction();
+    Serial.println("ERR invalid-or-expired-confirmation; review-cleared");
+    return;
+  }
+  uint32_t supplied = 0;
+  for (size_t index = 0; index < 6; ++index) {
+    if (approval_text[index] < '0' || approval_text[index] > '9') {
+      clear_pending_transaction();
+      Serial.println("ERR invalid-confirmation; review-cleared");
+      return;
+    }
+    supplied = supplied * 10U + static_cast<uint32_t>(approval_text[index] - '0');
+  }
+  if (supplied != transaction_approval) {
+    clear_pending_transaction();
+    Serial.println("ERR confirmation-mismatch; review-cleared");
+    return;
+  }
+  HdPrivateNode master;
+  if (!load_master(&master)) {
+    clear_pending_transaction();
+    return;
+  }
+  uint8_t signed_transaction[4096];
+  size_t signed_size = sizeof(signed_transaction);
+  const KaspaError error = kaspa_sign_transaction(
+      pending_kaspa_transaction, master, signed_transaction, &signed_size);
+  secure_zero(&master, sizeof(master));
+  if (error != KaspaError::Ok) {
+    clear_pending_transaction();
+    secure_zero(signed_transaction, sizeof(signed_transaction));
+    Serial.print("ERR kaspa-sign ");
+    Serial.println(kaspa_error_text(error));
+    return;
+  }
+  uint8_t transaction_id[32];
+  const KaspaError id_error =
+      kaspa_transaction_id(pending_kaspa_transaction, transaction_id);
+  clear_pending_transaction();
+  Serial.print("OK signed-transaction=");
+  print_hex(signed_transaction, signed_size);
+  Serial.println();
+  if (id_error == KaspaError::Ok) {
+    Serial.print("txid=");
+    print_hex_reverse(transaction_id, sizeof(transaction_id));
+    Serial.println();
+    Serial.print("txid-raw=");
+    print_hex(transaction_id, sizeof(transaction_id));
+    Serial.println();
+  }
+  secure_zero(transaction_id, sizeof(transaction_id));
+  secure_zero(signed_transaction, sizeof(signed_transaction));
+  wallet_ui_show_catalog();
+}
+
+void format_zec(uint64_t zats, char *out, size_t out_size) {
+  const uint64_t whole = zats / kZcashZatsPerZec;
+  const uint32_t fraction = static_cast<uint32_t>(zats % kZcashZatsPerZec);
+  snprintf(out, out_size, "%llu.%08lu", static_cast<unsigned long long>(whole),
+           static_cast<unsigned long>(fraction));
+}
+
+void inspect_zcash_transaction(char *arguments) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = { true, false, display_is_available };
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::SigningRequest, transport_state)) {
+    Serial.println("ERR trusted-display-required-for-signing");
+    return;
+  }
+  const NetworkProfile *network = find_network_profile("zec");
+  const NetworkSigningPolicy *policy = find_network_signing_policy("zec");
+  const ZcashNetworkPolicy *zcash_policy = find_zcash_network_policy("zec");
+  WalletCatalogEntry entry;
+  if (network == nullptr || policy == nullptr ||
+      policy->family != SighashFamily::ZcashZip243 || zcash_policy == nullptr ||
+      !wallet_catalog_find("zec", &entry) ||
+      !wallet_catalog_has(entry, WalletCapabilityTransactionReview) ||
+      !wallet_catalog_has(entry, WalletCapabilitySigning)) {
+    Serial.println("ERR zcash-signing-unsupported");
+    return;
+  }
+  static uint8_t payload[HEXWALLET_MAX_PSBT_BYTES];
+  size_t payload_size = 0;
+  if (!decode_hex(arguments, payload, sizeof(payload), &payload_size)) {
+    secure_zero(payload, sizeof(payload));
+    Serial.println("ERR invalid-zcash-payload-hex");
+    return;
+  }
+  const ZcashChainParams chain = {
+    network->id, network->alt_p2pkh_version, network->alt_p2sh_version,
+    zcash_policy->branch_id, network->derivation_coin_type
+  };
+  clear_pending_transaction();
+  const ZcashError error = zcash_parse_review_payload(
+      payload, payload_size, chain, &pending_zcash_transaction);
+  secure_zero(payload, sizeof(payload));
+  if (error != ZcashError::Ok) {
+    clear_pending_transaction();
+    Serial.print("ERR zcash-inspect ");
+    Serial.println(zcash_error_text(error));
+    return;
+  }
+  uint32_t random_value;
+  esp_fill_random(&random_value, sizeof(random_value));
+  transaction_approval = random_value % 1000000U;
+  transaction_expires_at = millis() + kTransactionApprovalMs;
+  transaction_pending = true;
+  pending_transaction_kind = PendingTransactionKind::Zcash;
+  Serial.println("BEGIN TRANSACTION REVIEW");
+  Serial.println("network=zec type=ZCASH-V4-TRANSPARENT");
+  Serial.print("branch-id=0x");
+  {
+    char branch[9];
+    snprintf(branch, sizeof(branch), "%08lx",
+             static_cast<unsigned long>(pending_zcash_transaction.chain.branch_id));
+    Serial.println(branch);
+    secure_zero(branch, sizeof(branch));
+  }
+  Serial.print("inputs=");
+  Serial.print(static_cast<unsigned long>(pending_zcash_transaction.input_count));
+  Serial.print(" outputs=");
+  Serial.println(static_cast<unsigned long>(pending_zcash_transaction.output_count));
+  Serial.print("input-zats=");
+  Serial.println(static_cast<unsigned long long>(pending_zcash_transaction.input_total));
+  Serial.print("output-zats=");
+  Serial.println(static_cast<unsigned long long>(pending_zcash_transaction.output_total));
+  Serial.print("fee-zats=");
+  Serial.print(static_cast<unsigned long long>(pending_zcash_transaction.fee));
+  Serial.print(" estimated-vbytes=");
+  Serial.println(static_cast<unsigned long>(pending_zcash_transaction.estimated_vbytes));
+  Serial.print("expiry-height=");
+  Serial.println(static_cast<unsigned long>(pending_zcash_transaction.expiry_height));
+  Serial.print("lock-time=");
+  Serial.println(static_cast<unsigned long>(pending_zcash_transaction.lock_time));
+  for (size_t index = 0; index < pending_zcash_transaction.output_count; ++index) {
+    const ZcashOutput &output = pending_zcash_transaction.outputs[index];
+    Serial.print("output=");
+    Serial.print(static_cast<unsigned long>(index));
+    Serial.print(" zats=");
+    Serial.print(static_cast<unsigned long long>(output.value));
+    Serial.print(" address=");
+    Serial.print(output.address);
+    Serial.println(" ownership=external");
+  }
+  Serial.print("review-id=");
+  print_hex(pending_zcash_transaction.request_hash, 8);
+  Serial.println();
+  Serial.println("END TRANSACTION REVIEW");
+  char approval[7];
+  snprintf(approval, sizeof(approval), "%06lu",
+           static_cast<unsigned long>(transaction_approval));
+  if (display_is_available) {
+    Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
+  } else {
+    Serial.print("OK confirm-code=");
+    Serial.print(approval);
+    Serial.println(" expires-ms=120000");
+  }
+  char amount_texts[kWalletUiMaxTransactionOutputs][32];
+  char display_fee[64];
+  format_zec(pending_zcash_transaction.fee, display_fee, sizeof(display_fee));
+  strncat(display_fee, " ZEC", sizeof(display_fee) - strlen(display_fee) - 1);
+  WalletUiTransactionReview review = {};
+  review.network = "ZCASH";
+  review.fee = pending_zcash_transaction.fee;
+  review.fee_text = display_fee;
+  review.approval_code = approval;
+  review.output_count = pending_zcash_transaction.output_count;
+  for (size_t index = 0; index < pending_zcash_transaction.output_count; ++index) {
+    format_zec(pending_zcash_transaction.outputs[index].value,
+               amount_texts[index], sizeof(amount_texts[index]));
+    strncat(amount_texts[index], " ZEC",
+            sizeof(amount_texts[index]) - strlen(amount_texts[index]) - 1);
+    review.outputs[index] = {
+      pending_zcash_transaction.outputs[index].value, amount_texts[index],
+      pending_zcash_transaction.outputs[index].address, "EXTERNAL"
+    };
+  }
+  wallet_ui_show_transaction(review);
+  secure_zero(amount_texts, sizeof(amount_texts));
+  secure_zero(display_fee, sizeof(display_fee));
+  secure_zero(approval, sizeof(approval));
+}
+
+void sign_zcash_transaction(const char *approval_text) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = { true, false, display_is_available };
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::ApprovalResponse, transport_state)) {
+    clear_pending_transaction();
+    Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+    return;
+  }
+  if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Zcash) {
+    Serial.println("ERR no-reviewed-zcash-transaction");
+    return;
+  }
+  if (deadline_reached(millis(), transaction_expires_at) ||
+      approval_text == nullptr || strlen(approval_text) != 6) {
+    clear_pending_transaction();
+    Serial.println("ERR invalid-or-expired-confirmation; review-cleared");
+    return;
+  }
+  uint32_t supplied = 0;
+  for (size_t index = 0; index < 6; ++index) {
+    if (approval_text[index] < '0' || approval_text[index] > '9') {
+      clear_pending_transaction();
+      Serial.println("ERR invalid-confirmation; review-cleared");
+      return;
+    }
+    supplied = supplied * 10U +
+               static_cast<uint32_t>(approval_text[index] - '0');
+  }
+  if (supplied != transaction_approval) {
+    clear_pending_transaction();
+    Serial.println("ERR confirmation-mismatch; review-cleared");
+    return;
+  }
+  HdPrivateNode master;
+  if (!load_master(&master)) {
+    clear_pending_transaction();
+    return;
+  }
+  uint8_t signed_transaction[kZcashMaxTransactionSize];
+  size_t signed_size = sizeof(signed_transaction);
+  const ZcashError error = zcash_sign_request(
+      pending_zcash_transaction, master, signed_transaction, &signed_size);
+  secure_zero(&master, sizeof(master));
+  clear_pending_transaction();
+  if (error != ZcashError::Ok) {
+    secure_zero(signed_transaction, sizeof(signed_transaction));
+    Serial.print("ERR zcash-sign ");
+    Serial.println(zcash_error_text(error));
+    return;
+  }
+  uint8_t transaction_id[kSha256Size];
+  const bool hashed =
+      crypto_double_sha256(signed_transaction, signed_size, transaction_id);
+  Serial.print("OK signed-transaction=");
+  print_hex(signed_transaction, signed_size);
+  Serial.println();
+  if (hashed) {
+    Serial.print("txid=");
+    print_hex_reverse(transaction_id, sizeof(transaction_id));
+    Serial.println();
+  }
+  secure_zero(transaction_id, sizeof(transaction_id));
+  secure_zero(signed_transaction, sizeof(signed_transaction));
+  wallet_ui_show_catalog();
+}
+
+void handle_zcash(char *command) {
+  constexpr char kInspectPrefix[] = "zec inspect ";
+  constexpr char kSignPrefix[] = "zec sign ";
+  if (strncmp(command, kInspectPrefix, sizeof(kInspectPrefix) - 1) == 0) {
+    inspect_zcash_transaction(command + sizeof(kInspectPrefix) - 1);
+  } else if (strncmp(command, kSignPrefix, sizeof(kSignPrefix) - 1) == 0) {
+    sign_zcash_transaction(command + sizeof(kSignPrefix) - 1);
+  } else {
+    Serial.println("ERR invalid-zcash-command");
+  }
+}
+
+void handle_kaspa(char *command) {
+  constexpr char kInspectPrefix[] = "kaspa inspect ";
+  constexpr char kSignPrefix[] = "kaspa sign ";
+  if (strncmp(command, kInspectPrefix, sizeof(kInspectPrefix) - 1) == 0) {
+    inspect_kaspa_transaction(command + sizeof(kInspectPrefix) - 1);
+  } else if (strncmp(command, kSignPrefix, sizeof(kSignPrefix) - 1) == 0) {
+    sign_kaspa_transaction(command + sizeof(kSignPrefix) - 1);
+  } else {
+    Serial.println("ERR invalid-kaspa-command");
+  }
+}
+
 void handle_evm(char *command) {
   constexpr char kInspectPrefix[] = "evm inspect ";
   constexpr char kSignPrefix[] = "evm sign ";
@@ -1186,6 +1742,33 @@ void handle_evm(char *command) {
   } else {
     Serial.println("ERR invalid-evm-command");
   }
+}
+
+void handle_link(char *command) {
+  if (!require_authentication()) return;
+  if (strcmp(command, "link status") == 0) {
+    Serial.print("OK link=");
+    Serial.print(wallet_link_service_ready() ? "ready" : "unavailable");
+    Serial.print(" nfc=");
+    Serial.print(wallet_link_service_nfc_state());
+    Serial.print(" pairing-pending=");
+    Serial.print(wallet_link_service_pairing_pending() ? "yes" : "no");
+    Serial.print(" usb-data=");
+    Serial.println(usb_data_enabled ? "on" : "off");
+    return;
+  }
+  if (strcmp(command, "link pair confirm") == 0) {
+    Serial.println(wallet_link_service_confirm_pairing()
+                       ? "OK phone-paired"
+                       : "ERR no-pending-pairing");
+    return;
+  }
+  if (strcmp(command, "link pair reject") == 0) {
+    wallet_link_service_reject_pairing();
+    Serial.println("OK pairing-rejected");
+    return;
+  }
+  Serial.println("ERR invalid-link-command");
 }
 
 void handle_transaction(char *command) {
@@ -1208,22 +1791,33 @@ void run_self_tests() {
   if (!require_authentication()) return;
   const bool crypto = run_crypto_self_tests();
   const bool cryptonote = run_cryptonote_self_tests();
+  const bool cryptonote_ringct = run_cryptonote_ringct_self_tests();
+  const bool cryptonote_clsag = run_cryptonote_clsag_self_test();
   const bool bip39 = run_bip39_self_test();
   const bool bip32 = run_bip32_self_test();
+  const bool evm_derive = run_evm_derivation_self_test();
   const bool address = run_address_self_tests();
   const bool networks = run_network_profile_self_tests();
   const bool tokens = run_token_profile_self_tests();
   const bool transaction = run_bitcoin_transaction_self_test();
   const bool evm = run_evm_transaction_self_test();
+  const bool zcash_sighash = run_zcash_sighash_self_tests();
+  const bool zcash = run_zcash_transaction_self_test();
   const bool transport = run_transport_policy_self_test();
   Serial.print("OK crypto=");
   Serial.print(crypto ? "pass" : "FAIL");
   Serial.print(" cryptonote=");
   Serial.print(cryptonote ? "pass" : "FAIL");
+  Serial.print(" cryptonote-ringct=");
+  Serial.print(cryptonote_ringct ? "pass" : "FAIL");
+  Serial.print(" cryptonote-clsag=");
+  Serial.print(cryptonote_clsag ? "pass" : "FAIL");
   Serial.print(" bip39=");
   Serial.print(bip39 ? "pass" : "FAIL");
   Serial.print(" bip32=");
   Serial.print(bip32 ? "pass" : "FAIL");
+  Serial.print(" evm-derive=");
+  Serial.print(evm_derive ? "pass" : "FAIL");
   Serial.print(" address=");
   Serial.print(address ? "pass" : "FAIL");
   Serial.print(" networks=");
@@ -1234,6 +1828,10 @@ void run_self_tests() {
   Serial.print(transaction ? "pass" : "FAIL");
   Serial.print(" evm=");
   Serial.print(evm ? "pass" : "FAIL");
+  Serial.print(" zcash-sighash=");
+  Serial.print(zcash_sighash ? "pass" : "FAIL");
+  Serial.print(" zcash=");
+  Serial.print(zcash ? "pass" : "FAIL");
   Serial.print(" transport-policy=");
   Serial.println(transport ? "pass" : "FAIL");
 }
@@ -1244,6 +1842,7 @@ void handle_line(char *command) {
   if (strcmp(command, "help") == 0) show_help();
   else if (strcmp(command, "status") == 0) show_status();
   else if (strncmp(command, "coin ", 5) == 0) handle_coin(command);
+  else if (strncmp(command, "mining ", 7) == 0) handle_mining(command);
   else if (strncmp(command, "token ", 6) == 0) handle_token(command);
   else if (strcmp(command, "auth begin") == 0) begin_challenge();
   else if (strncmp(command, "auth unlock ", 12) == 0) unlock(command + 12);
@@ -1254,6 +1853,9 @@ void handle_line(char *command) {
   } else if (strcmp(command, "selftest") == 0) run_self_tests();
   else if (strncmp(command, "wallet ", 7) == 0) handle_wallet(command);
   else if (strncmp(command, "evm ", 4) == 0) handle_evm(command);
+  else if (strncmp(command, "kaspa ", 6) == 0) handle_kaspa(command);
+  else if (strncmp(command, "zec ", 4) == 0) handle_zcash(command);
+  else if (strncmp(command, "link ", 5) == 0) handle_link(command);
   else if (strncmp(command, "tx ", 3) == 0) handle_transaction(command);
   else Serial.println("ERR unknown-command; use help");
 }
@@ -1281,6 +1883,13 @@ bool wallet_cli_init(bool display_available) {
     retry_after = millis() + delay_ms;
   }
   Serial.println("HexWallet authenticated CLI ready; use help");
+  Serial.print("INFO usb-data=");
+  Serial.print(usb_data_enabled ? "on" : "off");
+  Serial.print(" hold-boot-ms=");
+  Serial.println(HEXWALLET_USB_ENABLE_HOLD_MS);
+  if (!board_has_user_button()) {
+    Serial.println("WARN no verified user button; USB data cannot be enabled at runtime");
+  }
   if (!display_available) Serial.println("INFO no display detected; authenticated CLI is the active interface");
   if (!provisioned) {
     Serial.println("INFO authentication is not provisioned; use auth provision <pin> <pin>");
@@ -1291,8 +1900,116 @@ bool wallet_cli_init(bool display_available) {
 #endif
 }
 
+bool wallet_usb_data_enabled() {
+#if HEXWALLET_ENABLE_CLI
+  return usb_data_enabled;
+#else
+  return false;
+#endif
+}
+
+void wallet_usb_data_set(bool enabled) {
+#if HEXWALLET_ENABLE_CLI
+  usb_data_enabled = enabled;
+  usb_data_enabled_at = millis();
+  usb_apdu_used = 0;
+  usb_apdu_expected = 0;
+  usb_apdu_mode = false;
+  if (enabled) {
+    // Drop bytes that arrived while the transport was closed so they can
+    // never be replayed into an authenticated session later.
+    while (Serial.available() > 0) Serial.read();
+    Serial.print("INFO usb-data-enabled window-ms=");
+    Serial.println(HEXWALLET_USB_ENABLE_WINDOW_MS);
+  } else {
+    Serial.println("INFO usb-data-disabled");
+  }
+#else
+  (void)enabled;
+#endif
+}
+
+void wallet_usb_data_service() {
+#if HEXWALLET_ENABLE_CLI
+  if (!board_has_user_button()) {
+    usb_button_down = false;
+    return;
+  }
+  const bool down = board_user_button_pressed();
+  const uint32_t now = millis();
+  if (down && !usb_button_down) {
+    usb_button_down = true;
+    usb_button_long_handled = false;
+    usb_button_down_at = now;
+  } else if (!down) {
+    usb_button_down = false;
+  } else if (!usb_button_long_handled &&
+             now - usb_button_down_at >= HEXWALLET_USB_ENABLE_HOLD_MS) {
+    usb_button_long_handled = true;
+    wallet_usb_data_set(!usb_data_enabled);
+  }
+  if (usb_data_enabled && usb_data_enabled_at != 0 &&
+      now - usb_data_enabled_at >= HEXWALLET_USB_ENABLE_WINDOW_MS) {
+    wallet_usb_data_set(false);
+  }
+#endif
+}
+
+bool service_usb_apdu() {
+  if (!usb_apdu_mode && Serial.available() > 0 &&
+      Serial.peek() == kUsbApduMagic0) {
+    usb_apdu_mode = true;
+    usb_apdu_used = 0;
+    usb_apdu_expected = 0;
+  }
+  if (!usb_apdu_mode) return false;
+  while (Serial.available() > 0 && usb_apdu_used < sizeof(usb_apdu_frame)) {
+    usb_apdu_frame[usb_apdu_used++] = static_cast<uint8_t>(Serial.read());
+  }
+  if (usb_apdu_used >= 2 &&
+      (usb_apdu_frame[0] != kUsbApduMagic0 ||
+       usb_apdu_frame[1] != kUsbApduMagic1)) {
+    usb_apdu_used = 0;
+    usb_apdu_expected = 0;
+    usb_apdu_mode = false;
+    return true;
+  }
+  if (usb_apdu_expected == 0 && usb_apdu_used >= 4) {
+    const size_t length = static_cast<size_t>(usb_apdu_frame[2]) |
+                          (static_cast<size_t>(usb_apdu_frame[3]) << 8);
+    if (length > kUsbApduMax) {
+      usb_apdu_used = 0;
+      usb_apdu_mode = false;
+      return true;
+    }
+    usb_apdu_expected = 4 + length;
+  }
+  if (usb_apdu_expected != 0 && usb_apdu_used >= usb_apdu_expected) {
+    uint8_t response[kUsbApduMax + 4];
+    const size_t apdu_size = usb_apdu_expected - 4;
+    const size_t response_size = wallet_link_service_apdu(
+        usb_apdu_frame + 4, apdu_size, millis(), response + 4,
+        sizeof(response) - 4);
+    const size_t total = 4 + response_size;
+    response[0] = kUsbApduMagic0;
+    response[1] = kUsbApduMagic1;
+    response[2] = static_cast<uint8_t>(response_size);
+    response[3] = static_cast<uint8_t>(response_size >> 8);
+    for (size_t index = 0; index < total; ++index) {
+      Serial.write(response[index]);
+    }
+    secure_zero(response, sizeof(response));
+    usb_apdu_used = 0;
+    usb_apdu_expected = 0;
+    usb_apdu_mode = false;
+    return true;
+  }
+  return true;
+}
+
 void wallet_cli_service() {
 #if HEXWALLET_ENABLE_CLI
+  wallet_usb_data_service();
   if (authenticated && millis() - authenticated_at >= HEXWALLET_CLI_SESSION_TIMEOUT_MS) {
     wallet_cli_lock();
     Serial.println("INFO session-expired-and-wallet-cleared");
@@ -1301,6 +2018,11 @@ void wallet_cli_service() {
     clear_pending_transaction();
     Serial.println("INFO transaction-review-expired");
   }
+  if (!usb_data_enabled) {
+    while (Serial.available() > 0) Serial.read();
+    return;
+  }
+  if (service_usb_apdu()) return;
   while (Serial.available() > 0) {
     const char value = static_cast<char>(Serial.read());
     if (value == '\r') continue;
@@ -1337,6 +2059,12 @@ void wallet_cli_lock() {
   challenge_active = false;
   authenticated_at = 0;
   secure_zero(challenge, sizeof(challenge));
+  // Closing the USB gate on lock also drops anything that was typed but not
+  // yet executed, so a half-typed signing command cannot survive a lock.
+  usb_data_enabled = false;
+  usb_apdu_used = 0;
+  usb_apdu_expected = 0;
+  usb_apdu_mode = false;
   clear_wallet();
 #endif
 }

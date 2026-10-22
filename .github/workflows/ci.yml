@@ -10,6 +10,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -26,12 +29,15 @@ jobs:
   host-tests:
     name: Host self-tests (MSVC + ESP32 mbedtls headers)
     runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: HexWallet
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Check imported fork signing policy
-        run: python tests/test_fork_registry.py
+        with:
+          path: HexWallet
 
       - name: Install arduino-cli ${{ env.ARDUINO_CLI_VERSION }}
         shell: pwsh
@@ -43,15 +49,17 @@ jobs:
           $dst   = Join-Path $env:RUNNER_TEMP 'arduino-cli'
           $bin   = Join-Path $env:RUNNER_TEMP 'bin'
           $deadline = (Get-Date).AddMinutes(3)
+          $downloaded = $false
           do {
             try {
               Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+              $downloaded = $true
             } catch {
               Write-Warning "download failed: $($_.Exception.Message); retrying"
               Start-Sleep -Seconds 5
             }
-          } while (-not (Test-Path $zip) -and (Get-Date) -lt $deadline)
-          if (-not (Test-Path $zip)) { throw "failed to download $url" }
+          } while (-not $downloaded -and (Get-Date) -lt $deadline)
+          if (-not $downloaded) { throw "failed to download $url" }
           Expand-Archive -Path $zip -DestinationPath $dst -Force
           New-Item -ItemType Directory -Force -Path $bin | Out-Null
           Move-Item -Force (Join-Path $dst 'arduino-cli.exe') (Join-Path $bin 'arduino-cli.exe')
@@ -61,10 +69,14 @@ jobs:
         shell: pwsh
         run: |
           $cli = "$env:RUNNER_TEMP\bin\arduino-cli.exe"
-          & $cli config init --overwrite --dest-dir "$env:RUNNER_TEMP\arduino-cli-conf"
+          & $cli config init --overwrite
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $cli core update-index
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $cli core install esp32:esp32@${{ env.ESP32_CORE_VERSION }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Locate esp32-libs mbedtls include dir
         shell: pwsh
@@ -81,12 +93,24 @@ jobs:
           # and runs host_test.exe, exiting with the test verdict.
           powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 
+      - name: Catalog and phone protocol tests (require freshly built harness)
+        shell: pwsh
+        run: |
+          # build.ps1 also links tests/host/link_pipe.exe, which runs the real
+          # WalletLinkDevice/WalletNfcApdu code behind a line protocol. The
+          # reference phone client drives pairing, handshake, encrypted
+          # requests, replay and tamper rejection against it.
+          if (-not (Test-Path tests/host/link_pipe.exe)) { throw "phone harness missing" }
+          python -m unittest discover -s tests -p "test_*.py"
+
       - name: Device-target compile check (xtensa g++)
         shell: pwsh
         run: |
           # Compiles every pure-C++ firmware source with the ESP32 Xtensa
           # toolchain to prove the crypto core builds for the 32-bit device.
           powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
 
       - name: Clone LVGL 9.5.0 (for the board port compile check)
         shell: pwsh
@@ -108,6 +132,10 @@ jobs:
   firmware-build:
     name: Device build (${{ matrix.target }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: HexWallet
     strategy:
       fail-fast: false
       matrix:
@@ -115,10 +143,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          path: HexWallet
 
       - name: Install arduino-cli ${{ env.ARDUINO_CLI_VERSION }}
         run: |
-          set -e
+          set -euo pipefail
           # The arduino-cli install.sh refuses to create $BINDIR itself; on a
           # fresh runner ~/bin does not exist, so create it first.
           mkdir -p "$HOME/bin"

@@ -1153,6 +1153,41 @@ bool run_bip84_self_test() {
   return passed;
 }
 
+bool run_evm_derivation_self_test() {
+  // Official Conflux Ledger app vector:
+  // tests/test_get_pubkey_cmd.py, m/44'/503'/0'/0/0.
+  static const char kMnemonic[] =
+      "clown disagree excess state tray tongue use fat teach woman dizzy include";
+  static const uint8_t kExpectedPublic[kUncompressedPublicKeySize] = {
+    0x04, 0x4b, 0x0e, 0x7a, 0xa1, 0x24, 0x22, 0xc8, 0xbd, 0x4b, 0x2b, 0xed,
+    0x18, 0xbb, 0xa7, 0x75, 0xe0, 0x27, 0x1e, 0x6b, 0x9a, 0x99, 0xa1, 0xbf,
+    0x53, 0x40, 0x57, 0x2a, 0xce, 0xeb, 0x80, 0xe0, 0x35, 0x05, 0x88, 0xd6,
+    0xdc, 0xc8, 0x97, 0x07, 0x41, 0x2b, 0x12, 0x76, 0xe4, 0xcd, 0xfb, 0xc5,
+    0xfc, 0x65, 0x91, 0x06, 0x96, 0xc6, 0x89, 0x46, 0x56, 0x11, 0xb1, 0x2d,
+    0xda, 0x5b, 0x07, 0x00, 0xdb,
+  };
+  static const char kExpectedAddress[] =
+      "0xdc2a4fe87a86f8cd561fdd56d26075b4496fc831";
+  uint8_t seed[kSeedSize] = {};
+  HdPrivateNode master = {}, child = {};
+  uint8_t public_key[kUncompressedPublicKeySize] = {};
+  char address[64] = {};
+  bool passed =
+      bip39_seed_from_english(kMnemonic, "", seed) == WalletError::Ok &&
+      hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
+      hd_private_derive_path(&master, "m/44'/503'/0'/0/0", &child) == WalletError::Ok &&
+      uncompressed_public_key_from_private(child.private_key, public_key) == WalletError::Ok &&
+      memcmp(public_key, kExpectedPublic, sizeof(kExpectedPublic)) == 0 &&
+      address_evm(public_key, address, sizeof(address)) == WalletError::Ok &&
+      strcmp(address, kExpectedAddress) == 0;
+  secure_zero(seed, sizeof(seed));
+  secure_zero(&master, sizeof(master));
+  secure_zero(&child, sizeof(child));
+  secure_zero(public_key, sizeof(public_key));
+  secure_zero(address, sizeof(address));
+  return passed;
+}
+
 bool run_bip340_self_test() {
   struct Vector {
     const char *secret;

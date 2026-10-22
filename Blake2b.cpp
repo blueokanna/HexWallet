@@ -112,6 +112,14 @@ bool blake2b_init(Blake2bState *state, size_t out_size, const uint8_t *key,
   return true;
 }
 
+bool blake2b_init_personal(Blake2bState *state, size_t out_size,
+                           const uint8_t personal[16]) {
+  if (personal == nullptr || !blake2b_init(state, out_size, nullptr, 0)) return false;
+  state->h[6] ^= load_le64(personal);
+  state->h[7] ^= load_le64(personal + 8);
+  return true;
+}
+
 void blake2b_update(Blake2bState *state, const uint8_t *data, size_t size) {
   if (state == nullptr || data == nullptr || size == 0) return;
   size_t offset = 0;
@@ -160,11 +168,51 @@ bool run_blake2b_self_tests() {
     0xbd, 0xdd, 0x81, 0x3c, 0x63, 0x42, 0x39, 0x72, 0x31, 0x71, 0xef, 0x3f,
     0xee, 0x98, 0x57, 0x9b, 0x94, 0x96, 0x4e, 0x3b, 0xb1, 0xcb, 0x3e, 0x42,
     0x72, 0x62, 0xc8, 0xc0, 0x68, 0xd5, 0x23, 0x19 };
+  static const uint8_t expected512[64] = {
+    0xba, 0x80, 0xa5, 0x3f, 0x98, 0x1c, 0x4d, 0x0d, 0x6a, 0x27, 0x97, 0xb6,
+    0x9f, 0x12, 0xf6, 0xe9, 0x4c, 0x21, 0x2f, 0x14, 0x68, 0x5a, 0xc4, 0xb7,
+    0x4b, 0x12, 0xbb, 0x6f, 0xdb, 0xff, 0xa2, 0xd1, 0x7d, 0x87, 0xc5, 0x39,
+    0x2a, 0xab, 0x79, 0x2d, 0xc2, 0x52, 0xd5, 0xde, 0x45, 0x33, 0xcc, 0x95,
+    0x18, 0xd3, 0x8a, 0xa8, 0xdb, 0xf1, 0x92, 0x5a, 0xb9, 0x23, 0x86, 0xed,
+    0xd4, 0x00, 0x99, 0x23,
+  };
+  static const uint8_t expected_empty512[64] = {
+    0x78, 0x6a, 0x02, 0xf7, 0x42, 0x01, 0x59, 0x03, 0xc6, 0xc6, 0xfd, 0x85,
+    0x25, 0x52, 0xd2, 0x72, 0x91, 0x2f, 0x47, 0x40, 0xe1, 0x58, 0x47, 0x61,
+    0x8a, 0x86, 0xe2, 0x17, 0xf7, 0x1f, 0x54, 0x19, 0xd2, 0x5e, 0x10, 0x31,
+    0xaf, 0xee, 0x58, 0x53, 0x13, 0x89, 0x64, 0x44, 0x93, 0x4e, 0xb0, 0x4b,
+    0x90, 0x3a, 0x68, 0x5b, 0x14, 0x48, 0xb7, 0x55, 0xd5, 0x6f, 0x70, 0x1a,
+    0xfe, 0x9b, 0xe2, 0xce,
+  };
+  static const uint8_t expected_empty256[32] = {
+    0x0e, 0x57, 0x51, 0xc0, 0x26, 0xe5, 0x43, 0xb2, 0xe8, 0xab, 0x2e, 0xb0,
+    0x60, 0x99, 0xda, 0xa1, 0xd1, 0xe5, 0xdf, 0x47, 0x77, 0x8f, 0x77, 0x87,
+    0xfa, 0xab, 0x45, 0xcd, 0xf1, 0x2f, 0xe3, 0xa8,
+  };
   uint8_t actual[64];
   bool passed = blake2b_keyed_hash(nullptr, 0, abc, sizeof(abc), actual, 32) &&
                 crypto_constant_time_equal(actual, expected256, sizeof(expected256));
-  // Keyed vector cross-checked against Python hashlib.blake2b and Rust
-  // blake2b_simd with the same key: empty message, 32-byte digest.
+  passed = blake2b_keyed_hash(nullptr, 0, abc, sizeof(abc), actual, 64) &&
+           crypto_constant_time_equal(actual, expected512, sizeof(expected512)) &&
+           passed;
+  passed = blake2b_keyed_hash(nullptr, 0, nullptr, 0, actual, 64) &&
+           crypto_constant_time_equal(actual, expected_empty512,
+                                      sizeof(expected_empty512)) &&
+           passed;
+  passed = blake2b_keyed_hash(nullptr, 0, nullptr, 0, actual, 32) &&
+           crypto_constant_time_equal(actual, expected_empty256,
+                                      sizeof(expected_empty256)) &&
+           passed;
+  Blake2bState stream_state;
+  if (passed && blake2b_init(&stream_state, 32, nullptr, 0)) {
+    for (size_t index = 0; index < sizeof(abc); ++index) {
+      blake2b_update(&stream_state, abc + index, 1);
+    }
+    passed = blake2b_final(&stream_state, actual) &&
+             crypto_constant_time_equal(actual, expected256, sizeof(expected256));
+  } else {
+    passed = false;
+  }
   static const uint8_t kKey[] = { 'T', 'r', 'a', 'n', 's', 'a', 'c', 't', 'i',
                                   'o', 'n', 'S', 'i', 'g', 'n', 'i', 'n', 'g',
                                   'H', 'a', 's', 'h' };
@@ -179,6 +227,20 @@ bool run_blake2b_self_tests() {
   uint8_t unkeyed[32];
   passed = blake2b_keyed_hash(nullptr, 0, nullptr, 0, unkeyed, 32) &&
            !crypto_constant_time_equal(unkeyed, actual, sizeof(unkeyed)) && passed;
+  // Zcash ZIP-243 personalization: Python hashlib.blake2b(person=...).
+  static const uint8_t kPersonal[16] = {
+    0x5a, 0x63, 0x61, 0x73, 0x68, 0x53, 0x69, 0x67,
+    0x48, 0x61, 0x73, 0x68, 0x30, 0xf3, 0x37, 0x54 };
+  static const uint8_t kPersonalMessage[] = "hexwallet-zcash-personalization-test";
+  const uint8_t expected_personal[32] = {
+    0x1d, 0x60, 0x60, 0x0a, 0xe3, 0x08, 0xfb, 0x1b, 0xaf, 0xb8, 0xc9, 0x71,
+    0x06, 0x05, 0xd5, 0x3b, 0x5e, 0xd6, 0xed, 0x8c, 0x8c, 0x13, 0x75, 0x52,
+    0x9a, 0x9b, 0x6f, 0x6c, 0x83, 0x3d, 0x78, 0xf0 };
+  Blake2bState personal_state;
+  passed = blake2b_init_personal(&personal_state, 32, kPersonal);
+  blake2b_update(&personal_state, kPersonalMessage, sizeof(kPersonalMessage) - 1);
+  passed = passed && blake2b_final(&personal_state, actual) &&
+           crypto_constant_time_equal(actual, expected_personal, sizeof(expected_personal));
   secure_zero(actual, sizeof(actual));
   secure_zero(unkeyed, sizeof(unkeyed));
   return passed;

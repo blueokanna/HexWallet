@@ -5,6 +5,8 @@
 `local_segwit`、`keccak256`、`local_ripemd160`）。每个原语都在固件启动前
 于主机上对照官方测试向量验证。
 
+严格构建说明：CryptoNote、QRL、Chia/BLS 等仅地址原语是内部库，只有在完整收/发/签名路径同时交付时才会进入钱包目录；当前不会作为钱包暴露。
+
 ## Ed25519（RFC 8032）
 
 - 纯域/群运算，位于 `Ed25519.cpp`，不依赖外部大数库。
@@ -57,6 +59,23 @@ Chia/BLS 密钥树。规范已迁移到 ERC-2333；要点如下：
 `okm mod r`）都能通过，只有完整点运算才会暴露。修法：先约减 `|A|`，
 非零时再 `B − |A|`。
 
+## Zcash 透明 v4 / ZIP-243
+
+- `ZcashTransaction` 只签名 Overwinter/Sapling v4 透明 t1 P2PKH 输入。屏蔽
+  spend/output、JoinSplit、v3/v5 和已有 scriptSig 在派生任何密钥之前就被拒绝。
+- 摘要使用 `"ZcashSigHash" || branch_id_le` 个性化的 BLAKE2b-256，覆盖 v4
+  header、`hashPrevouts`、`hashSequence`、`hashOutputs`、
+  `hashJoinSplits`、`hashShieldedSpends`、`hashShieldedOutputs`、lock time、
+  expiry height、value balance 和 hash type，再追加当前输入的
+  outpoint/scriptCode/amount/sequence。`Blake2b` 新增了 personalization；
+  keyed hash 不能替代它。
+- 主网分支 ID 是显式网络策略（`0x5437f330`，NU6.2），不是主机任意传入的
+  参数。`zec inspect` 审查带每个 prevout 金额和 scriptPubKey 的紧凑 payload；
+  `zec sign` 重新派生 `m/44'/133'/account'/change/index`、校验 prevout
+  HASH160，并输出 v4 交易和 txid。
+- 启动自检校验官方 ZIP-243 test vector 3（`f3148f80…`）以及解析/手续费失败
+  路径；完整签名路径由设备上的 `run_zcash_transaction_self_test()` 覆盖。
+
 ## CryptoNote（Monero / Masari）
 
 - Spend key = `sc_reduce32(Keccak-256(seed))`，view key =
@@ -91,11 +110,9 @@ Chia/BLS 密钥树。规范已迁移到 ERC-2333；要点如下：
 `WalletCustody` 把每个 `AddressEncoding` 映射为 `KeyScheme`，回答安全芯片
 能否持有密钥并产生该链需要的精确签名。默认活动配置是纯 MCU；只有板级移植
 探测 applet 并调用 `set_active_secure_element_profile()` 后才会改变。保守的
-SE050C1H1 目标配置只声明 secp256k1 + ECDSA + seed 封装：BTC/LTC/ETH/Cosmos 类密钥可以导入并在
-applet 内签名；Kaspa（BIP340 Schnorr）、Monero/Masari（Keccak 约简
-Edwards）、QRL（XMSS）、Chia（BLS12-381），以及在硬件验证 Ed25519
-applet 路径之前的 Solana/Algorand/Cardano/Tezos/Qubic 密钥都保留在
-MCU RAM。BIP32/SLIP-0010 派生本身始终在 MCU 完成，因为 SE050 没有
+SE050C1H1 目标配置只声明 secp256k1 + ECDSA + seed 封装：BTC/LTC/ETH 类密钥可以导入并在
+applet 内签名；Kaspa（BIP340 Schnorr）以及内部保留的 Ed25519/BLS/XMSS
+密钥都保留在 MCU RAM，直到 applet 路径在硬件上验证通过。BIP32/SLIP-0010 派生本身始终在 MCU 完成，因为 SE050 没有
 BIP32 引擎。该策略是代码而非宣传：`wallet custody <id>` 会输出结论与原因。
 
 ## Chia 标准地址

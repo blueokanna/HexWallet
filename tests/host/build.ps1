@@ -26,7 +26,7 @@ New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 $common = @(
   "/nologo", "/O2", "/W3",
-  "/D_CRT_SECURE_NO_WARNINGS",
+  "/D_CRT_SECURE_NO_WARNINGS", "/DHEXWALLET_HOST_TEST=1",
   "/DMBEDTLS_ALLOW_PRIVATE_ACCESS",
   "/DHEXWALLET_ENABLE_LVGL=0",
   "/DHEXWALLET_BOARD=0",
@@ -41,6 +41,9 @@ $cppSources = @(
   "CryptoPrimitives.cpp",
   "Blake2b.cpp",
   "CryptoExtended.cpp",
+  "WalletLinkCrypto.cpp",
+  "WalletLink.cpp",
+  "WalletNfcApdu.cpp",
   "Ed25519.cpp",
   "BlsG1.cpp",
   "base58.cpp",
@@ -52,15 +55,17 @@ $cppSources = @(
   "WalletAltAddresses.cpp",
   "WalletNetworks.cpp",
   "WalletCatalog.cpp",
+  "WalletMiningCatalog.cpp",
   "WalletTokens.cpp",
   "CryptoNoteAddress.cpp",
+  "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp",
+  "CryptoNoteTransaction.cpp",
   "QrlXmss.cpp",
   "WalletCustody.cpp",
   "BitcoinTransaction.cpp",
   "KaspaTransaction.cpp",
   "TokenCalldata.cpp",
-  "CosmosTransaction.cpp",
-  "MoneroScan.cpp",
+  "ZcashTransaction.cpp",
   "host_security.cpp",
   "host_test_main.cpp"
 )
@@ -76,6 +81,43 @@ foreach ($s in $cppSources) {
 }
 
 & cl @common "/Fe$out" $cppObjs (Join-Path $objDir "mbedtls_host.obj") /link
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Second binary: the phone-link harness used by tests/test_phone_link.py.
+# It links the real WalletLink/WalletLinkCrypto/WalletNfcApdu code with a stub
+# application handler so the phone-side reference client can be validated
+# end to end without hardware.
+$pipeSources = @(
+  "CryptoPrimitives.cpp",
+  "Blake2b.cpp",
+  "CryptoExtended.cpp",
+  "WalletLinkCrypto.cpp",
+  "WalletLink.cpp",
+  "WalletNfcApdu.cpp",
+  "Ed25519.cpp",
+  "BlsG1.cpp",
+  "keccak256.cpp",
+  "local_ripemd160.cpp",
+  "host_security.cpp"
+)
+$pipeObjs = @()
+foreach ($s in $pipeSources) {
+  $src = Join-Path $root $s
+  if (-not (Test-Path $src)) { $src = Join-Path $PSScriptRoot $s }
+  $obj = Join-Path $objDir ("pipe_" + ($s -replace '\.cpp$', '.obj'))
+  & cl @common /std:c++17 /EHsc /utf-8 /c $src "/Fo$obj"
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $pipeObjs += $obj
+}
+& cl @common /std:c++17 /EHsc /utf-8 /c (Join-Path $PSScriptRoot "link_pipe.cpp") "/Fo$objDir\pipe_link_pipe.obj"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& cl @common "/Fe$(Join-Path $PSScriptRoot 'link_pipe.exe')" $pipeObjs "$objDir\pipe_link_pipe.obj" (Join-Path $objDir "mbedtls_host.obj") /link
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Exercise the enabled NFC driver, including actual SPI frame construction.
+& cl /nologo /O2 /W3 /std:c++17 /EHsc /utf-8 /DHEXWALLET_BOARD=0 /DHEXWALLET_ENABLE_LVGL=0 "/I$PSScriptRoot/mock" "/I$root" (Join-Path $PSScriptRoot "nfc_port_test.cpp") "/Fo$objDir/nfc_port_test.obj" "/Fe$(Join-Path $PSScriptRoot 'nfc_port_test.exe')"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& (Join-Path $PSScriptRoot 'nfc_port_test.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & $out

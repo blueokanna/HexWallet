@@ -111,8 +111,6 @@ static void rm67162_push_pixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 }
 
 static bool rm67162_init() {
-  // IO38 is the panel power rail on the touch variant (onboard LED on the
-  // basic one). The official driver enables it before touching the panel.
 #if defined(HEXWALLET_PIN_LED)
   pinMode(HEXWALLET_PIN_LED, OUTPUT);
   digitalWrite(HEXWALLET_PIN_LED, HIGH);
@@ -191,8 +189,6 @@ static void st_write_byte(uint8_t b) {
   REG_WRITE(GPIO_OUT1_W1TS_REG, uint32_t(s_st_set_pat[b] >> 32));
   REG_WRITE(GPIO_OUT_W1TC_REG, uint32_t(s_st_clr_pat[b]));
   REG_WRITE(GPIO_OUT1_W1TC_REG, uint32_t(s_st_clr_pat[b] >> 32));
-  // 8080 WR strobe: falling edge latches nothing, data is latched on the
-  // rising edge; keep the low phase a few cycles wide.
   gpio_fast_clr(HEXWALLET_LCD_PIN_WR);
   __asm__ __volatile__("nop");
   gpio_fast_set(HEXWALLET_LCD_PIN_WR);
@@ -565,6 +561,39 @@ uint16_t board_battery_millivolts() {
   return read_battery_mv();
 #else
   return 0;
+#endif
+}
+
+bool board_has_user_button() {
+#if defined(HEXWALLET_PIN_USER_BUTTON) && HEXWALLET_PIN_USER_BUTTON >= 0
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool board_user_button_pressed() {
+#if defined(HEXWALLET_PIN_USER_BUTTON) && HEXWALLET_PIN_USER_BUTTON >= 0
+  static bool configured = false;
+  if (!configured) {
+    pinMode(HEXWALLET_PIN_USER_BUTTON, INPUT_PULLUP);
+    configured = true;
+  }
+  return digitalRead(HEXWALLET_PIN_USER_BUTTON) == LOW;
+#else
+  return false;
+#endif
+}
+
+SecureElementProbeState board_secure_element_probe() {
+#if defined(HEXWALLET_SE050_I2C_SDA) && defined(HEXWALLET_SE050_I2C_SCL)
+  // Dedicated bus: a custody probe must not reconfigure the panel/touch bus.
+  Wire1.begin(HEXWALLET_SE050_I2C_SDA, HEXWALLET_SE050_I2C_SCL);
+  Wire1.beginTransmission(0x48);
+  return Wire1.endTransmission() == 0 ? SecureElementProbeState::PresentUnverified
+                                      : SecureElementProbeState::NoResponse;
+#else
+  return SecureElementProbeState::NotConfigured;
 #endif
 }
 

@@ -28,8 +28,6 @@ struct WalletCatalogEntry {
 
 size_t wallet_catalog_count();
 bool wallet_catalog_at(size_t index, WalletCatalogEntry *out);
-// Same entries ordered by chain name A-Z, for presentation only. Lookups by id
-// or symbol always use wallet_catalog_find and are unaffected by this order.
 bool wallet_catalog_at_sorted(size_t position, WalletCatalogEntry *out);
 bool wallet_catalog_find(const char *id_or_symbol, WalletCatalogEntry *out);
 bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query);

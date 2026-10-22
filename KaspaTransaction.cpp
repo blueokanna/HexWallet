@@ -131,14 +131,18 @@ uint64_t utxo_plurality(uint8_t script_size) {
   return (kUtxoConstStorage + script_size + kUtxoUnitSize - 1) / kUtxoUnitSize;
 }
 
-bool derive_and_verify_key(const HdPrivateNode &master, uint32_t index,
+bool derive_and_verify_key(const HdPrivateNode &master, uint32_t account,
+                           uint8_t change, uint32_t index,
                            const NetworkProfile &network, uint8_t *out_key,
                            uint8_t *out_xonly) {
-  // Kaspa spends a P2PK output whose key is the BIP32 child at
-  // m/44'/111111'/account'/change/index, hardened coin type only.
+  // Kaspa spends P2PK outputs at m/44'/111111'/account'/change/index. The
+  // account is hardened; change and address are not. Refuse anything outside
+  // the two standard branches so a malformed review payload cannot select an
+  // unexpected derivation path.
+  if (change > 1 || account >= kHardenedOffset) return false;
   const uint32_t path[5] = { 44U | kHardenedOffset,
                              static_cast<uint32_t>(network.derivation_coin_type) | kHardenedOffset,
-                             kHardenedOffset, 0, index };
+                             account | kHardenedOffset, change, index };
   HdPrivateNode current = master;
   for (size_t depth = 0; depth < 5; ++depth) {
     HdPrivateNode next;
@@ -509,6 +513,119 @@ KaspaError kaspa_script_from_address(const char *prefix, const char *address,
   return result;
 }
 
+namespace {
+
+struct Cursor {
+  const uint8_t *data;
+  size_t size;
+  size_t position;
+};
+
+bool take(Cursor *cursor, void *out, size_t size) {
+  if (cursor == nullptr || size > cursor->size - cursor->position) return false;
+  if (size != 0) memcpy(out, cursor->data + cursor->position, size);
+  cursor->position += size;
+  return true;
+}
+
+bool take_u8(Cursor *cursor, uint8_t *out) { return take(cursor, out, 1); }
+
+bool take_u16(Cursor *cursor, uint16_t *out) {
+  uint8_t bytes[2];
+  if (!take(cursor, bytes, sizeof(bytes))) return false;
+  *out = static_cast<uint16_t>(bytes[0]) |
+         (static_cast<uint16_t>(bytes[1]) << 8);
+  return true;
+}
+
+bool take_u32(Cursor *cursor, uint32_t *out) {
+  uint8_t bytes[4];
+  if (!take(cursor, bytes, sizeof(bytes))) return false;
+  *out = static_cast<uint32_t>(bytes[0]) |
+         (static_cast<uint32_t>(bytes[1]) << 8) |
+         (static_cast<uint32_t>(bytes[2]) << 16) |
+         (static_cast<uint32_t>(bytes[3]) << 24);
+  return true;
+}
+
+bool take_u64(Cursor *cursor, uint64_t *out) {
+  uint8_t bytes[8];
+  if (!take(cursor, bytes, sizeof(bytes))) return false;
+  uint64_t value = 0;
+  for (uint8_t index = 0; index < 8; ++index) {
+    value |= static_cast<uint64_t>(bytes[index]) << (8 * index);
+  }
+  *out = value;
+  return true;
+}
+
+}  // namespace
+
+KaspaError kaspa_parse_review_payload(const uint8_t *data, size_t size,
+                                      KaspaTransaction *transaction) {
+  if (data == nullptr || transaction == nullptr || size < 2) {
+    return KaspaError::InvalidArgument;
+  }
+  KaspaTransaction parsed = {};
+  Cursor cursor = {data, size, 0};
+  if (!take_u16(&cursor, &parsed.version) ||
+      !take_u64(&cursor, &parsed.lock_time) ||
+      !take_u8(&cursor, &parsed.payload_size) ||
+      parsed.payload_size > kKaspaMaxPayloadSize ||
+      !take(&cursor, parsed.payload, parsed.payload_size) ||
+      !take_u8(&cursor, &parsed.input_count) ||
+      parsed.input_count == 0 || parsed.input_count > kKaspaMaxInputs) {
+    return KaspaError::Truncated;
+  }
+  for (size_t index = 0; index < parsed.input_count; ++index) {
+    KaspaInput &input = parsed.inputs[index];
+    if (!take(&cursor, input.previous_outpoint.transaction_id, 32) ||
+        !take_u32(&cursor, &input.previous_outpoint.index) ||
+        !take_u64(&cursor, &input.sequence) ||
+        !take_u64(&cursor, &input.value) ||
+        !take_u16(&cursor, &input.script_version) ||
+        !take_u8(&cursor, &input.script_size) ||
+        input.script_size == 0 ||
+        input.script_size > kKaspaMaxScriptPublicKeySize ||
+        !take(&cursor, input.script, input.script_size) ||
+        !take_u32(&cursor, &input.account_index) ||
+        !take_u8(&cursor, &input.change) ||
+        !take_u32(&cursor, &input.address_index) ||
+        !take_u8(&cursor, &input.sigop_count)) {
+      return KaspaError::Truncated;
+    }
+    if (input.change > 1) return KaspaError::Unsupported;
+  }
+  if (!take_u8(&cursor, &parsed.output_count) || parsed.output_count == 0 ||
+      parsed.output_count > kKaspaMaxOutputs) {
+    return KaspaError::Truncated;
+  }
+  for (size_t index = 0; index < parsed.output_count; ++index) {
+    KaspaOutput &output = parsed.outputs[index];
+    if (!take_u64(&cursor, &output.value) ||
+        !take_u16(&cursor, &output.script_version) ||
+        !take_u8(&cursor, &output.script_size) ||
+        output.script_size == 0 ||
+        output.script_size > kKaspaMaxScriptPublicKeySize ||
+        !take(&cursor, output.script, output.script_size)) {
+      return KaspaError::Truncated;
+    }
+    output.wallet_owned = false;
+    output.change = false;
+  }
+  if (cursor.position != cursor.size) {
+    clear_kaspa_transaction(&parsed);
+    return KaspaError::NonCanonical;
+  }
+  const KaspaError reviewed = kaspa_review(&parsed);
+  if (reviewed != KaspaError::Ok) {
+    clear_kaspa_transaction(&parsed);
+    return reviewed;
+  }
+  *transaction = parsed;
+  return KaspaError::Ok;
+}
+
 KaspaError kaspa_review(KaspaTransaction *transaction) {
   if (transaction == nullptr || transaction->version != 0 ||
       transaction->input_count == 0 ||
@@ -526,6 +643,9 @@ KaspaError kaspa_review(KaspaTransaction *transaction) {
         input.script_size > kKaspaMaxScriptPublicKeySize ||
         input.script_version != 0) {
       return KaspaError::InvalidAmount;
+    }
+    if (input.change > 1 || input.account_index >= kHardenedOffset) {
+      return KaspaError::Unsupported;
     }
     // The wallet only spends its own P2PK outputs.
     if (input.script[0] != kOpData32 ||
@@ -622,8 +742,10 @@ KaspaError kaspa_sign_transaction(const KaspaTransaction &transaction,
   for (size_t index = 0; index < transaction.input_count; ++index) {
     uint8_t secret[kPrivateKeySize];
     uint8_t xonly[kPrivateKeySize];
-    const bool derived = derive_and_verify_key(master, transaction.inputs[index].address_index,
-                                               *network, secret, xonly);
+    const bool derived = derive_and_verify_key(
+        master, transaction.inputs[index].account_index,
+        transaction.inputs[index].change, transaction.inputs[index].address_index,
+        *network, secret, xonly);
     const bool matches = derived &&
         crypto_constant_time_equal(xonly, transaction.inputs[index].script + 1, 32);
     if (!matches) {
@@ -909,8 +1031,64 @@ bool run_kaspa_self_tests() {
   passed = kaspa_script_from_address("kaspa", corrupted, &version_out, script_out,
                                      &script_out_size) != KaspaError::Ok && passed;
 
+  // Compact CLI review payload round-trip. This is the exact byte layout the
+  // host uses for `kaspa inspect`; one trailing byte must be rejected.
+  uint8_t review_payload[256] = {};
+  size_t review_size = 0;
+  const auto put8 = [&](uint8_t value) { review_payload[review_size++] = value; };
+  const auto put16 = [&](uint16_t value) {
+    put8(static_cast<uint8_t>(value));
+    put8(static_cast<uint8_t>(value >> 8));
+  };
+  const auto put32 = [&](uint32_t value) {
+    for (uint8_t i = 0; i < 4; ++i) put8(static_cast<uint8_t>(value >> (8 * i)));
+  };
+  const auto put64 = [&](uint64_t value) {
+    for (uint8_t i = 0; i < 8; ++i) put8(static_cast<uint8_t>(value >> (8 * i)));
+  };
+  put16(0);
+  put64(0);
+  put8(0);
+  put8(1);
+  for (uint8_t i = 0; i < 32; ++i) put8(0);
+  put32(0);
+  put64(0);
+  put64(1000);
+  put16(0);
+  put8(kP2pkScriptSize);
+  for (uint8_t i = 0; i < kP2pkScriptSize; ++i) put8(script[i]);
+  put32(0);
+  const size_t change_offset = review_size;
+  put8(0);
+  put32(0);
+  put8(1);
+  put8(1);
+  put64(900);
+  put16(0);
+  put8(kP2pkScriptSize);
+  for (uint8_t i = 0; i < kP2pkScriptSize; ++i) put8(script[i]);
+  KaspaTransaction parsed_review = {};
+  passed = kaspa_parse_review_payload(review_payload, review_size,
+                                      &parsed_review) == KaspaError::Ok &&
+           parsed_review.input_count == 1 && parsed_review.output_count == 1 &&
+           parsed_review.fee == 100 &&
+           strcmp(parsed_review.outputs[0].address, address) == 0 && passed;
+  clear_kaspa_transaction(&parsed_review);
+  review_payload[review_size] = 0;
+  passed = kaspa_parse_review_payload(review_payload, review_size + 1,
+                                      &parsed_review) == KaspaError::NonCanonical &&
+           passed;
+  clear_kaspa_transaction(&parsed_review);
+  review_payload[change_offset] = 2;
+  passed = kaspa_parse_review_payload(review_payload, review_size,
+                                      &parsed_review) == KaspaError::Unsupported &&
+           passed;
+  review_payload[change_offset] = 0;
+  clear_kaspa_transaction(&parsed_review);
+
   clear_kaspa_transaction(&transaction);
   clear_kaspa_transaction(&pair);
+  secure_zero(review_payload, sizeof(review_payload));
   secure_zero(script, sizeof(script));
   secure_zero(corrupted, sizeof(corrupted));
 

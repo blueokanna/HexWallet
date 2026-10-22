@@ -19,6 +19,8 @@ class ForkRegistryTests(unittest.TestCase):
             generator.REGISTRY = directory / "registry.json"
             generator.PROFILES_OUT = directory / "profiles.inc"
             generator.CATALOG_OUT = directory / "catalog.inc"
+            generator.POLICIES_OUT = directory / "policies.inc"
+            generator.VECTORS_OUT = directory / "vectors.inc"
             source = json.dumps({"profiles": [
                 {"network": "test" + str(i), "symbol": "T" + str(i),
                  "name": "Test " + str(i), "slip44": i,
@@ -28,10 +30,52 @@ class ForkRegistryTests(unittest.TestCase):
             generator.REGISTRY.write_text(source, encoding="utf-8")
             self.assertEqual(generator.main(), 0)
             catalog = generator.CATALOG_OUT.read_text(encoding="utf-8")
-            self.assertNotIn("WalletCapabilitySigning", catalog)
-            self.assertNotIn("WalletCapabilityTransactionReview", catalog)
-            self.assertEqual(catalog.count("WalletCapabilityAddress"), 3)
+            self.assertFalse(
+                any(line.lstrip().startswith("{") for line in catalog.splitlines()))
             self.assertEqual(generator.REGISTRY.read_text(encoding="utf-8"), source)
+
+
+class SigningEvidenceTests(unittest.TestCase):
+    def test_signing_rows_have_consensus_evidence(self):
+        registry = json.loads(
+            (ROOT / "tools" / "fork_registry.json").read_text(encoding="utf-8"))
+        for row in registry["profiles"]:
+            if not row.get("signing"):
+                continue
+            with self.subTest(network=row["network"]):
+                self.assertIn(row.get("sighash"), ("legacy", "forkid"))
+                self.assertTrue(row.get("source"))
+                self.assertTrue(row.get("source_verified"))
+                self.assertTrue(
+                    row.get("sighash_source", "").startswith(
+                        "https://raw.githubusercontent.com/"))
+
+    def test_audit_covers_every_signing_row(self):
+        registry = json.loads(
+            (ROOT / "tools" / "fork_registry.json").read_text(encoding="utf-8"))
+        audit = json.loads(
+            (ROOT / "tools" / "utxo_sighash_audit.json").read_text(encoding="utf-8"))
+        audited = {row["network"]: row["verdict"] for row in audit["rows"]}
+        for row in registry["profiles"]:
+            if row.get("signing"):
+                with self.subTest(network=row["network"]):
+                    self.assertEqual(row["sighash"], audited[row["network"]])
+
+    def test_unsupported_verdicts_cannot_sign(self):
+        registry = json.loads(
+            (ROOT / "tools" / "fork_registry.json").read_text(encoding="utf-8"))
+        for row in registry["profiles"]:
+            if row.get("sighash") in ("timestamp", "unknown"):
+                with self.subTest(network=row["network"]):
+                    self.assertFalse(row.get("signing"))
+
+    def test_fork_id_signing_requires_vectors(self):
+        registry = json.loads(
+            (ROOT / "tools" / "fork_registry.json").read_text(encoding="utf-8"))
+        for row in registry["profiles"]:
+            if row.get("signing") and row.get("sighash") == "forkid":
+                with self.subTest(network=row["network"]):
+                    self.assertTrue(row.get("forkid_vectors"))
 
 
 class SegwitProfileTests(unittest.TestCase):
@@ -41,6 +85,8 @@ class SegwitProfileTests(unittest.TestCase):
             generator.REGISTRY = directory / "registry.json"
             generator.PROFILES_OUT = directory / "profiles.inc"
             generator.CATALOG_OUT = directory / "catalog.inc"
+            generator.POLICIES_OUT = directory / "policies.inc"
+            generator.VECTORS_OUT = directory / "vectors.inc"
             source = json.dumps({"profiles": [
                 {"network": "sugar", "symbol": "SUGAR", "name": "Sugar",
                  "slip44": 408, "p2pkh": 63, "p2sh": 125,

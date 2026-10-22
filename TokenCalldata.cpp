@@ -25,7 +25,7 @@ const TokenCalldataSelector kTokenCalldataSelectors[] = {
   { EvmTokenStandard::Erc721, TokenFunction::SetApprovalForAll,
     "setApprovalForAll(address,bool)", 0xa22cb465, 2 },
   { EvmTokenStandard::Erc1155, TokenFunction::SafeTransferFrom,
-    "safeTransferFrom(address,address,uint256,uint256,bytes)", 0xf242432a, 5, true },
+    "safeTransferFrom(address,address,uint256,uint256,bytes)", 0xf242432a, 5 },
   { EvmTokenStandard::Erc1155, TokenFunction::SafeBatchTransferFrom,
     "safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)", 0x2eb2c2d6, 5 },
   { EvmTokenStandard::Erc4626, TokenFunction::Deposit,
@@ -39,17 +39,13 @@ const TokenCalldataSelector kTokenCalldataSelectors[] = {
   { EvmTokenStandard::Erc777, TokenFunction::Send777,
     "send(address,uint256,bytes)", 0x9bd9bbc6, 3 },
   { EvmTokenStandard::Erc777, TokenFunction::OperatorSend,
-    "operatorSend(address,address,uint256,bytes,bytes)", 0x62ad1b83, 6 },
-  { EvmTokenStandard::Erc3525, TokenFunction::TransferFrom,
-    "transferFrom(address,address,uint256,uint256)", 0xfe99049a, 4 },
-  { EvmTokenStandard::Erc3525, TokenFunction::SafeTransferFrom,
-    "safeTransferFrom(address,address,uint256,uint256)", 0x0febdd49, 4 },
-  { EvmTokenStandard::Erc3525, TokenFunction::SafeTransferFromValueWithData,
-    "safeTransferFrom(address,address,uint256,uint256,bytes)", 0xf242432a, 5, true },
-  { EvmTokenStandard::Erc6551, TokenFunction::ExecuteCall,
-    "executeCall(address,uint256,bytes)", 0x9e5d4c49, 3 },
-  { EvmTokenStandard::Erc6551, TokenFunction::ExecuteBatchCall,
-    "executeBatchCall(address[],uint256[],bytes[])", 0x912ccaa3, 3 },
+    "operatorSend(address,address,uint256,bytes,bytes)", 0x62ad1b83, 5 },
+  { EvmTokenStandard::Erc3525, TokenFunction::TransferValueToAddress,
+    "transferFrom(uint256,address,uint256)", 0x0f485c02, 3 },
+  { EvmTokenStandard::Erc3525, TokenFunction::TransferValueToToken,
+    "transferFrom(uint256,uint256,uint256)", 0x310ed7f0, 3 },
+  { EvmTokenStandard::Erc6551, TokenFunction::Execute,
+    "execute(address,uint256,bytes,uint8)", 0x51945447, 4 },
   { EvmTokenStandard::LayerZeroOft, TokenFunction::OftSend,
     "send((uint32,bytes32,uint256,uint256,bytes,bytes,bytes),(uint256,uint256),address)",
     0xc7c7f5b3, 4 },
@@ -160,6 +156,9 @@ bool read_tail(const uint8_t *arguments, size_t arguments_size,
   }
   const size_t padded = padded_word_size(static_cast<size_t>(length));
   if (padded > arguments_size - expected_offset - kTokenWordSize) return false;
+  if (!is_zero_bytes(arguments + expected_offset + kTokenWordSize +
+                         static_cast<size_t>(length),
+                     padded - static_cast<size_t>(length))) return false;
   *data = arguments + expected_offset + kTokenWordSize;
   *size = static_cast<size_t>(length);
   *end = expected_offset + kTokenWordSize + padded;
@@ -254,13 +253,8 @@ const TokenCalldataSelector *match_token_selector(const uint8_t *data,
       match = &candidate;
       continue;
     }
-    // Identical ABIs for different standards decode to the same fields; keep
-    // the first label. A genuine opcode clash with different signatures is
-    // only resolvable from a trusted contract registry.
-    if (!(match->generic && candidate.generic &&
-          strcmp(match->signature, candidate.signature) == 0)) {
-      return nullptr;
-    }
+    // Shared selectors require trusted contract context, even if ABI types match.
+    return nullptr;
   }
   return match;
 }
@@ -293,8 +287,6 @@ const char *token_function_name(TokenFunction function) {
     case TokenFunction::TransferFrom: return "transferFrom";
     case TokenFunction::SafeTransferFrom: return "safeTransferFrom";
     case TokenFunction::SafeTransferFromWithData: return "safeTransferFrom(with-data)";
-    case TokenFunction::SafeTransferFromValue: return "safeTransferFrom(value)";
-    case TokenFunction::SafeTransferFromValueWithData: return "safeTransferFrom(value,with-data)";
     case TokenFunction::SafeBatchTransferFrom: return "safeBatchTransferFrom";
     case TokenFunction::SetApprovalForAll: return "setApprovalForAll";
     case TokenFunction::Deposit: return "deposit";
@@ -303,8 +295,9 @@ const char *token_function_name(TokenFunction function) {
     case TokenFunction::Redeem: return "redeem";
     case TokenFunction::Send777: return "send";
     case TokenFunction::OperatorSend: return "operatorSend";
-    case TokenFunction::ExecuteCall: return "executeCall";
-    case TokenFunction::ExecuteBatchCall: return "executeBatchCall";
+    case TokenFunction::Execute: return "execute";
+    case TokenFunction::TransferValueToAddress: return "transferValueToAddress";
+    case TokenFunction::TransferValueToToken: return "transferValueToToken";
     case TokenFunction::OftSend: return "send(OFT)";
     case TokenFunction::OnftSendFrom: return "sendFrom";
     case TokenFunction::Unknown: return "unknown";
@@ -557,12 +550,11 @@ static bool decode_calldata(const uint8_t *data, size_t data_size,
     }
     case EvmTokenStandard::Erc777: {
       if (selector->function == TokenFunction::OperatorSend) {
-        if (!read_address_word(arguments, out->tertiary) ||
-            !read_address_word(arguments + kTokenWordSize, out->secondary) ||
-            !read_address_word(arguments + 2 * kTokenWordSize, out->recipient)) {
+        if (!read_address_word(arguments, out->secondary) ||
+            !read_address_word(arguments + kTokenWordSize, out->recipient)) {
           return false;
         }
-        memcpy(out->amount, arguments + 3 * kTokenWordSize, kTokenWordSize);
+        memcpy(out->amount, arguments + 2 * kTokenWordSize, kTokenWordSize);
         out->amount_fits_u64 = word_to_u64(out->amount, &out->amount_u64);
         const uint8_t *tail = nullptr;
         const uint8_t *operator_tail = nullptr;
@@ -570,9 +562,9 @@ static bool decode_calldata(const uint8_t *data, size_t data_size,
         size_t operator_tail_size = 0;
         size_t end = 0;
         size_t operator_end = 0;
-        if (!read_tail(arguments, arguments_size, 4, 6 * kTokenWordSize,
+        if (!read_tail(arguments, arguments_size, 3, 5 * kTokenWordSize,
                        kTokenMaxTailSize, &tail, &tail_size, &end) ||
-            !read_tail(arguments, arguments_size, 5, end, kTokenMaxTailSize,
+            !read_tail(arguments, arguments_size, 4, end, kTokenMaxTailSize,
                        &operator_tail, &operator_tail_size, &operator_end) ||
             operator_end != arguments_size) {
           return false;
@@ -599,33 +591,25 @@ static bool decode_calldata(const uint8_t *data, size_t data_size,
       return true;
     }
     case EvmTokenStandard::Erc3525: {
-      if (!read_address_word(arguments, out->secondary) ||
-          !read_address_word(arguments + kTokenWordSize, out->recipient)) {
-        return false;
-      }
       out->has_token_id = true;
-      memcpy(out->token_id, arguments + 2 * kTokenWordSize, kTokenWordSize);
+      memcpy(out->token_id, arguments, kTokenWordSize);
+      if (selector->function == TokenFunction::TransferValueToAddress) {
+        if (!read_address_word(arguments + kTokenWordSize, out->recipient)) return false;
+      } else {
+        out->has_destination_token_id = true;
+        memcpy(out->destination_token_id, arguments + kTokenWordSize, kTokenWordSize);
+      }
       out->has_value = true;
-      memcpy(out->value, arguments + 3 * kTokenWordSize, kTokenWordSize);
-      if (selector->function != TokenFunction::SafeTransferFromValueWithData) {
-        return arguments_size == head_size;
-      }
-      const uint8_t *tail = nullptr;
-      size_t tail_size = 0;
-      size_t end = 0;
-      if (!read_tail(arguments, arguments_size, 4, 5 * kTokenWordSize,
-                     kTokenMaxTailSize, &tail, &tail_size, &end) ||
-          end != arguments_size) {
-        return false;
-      }
-      out->has_bytes_tail = true;
-      out->bytes_tail_size = static_cast<uint16_t>(tail_size);
-      return true;
+      memcpy(out->value, arguments + 2 * kTokenWordSize, kTokenWordSize);
+      memcpy(out->amount, out->value, kTokenWordSize);
+      out->amount_fits_u64 = word_to_u64(out->amount, &out->amount_u64);
+      return arguments_size == head_size;
     }
     case EvmTokenStandard::Erc6551: {
-      if (selector->function == TokenFunction::ExecuteBatchCall) {
-        // Batch execution hides multiple nested targets behind three arrays;
-        // the review surface cannot present it faithfully.
+      // IERC6551Executable permits multiple operation types. Only CALL can
+      // be represented by this review path; never accept DELEGATECALL/CREATE.
+      uint64_t operation = 0;
+      if (!word_to_u64(arguments + 3 * kTokenWordSize, &operation) || operation != 0) {
         return false;
       }
       if (!read_address_word(arguments, out->nested_target)) return false;
@@ -633,7 +617,7 @@ static bool decode_calldata(const uint8_t *data, size_t data_size,
       const uint8_t *nested = nullptr;
       size_t nested_size = 0;
       size_t end = 0;
-      if (!read_tail(arguments, arguments_size, 2, 3 * kTokenWordSize,
+      if (!read_tail(arguments, arguments_size, 2, 4 * kTokenWordSize,
                      kTokenMaxTailSize, &nested, &nested_size, &end) ||
           end != arguments_size) {
         return false;
@@ -652,7 +636,8 @@ static bool decode_calldata(const uint8_t *data, size_t data_size,
       const TokenCalldataSelector *nested_selector =
           match_token_selector(nested, nested_size);
       if (nested_selector == nullptr) return false;
-      if (nested_selector->standard == EvmTokenStandard::Erc6551 ||
+      if (nested_selector->standard == EvmTokenStandard::Erc3525 ||
+          nested_selector->standard == EvmTokenStandard::Erc6551 ||
           nested_selector->standard == EvmTokenStandard::LayerZeroOft ||
           nested_selector->standard == EvmTokenStandard::LayerZeroOnft) {
         return false;
@@ -672,7 +657,7 @@ static bool decode_calldata(const uint8_t *data, size_t data_size,
       out->nested_has_token_id = inner.has_token_id;
       memcpy(out->nested_token_id, inner.token_id, sizeof(out->nested_token_id));
       // Surface the inner callback flags so the signing policy can refuse an
-      // opaque hook hidden behind executeCall.
+      // opaque hook hidden behind execute.
       out->has_bytes_tail = inner.has_bytes_tail;
       out->bytes_tail_size = inner.bytes_tail_size;
       out->has_second_bytes_tail = inner.has_second_bytes_tail;
@@ -951,7 +936,7 @@ bool run_token_calldata_self_tests() {
   data[163] = 1;
   passed = !token_decode_calldata(data, 164, &decoded) && passed;
 
-  // ERC-1155 single transfer (selector shared with ERC-3525 but identical ABI).
+  // ERC-1155 single transfer.
   const size_t erc1155_size = kTokenSelectorSize + 6 * kTokenWordSize;
   passed = token_build_erc1155_safe_transfer(sender, recipient, token_id, 7, data,
                                              sizeof(data)) &&
@@ -1005,66 +990,82 @@ bool run_token_calldata_self_tests() {
   passed = !token_decode_calldata(data, 100, &decoded) && passed;
   data[99] = 64;
   passed = !token_decode_calldata(data, 132, &decoded) && passed;
+  memset(data, 0, sizeof(data));
   store_selector(data, 0x62ad1b83);
   store_address_word(data + 4, sender);
   store_address_word(data + 36, recipient);
-  store_address_word(data + 68, recipient);
-  store_u64_word(data + 100, 55);
-  store_u64_word(data + 132, 192);
-  store_u64_word(data + 164, 256);
-  store_u64_word(data + 196, 1);
-  data[228] = 0xaa;
-  store_u64_word(data + 260, 0);
-  passed = token_decode_calldata(data, kTokenSelectorSize + 288, &decoded) &&
+  store_u64_word(data + 68, 55);
+  store_u64_word(data + 100, 160);
+  store_u64_word(data + 132, 224);
+  store_u64_word(data + 164, 1);
+  data[196] = 0xaa;
+  store_u64_word(data + 228, 0);
+  passed = token_decode_calldata(data, 260, &decoded) &&
            decoded.function == TokenFunction::OperatorSend &&
-           decoded.amount_u64 == 55 && decoded.has_bytes_tail &&
-           decoded.bytes_tail_size == 1 &&
-           memcmp(decoded.tertiary, sender, 20) == 0 &&
+           decoded.amount_u64 == 55 && decoded.bytes_tail_size == 1 &&
+           memcmp(decoded.secondary, sender, 20) == 0 &&
            memcmp(decoded.recipient, recipient, 20) == 0 && passed;
-
-  // ERC-3525 value transfer: 4-arg and 5-arg forms.
-  store_selector(data, 0xfe99049a);
-  store_address_word(data + 4, sender);
-  store_address_word(data + 36, recipient);
-  memcpy(data + 68, token_id, kTokenWordSize);
-  store_u64_word(data + 100, 5);
-  passed = token_decode_calldata(data, 132, &decoded) &&
-           decoded.standard == EvmTokenStandard::Erc3525 &&
-           decoded.has_value && decoded.value[kTokenWordSize - 1] == 5 && passed;
-  store_selector(data, 0xf242432a);
-  store_address_word(data + 4, sender);
-  store_address_word(data + 36, recipient);
-  memcpy(data + 68, token_id, kTokenWordSize);
-  store_u64_word(data + 100, 5);
+  // Nonzero ABI padding and overlapping tails are rejected, with cleared output.
+  data[197] = 1;
+  passed = !token_decode_calldata(data, 260, &decoded) &&
+           decoded.standard == EvmTokenStandard::Unknown && decoded.selector == nullptr && passed;
+  data[197] = 0;
   store_u64_word(data + 132, 160);
-  store_u64_word(data + 164, 0);
-  passed = token_decode_calldata(data, kTokenSelectorSize + 192,
-                                 EvmTokenStandard::Erc3525, &decoded) &&
-           decoded.function == TokenFunction::SafeTransferFromValueWithData &&
-           decoded.value[kTokenWordSize - 1] == 5 && passed;
+  passed = !token_decode_calldata(data, 260, &decoded) && passed;
+  store_u64_word(data + 132, 224);
+  passed = !token_decode_calldata(data, 292, &decoded) && passed;
 
-  // ERC-6551 executeCall wrapping an ERC-20 transfer.
+  // EIP-3525 value transfer overloads: IDs are uint256, not addresses.
+  memset(data, 0, sizeof(data));
+  store_selector(data, 0x0f485c02);
+  memcpy(data + 4, token_id, kTokenWordSize);
+  data[4] = 0xff; // Full-width ID must never undergo address validation.
+  store_address_word(data + 36, recipient);
+  store_u64_word(data + 68, 5);
+  passed = token_decode_calldata(data, 100, &decoded) &&
+           decoded.standard == EvmTokenStandard::Erc3525 &&
+           decoded.token_id[0] == 0xff && decoded.amount_u64 == 5 &&
+           !decoded.has_destination_token_id &&
+           memcmp(decoded.recipient, recipient, 20) == 0 && passed;
+  store_selector(data, 0x310ed7f0);
+  memset(data + 36, 0xff, kTokenWordSize);
+  passed = token_decode_calldata(data, 100, &decoded) &&
+           decoded.has_destination_token_id &&
+           decoded.destination_token_id[0] == 0xff && passed;
+  store_selector(data, 0xfe99049a);
+  passed = !token_decode_calldata(data, 132, EvmTokenStandard::Erc3525, &decoded) && passed;
+  store_selector(data, 0xf242432a);
+  passed = !token_decode_calldata(data, 196, EvmTokenStandard::Erc3525, &decoded) && passed;
+
+  // ERC-6551 execute(CALL) wrapping an ERC-20 transfer.
   uint8_t nested_erc20[kTokenSelectorSize + 2 * kTokenWordSize];
   passed = token_build_erc20_transfer(recipient, 321, nested_erc20,
                                       sizeof(nested_erc20)) && passed;
-  store_selector(data, 0x9e5d4c49);
+  memset(data, 0, sizeof(data));
+  store_selector(data, 0x51945447);
   store_address_word(data + 4, sender);
   store_u64_word(data + 36, 0);
-  store_u64_word(data + 68, 96);
-  store_u64_word(data + 100, sizeof(nested_erc20));
-  memcpy(data + 132, nested_erc20, sizeof(nested_erc20));
+  store_u64_word(data + 68, 128);
+  store_u64_word(data + 100, 0);
+  store_u64_word(data + 132, sizeof(nested_erc20));
+  memcpy(data + 164, nested_erc20, sizeof(nested_erc20));
   const size_t execute_call_size =
-      kTokenSelectorSize + 128 + padded_word_size(sizeof(nested_erc20));
+      kTokenSelectorSize + 160 + padded_word_size(sizeof(nested_erc20));
   passed = token_decode_calldata(data, execute_call_size, &decoded) &&
            decoded.standard == EvmTokenStandard::Erc6551 &&
            decoded.has_nested_call && decoded.nested_data_size == sizeof(nested_erc20) &&
            memcmp(decoded.nested_target, sender, 20) == 0 &&
            memcmp(decoded.recipient, recipient, 20) == 0 &&
            decoded.amount_u64 == 321 && passed;
-  data[134] = 0xde;
-  data[135] = 0xad;
-  data[136] = 0xbe;
-  data[137] = 0xef;
+  store_u64_word(data + 100, 1);
+  passed = !token_decode_calldata(data, execute_call_size, &decoded) && passed;
+  store_u64_word(data + 100, 256);
+  passed = !token_decode_calldata(data, execute_call_size, &decoded) && passed;
+  store_u64_word(data + 100, 0);
+  data[166] = 0xde;
+  data[167] = 0xad;
+  data[168] = 0xbe;
+  data[169] = 0xef;
   passed = !token_decode_calldata(data, execute_call_size, &decoded) && passed;
   store_selector(data, 0x912ccaa3);
   passed = !token_decode_calldata(data, 100, &decoded) && passed;

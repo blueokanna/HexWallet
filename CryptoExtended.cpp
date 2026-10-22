@@ -1715,6 +1715,110 @@ bool run_crypto_extended_self_tests() {
   passed = selftest_report("chia addr ones", chia_standard_address(ones_seed, sizeof(ones_seed), 0, chia, sizeof(chia)) && strcmp(chia, "xch1wv0k6nwah2vx6rgplqcey8yhcv3vd2sadwjx6gpa9n9wkcx4p48q6v7n2d") == 0) && passed;
   secure_zero(ones_seed, sizeof(ones_seed));
 
+  // Monero tests/crypto/tests.txt hash_to_point vectors.
+  static const uint8_t kHtp0in[32] = {
+    0x83, 0xef, 0xb7, 0x74, 0x65, 0x77, 0x00, 0xe3, 0x72, 0x91, 0xf4, 0xb8,
+    0xdd, 0x10, 0xc8, 0x39, 0xd1, 0xc7, 0x39, 0xfd, 0x13, 0x5c, 0x07, 0xa2,
+    0xfd, 0x73, 0x82, 0x33, 0x4d, 0xaf, 0xdd, 0x6a,
+  };
+  static const uint8_t kHtp0out[32] = {
+    0x27, 0x89, 0xec, 0xba, 0xf3, 0x6e, 0x4f, 0xcb, 0x41, 0xc6, 0x15, 0x72,
+    0x28, 0x00, 0x15, 0x38, 0xb4, 0x0c, 0xa3, 0x79, 0x46, 0x4b, 0x71, 0x8d,
+    0x83, 0x0c, 0x58, 0xca, 0xae, 0x7e, 0xa4, 0xca,
+  };
+  static const uint8_t kHtp1in[32] = {
+    0x5c, 0x38, 0x0f, 0x98, 0x79, 0x4a, 0xb7, 0xa9, 0xbe, 0x7c, 0x2d, 0x32,
+    0x59, 0xb9, 0x27, 0x72, 0x12, 0x5c, 0xe9, 0x35, 0x27, 0xbe, 0x6a, 0x76,
+    0x21, 0x06, 0x31, 0xfd, 0xd8, 0x00, 0x14, 0x98,
+  };
+  static const uint8_t kHtp1out[32] = {
+    0x31, 0xa1, 0xfe, 0xb4, 0x98, 0x6d, 0x42, 0xe2, 0x13, 0x7a, 0xe0, 0x61,
+    0xea, 0x03, 0x18, 0x38, 0xd2, 0x4f, 0xa5, 0x23, 0x23, 0x49, 0x54, 0xcf,
+    0x88, 0x60, 0xbc, 0xd4, 0x24, 0x21, 0xae, 0x94,
+  };
+  static const uint8_t kHtp2in[32] = {
+    0x47, 0x75, 0xd3, 0x9f, 0x91, 0xa4, 0x66, 0x26, 0x2f, 0x0c, 0xcf, 0x21,
+    0xf5, 0xa7, 0xee, 0x44, 0x6f, 0x79, 0xa0, 0x54, 0x48, 0x86, 0x1e, 0x21,
+    0x2b, 0xe0, 0x63, 0xa1, 0x06, 0x32, 0x98, 0xf0,
+  };
+  static const uint8_t kHtp2out[32] = {
+    0x89, 0x7b, 0x35, 0x89, 0xf2, 0x9e, 0xa4, 0x0e, 0x57, 0x6a, 0x91, 0x50,
+    0x6d, 0x9a, 0xec, 0xa4, 0xc0, 0x5a, 0x49, 0x49, 0x22, 0xa8, 0x0d, 0xe5,
+    0x72, 0x76, 0xf4, 0xb4, 0x0c, 0x0a, 0x98, 0xbc,
+  };
+  uint8_t point[32];
+  passed = selftest_report(
+               "hash_to_point 0",
+               ed25519_hash_to_point(kHtp0in, point) &&
+                   crypto_constant_time_equal(point, kHtp0out, 32)) &&
+           passed;
+  passed = selftest_report(
+               "hash_to_point 1",
+               ed25519_hash_to_point(kHtp1in, point) &&
+                   crypto_constant_time_equal(point, kHtp1out, 32)) &&
+           passed;
+  passed = selftest_report(
+               "hash_to_point 2",
+               ed25519_hash_to_point(kHtp2in, point) &&
+                   crypto_constant_time_equal(point, kHtp2out, 32)) &&
+           passed;
+  secure_zero(point, sizeof(point));
+
+  // Link handshake primitives: Ed25519 verification and group ECDH. These
+  // are not chain consensus rules; they protect the phone transport only.
+  uint8_t seed_a[32] = { 0 };
+  uint8_t seed_b[32] = { 0 };
+  for (size_t index = 0; index < sizeof(seed_a); ++index) {
+    seed_a[index] = static_cast<uint8_t>(index + 1);
+    seed_b[index] = static_cast<uint8_t>(0x101 - index);
+  }
+  uint8_t public_a[32];
+  uint8_t public_b[32];
+  uint8_t shared_a[32];
+  uint8_t shared_b[32];
+  static const uint8_t kLinkMessage[] = "HexWallet link handshake";
+  uint8_t signature[64];
+  const bool keys_ok = ed25519_public_key(seed_a, public_a) &&
+                       ed25519_public_key(seed_b, public_b);
+  passed = selftest_report("ed25519 ecdh symmetry",
+                           keys_ok &&
+                               ed25519_ecdh(seed_a, public_b, shared_a) &&
+                               ed25519_ecdh(seed_b, public_a, shared_b) &&
+                               crypto_constant_time_equal(shared_a, shared_b, 32)) &&
+           passed;
+  const bool sign_ok = keys_ok &&
+                       ed25519_sign(seed_a, kLinkMessage, sizeof(kLinkMessage) - 1,
+                                    signature) &&
+                       ed25519_verify(public_a, kLinkMessage,
+                                      sizeof(kLinkMessage) - 1, signature);
+  passed = selftest_report("ed25519 verify", sign_ok) && passed;
+  uint8_t tampered[64];
+  memcpy(tampered, signature, sizeof(tampered));
+  tampered[17] ^= 0x01;
+  passed = selftest_report("ed25519 reject tamper",
+                           sign_ok &&
+                               !ed25519_verify(public_a, kLinkMessage,
+                                               sizeof(kLinkMessage) - 1, tampered) &&
+                               !ed25519_verify(public_b, kLinkMessage,
+                                               sizeof(kLinkMessage) - 1, signature) &&
+                               !ed25519_verify(public_a, kLinkMessage,
+                                               sizeof(kLinkMessage) - 2, signature)) &&
+           passed;
+  // The identity public key must never verify (classic small-order forgery).
+  static const uint8_t kIdentityKey[32] = { 1 };
+  passed = selftest_report("ed25519 reject identity key",
+                           !ed25519_verify(kIdentityKey, kLinkMessage,
+                                           sizeof(kLinkMessage) - 1, signature)) &&
+           passed;
+  secure_zero(seed_a, sizeof(seed_a));
+  secure_zero(seed_b, sizeof(seed_b));
+  secure_zero(public_a, sizeof(public_a));
+  secure_zero(public_b, sizeof(public_b));
+  secure_zero(shared_a, sizeof(shared_a));
+  secure_zero(shared_b, sizeof(shared_b));
+  secure_zero(signature, sizeof(signature));
+  secure_zero(tampered, sizeof(tampered));
+
   secure_zero(digest, sizeof(digest));
   secure_zero(blake64, sizeof(blake64));
   secure_zero(zero_hash, sizeof(zero_hash));

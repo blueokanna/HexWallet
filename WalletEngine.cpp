@@ -419,6 +419,16 @@ bool run_address_self_tests() {
   size_t address_size = sizeof(address);
   bool passed = public_key_from_private(kPrivateOne, compressed) == WalletError::Ok && crypto_constant_time_equal(compressed, kExpectedCompressed, sizeof(compressed)) && address_p2pkh(kBitcoinMainnet, compressed, address, &address_size) == WalletError::Ok && strcmp(address, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH") == 0;
   passed = passed && uncompressed_public_key_from_private(kPrivateOne, uncompressed) == WalletError::Ok && address_evm(uncompressed, address, sizeof(address)) == WalletError::Ok && strcmp(address, "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf") == 0;
+  // Official Conflux Ledger app vector: m/44'/503'/0'/0/0 public key.
+  static const uint8_t kConfluxPublic[kUncompressedPublicKeySize] = {
+    0x04, 0x4b, 0x0e, 0x7a, 0xa1, 0x24, 0x22, 0xc8, 0xbd, 0x4b, 0x2b, 0xed,
+    0x18, 0xbb, 0xa7, 0x75, 0xe0, 0x27, 0x1e, 0x6b, 0x9a, 0x99, 0xa1, 0xbf,
+    0x53, 0x40, 0x57, 0x2a, 0xce, 0xeb, 0x80, 0xe0, 0x35, 0x05, 0x88, 0xd6,
+    0xdc, 0xc8, 0x97, 0x07, 0x41, 0x2b, 0x12, 0x76, 0xe4, 0xcd, 0xfb, 0xc5,
+    0xfc, 0x65, 0x91, 0x06, 0x96, 0xc6, 0x89, 0x46, 0x56, 0x11, 0xb1, 0x2d,
+    0xda, 0x5b, 0x07, 0x00, 0xdb,
+  };
+  passed = passed && address_evm(kConfluxPublic, address, sizeof(address)) == WalletError::Ok && strcmp(address, "0xdc2a4fe87a86f8cd561fdd56d26075b4496fc831") == 0;
   passed = passed && run_alt_address_self_tests();
   secure_zero(compressed, sizeof(compressed));
   secure_zero(uncompressed, sizeof(uncompressed));

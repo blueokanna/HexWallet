@@ -259,6 +259,162 @@ void fe_invert(fe out, const fe value) {
   secure_zero(t3, sizeof(t3));
 }
 
+// Full 32-byte field decode used by CryptoNote's ge_fromfe_frombytes_vartime.
+// Unlike fe_frombytes(), bit 255 is part of the value, not an x sign bit.
+void fe_frombytes_full(fe out, const uint8_t *data) {
+  int64_t h0 = static_cast<int64_t>(data[0]) |
+               (static_cast<int64_t>(data[1]) << 8) |
+               (static_cast<int64_t>(data[2]) << 16) |
+               (static_cast<int64_t>(data[3]) << 24);
+  int64_t h1 = (static_cast<int64_t>(data[4]) |
+                (static_cast<int64_t>(data[5]) << 8) |
+                (static_cast<int64_t>(data[6]) << 16)) << 6;
+  int64_t h2 = (static_cast<int64_t>(data[7]) |
+                (static_cast<int64_t>(data[8]) << 8) |
+                (static_cast<int64_t>(data[9]) << 16)) << 5;
+  int64_t h3 = (static_cast<int64_t>(data[10]) |
+                (static_cast<int64_t>(data[11]) << 8) |
+                (static_cast<int64_t>(data[12]) << 16)) << 3;
+  int64_t h4 = (static_cast<int64_t>(data[13]) |
+                (static_cast<int64_t>(data[14]) << 8) |
+                (static_cast<int64_t>(data[15]) << 16)) << 2;
+  int64_t h5 = static_cast<int64_t>(data[16]) |
+               (static_cast<int64_t>(data[17]) << 8) |
+               (static_cast<int64_t>(data[18]) << 16) |
+               (static_cast<int64_t>(data[19]) << 24);
+  int64_t h6 = (static_cast<int64_t>(data[20]) |
+                (static_cast<int64_t>(data[21]) << 8) |
+                (static_cast<int64_t>(data[22]) << 16)) << 7;
+  int64_t h7 = (static_cast<int64_t>(data[23]) |
+                (static_cast<int64_t>(data[24]) << 8) |
+                (static_cast<int64_t>(data[25]) << 16)) << 5;
+  int64_t h8 = (static_cast<int64_t>(data[26]) |
+                (static_cast<int64_t>(data[27]) << 8) |
+                (static_cast<int64_t>(data[28]) << 16)) << 4;
+  int64_t h9 = (static_cast<int64_t>(data[29]) |
+                (static_cast<int64_t>(data[30]) << 8) |
+                (static_cast<int64_t>(data[31]) << 16)) << 2;
+
+  const int64_t carry9 = (h9 + (INT64_C(1) << 24)) >> 25;
+  h0 += carry9 * 19;
+  h9 -= carry9 * (INT64_C(1) << 25);
+  const int64_t carry1 = (h1 + (INT64_C(1) << 24)) >> 25;
+  h2 += carry1;
+  h1 -= carry1 * (INT64_C(1) << 25);
+  const int64_t carry3 = (h3 + (INT64_C(1) << 24)) >> 25;
+  h4 += carry3;
+  h3 -= carry3 * (INT64_C(1) << 25);
+  const int64_t carry5 = (h5 + (INT64_C(1) << 24)) >> 25;
+  h6 += carry5;
+  h5 -= carry5 * (INT64_C(1) << 25);
+  const int64_t carry7 = (h7 + (INT64_C(1) << 24)) >> 25;
+  h8 += carry7;
+  h7 -= carry7 * (INT64_C(1) << 25);
+
+  const int64_t carry0 = (h0 + (INT64_C(1) << 25)) >> 26;
+  h1 += carry0;
+  h0 -= carry0 * (INT64_C(1) << 26);
+  const int64_t carry2 = (h2 + (INT64_C(1) << 25)) >> 26;
+  h3 += carry2;
+  h2 -= carry2 * (INT64_C(1) << 26);
+  const int64_t carry4 = (h4 + (INT64_C(1) << 25)) >> 26;
+  h5 += carry4;
+  h4 -= carry4 * (INT64_C(1) << 26);
+  const int64_t carry6 = (h6 + (INT64_C(1) << 25)) >> 26;
+  h7 += carry6;
+  h6 -= carry6 * (INT64_C(1) << 26);
+  const int64_t carry8 = (h8 + (INT64_C(1) << 25)) >> 26;
+  h9 += carry8;
+  h8 -= carry8 * (INT64_C(1) << 26);
+
+  out[0] = h0;
+  out[1] = h1;
+  out[2] = h2;
+  out[3] = h3;
+  out[4] = h4;
+  out[5] = h5;
+  out[6] = h6;
+  out[7] = h7;
+  out[8] = h8;
+  out[9] = h9;
+}
+
+bool fe_isnonzero(const fe value) {
+  uint8_t encoded[32];
+  fe_tobytes(encoded, value);
+  uint8_t any = 0;
+  for (size_t index = 0; index < sizeof(encoded); ++index) {
+    any |= encoded[index];
+  }
+  return any != 0;
+}
+
+int fe_isnegative(const fe value) {
+  uint8_t encoded[32];
+  fe_tobytes(encoded, value);
+  return encoded[0] & 1;
+}
+
+void fe_sq2(fe out, const fe value) {
+  fe squared;
+  fe_sq(squared, value);
+  fe_add(out, squared, squared);
+}
+
+// x^((p-5)/8), used by the CryptoNote hash-to-point map.
+void fe_pow22523(fe out, const fe value) {
+  fe t0, t1, t2;
+  fe_sq(t0, value);
+  fe_sq(t1, t0);
+  fe_sq(t1, t1);
+  fe_mul(t1, value, t1);
+  fe_mul(t0, t0, t1);
+  fe_sq(t0, t0);
+  fe_mul(t0, t1, t0);
+  fe_sq(t1, t0);
+  for (int index = 0; index < 4; ++index) fe_sq(t1, t1);
+  fe_mul(t0, t1, t0);
+  fe_sq(t1, t0);
+  for (int index = 0; index < 9; ++index) fe_sq(t1, t1);
+  fe_mul(t1, t1, t0);
+  fe_sq(t2, t1);
+  for (int index = 0; index < 19; ++index) fe_sq(t2, t2);
+  fe_mul(t1, t2, t1);
+  for (int index = 0; index < 10; ++index) fe_sq(t1, t1);
+  fe_mul(t0, t1, t0);
+  fe_sq(t1, t0);
+  for (int index = 0; index < 49; ++index) fe_sq(t1, t1);
+  fe_mul(t1, t1, t0);
+  fe_sq(t2, t1);
+  for (int index = 0; index < 99; ++index) fe_sq(t2, t2);
+  fe_mul(t1, t2, t1);
+  for (int index = 0; index < 50; ++index) fe_sq(t1, t1);
+  fe_mul(t0, t1, t0);
+  fe_sq(t0, t0);
+  fe_sq(t0, t0);
+  fe_mul(out, t0, value);
+  secure_zero(t0, sizeof(t0));
+  secure_zero(t1, sizeof(t1));
+  secure_zero(t2, sizeof(t2));
+}
+
+void fe_divpowm1(fe out, const fe u, const fe v) {
+  fe v3, uv7, t0, t1, t2;
+  fe_sq(v3, v);
+  fe_mul(v3, v3, v);          // v^3
+  fe_sq(uv7, v3);
+  fe_mul(uv7, uv7, v);
+  fe_mul(uv7, uv7, u);        // u * v^7
+  fe_pow22523(t0, uv7);
+  fe_mul(t0, t0, v3);
+  fe_mul(out, t0, u);
+  secure_zero(v3, sizeof(v3));
+  secure_zero(uv7, sizeof(uv7));
+  secure_zero(t0, sizeof(t0));
+  secure_zero(t1, sizeof(t1));
+  secure_zero(t2, sizeof(t2));
+}
+
 // ---------------------------------------------------------------------------
 // Scalar arithmetic mod L = 2^252 + 27742317777372353535851937790883648493.
 // ---------------------------------------------------------------------------
@@ -414,6 +570,52 @@ void sc_muladd(uint8_t out[32], const uint8_t *a, const uint8_t *b,
   secure_zero(wide, sizeof(wide));
 }
 
+const uint64_t kScalarOrder[4] = {
+  UINT64_C(0x5812631a5cf5d3ed),
+  UINT64_C(0x14def9dea2f79cd6),
+  UINT64_C(0x0000000000000000),
+  UINT64_C(0x1000000000000000),
+};
+
+// out = (c - a * b) mod L.
+void sc_mulsub(uint8_t out[32], const uint8_t *a, const uint8_t *b,
+               const uint8_t *c) {
+  uint8_t product[32];
+  const uint8_t zero[32] = { 0 };
+  sc_muladd(product, a, b, zero);
+  uint64_t cw[4], pw[4], diff[4];
+  for (int index = 0; index < 4; ++index) {
+    cw[index] = load_le64_word(c + index * 8);
+    pw[index] = load_le64_word(product + index * 8);
+  }
+  uint64_t borrow = 0;
+  for (int index = 0; index < 4; ++index) {
+    const uint64_t partial = cw[index] - pw[index];
+    const uint64_t borrow1 = cw[index] < pw[index];
+    diff[index] = partial - borrow;
+    const uint64_t borrow2 = partial < borrow;
+    borrow = borrow1 | borrow2;
+  }
+  if (borrow != 0) {
+    uint64_t carry = 0;
+    for (int index = 0; index < 4; ++index) {
+      const uint64_t sum1 = diff[index] + kScalarOrder[index];
+      const uint64_t carry1 = sum1 < diff[index];
+      const uint64_t sum2 = sum1 + carry;
+      const uint64_t carry2 = sum2 < sum1;
+      diff[index] = sum2;
+      carry = carry1 | carry2;
+    }
+  }
+  for (int index = 0; index < 4; ++index) {
+    store_le64_word(out + index * 8, diff[index]);
+  }
+  secure_zero(product, sizeof(product));
+  secure_zero(cw, sizeof(cw));
+  secure_zero(pw, sizeof(pw));
+  secure_zero(diff, sizeof(diff));
+}
+
 // ---------------------------------------------------------------------------
 // Ed25519 curve group (affine formulas from RFC 8032).
 // ---------------------------------------------------------------------------
@@ -453,6 +655,20 @@ const uint8_t kEdwardsD[32] = {
   0x03,
   0x52,
 };
+
+// Constants from Monero's crypto-ops-data.c, same 25.5-bit limb layout.
+const fe kFeMa2 = { -12721188, -3529, 0, 0, 0, 0, 0, 0, 0, 0 };
+const fe kFeMa = { -486662, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+const fe kFeSqrtM1 = { -32595792, -7943725, 9377950, 3500415, 12389472,
+                       -272473, -25146209, -2005654, 326686, 11406482 };
+const fe kFeFffb1 = { -31702527, -2466483, -26106795, -12203692, -12169197,
+                      -321052, 14850977, -10296299, -16929438, -407568 };
+const fe kFeFffb2 = { 8166131, -6741800, -17040804, 3154616, 21461005,
+                      1466302, -30876704, -6368709, 10503587, -13363080 };
+const fe kFeFffb3 = { -13620103, 14639558, 4532995, 7679154, 16815101,
+                      -15883539, -22863840, -14813421, 13716513, -6477756 };
+const fe kFeFffb4 = { -21786234, -12173074, 21573800, 4524538, -4645904,
+                      16204591, 8012863, -8444712, 3212926, 6885324 };
 
 // Base point: y = 4/5, x = 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a.
 const uint8_t kBaseY[32] = {
@@ -590,6 +806,68 @@ void fe_neg(fe out, const fe value) {
   fe zero;
   fe_0(zero);
   fe_sub(out, zero, value);
+}
+
+// CryptoNote hash-to-point: Monero ge_fromfe_frombytes_vartime().
+bool hash_to_point_compressed(const uint8_t hash[32], uint8_t out[32]) {
+  fe u, v, w, x, y, z, rx, denominator, numerator, inverse, affine_y;
+  fe_frombytes_full(u, hash);
+  fe_sq2(v, u);
+  fe_1(w);
+  fe_add(w, v, w);
+  fe_sq(x, w);
+  fe_mul(y, kFeMa2, v);
+  fe_add(x, x, y);
+  fe_divpowm1(rx, w, x);
+  fe_sq(y, rx);
+  fe_mul(x, y, x);
+  fe_sub(y, w, x);
+  fe_copy(z, kFeMa);
+  int sign;
+  if (fe_isnonzero(y)) {
+    fe_add(y, w, x);
+    if (fe_isnonzero(y)) {
+      fe_mul(x, x, kFeSqrtM1);
+      fe_sub(y, w, x);
+      if (fe_isnonzero(y)) {
+        fe_add(y, w, x);
+        fe_mul(rx, rx, kFeFffb3);
+      } else {
+        fe_mul(rx, rx, kFeFffb4);
+      }
+      sign = 1;
+    } else {
+      fe_mul(rx, rx, kFeFffb1);
+      fe_mul(rx, rx, u);
+      fe_mul(z, z, v);
+      sign = 0;
+    }
+  } else {
+    fe_mul(rx, rx, kFeFffb2);
+    fe_mul(rx, rx, u);
+    fe_mul(z, z, v);
+    sign = 0;
+  }
+  if (fe_isnegative(rx) != sign) fe_neg(rx, rx);
+  fe_add(denominator, z, w);
+  fe_sub(numerator, z, w);
+  if (!fe_isnonzero(denominator)) return false;
+  fe_invert(inverse, denominator);
+  fe_mul(affine_y, numerator, inverse);
+  fe_tobytes(out, affine_y);
+  out[31] ^= static_cast<uint8_t>(fe_isnegative(rx) << 7);
+  secure_zero(u, sizeof(u));
+  secure_zero(v, sizeof(v));
+  secure_zero(w, sizeof(w));
+  secure_zero(x, sizeof(x));
+  secure_zero(y, sizeof(y));
+  secure_zero(z, sizeof(z));
+  secure_zero(rx, sizeof(rx));
+  secure_zero(denominator, sizeof(denominator));
+  secure_zero(numerator, sizeof(numerator));
+  secure_zero(inverse, sizeof(inverse));
+  secure_zero(affine_y, sizeof(affine_y));
+  return true;
 }
 
 // Constant-time select: out = flag ? b : a.  flag must be 0 or 1.
@@ -796,6 +1074,130 @@ bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
   return true;
 }
 
+bool ed25519_verify(const uint8_t public_key[32], const uint8_t *message,
+                    size_t message_size, const uint8_t signature[64]) {
+  if (public_key == nullptr || signature == nullptr ||
+      (message == nullptr && message_size != 0)) {
+    return false;
+  }
+
+  // S must be a canonical scalar. A non-canonical S is a malleable signature
+  // and must not be accepted by the link handshake.
+  uint64_t s_words[4];
+  for (int index = 0; index < 4; ++index) {
+    s_words[index] = load_le64_word(signature + 32 + index * 8);
+  }
+  if (ge_ge_words(s_words, kScalarOrder)) return false;
+
+  fe ax, ay, rx, ry;
+  if (!edwards_decompress(ax, ay, public_key) ||
+      !edwards_decompress(rx, ry, signature)) {
+    return false;
+  }
+
+  // Reject public keys and R values whose order divides 8. Without this
+  // check the identity public key would let anyone forge a "valid" signature.
+  static const uint8_t kCofactor[32] = { 8 };
+  fe cx, cy;
+  scalarmult_point(cx, cy, ax, ay, kCofactor);
+  uint8_t cofactored_public[32];
+  encode_point(cofactored_public, cx, cy);
+  static const uint8_t kIdentity[32] = { 1 };
+  if (crypto_constant_time_equal(cofactored_public, kIdentity, 32)) return false;
+  scalarmult_point(cx, cy, rx, ry, kCofactor);
+  uint8_t cofactored_r[32];
+  encode_point(cofactored_r, cx, cy);
+  if (crypto_constant_time_equal(cofactored_r, kIdentity, 32)) return false;
+
+  // k = SHA-512(R || A || M) mod L.
+  uint8_t digest[64];
+  mbedtls_md_context_t context;
+  mbedtls_md_init(&context);
+  const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA512);
+  bool ok = info != nullptr;
+  if (ok) ok = mbedtls_md_setup(&context, info, 0) == 0;
+  if (ok) ok = mbedtls_md_starts(&context) == 0;
+  if (ok) ok = mbedtls_md_update(&context, signature, 32) == 0;
+  if (ok) ok = mbedtls_md_update(&context, public_key, 32) == 0;
+  if (ok && message_size != 0) ok = mbedtls_md_update(&context, message, message_size) == 0;
+  if (ok) ok = mbedtls_md_finish(&context, digest) == 0;
+  mbedtls_md_free(&context);
+  if (!ok) {
+    secure_zero(digest, sizeof(digest));
+    return false;
+  }
+
+  uint8_t k_scalar[32];
+  sc_reduce_64(digest, k_scalar);
+
+  // [S]B == R + [k]A.
+  fe sbx, sby, kax, kay, sumx, sumy;
+  scalarmult_base(sbx, sby, signature + 32);
+  scalarmult_point(kax, kay, ax, ay, k_scalar);
+  edwards_add(sumx, sumy, rx, ry, kax, kay);
+  uint8_t left[32];
+  uint8_t right[32];
+  encode_point(left, sbx, sby);
+  encode_point(right, sumx, sumy);
+  ok = crypto_constant_time_equal(left, right, sizeof(left));
+
+  secure_zero(digest, sizeof(digest));
+  secure_zero(k_scalar, sizeof(k_scalar));
+  secure_zero(s_words, sizeof(s_words));
+  secure_zero(left, sizeof(left));
+  secure_zero(right, sizeof(right));
+  secure_zero(cofactored_public, sizeof(cofactored_public));
+  secure_zero(cofactored_r, sizeof(cofactored_r));
+  secure_zero(cx, sizeof(cx));
+  secure_zero(cy, sizeof(cy));
+  secure_zero(ax, sizeof(ax));
+  secure_zero(ay, sizeof(ay));
+  secure_zero(rx, sizeof(rx));
+  secure_zero(ry, sizeof(ry));
+  secure_zero(sbx, sizeof(sbx));
+  secure_zero(sby, sizeof(sby));
+  secure_zero(kax, sizeof(kax));
+  secure_zero(kay, sizeof(kay));
+  secure_zero(sumx, sizeof(sumx));
+  secure_zero(sumy, sizeof(sumy));
+  return ok;
+}
+
+bool ed25519_ecdh(const uint8_t seed[32], const uint8_t peer_public[32],
+                  uint8_t out_shared[32]) {
+  if (seed == nullptr || peer_public == nullptr || out_shared == nullptr) {
+    return false;
+  }
+  uint8_t hash[64];
+  if (!sha512(seed, 32, hash)) {
+    secure_zero(hash, sizeof(hash));
+    return false;
+  }
+  hash[0] &= 248;
+  hash[31] &= 127;
+  hash[31] |= 64;
+
+  fe px, py, sx, sy;
+  bool ok = edwards_decompress(px, py, peer_public);
+  if (ok) scalarmult_point(sx, sy, px, py, hash);
+  uint8_t shared[32];
+  if (ok) {
+    encode_point(shared, sx, sy);
+    static const uint8_t kIdentity[32] = { 1 };
+    ok = !crypto_constant_time_equal(shared, kIdentity, sizeof(shared));
+  }
+  if (ok) memcpy(out_shared, shared, sizeof(shared));
+  else memset(out_shared, 0, 32);
+
+  secure_zero(hash, sizeof(hash));
+  secure_zero(shared, sizeof(shared));
+  secure_zero(px, sizeof(px));
+  secure_zero(py, sizeof(py));
+  secure_zero(sx, sizeof(sx));
+  secure_zero(sy, sizeof(sy));
+  return ok;
+}
+
 bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
                            const uint32_t *path, size_t path_size,
                            uint8_t out_private[32]) {
@@ -878,13 +1280,42 @@ void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]) {
   if (scalar != nullptr) sc_reduce_32(scalar);
 }
 
-bool ed25519_point_is_valid_compressed(const uint8_t point[32]) {
-  if (point == nullptr) return false;
-  fe x, y;
-  const bool ok = edwards_decompress(x, y, point);
-  secure_zero(x, sizeof(x));
-  secure_zero(y, sizeof(y));
-  return ok;
+void ed25519_scalar_muladd(uint8_t out[32], const uint8_t a[32],
+                           const uint8_t b[32], const uint8_t c[32]) {
+  if (out == nullptr || a == nullptr || b == nullptr || c == nullptr) return;
+  sc_muladd(out, a, b, c);
+}
+
+void ed25519_scalar_mulsub(uint8_t out[32], const uint8_t a[32],
+                           const uint8_t b[32], const uint8_t c[32]) {
+  if (out == nullptr || a == nullptr || b == nullptr || c == nullptr) return;
+  sc_mulsub(out, a, b, c);
+}
+
+bool ed25519_point_sub_compressed(const uint8_t left[32],
+                                  const uint8_t right[32],
+                                  uint8_t out[32]) {
+  if (left == nullptr || right == nullptr || out == nullptr) return false;
+  fe x1, y1, x2, y2, x3, y3;
+  if (!edwards_decompress(x1, y1, left) ||
+      !edwards_decompress(x2, y2, right)) {
+    return false;
+  }
+  fe_neg(x2, x2);
+  edwards_add(x3, y3, x1, y1, x2, y2);
+  encode_point(out, x3, y3);
+  secure_zero(x1, sizeof(x1));
+  secure_zero(y1, sizeof(y1));
+  secure_zero(x2, sizeof(x2));
+  secure_zero(y2, sizeof(y2));
+  secure_zero(x3, sizeof(x3));
+  secure_zero(y3, sizeof(y3));
+  return true;
+}
+
+bool ed25519_hash_to_point(const uint8_t hash[32], uint8_t out_point[32]) {
+  if (hash == nullptr || out_point == nullptr) return false;
+  return hash_to_point_compressed(hash, out_point);
 }
 
 }  // namespace hexwallet

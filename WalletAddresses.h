@@ -7,9 +7,6 @@
 #include "WalletSecurity.h"
 
 namespace hexwallet {
-
-// BIP13 and BIP173 parameters are data, never literals scattered through the
-// address implementation. Add a network profile only after test-vector review.
 struct UtxoAddressProfile {
   uint8_t p2pkh_version;
   uint8_t p2sh_version;

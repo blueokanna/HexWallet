@@ -19,7 +19,14 @@ Expected result:
 ```text
 extended-crypto=pass
 alt-addresses=pass
+zcash=pass
 ```
+
+The `zcash` case checks the official ZIP-243 transparent vector plus
+`zcash-test-vectors` rows covering shielded spends, shielded outputs and
+JoinSplits. The host shim deliberately stubs secp256k1 signing, so the full
+device signing round-trip runs in `run_zcash_transaction_self_test()` on the
+MCU (ECDSA sign, scriptSig layout, re-parse and signature verification).
 
 The `mbedtls_host.c` shim implements the small mbedtls subset the firmware
 uses (SHA-256/512, HMAC, PBKDF2, and a 64-bit-limb bignum with

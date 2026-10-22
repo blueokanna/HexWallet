@@ -25,14 +25,22 @@ struct WalletUiTransactionReview {
   uint64_t fee_rate;
   const char *fee_text;
   const char *approval_code;
+  // Link-originated requests use on-device APPROVE/REJECT buttons instead of
+  // the six-digit code that the serial host must echo back.
+  bool show_decision_buttons;
 };
 
+using WalletUiDecisionCallback = void (*)(bool approved);
+void wallet_ui_set_decision_callback(WalletUiDecisionCallback callback);
+
 bool wallet_ui_init();
+bool wallet_ui_ready();
 void wallet_ui_show_port_error();
 void wallet_ui_set_authenticated(bool authenticated);
 void wallet_ui_set_status(const char *status);
 void wallet_ui_show_catalog();
 void wallet_ui_show_transaction(const WalletUiTransactionReview &review);
+void wallet_ui_show_pairing(uint32_t code, const char *fingerprint);
 void wallet_ui_service();
 
 }  // namespace hexwallet

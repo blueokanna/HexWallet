@@ -19,10 +19,8 @@
 
 #ifndef HEXWALLET_BOARD
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
-// P4 requires its own board port; never apply an S3 display pin map to it.
 #define HEXWALLET_BOARD HEXWALLET_BOARD_HEADLESS
 #else
-// Default target: the reference board the port was developed and validated on.
 #define HEXWALLET_BOARD HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED
 #endif
 #endif
@@ -60,6 +58,17 @@
 #define HEXWALLET_RUN_SELF_TESTS 1
 #endif
 
+// Stack for the second-core crypto worker (bytes). The boot self-tests run
+// there so the display can come up in parallel; BLS/XMSS need real headroom.
+#ifndef HEXWALLET_WORKER_STACK_BYTES
+#define HEXWALLET_WORKER_STACK_BYTES (24 * 1024)
+#endif
+
+// Upper bound for a full boot self-test pass on the worker.
+#ifndef HEXWALLET_SELFTEST_TIMEOUT_MS
+#define HEXWALLET_SELFTEST_TIMEOUT_MS 120000UL
+#endif
+
 #ifndef HEXWALLET_ENABLE_CLI
 #define HEXWALLET_ENABLE_CLI 1
 #endif
@@ -88,6 +97,30 @@
 #define HEXWALLET_MAX_EVM_FEE_WEI 1000000000000000000ULL
 #endif
 
+#ifndef HEXWALLET_MAX_ZCASH_FEE_ZATS
+#define HEXWALLET_MAX_ZCASH_FEE_ZATS 1000000ULL
+#endif
+
+#ifndef HEXWALLET_MAX_ZCASH_FEE_RATE
+#define HEXWALLET_MAX_ZCASH_FEE_RATE 10000ULL
+#endif
+
+// USB data transport is OFF by default. The user must long-press the physical
+// BOOT/user button to enable it for a bounded window; it turns off again on
+// reset, timeout, or another long press. This gates the serial CLI and any
+// future USB HID/CCID link, not the ROM bootloader used for flashing.
+#ifndef HEXWALLET_USB_DATA_DEFAULT
+#define HEXWALLET_USB_DATA_DEFAULT 0
+#endif
+
+#ifndef HEXWALLET_USB_ENABLE_HOLD_MS
+#define HEXWALLET_USB_ENABLE_HOLD_MS 3000UL
+#endif
+
+#ifndef HEXWALLET_USB_ENABLE_WINDOW_MS
+#define HEXWALLET_USB_ENABLE_WINDOW_MS (10UL * 60UL * 1000UL)
+#endif
+
 #ifndef HEXWALLET_ENABLE_SECRET_EXPORT
 #define HEXWALLET_ENABLE_SECRET_EXPORT 0
 #endif
@@ -96,40 +129,45 @@
 #define HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION 0
 #endif
 
-namespace hexwallet {
+namespace hexwallet
+{
 
-enum class DisplayKind : unsigned char {
-  Color,
-  MonoEink,
-};
+  enum class DisplayKind : unsigned char
+  {
+    Color,
+    MonoEink,
+  };
 
-struct UiPolicy {
-  DisplayKind display_kind;
-  unsigned long eink_min_refresh_ms;
-  bool allow_animations;
-  uint16_t logical_width;
-  uint16_t logical_height;
-};
+  struct UiPolicy
+  {
+    DisplayKind display_kind;
+    unsigned long eink_min_refresh_ms;
+    bool allow_animations;
+    uint16_t logical_width;
+    uint16_t logical_height;
+  };
 
-inline const UiPolicy &ui_policy() {
-  static const UiPolicy kPolicy = []() {
+  inline const UiPolicy &ui_policy()
+  {
+    static const UiPolicy kPolicy = []()
+    {
 #if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
-    return UiPolicy{ DisplayKind::Color, 0UL, true, 240, 536 };
+      return UiPolicy{DisplayKind::Color, 0UL, true, 240, 536};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
-    return UiPolicy{ DisplayKind::Color, 0UL, true, 170, 320 };
+      return UiPolicy{DisplayKind::Color, 0UL, true, 170, 320};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DECK_MAX
-    return UiPolicy{ DisplayKind::MonoEink, 900UL, false, 800, 480 };
+      return UiPolicy{DisplayKind::MonoEink, 900UL, false, 800, 480};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_ECHO_LITE
-    return UiPolicy{ DisplayKind::MonoEink, 900UL, false, 176, 192 };
+      return UiPolicy{DisplayKind::MonoEink, 900UL, false, 176, 192};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
-    // No UI surface on the headless target; values are unused.
-    return UiPolicy{ DisplayKind::Color, 0UL, false, 0, 0 };
+      // No UI surface on the headless target; values are unused.
+      return UiPolicy{DisplayKind::Color, 0UL, false, 0, 0};
 #else
-    return UiPolicy{ DisplayKind::Color, 0UL, true, 240, 536 };
+      return UiPolicy{DisplayKind::Color, 0UL, true, 240, 536};
 #endif
-  }();
-  return kPolicy;
-}
+    }();
+    return kPolicy;
+  }
 
 }
 

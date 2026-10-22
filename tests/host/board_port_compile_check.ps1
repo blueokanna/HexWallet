@@ -22,11 +22,12 @@ $defaultS3Libs = Join-Path (Split-Path (Split-Path $espLibsRoot -Parent) -Parent
 $libs = $espLibsRoot
 $s3libs = if ($env:HEXWALLET_ESP32_S3_LIBS) { $env:HEXWALLET_ESP32_S3_LIBS } else { $defaultS3Libs }
 $core = $coreCandidate
+$toolRoot = Join-Path (Split-Path (Split-Path $espLibsRoot -Parent) -Parent) "esp-x32"
 
-$gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32s3-elf-g++.exe" -ErrorAction SilentlyContinue |
+$gcc = Get-ChildItem $toolRoot -Recurse -Filter "xtensa-esp32s3-elf-g++.exe" -ErrorAction SilentlyContinue |
        Select-Object -First 1 -ExpandProperty FullName
 if (-not $gcc) {
-  $gcc = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32-elf-g++.exe" -ErrorAction SilentlyContinue |
+  $gcc = Get-ChildItem $toolRoot -Recurse -Filter "xtensa-esp32-elf-g++.exe" -ErrorAction SilentlyContinue |
          Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $gcc) { throw "xtensa-esp32(s3) g++ not found; is the ESP32 core installed?" }
@@ -65,7 +66,7 @@ $extraDefines = @("-DLV_CONF_INCLUDE_SIMPLE")
 # arduino-cli build compiles LVGL), which catches config bugs that only appear
 # inside LVGL's own .c files (e.g. an empty LV_MEM_POOL_INCLUDE breaking
 # `#include LV_MEM_POOL_INCLUDE` in lv_mem_core_builtin.c).
-$gccC = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esp-x32" -Recurse -Filter "xtensa-esp32-elf-gcc.exe" -ErrorAction SilentlyContinue |
+$gccC = Get-ChildItem $toolRoot -Recurse -Filter "xtensa-esp32-elf-gcc.exe" -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty FullName
 if (-not $gccC) { throw "xtensa-esp32-elf-gcc.exe not found; is the ESP32 core installed?" }
 
@@ -114,6 +115,35 @@ foreach ($b in $boards) {
     }
   }
 }
+if ($fail -gt 0) {
+  Write-Output "BOARD PORT COMPILE: $fail failure(s)"
+  exit 1
+}
+
+# --- NFC port: force the PN7161 implementation to compile ----------------
+# Without a real pin map the whole NCI implementation is #if'd out, which
+# means a syntax/type error there would only show up on the one board that
+# defines it. Compile it here with a synthetic pin map so the code is always
+# type-checked, while the shipped boards stay NotConfigured.
+$nfcPins = @(
+  "-DHEXWALLET_NFC_PN7161=1",
+  "-DHEXWALLET_NFC_PIN_SCK=12",
+  "-DHEXWALLET_NFC_PIN_MOSI=13",
+  "-DHEXWALLET_NFC_PIN_MISO=14",
+  "-DHEXWALLET_NFC_PIN_CS=15",
+  "-DHEXWALLET_NFC_PIN_IRQ=16",
+  "-DHEXWALLET_NFC_PIN_VEN=17"
+)
+$nfcLog = Join-Path $objDir "WalletNfcPort_nfc.log"
+& $gcc -std=c++17 -O2 -Wall -Wno-unused-parameter "-DHEXWALLET_BOARD=1" @nfcPins $extraDefines $incArgs -c (Join-Path $root "WalletNfcPort.cpp") -o (Join-Path $objDir "WalletNfcPort_nfc.o") *> $nfcLog
+$nfcRc = $LASTEXITCODE
+Write-Output ("  [nfc] WalletNfcPort.cpp => rc={0}" -f $nfcRc)
+if ($nfcRc -ne 0) {
+  $fail++
+  Write-Output "----- WalletNfcPort.cpp [synthetic pins] -----"
+  Get-Content $nfcLog -Encoding Unicode | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
+}
+
 if ($fail -gt 0) {
   Write-Output "BOARD PORT COMPILE: $fail failure(s)"
   exit 1

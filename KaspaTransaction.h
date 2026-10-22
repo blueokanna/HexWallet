@@ -64,6 +64,11 @@ struct KaspaInput {
   uint64_t sequence;
   // Sigop count carried in the v0 sighash. Standard P2PK spends use 1.
   uint8_t sigop_count;
+  // BIP44 account and change branch for this UTXO. Kaspa wallets spend both
+  // receive (change=0) and change (change=1) keys, so the signer must use the
+  // exact branch instead of assuming a single receive path.
+  uint32_t account_index;
+  uint8_t change;
   // BIP44 address index this UTXO was received at; the signer re-derives the
   // key from it and refuses the transaction unless the x-only key matches.
   uint32_t address_index;
@@ -116,6 +121,19 @@ KaspaError kaspa_sighash(const KaspaTransaction &transaction, size_t input_index
 KaspaError kaspa_masses(const KaspaTransaction &transaction,
                         uint64_t *compute_mass, uint64_t *transient_mass,
                         uint64_t *storage_mass);
+
+// Parse the compact review payload accepted by the CLI. All integers are
+// little-endian and the layout is:
+//   u16 version, u64 lock_time, u8 payload_size + payload,
+//   u8 input_count, {txid[32], u32 index, u64 sequence, u64 value,
+//                    u16 script_version, u8 script_size + script,
+//                    u32 account_index, u8 change, u32 address_index,
+//                    u8 sigop_count} * input_count,
+//   u8 output_count, {u64 value, u16 script_version,
+//                     u8 script_size + script} * output_count.
+// The parser validates every bound and then calls kaspa_review().
+KaspaError kaspa_parse_review_payload(const uint8_t *data, size_t size,
+                                      KaspaTransaction *transaction);
 
 // Recompute every derived field (totals, fee, masses, address rendering) and
 // apply the fee policy. Call after populating inputs/outputs.

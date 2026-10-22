@@ -36,6 +36,22 @@ bool wallet_transport_allows(WalletTransport transport,
           return state.authenticated && HEXWALLET_ENABLE_SECRET_EXPORT != 0;
       }
       return false;
+    case WalletTransport::Nfc:
+      switch (operation) {
+        case WalletTransportOperation::PublicCatalog:
+        case WalletTransportOperation::PublicPrice:
+        case WalletTransportOperation::PublicBlockHeight:
+          return true;
+        case WalletTransportOperation::SigningRequest:
+        case WalletTransportOperation::ApprovalResponse:
+          // The link layer authenticates the paired phone and the user must
+          // press APPROVE on the trusted display; without a display there is
+          // no trustworthy review, so NFC signing fails closed.
+          return state.authenticated && state.paired && state.trusted_display;
+        case WalletTransportOperation::SecretExport:
+          return false;
+      }
+      return false;
   }
   return false;
 }
@@ -63,7 +79,15 @@ bool run_transport_policy_self_test() {
          && !wallet_transport_allows(WalletTransport::BluetoothLowEnergy,
                                      WalletTransportOperation::SecretExport, trusted)
          && !wallet_transport_allows(WalletTransport::SerialUsb,
-                                     WalletTransportOperation::SigningRequest, unauthenticated);
+                                     WalletTransportOperation::SigningRequest, unauthenticated)
+         && wallet_transport_allows(WalletTransport::Nfc,
+                                    WalletTransportOperation::SigningRequest, trusted)
+         && !wallet_transport_allows(WalletTransport::Nfc,
+                                     WalletTransportOperation::SigningRequest, unpaired)
+         && !wallet_transport_allows(WalletTransport::Nfc,
+                                     WalletTransportOperation::SigningRequest, unauthenticated)
+         && !wallet_transport_allows(WalletTransport::Nfc,
+                                     WalletTransportOperation::SecretExport, trusted);
 }
 
 }  // namespace hexwallet
