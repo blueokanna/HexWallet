@@ -15,6 +15,12 @@ static void hex(const char *key, const uint8_t *p, size_t n) {
   printf("%s=", key); for (size_t i = 0; i < n; ++i) printf("%02x", p[i]); puts("");
 }
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "chain-selftest")) {
+    const bool ok = run_chain_self_tests();
+    if (!ok) report_chain_self_tests();
+    printf("chain=%s\n", ok ? "pass" : "FAIL");
+    return ok ? 0 : 1;
+  }
   if (argc != 5 && argc != 6) return 2;
   if (!strcmp(argv[1], "chain-selftest")) {
     const bool ok = run_chain_self_tests();

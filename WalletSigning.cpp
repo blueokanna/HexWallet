@@ -1,7 +1,7 @@
 #include "WalletSigning.h"
 
 #include <Arduino.h>
-#include <esp_random.h>
+#include "RandomSource.h"
 #include <esp_system.h>
 #include <stdio.h>
 #include <string.h>
@@ -935,7 +935,7 @@ WalletSigningError finish_review(uint32_t now_ms) {
   active.approved = false;
   active.rejected = false;
   active.consumed = false;
-  esp_fill_random(active.review_id, sizeof(active.review_id));
+  random_fill(active.review_id, sizeof(active.review_id));
   bool nonzero = false;
   for (size_t index = 0; index < sizeof(active.review_id); ++index) {
     if (active.review_id[index] != 0) nonzero = true;
@@ -1756,7 +1756,7 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
       return WalletSigningError::NoWallet;
     }
     uint8_t nonce_seed[kCryptoNoteKeySize];
-    esp_fill_random(nonce_seed, sizeof(nonce_seed));
+    random_fill(nonce_seed, sizeof(nonce_seed));
     wallet_ui_show_busy(strcmp(network_id, "msr") == 0
                             ? "Signing MSR transaction..."
                             : "Signing XMR transaction...");

@@ -1,4 +1,4 @@
-> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](solana-signing.md)。TRON 使用 kind=7，payload 为原始 `raw_data`，详见 [tron-signing.md](tron-signing.md)。Cosmos（ATOM/OSMO/TIA）使用 kind=8，payload 为紧凑审阅结构，返回完整 `TxRaw`，详见 [cosmos-signing.md](cosmos-signing.md)。Stellar 使用 kind=9；Algorand kind=10；NEAR kind=11；VET/ICX/TON/DCR/CKB 使用 kind=14，详见 [chain-signing.md](chain-signing.md)。
+> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](chain-protocols.md)。TRON 使用 kind=7，payload 为原始 `raw_data`，详见 [tron-signing.md](chain-protocols.md)。Cosmos（ATOM/OSMO/TIA）使用 kind=8，payload 为紧凑审阅结构，返回完整 `TxRaw`，详见 [cosmos-signing.md](chain-protocols.md)。Stellar 使用 kind=9；Algorand kind=10；NEAR kind=11；VET/ICX/TON/DCR/CKB 使用 kind=14，详见 [chain-signing.md](chain-protocols.md)。
 
 # 手机 ↔ 硬件钱包链路协议（v1）
 
@@ -143,13 +143,13 @@ request_id(4) | status(1) | 数据...
 
 `kind`：1=UTXO/PSBT，2=EVM，3=Kaspa，4=Zcash（`coin_id=zec`，payload 为 `ZEC4`），5=CryptoNote（XMR；MSR 已移除），
 6=Solana，7=TRON（payload 为 `raw_data`，返回 `r||s||v` 65 字节签名），
-8=Cosmos（ATOM/OSMO/TIA，payload 为 [cosmos-signing.md](cosmos-signing.md) 定义的紧凑结构，
-返回完整 `TxRaw`），9=Stellar（`coin_id=xlm`，主网网络哈希与 unsigned envelope XDR，返回完整 signed envelope；详见 [stellar-signing.md](stellar-signing.md)），
-10=Algorand（`coin_id=algo`，payload 为 canonical unsigned MessagePack，返回 `{sig, txn}`；详见 [algorand-signing.md](algorand-signing.md)），
-11=NEAR（`coin_id=near`，payload 为 unsigned Borsh `TransactionV0`，返回 `tx || 0x00 || sig`；详见 [near-signing.md](near-signing.md)），
-12=Tezos（`coin_id=xtz`，payload 为 manager operation 原始字节，返回 `forged || signature`；详见 [tezos-signing.md](tezos-signing.md)），
-13=XRP（`coin_id=xrp`，payload 为 50 字节 Payment 审阅结构，返回完整 signed binary；详见 [xrp-signing.md](xrp-signing.md)），
-14=Chain（`coin_id=vet|icx|ton|dcr|ckb|ada|hive|sui|fil|dot|ksm`。SUI 的 payload 是原始 BCS TransactionData，返回 97 字节 `flag||signature||public_key`；FIL 的 payload 是原始 CBOR Message，返回完整 SignedMessage CBOR；ADA 的 payload 是原始 Conway body CBOR，返回 `[body, witness_set, true, null]`，三者都不带自定义 magic，详见 [sui-filecoin-signing.md](sui-filecoin-signing.md) 与 [chain-signing.md](chain-signing.md)。其他 payload 以各链 magic 开头；VET 返回完整 signed RLP，ICX/TON/DCR/CKB 返回各自签名或完整签名交易，HIVE 返回 65 字节 graphene 签名，详见 [chain-signing.md](chain-signing.md)；DOT/KSM 使用 `DOT2` payload（短命期 era + tip），返回 v4 signed extrinsic，详见 [chain-signing.md](chain-signing.md)）。
+8=Cosmos（ATOM/OSMO/TIA，payload 为 [cosmos-signing.md](chain-protocols.md) 定义的紧凑结构，
+返回完整 `TxRaw`），9=Stellar（`coin_id=xlm`，主网网络哈希与 unsigned envelope XDR，返回完整 signed envelope；详见 [stellar-signing.md](chain-protocols.md)），
+10=Algorand（`coin_id=algo`，payload 为 canonical unsigned MessagePack，返回 `{sig, txn}`；详见 [algorand-signing.md](chain-protocols.md)），
+11=NEAR（`coin_id=near`，payload 为 unsigned Borsh `TransactionV0`，返回 `tx || 0x00 || sig`；详见 [near-signing.md](chain-protocols.md)），
+12=Tezos（`coin_id=xtz`，payload 为 manager operation 原始字节，返回 `forged || signature`；详见 [tezos-signing.md](chain-protocols.md)），
+13=XRP（`coin_id=xrp`，payload 为 50 字节 Payment 审阅结构，返回完整 signed binary；详见 [xrp-signing.md](chain-protocols.md)），
+14=Chain（`coin_id=vet|icx|ton|dcr|ckb|ada|hive|sui|fil|dot|ksm`。SUI 的 payload 是原始 BCS TransactionData，返回 97 字节 `flag||signature||public_key`；FIL 的 payload 是原始 CBOR Message，返回完整 SignedMessage CBOR；ADA 的 payload 是原始 Conway body CBOR，返回 `[body, witness_set, true, null]`，三者都不带自定义 magic，详见 [sui-filecoin-signing.md](chain-protocols.md) 与 [chain-signing.md](chain-protocols.md)。其他 payload 以各链 magic 开头；VET 返回完整 signed RLP，ICX/TON/DCR/CKB 返回各自签名或完整签名交易，HIVE 返回 65 字节 graphene 签名，详见 [chain-signing.md](chain-protocols.md)；DOT/KSM 使用 `DOT2` payload（短命期 era + tip），返回 v4 signed extrinsic，详见 [chain-signing.md](chain-protocols.md)）。
 
 状态字节：`0` ok、`1` pending（等待按键）、`2` rejected、`3` unknown-coin、`4` invalid、
 `5` expired、`6` unsupported、`8` not-approved、`9` **locked**（设备已配对但钱包未解锁，RAM 里没有任何密钥）、

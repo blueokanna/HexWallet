@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <esp_random.h>
+#include "RandomSource.h"
 #include <esp_system.h>
 #include <stdio.h>
 #include <string.h>
@@ -590,7 +590,7 @@ bool wallet_link_service_init() {
   if (preferences.getBytesLength(kIdentitySeedKey) == sizeof(identity_seed)) {
     preferences.getBytes(kIdentitySeedKey, identity_seed, sizeof(identity_seed));
   } else {
-    esp_fill_random(identity_seed, sizeof(identity_seed));
+    random_fill(identity_seed, sizeof(identity_seed));
     identity_seed[0] |= 1;
     if (preferences.putBytes(kIdentitySeedKey, identity_seed,
                              sizeof(identity_seed)) != sizeof(identity_seed)) {

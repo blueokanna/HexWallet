@@ -1,6 +1,7 @@
 #include "WalletBoardPort.h"
 #include "WalletBoardPins.h"
 #include "EinkFrame.h"
+#include "WalletSecurity.h"
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -611,22 +612,74 @@ bool board_user_button_pressed() {
 #endif
 }
 
-SecureElementProbeState board_secure_element_probe() {
+namespace {
+
 #if defined(HEXWALLET_SE051_I2C_SDA) && defined(HEXWALLET_SE051_I2C_SCL)
-  // Presence only. Never mark an applet authenticated or enable custody here.
-  Wire1.begin(HEXWALLET_SE051_I2C_SDA, HEXWALLET_SE051_I2C_SCL);
-  Wire1.beginTransmission(0x48);
-  return Wire1.endTransmission() == 0 ? SecureElementProbeState::PresentUnverified
-                                      : SecureElementProbeState::NoResponse;
+constexpr int kSecureElementSda = HEXWALLET_SE051_I2C_SDA;
+constexpr int kSecureElementScl = HEXWALLET_SE051_I2C_SCL;
 #elif defined(HEXWALLET_SE050_I2C_SDA) && defined(HEXWALLET_SE050_I2C_SCL)
-  // Dedicated bus: a custody probe must not reconfigure the panel/touch bus.
-  Wire1.begin(HEXWALLET_SE050_I2C_SDA, HEXWALLET_SE050_I2C_SCL);
-  Wire1.beginTransmission(0x48);
-  return Wire1.endTransmission() == 0 ? SecureElementProbeState::PresentUnverified
-                                      : SecureElementProbeState::NoResponse;
+constexpr int kSecureElementSda = HEXWALLET_SE050_I2C_SDA;
+constexpr int kSecureElementScl = HEXWALLET_SE050_I2C_SCL;
 #else
-  return SecureElementProbeState::NotConfigured;
+constexpr int kSecureElementSda = -1;
+constexpr int kSecureElementScl = -1;
 #endif
+
+#ifndef HEXWALLET_SE051_I2C_ADDRESS
+// SE05x default 7-bit address. Override through the board profile if the
+// schematic uses the alternate strap.
+constexpr uint8_t kSecureElementAddress = 0x48;
+#else
+constexpr uint8_t kSecureElementAddress = HEXWALLET_SE051_I2C_ADDRESS;
+#endif
+
+bool secure_element_bus_ready() {
+#if defined(HEXWALLET_SE051_I2C_SDA) && defined(HEXWALLET_SE051_I2C_SCL)
+  static bool started = false;
+  if (!started) {
+    // Dedicated bus: a custody probe must never reconfigure the panel or touch
+    // bus, so this uses Wire1 and a board profile has to say so explicitly.
+    started = Wire1.begin(kSecureElementSda, kSecureElementScl);
+  }
+  return started;
+#elif defined(HEXWALLET_SE050_I2C_SDA) && defined(HEXWALLET_SE050_I2C_SCL)
+  static bool started = false;
+  if (!started) {
+    started = Wire1.begin(kSecureElementSda, kSecureElementScl);
+  }
+  return started;
+#else
+  return false;
+#endif
+}
+
+}  // namespace
+
+bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size) {
+  if (out == nullptr || size == nullptr || capacity < 2) return false;
+  *size = 0;
+  if (!secure_element_bus_ready()) return false;
+  const size_t take = capacity < 33 ? capacity : 33;
+  const size_t received = Wire1.requestFrom(kSecureElementAddress,
+                                            static_cast<uint8_t>(take));
+  if (received < 2 || received > take) return false;
+  for (size_t index = 0; index < received; ++index) {
+    out[index] = static_cast<uint8_t>(Wire1.read());
+  }
+  if (!iso7816_atr_valid(out, received)) return false;
+  *size = received;
+  return true;
+}
+
+SecureElementProbeState board_secure_element_probe() {
+  if (!secure_element_bus_ready()) return SecureElementProbeState::NotConfigured;
+  uint8_t atr[33];
+  size_t size = 0;
+  if (!board_secure_element_atr(atr, sizeof(atr), &size)) {
+    return SecureElementProbeState::NoResponse;
+  }
+  secure_zero(atr, sizeof(atr));
+  return SecureElementProbeState::PresentUnverified;
 }
 
 bool board_display_init() {

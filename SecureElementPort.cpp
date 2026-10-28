@@ -157,6 +157,39 @@ uint16_t iso7816_crc16(const uint8_t *data, size_t size) {
   return crc;
 }
 
+bool iso7816_atr_valid(const uint8_t *atr, size_t size) {
+  if (atr == nullptr || size < 2) return false;
+  if (atr[0] != 0x3B && atr[0] != 0x3F) return false;
+  // T0: Y1 (TA1/TB1/TC1/TD1 present) in the high nibble, K historical bytes in
+  // the low nibble.
+  uint8_t interface_bits = static_cast<uint8_t>(atr[1] >> 4);
+  size_t offset = 2;
+  while (interface_bits != 0) {
+    size_t count = 0;
+    if ((interface_bits & 0x01U) != 0) ++count;  // TA
+    if ((interface_bits & 0x02U) != 0) ++count;  // TB
+    if ((interface_bits & 0x04U) != 0) ++count;  // TC
+    if ((interface_bits & 0x08U) != 0) ++count;  // TD
+    if (offset + count > size) return false;
+    // TD is the last of the interface bytes and carries the next Y.
+    interface_bits = (interface_bits & 0x08U) != 0
+                         ? static_cast<uint8_t>(atr[offset + count - 1] >> 4)
+                         : 0;
+    offset += count;
+  }
+  offset += static_cast<size_t>(atr[1] & 0x0F);
+  if (offset > size) return false;
+  const size_t trailing = size - offset;
+  if (trailing == 0) return true;
+  if (trailing != 1) return false;
+  // TCK is chosen so that the XOR of every byte after TS is zero.
+  uint8_t checksum = 0;
+  for (size_t index = 1; index < size; ++index) {
+    checksum = static_cast<uint8_t>(checksum ^ atr[index]);
+  }
+  return checksum == 0;
+}
+
 void aes128_expand_key(const uint8_t key[16], Aes128Schedule *schedule) {
   if (schedule == nullptr) return;
   if (key == nullptr) {
@@ -434,6 +467,26 @@ bool run_secure_element_self_tests() {
   uint8_t other_mac[16] = {};
   passed = aes128_cmac(kOtherKey, kMessage64, 16, other_mac) &&
            !constant_time_equal(mac, other_mac, 16) && passed;
+
+  // Answer-to-reset structure. These are constructed from the ISO 7816-3 rules
+  // (TS/T0/interface chain/historical bytes/TCK), not captured from a card.
+  static const uint8_t kAtrMinimal[] = {0x3B, 0x00};
+  static const uint8_t kAtrInverse[] = {0x3F, 0x00};
+  static const uint8_t kAtrHistorical[] = {0x3B, 0x02, 0x14, 0x50};
+  static const uint8_t kAtrTck[] = {0x3B, 0x80, 0x01, 0x81};
+  static const uint8_t kAtrBadTck[] = {0x3B, 0x80, 0x01, 0x80};
+  static const uint8_t kAtrShortHistorical[] = {0x3B, 0x02, 0x14};
+  static const uint8_t kAtrBadTs[] = {0x00, 0x00};
+  static const uint8_t kAtrTruncated[] = {0x3B};
+  passed = iso7816_atr_valid(kAtrMinimal, sizeof(kAtrMinimal)) && passed;
+  passed = iso7816_atr_valid(kAtrInverse, sizeof(kAtrInverse)) && passed;
+  passed = iso7816_atr_valid(kAtrHistorical, sizeof(kAtrHistorical)) && passed;
+  passed = iso7816_atr_valid(kAtrTck, sizeof(kAtrTck)) && passed;
+  passed = !iso7816_atr_valid(kAtrBadTck, sizeof(kAtrBadTck)) && passed;
+  passed = !iso7816_atr_valid(kAtrShortHistorical, sizeof(kAtrShortHistorical)) && passed;
+  passed = !iso7816_atr_valid(kAtrBadTs, sizeof(kAtrBadTs)) && passed;
+  passed = !iso7816_atr_valid(kAtrTruncated, sizeof(kAtrTruncated)) && passed;
+  passed = !iso7816_atr_valid(nullptr, 0) && passed;
 
   // Gate behaviour: nothing registered means nothing ready.
   secure_element_register_backend(nullptr);

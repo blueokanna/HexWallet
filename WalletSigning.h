@@ -147,7 +147,7 @@ WalletSigningError wallet_signing_begin_tron(const char *network_id,
                                              uint32_t now_ms);
 
 // Cosmos SDK native MsgSend for atom/osmo/tia. The payload is the compact
-// review structure documented in docs/cosmos-signing.md; the returned bytes are
+// review structure documented in docs/chain-protocols.md; the returned bytes are
 // the complete TxRaw protobuf.
 WalletSigningError wallet_signing_begin_cosmos(const char *network_id,
                                                uint32_t address_index,

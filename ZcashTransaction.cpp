@@ -1,6 +1,6 @@
 #include "ZcashTransaction.h"
 
-#include <esp_random.h>
+#include "RandomSource.h"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/md.h>
 #include <string.h>
@@ -474,7 +474,7 @@ namespace hexwallet
 
     int random_callback(void *, unsigned char *output, size_t length)
     {
-      esp_fill_random(output, length);
+      random_fill(output, length);
       return 0;
     }
 

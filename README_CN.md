@@ -1,6 +1,6 @@
 # HexWallet CLI 使用与构建指南
 
-> 当前版本尚未完成生产验收，XMR 已能在设备上走通完整签名流程，但尚未获得全节点接收验收。Arduino 目录说明见 [docs/arduino-layout.md](docs/arduino-layout.md)。
+> 当前版本尚未完成生产验收，XMR 已能在设备上走通完整签名流程，但尚未获得全节点接收验收。Arduino 目录说明见 [docs/display.md](docs/display.md)。
 
 HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供 BIP39/BIP32 密钥派生、地址生成、受限的 Bitcoin PSBT 审查、受限的 EVM 交易审查，以及经过认证的 USB 串口 CLI。
 
@@ -42,17 +42,17 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
 - 审查并签名受限的 Bitcoin PSBT v0。
 - 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 输入、t1/t3 输出）：`zec inspect <ZEC4-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在启动自检中校验。
-- 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 合约。ERC-721 `safeTransferFrom`（`0x42842e0e`）和 ERC-1155 `safeTransferFrom`（`0xf242432a`）等唯一 selector 可在无合约注册表时审阅：设备显示合约地址、标准和明确的未登记警告，但无法离线验证合约身份或 NFT 元数据。ERC-20 必须登记 decimals/symbol；与 ERC-20 共享 selector 的 `transferFrom`、批量转移和 receiver hook 一律拒绝。TRON 的 TRC-721/1155 支持同一唯一 selector 子集，详见 [tron-signing.md](docs/tron-signing.md) 与 [adapter-status.md](docs/adapter-status.md)。
+- 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 合约。ERC-721 `safeTransferFrom`（`0x42842e0e`）和 ERC-1155 `safeTransferFrom`（`0xf242432a`）等唯一 selector 可在无合约注册表时审阅：设备显示合约地址、标准和明确的未登记警告，但无法离线验证合约身份或 NFT 元数据。ERC-20 必须登记 decimals/symbol；与 ERC-20 共享 selector 的 `transferFrom`、批量转移和 receiver hook 一律拒绝。TRON 的 TRC-721/1155 支持同一唯一 selector 子集，详见 [tron-signing.md](docs/chain-protocols.md) 与 [adapter-status.md](docs/chain-support.md)。
 
-- Monero type-6 审阅和 CLSAG 签名已接入；MSR 已移除。SOL 原生转账、SPL Token 与 Token-2022 `TransferChecked` 已接入设备批准流程；Token-2022 会显示扩展风险警告，要求额外 hook 账户的指令被拒绝，范围与独立向量见 [solana-signing.md](docs/solana-signing.md)。
-- TRON 原生 TRX、已登记 TRC-20（当前为 Tether 官方合约 USDT）的 `transfer(address,uint256)`，以及唯一 selector 的 TRC-721/1155 `safeTransferFrom` 已接入 `BEGIN_SIGN kind=7`；设备只接受 owner 权限、无 memo、单合约交易，NFT 合约未登记时会显示明确警告，范围与独立向量见 [tron-signing.md](docs/tron-signing.md)。
-- Stellar 的 SEP-0005 地址、主网 XDR Payment/CreateAccount、memo 和发行者审阅已接入 `BEGIN_SIGN kind=9`，返回完整签名 envelope；范围、独立 SDK 向量和离线限制见 [stellar-signing.md](docs/stellar-signing.md)。
-- Cosmos SDK 原生 `MsgSend`（ATOM/OSMO/TIA）已接入 `BEGIN_SIGN kind=8`：设备自行构建 `TxBody`/`AuthInfo`/`SignDoc`/`TxRaw`，只支持单消息、原生 denom、`SIGN_MODE_DIRECT`，不支持 IBC/memo/authz，范围见 [cosmos-signing.md](docs/cosmos-signing.md)。
-- Algorand 原生 `pay` 与 ASA `axfer`/opt-in 已接入 `BEGIN_SIGN kind=10`：设备只接受 canonical unsigned MessagePack，绑定主网 genesis、fee 和轮次窗口，显示 note/lease，返回 `{sig, txn}`；不支持 group、rekey、close、clawback、LogicSig 和应用调用，见 [algorand-signing.md](docs/algorand-signing.md)。
-- NEAR Borsh `TransactionV0` 原生 Transfer 已接入 `BEGIN_SIGN kind=11`：1–16 笔转账、128 位总额溢出拒绝、隐式账户 owner 绑定，返回 `tx || 0x00 || sig`；不支持 FunctionCall、访问密钥、委托或命名账户所有权，见 [near-signing.md](docs/near-signing.md)。
+- Monero type-6 审阅和 CLSAG 签名已接入；MSR 已移除。SOL 原生转账、SPL Token 与 Token-2022 `TransferChecked` 已接入设备批准流程；Token-2022 会显示扩展风险警告，要求额外 hook 账户的指令被拒绝，范围与独立向量见 [solana-signing.md](docs/chain-protocols.md)。
+- TRON 原生 TRX、已登记 TRC-20（当前为 Tether 官方合约 USDT）的 `transfer(address,uint256)`，以及唯一 selector 的 TRC-721/1155 `safeTransferFrom` 已接入 `BEGIN_SIGN kind=7`；设备只接受 owner 权限、无 memo、单合约交易，NFT 合约未登记时会显示明确警告，范围与独立向量见 [tron-signing.md](docs/chain-protocols.md)。
+- Stellar 的 SEP-0005 地址、主网 XDR Payment/CreateAccount、memo 和发行者审阅已接入 `BEGIN_SIGN kind=9`，返回完整签名 envelope；范围、独立 SDK 向量和离线限制见 [stellar-signing.md](docs/chain-protocols.md)。
+- Cosmos SDK 原生 `MsgSend`（ATOM/OSMO/TIA）已接入 `BEGIN_SIGN kind=8`：设备自行构建 `TxBody`/`AuthInfo`/`SignDoc`/`TxRaw`，只支持单消息、原生 denom、`SIGN_MODE_DIRECT`，不支持 IBC/memo/authz，范围见 [cosmos-signing.md](docs/chain-protocols.md)。
+- Algorand 原生 `pay` 与 ASA `axfer`/opt-in 已接入 `BEGIN_SIGN kind=10`：设备只接受 canonical unsigned MessagePack，绑定主网 genesis、fee 和轮次窗口，显示 note/lease，返回 `{sig, txn}`；不支持 group、rekey、close、clawback、LogicSig 和应用调用，见 [algorand-signing.md](docs/chain-protocols.md)。
+- NEAR Borsh `TransactionV0` 原生 Transfer 已接入 `BEGIN_SIGN kind=11`：1–16 笔转账、128 位总额溢出拒绝、隐式账户 owner 绑定，返回 `tx || 0x00 || sig`；不支持 FunctionCall、访问密钥、委托或命名账户所有权，见 [near-signing.md](docs/chain-protocols.md)。
 - 离线 TOTP（RFC 6238，SHA-1/256/512）已实现并通过 RFC 6238/2202/4648 向量；认证后的 CLI 用 `totp time <unix>` 锚定时钟，`totp <base32>` 生成验证码，密钥不落盘、不回显。时钟与硬件 RTC 的边界见 [totp.md](docs/totp.md)。
-- Tezos（XTZ）manager operation 已接入 `BEGIN_SIGN kind=12`：可选 Ed25519 reveal、1–16 笔 tz1–tz4 原生转账、BLAKE2b-256(0x03 || forged) 摘要与 Ed25519 签名；不支持 KT1、Michelson、委托或 FA token，见 [tezos-signing.md](docs/tezos-signing.md)。
-- XRP 原生 Payment 已接入 `BEGIN_SIGN kind=13`：设备从 50 字节紧凑结构构建规范 XRPL 二进制，使用 SHA-512Half 与 secp256k1 DER 签名；classic r-address 使用 Ripple base58 + hash160。不支持 issued currency、path、memo、partial payment 或多签名，见 [xrp-signing.md](docs/xrp-signing.md)。
+- Tezos（XTZ）manager operation 已接入 `BEGIN_SIGN kind=12`：可选 Ed25519 reveal、1–16 笔 tz1–tz4 原生转账、BLAKE2b-256(0x03 || forged) 摘要与 Ed25519 签名；不支持 KT1、Michelson、委托或 FA token，见 [tezos-signing.md](docs/chain-protocols.md)。
+- XRP 原生 Payment 已接入 `BEGIN_SIGN kind=13`：设备从 50 字节紧凑结构构建规范 XRPL 二进制，使用 SHA-512Half 与 secp256k1 DER 签名；classic r-address 使用 Ripple base58 + hash160。不支持 issued currency、path、memo、partial payment 或多签名，见 [xrp-signing.md](docs/chain-protocols.md)。
 
 以下能力明确不可用，也不会出现在钱包目录中：
 
@@ -77,11 +77,11 @@ BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量
 
 没有 SLIP-0044 coin type、可读官方 chainparams 或受支持地址编码的币种已从钱包删除，不再生成占位目录项。重新加入必须附官方证据，不能猜 version byte。
 
-`tools/build_utxo_candidates.py` 会抓取每个 MiningPoolStats 币页面的官方 GitHub 仓库，解析主网 `chainparams.cpp`，拒绝 CashAddr、Zcash、fork-id 和多字节前缀，再与 SLIP-0044 匹配。候选只写入 `tools/utxo_candidates.json`，不会直接进入钱包：必须先通过 `tools/verify_utxo_sighash.py` 的地址版本和 sighash 审计，再人工确认派生路径、费用上限和托管策略。
+`tools/fork_registry.json` 的每个 profile 都记录了来源仓库、base58 版本、legacy sighash 与交易头字段核对结果；采集脚本已随 Python 工具链一并移除，新增 profile 必须手工附上同样的证据。
 
-`python tools/miningpool_coverage.py` 拉取 MiningPoolStats 当前列表，按 ASIC/GPU/CPU/HDD 统计固件已支持的行数与缺口；它只审计，不把尚未实现的币写进钱包。当前审计：**518 个活跃条目中支持 111 个**（ASIC 62/212，GPU 30/181，CPU 19/121，HDD 0/4）。缺口是显式的，不用占位行伪装。
+MiningPoolStats 快照（`tools/miningpoolstats_coin_list.json`，2026-10-23）按 ASIC/GPU/CPU/HDD 统计缺口：**518 个活跃条目中支持 111 个**（ASIC 62/212，GPU 30/181，CPU 19/121，HDD 0/4）。审计只用于说明缺口，不把尚未实现的币写进钱包。
 
-`python tools/generate_mining_catalog.py` 生成随固件发布的 `WalletMiningCatalog.inc`，只保留能解析到完整签名钱包的行。未支持条目保留在 `tools/miningpoolstats_coin_list.json` 供后续按家族扩展，不进入固件。CLI 提供 `mining stats`、`mining list [ASIC|GPU|CPU|HDD] [offset]` 和 `mining show <symbol>`。
+`src/generated/WalletMiningCatalog.inc` 只保留能解析到完整签名钱包的行；未支持条目保留在快照 JSON 里供后续按家族扩展，不进入固件。`tests/host/policy_check.ps1` 会校验矿池表每一行都指向目录里真实存在的条目。
 
 ### SE050 / SE051C2HQ1 托管边界
 
@@ -89,7 +89,7 @@ BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量
 
 `SecureElementPort.h` 定义了真正的后端契约：`open`、`session_authenticated`、`sign_digest`、`public_key`、`close` 必须全部提供，每次启动只允许注册一个后端；如果后端在 `open()` 返回成功但 `session_authenticated()` 仍为假（这正是静态密钥不匹配、卡片被复位时的情形），后端会被立即注销，托管门保持关闭。`active_secure_element_profile()` 只有在这样的后端完成认证后才返回 SE051C2HQ1 配置，因此“器件型号”永远无法被提升为“硬件托管”。
 
-当前**没有任何后端注册**，所以 `secure_element_ready()` 为假，`HEXWALLET_REQUIRE_SECURE_CUSTODY=1` 会拒绝生成/导入会话与装载种子。已实现并用公开向量固定的只有任何 SCP03 后端都需要的地基：ISO/IEC 7816-3 CRC16/A（校验值 `0x29B1`）、FIPS-197 AES-128（`69c4e0d8…`）、RFC 4493 AES-CMAC（四组长度）。**没有**写 SCP03 密钥派生/ICV 布局与 T=1 over I2C 帧格式——这两者必须对着真实卡片或许可的参考实现验证，凭记忆写出来只会得到“看起来能通”的通道。逐项缺口与验收条件见 [docs/se051-plug-and-trust.md](docs/se051-plug-and-trust.md)。
+当前**没有任何后端注册**，所以 `secure_element_ready()` 为假，`HEXWALLET_REQUIRE_SECURE_CUSTODY=1` 会拒绝生成/导入会话与装载种子。已实现并用公开向量固定的只有任何 SCP03 后端都需要的地基：ISO/IEC 7816-3 CRC16/A（校验值 `0x29B1`）、FIPS-197 AES-128（`69c4e0d8…`）、RFC 4493 AES-CMAC（四组长度）。**没有**写 SCP03 密钥派生/ICV 布局与 T=1 over I2C 帧格式——这两者必须对着真实卡片或许可的参考实现验证，凭记忆写出来只会得到“看起来能通”的通道。逐项缺口与验收条件见 [docs/security.md](docs/security.md)。
 
 需要解密到 RAM 的 seed 仍然只受 MCU 保护；即使后端就绪，BIP32/SLIP-0010 派生仍在 MCU 内完成，SE 提升的是静态密钥与签名隔离，不等于“所有私钥都由安全芯片保护”。
 
@@ -829,7 +829,7 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `CryptoNoteReview` | 按网络策略（手续费上限、ring 大小）、key offsets 与 RCT 绑定、CLSAG `D` 校验、诚实的诱饵边界说明 |
 | `CryptoNoteSigning` | 手机 payload 解析 → 审阅 → 逐输入 CLSAG → 序列化交易；会话状态与清零 |
 | `CryptoNoteMasari` | Legacy regression source; MSR is not exposed as a wallet |
-| `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序）；EPD 刷新策略见 [epd-lvgl.md](docs/epd-lvgl.md) |
+| `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序）；EPD 刷新策略见 [epd-lvgl.md](docs/display.md) |
 | `WalletBoardPins` | 全部五块受支持 LilyGO 板卡的逐引脚定义 |
 | `EvmTransaction` | EIP-155、EIP-1559、原生转账和白名单 Token 调用 |
 | `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 与 LayerZero OFT/ONFT 的选择器白名单和规范 ABI 解码 |

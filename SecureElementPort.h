@@ -34,6 +34,13 @@ namespace hexwallet {
 // The published check value for "123456789" is 0x29B1.
 uint16_t iso7816_crc16(const uint8_t *data, size_t size);
 
+// Structural validation of an answer-to-reset: TS must be 0x3B or 0x3F, the
+// TA/TB/TC/TD chain and the historical bytes must fit exactly, and when a TCK
+// byte is present the XOR of every byte after TS must be zero (ISO 7816-3
+// 8.2.5). An I2C ACK proves a device is at the address; a well-formed ATR is
+// the first evidence that it is a smart card.
+bool iso7816_atr_valid(const uint8_t *atr, size_t size);
+
 // AES-128, encryption direction only (SCP03 uses the forward cipher for CMAC
 // and CTR). The S-box is derived from the GF(2^8) inverse plus the affine
 // transform instead of a transcribed table, so there is no constant to mistype.

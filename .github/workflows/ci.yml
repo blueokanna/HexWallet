@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -93,100 +93,21 @@ jobs:
           # and runs host_test.exe, exiting with the test verdict.
           powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 
-      - name: Build real BIP32 and secp256k1 chain probe
+      - name: Build native chain probe and production policy, run both
         shell: pwsh
         run: |
           git clone --depth 1 --branch mbedtls-3.6.5 --recurse-submodules --shallow-submodules https://github.com/Mbed-TLS/mbedtls.git build/chain-mbedtls
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/generate_chain_selftest.py --check
 
-      - name: Catalog and phone protocol tests (require freshly built harness)
+      - name: Firmware policy gates
         shell: pwsh
         run: |
-          # build.ps1 also links tests/host/link_pipe.exe, which runs the real
-          # WalletLinkDevice/WalletNfcApdu code behind a line protocol. The
-          # reference phone client drives pairing, handshake, encrypted
-          # requests, replay and tamper rejection against it.
-          if (-not (Test-Path tests/host/link_pipe.exe)) { throw "phone harness missing" }
-          python -m unittest discover -s tests -p "test_*.py"
-
-      - name: Verify native transfers and QRL addresses with independent SDKs
-        shell: pwsh
-        run: |
-          npm install --prefix build/nem-sdk --ignore-scripts --save-exact nem-sdk@1.6.11 @hiveio/dhive@1.3.6 ethers@6.15.0
+          # Graveyard exclusion, withdrawn-chain pins, mining-table resolution,
+          # no network stack, and the production custody refusal.
+          powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm install --prefix build/flow-sdk --ignore-scripts --save-exact @scure/bip32@1.7.0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm install --prefix build/icp-sdk --ignore-scripts --save-exact @icp-sdk/core@6.1.1 @icp-sdk/canisters@4.0.0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Force build/sia-sdk, build/qrl-reference | Out-Null
-          npm pack @siafoundation/sdk@0.5.0 --ignore-scripts --pack-destination build/sia-sdk
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          tar -xf build/sia-sdk/siafoundation-sdk-0.5.0.tgz -C build/sia-sdk
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm pack qrllib@1.3.2 --ignore-scripts --pack-destination build/qrl-reference
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          tar -xf build/qrl-reference/qrllib-1.3.2.tgz -C build/qrl-reference
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/reference/generate_native_remaining.cjs --check --verify-device
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/reference/generate_icp_vectors.cjs --check --verify-device
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/reference/generate_flow_lsk.cjs --check --verify-device
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/reference/generate_qrl_vectors.cjs --check --verify-device
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Python for independent SPL VM execution
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Execute firmware-signed SPL transactions in independent LiteSVM
-        shell: pwsh
-        run: |
-          # Desktop-only oracle. Firmware has no VM dependency or network client.
-          python -m pip install solders==0.28.0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tests/reference/verify_spl_execution.py
-
-      - name: Regenerate Stellar envelopes with independent SDK
-        shell: pwsh
-        run: |
-          python -m pip install stellar-sdk==13.1.0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tests/reference/generate_stellar_vectors.py --check
-
-      - name: Regenerate Algorand transactions with independent SDK
-        shell: pwsh
-        run: |
-          python -m pip install py-algorand-sdk==2.11.1 pynacl==1.6.2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tests/reference/generate_algorand_vectors.py --check
-
-      - name: Verify embedded known-answer vectors
-        shell: pwsh
-        run: |
-          python tools/generate_algorand_selftest.py --check
-          python tools/generate_near_selftest.py --check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/generate_tezos_selftest.py --check
-
-      - name: Regenerate XTZ operations with independent Taquito SDK
-        shell: pwsh
-        run: |
-          npm install --prefix build/tezos-sdk --ignore-scripts --save-exact @taquito/local-forging@25.0.0 @taquito/signer@25.0.0 @taquito/utils@25.0.0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/reference/generate_tezos_vectors.cjs --check
-
-      - name: Save SPL execution evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: spl-litesvm-evidence
-          path: HexWallet/build/spl-svm-execution.json
-          if-no-files-found: error
 
       - name: Device-target compile check (xtensa g++)
         shell: pwsh

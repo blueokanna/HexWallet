@@ -1,6 +1,6 @@
 # HexWallet
 
-> Production acceptance is incomplete. MSR support was withdrawn on 2026-10-24. Native SOL, SPL Token and Token-2022 TransferChecked are implemented; Token-2022 reviews carry an unverifiable-extension warning and ATA creation is rejected. TRX supports native transfers and registered TRC-20 contracts. Hardware and node acceptance remain pending. See [Solana scope and evidence](docs/solana-signing.md) and [TRON scope and evidence](docs/tron-signing.md).
+> Production acceptance is incomplete. MSR support was withdrawn on 2026-10-24. Native SOL, SPL Token and Token-2022 TransferChecked are implemented; Token-2022 reviews carry an unverifiable-extension warning and ATA creation is rejected. TRX supports native transfers and registered TRC-20 contracts. Hardware and node acceptance remain pending. See [Solana scope and evidence](docs/chain-protocols.md) and [TRON scope and evidence](docs/chain-protocols.md).
 
 HexWallet is an offline-first hardware wallet for ESP32-S3. It derives keys from a BIP39 seed, builds and reviews transactions on the MCU, and signs only after a one-time confirmation on the trusted display. The host never receives the seed or private keys.
 
@@ -9,7 +9,7 @@ The public wallet catalog is filtered by the configured signing policies. This f
 ## Security model
 
 - BIP39/BIP32 derivation and all signing happen on the device. Secret export is disabled by default (`HEXWALLET_ENABLE_SECRET_EXPORT=0`).
-- Secure-element custody is a contract, not a claim: `SecureElementPort.h` requires every backend operation, allows one backend per boot, and unregisters a backend that reports success without an authenticated card session. No backend ships today, so the SE051C2HQ1 profile never becomes active and `HEXWALLET_REQUIRE_SECURE_CUSTODY=1` refuses to open a wallet. See [docs/se051-plug-and-trust.md](docs/se051-plug-and-trust.md).
+- Secure-element custody is a contract, not a claim: `SecureElementPort.h` requires every backend operation, allows one backend per boot, and unregisters a backend that reports success without an authenticated card session. No backend ships today, so the SE051C2HQ1 profile never becomes active and `HEXWALLET_REQUIRE_SECURE_CUSTODY=1` refuses to open a wallet. See [docs/security.md](docs/security.md).
 - Every signing request is parsed into a bounded review structure and displayed on the trusted UI. Phone-link signing requires a single-use on-device approval with a 120-second lifetime.
 - Bitcoin PSBT inputs must commit to wallet-owned UTXOs. Zcash payloads must carry every prevout value/script, and the signer re-derives and checks each P2PKH hash. Kaspa payloads are validated against BIP340 keys and KIP-0009 mass.
 - Fee caps, amount bounds, duplicate-input checks, canonical encoding checks, and explicit refusal of unsupported transaction families are enforced before ECDSA/Schnorr.
@@ -52,7 +52,7 @@ public derivation; no one-time-signature reservation or signing).
 
 The strict catalog is generated from `WalletForkCatalog.inc` and `WalletCatalog.cpp`. A profile whose network lacks a signing policy is internal test data, not a user wallet.
 
-Generated fork profiles are admitted only after `tools/verify_utxo_sighash.py` confirms the upstream base58 versions, a legacy P2PKH sighash, and a transaction header without `nTime` or a wide `nType`. Fork-id, timestamp-sighash, and wide-type chains stay address-only: the Bitcoin legacy signer is never used as a guess.
+Generated fork profiles are admitted only after the upstream chainparams were checked for base58 versions, a legacy P2PKH sighash and a transaction header without `nTime` or a wide `nType`; `tools/fork_registry.json` records that audit per row. Fork-id, timestamp-sighash, and wide-type chains stay address-only: the Bitcoin legacy signer is never used as a guess.
 
 ## Deliberately unsupported
 
@@ -131,7 +131,7 @@ link status | link pair confirm | link pair reject
 tx reject
 ```
 
-`zec inspect` accepts `ZEC4` payloads with one prevout record per input. `tools/build_zcash_review_payload.py` builds the payload and prints the independent ZIP-243 digest for auditing.
+`zec inspect` accepts `ZEC4` payloads with one prevout record per input; the layout is specified in [docs/chain-protocols.md](docs/chain-protocols.md). Build the payload on the host and compare the printed ZIP-243 digest against an independent implementation before signing.
 
 ## Build
 
@@ -153,12 +153,10 @@ The headless build uses `-DHEXWALLET_BOARD=6 -DHEXWALLET_ENABLE_LVGL=0`. See `pa
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
+powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
 powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
-python tests/test_fork_registry.py
-python tests/test_fork_address_vectors.py
-python tests/test_mining_catalog.py
-python tests/test_phone_link.py
-python tools/verify_utxo_sighash.py   # network audit; use --apply only after review
+powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1   # needs build/chain-mbedtls
+powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1
 ```
 
 Expected host results include:
@@ -190,7 +188,7 @@ secure-element=pass
 
 `run_cryptonote_ringct_self_tests()` pins selected `monero/tests/crypto/tests.txt` vectors for hash-to-scalar, key derivation, public/secret key derivation, key images and view tags. `run_cryptonote_clsag_self_test()` signs and verifies a deterministic 3-member ring and rejects tampered `s`, `I` and message. `run_cryptonote_review_self_tests()` rejects thirteen tampering classes against a proof generated by the pinned Monero reference build, and `run_cryptonote_signing_self_tests()` drives the whole payload → review → CLSAG → serialize path plus the subaddress spend path (the subaddress key pair is cross-checked against the pinned Monero subaddress addresses, and the standard spend secret must fail to sign a subaddress output). `run_masari_self_tests()` verifies the real upstream Masari transaction vector (`tests/fixtures/masari/tx2.bin`), an end-to-end synthetic RCT type-2 spend, and the fail-closed type-3 gate.
 
-An offline signer cannot prove that ring decoys exist on chain; it proves ring consistency, ownership and offset binding only. The phone is trusted to supply live decoys, never amounts, fees or destination addresses. See [xmr-review.md](docs/xmr-review.md) and [xmr-signing.md](docs/xmr-signing.md).
+An offline signer cannot prove that ring decoys exist on chain; it proves ring consistency, ownership and offset binding only. The phone is trusted to supply live decoys, never amounts, fees or destination addresses. See [xmr-review.md](docs/chain-protocols.md) and [xmr-signing.md](docs/chain-protocols.md).
 
 ## Phone link (NFC / USB)
 
@@ -207,13 +205,13 @@ Sending is initiated by the phone. The wallet only reviews, authorizes and signs
 
 ## MiningPoolStats coverage
 
-`tools/miningpool_coverage.py` fetches the live MiningPoolStats list and compares it with the shipped mining table. `tools/generate_mining_catalog.py` emits only rows that resolve to a fully supported wallet; unsupported listings are counted by the audit tool but are not shipped as wallets. Current audit: **111 / 518 active listings** supported (ASIC 62/212, GPU 30/181, CPU 19/121, HDD 0/4). The gap is explicit, not hidden behind placeholder rows.
+The shipped mining table lists only rows that resolve to a fully supported wallet. Against the 2026-10-23 MiningPoolStats snapshot it covers **111 / 518 active listings** (ASIC 62/212, GPU 30/181, CPU 19/121, HDD 0/4); the remaining listings are absent on purpose rather than shipped as placeholder wallets.
 
 Adding a family is a protocol project, not a catalog edit: consensus transaction format, official vectors, review rules, signing, failure paths, and custody policy must all land together.
 
 ## Flash, OTA and eFuses
 
-Secure Boot v2, Flash Encryption, and OTA rollback are documented in `partitions/` and the wiki. Do not burn eFuses until the recovery image, signing-key backup, and rollback path have been validated on a sacrificial board. A wrong eFuse cannot be fixed by OTA.
+Secure Boot v2, Flash Encryption, and OTA rollback are documented in `partitions/`.  Do not burn eFuses until the recovery image, signing-key backup, and rollback path have been validated on a sacrificial board. A wrong eFuse cannot be fixed by OTA.
 
 ## License
 

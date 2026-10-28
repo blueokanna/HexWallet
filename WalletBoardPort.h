@@ -55,10 +55,12 @@ uint16_t board_battery_millivolts();
 bool board_has_user_button();
 bool board_user_button_pressed();
 
-// SE05x presence probe. "PresentUnverified" means an I2C device answered at
-// 0x48; it does not prove the part is the requested SE051C2HQ1, that SCP03 was
-// established, or that a key was imported. The wallet therefore keeps the
-// MCU-only custody profile until a real applet driver verifies the device.
+// SE05x presence probe. "PresentUnverified" now requires a well-formed ATR, not
+// just an I2C ACK: an ACK proves something sits at the address, an ATR with a
+// valid TA/TB/TC/TD chain and TCK proves it is a smart card. Neither is proof
+// that the part is the requested SE051C2HQ1, that SCP03 was established, or
+// that a key was imported, so the wallet keeps the MCU-only custody profile
+// until a real applet driver verifies the device.
 enum class SecureElementProbeState : uint8_t {
   NotConfigured = 0,
   NoResponse,
@@ -66,6 +68,10 @@ enum class SecureElementProbeState : uint8_t {
 };
 
 SecureElementProbeState board_secure_element_probe();
+
+// Reads the answer-to-reset for diagnostics. Returns false when the bus is not
+// configured or the card did not answer with a structurally valid ATR.
+bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size);
 
 }  // namespace hexwallet
 

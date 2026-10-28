@@ -1,4 +1,4 @@
-﻿# Builds and runs the host-side self-tests for the extended crypto stack.
+# Builds and runs the host-side self-tests for the extended crypto stack.
 # Uses MSVC (cl.exe from Visual Studio 2022) and the mbedtls headers bundled
 # with the ESP32 Arduino core; mbedtls_host.c provides the runtime for the
 # subset of mbedtls the firmware uses, so the API surface matches the device.
@@ -69,7 +69,7 @@ $cppSources = @(
   "CryptoNoteSigning.cpp",
   "CryptoNoteMasari.cpp",
   "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp",
+  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp",
   "BitcoinTransaction.cpp",
   "KaspaTransaction.cpp",
   "TronTransaction.cpp",
@@ -108,7 +108,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $pipeSources = @(
   "CryptoPrimitives.cpp",
   "Blake2b.cpp",
-  "CryptoExtended.cpp",
+  "CryptoExtended.cpp", "RandomSource.cpp",
   "WalletLinkCrypto.cpp",
   "WalletLink.cpp",
   "WalletNfcApdu.cpp",
@@ -149,7 +149,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $catalogSources = @(
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoPrimitives.cpp", "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "Ed25519.cpp",
+  "CryptoPrimitives.cpp", "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
   "BlsG1.cpp", "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
   "CosmosTransaction.cpp", "StellarTransaction.cpp",
   "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp",
@@ -159,7 +159,7 @@ $catalogSources = @(
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
   "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
   "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "host_security.cpp"
+  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "host_security.cpp"
 )
 $catalogObjs = @()
 foreach ($s in $catalogSources) {

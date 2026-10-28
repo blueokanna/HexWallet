@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <esp_random.h>
+#include "RandomSource.h"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/md.h>
 
@@ -163,7 +163,7 @@ bool chain_constant_time_equal(const uint8_t *left, const uint8_t *right,
 namespace {
 
 int chain_random_callback(void *, unsigned char *output, size_t length) {
-  esp_fill_random(output, length);
+  random_fill(output, length);
   return 0;
 }
 

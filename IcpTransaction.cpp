@@ -53,7 +53,7 @@ struct Cbor {
   uint8_t *p;size_t cap,n=0;bool ok=true;
   void raw(const uint8_t *v,size_t z){if(!ok || z>cap-n){ok=false;return;}memcpy(p+n,v,z);n+=z;}
   void byte(uint8_t v){raw(&v,1);}
-  void number(uint8_t major,uint64_t v){if(v<24){byte((major<<5)|v);return;}size_t z=v<=255?1:v<=65535?2:v<=UINT32_MAX?4:8;byte((major<<5)|(z==1?24:z==2?25:z==4?26:27));for(size_t i=z;i>0;--i)byte(static_cast<uint8_t>(v>>((i-1)*8)));}
+  void number(uint8_t major,uint64_t v){if(v<24){byte(static_cast<uint8_t>((major<<5)|v));return;}size_t z=v<=255?1:v<=65535?2:v<=UINT32_MAX?4:8;byte(static_cast<uint8_t>((major<<5)|(z==1?24:z==2?25:z==4?26:27)));for(size_t i=z;i>0;--i)byte(static_cast<uint8_t>(v>>((i-1)*8)));}
   void bytes(const uint8_t *v,size_t z){number(2,z);raw(v,z);}
   void text(const char *s){size_t z=strlen(s);number(3,z);raw(reinterpret_cast<const uint8_t *>(s),z);}
 };

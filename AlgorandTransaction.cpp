@@ -97,7 +97,7 @@ AlgorandError parse(const uint8_t *data, size_t size, const uint8_t owner[32], A
     Genesis=32, Last=64, Receiver=128, Sender=256, Type=512, Asset=1024 };
   uint32_t seen = 0;
   AlgorandReview &v = out->review;
-  for (unsigned i = 0; i < (map & 15); ++i) {
+  for (unsigned i = 0; i < static_cast<unsigned>(map & 15); ++i) {
     if (!r.string(key, sizeof(key)) || strcmp(previous, key) >= 0) return AlgorandError::Malformed;
     strcpy(previous, key);
     bool ok = false;

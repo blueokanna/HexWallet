@@ -11,6 +11,7 @@
 #include "CryptoNoteAddress.h"
 #include "CryptoNoteRingCt.h"
 #include "CryptoPrimitives.h"
+#include "RandomSource.h"
 #include "EvmTransaction.h"
 #include "KaspaTransaction.h"
 #include "ZcashTransaction.h"
@@ -268,7 +269,7 @@ void provision_pin(char *arguments) {
     secure_zero(separator, strlen(separator));
     return;
   }
-  esp_fill_random(salt, sizeof(salt));
+  random_fill(salt, sizeof(salt));
   uint8_t new_verifier[kVerifierSize];
   const bool derived = crypto_pbkdf2_sha256(reinterpret_cast<const uint8_t *>(arguments), pin_size,
                                             salt, sizeof(salt), HEXWALLET_CLI_PBKDF2_ITERATIONS,
@@ -298,7 +299,7 @@ void begin_challenge() {
     Serial.println(retry_after - now);
     return;
   }
-  esp_fill_random(challenge, sizeof(challenge));
+  random_fill(challenge, sizeof(challenge));
   challenge_active = true;
   Serial.print("OK challenge salt=");
   print_hex(salt, sizeof(salt));
@@ -994,7 +995,7 @@ void inspect_transaction(char *arguments) {
     return;
   }
   uint32_t random_value;
-  esp_fill_random(&random_value, sizeof(random_value));
+  random_fill(&random_value, sizeof(random_value));
   transaction_approval = random_value % 1000000U;
   transaction_expires_at = millis() + kTransactionApprovalMs;
   transaction_pending = true;
@@ -1149,7 +1150,7 @@ void inspect_evm_transaction(char *arguments) {
     return;
   }
   uint32_t random_value;
-  esp_fill_random(&random_value, sizeof(random_value));
+  random_fill(&random_value, sizeof(random_value));
   transaction_approval = random_value % 1000000U;
   transaction_expires_at = millis() + kTransactionApprovalMs;
   transaction_pending = true;
@@ -1392,7 +1393,7 @@ void inspect_kaspa_transaction(char *arguments) {
     return;
   }
   uint32_t random_value;
-  esp_fill_random(&random_value, sizeof(random_value));
+  random_fill(&random_value, sizeof(random_value));
   transaction_approval = random_value % 1000000U;
   transaction_expires_at = millis() + kTransactionApprovalMs;
   transaction_pending = true;
@@ -1583,7 +1584,7 @@ void inspect_zcash_transaction(char *arguments) {
     return;
   }
   uint32_t random_value;
-  esp_fill_random(&random_value, sizeof(random_value));
+  random_fill(&random_value, sizeof(random_value));
   transaction_approval = random_value % 1000000U;
   transaction_expires_at = millis() + kTransactionApprovalMs;
   transaction_pending = true;

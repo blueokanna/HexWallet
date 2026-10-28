@@ -1,6 +1,6 @@
 #include "WalletLink.h"
 
-#include <esp_random.h>
+#include "RandomSource.h"
 #include <esp_system.h>
 #include <string.h>
 
@@ -343,7 +343,7 @@ WalletLinkStatus WalletLinkDevice::handle_pair_request(
   memcpy(payload + offset, phone_nonce, 32);
   offset += 32;
   uint8_t device_nonce[32];
-  esp_fill_random(device_nonce, sizeof(device_nonce));
+  random_fill(device_nonce, sizeof(device_nonce));
   memcpy(payload + offset, device_nonce, 32);
   offset += 32;
   uint8_t signed_fields_response[32 + 32 + 32 + 32];
@@ -395,8 +395,8 @@ WalletLinkStatus WalletLinkDevice::handle_hello_request(
   uint8_t device_ephemeral_seed[32];
   uint8_t device_ephemeral[32];
   uint8_t device_nonce[32];
-  esp_fill_random(device_ephemeral_seed, sizeof(device_ephemeral_seed));
-  esp_fill_random(device_nonce, sizeof(device_nonce));
+  random_fill(device_ephemeral_seed, sizeof(device_ephemeral_seed));
+  random_fill(device_nonce, sizeof(device_nonce));
   bool ok = ed25519_public_key(device_ephemeral_seed, device_ephemeral);
 
   uint8_t response_fields[32 * 6];

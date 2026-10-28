@@ -48,7 +48,7 @@ namespace hexwallet
       {"vtc84", "VTC", "Vertcoin Native SegWit", 28, 28, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoVertcoin, 0, 0, 0, 0, nullptr},
       {"axe", "AXE", "Axe", 4242, 4242, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoAxe, 0, 0, 0, 0, nullptr},
       // --- EVM networks ------------------------------------------------------
-      // Official network references and supported envelopes: docs/evm-network-evidence.md.
+      // Official network references and supported envelopes: docs/chain-protocols.md.
       {"xlayer", "OKB", "X Layer", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 196, 0, 0, nullptr},
       {"zksync", "ETH", "zkSync Era", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 324, 0, 0, nullptr},
       {"eth", "ETH", "Ethereum", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1, 0, 0, nullptr},

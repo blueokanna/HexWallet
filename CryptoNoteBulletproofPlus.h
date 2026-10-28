@@ -57,7 +57,7 @@ namespace hexwallet
 
 #if defined(HEXWALLET_HOST_TEST)
   // Cross-checks every proof and every intermediate transcript value against the
-  // pinned Monero reference build (tests/fixtures/monero-bp-plus). Covers the
+  // pinned Monero reference build (src/generated/BulletproofPlusReferenceTest.inc). Covers the
   // 1/2/3/4/5/8/9/16-output shapes. Host-only: it costs a full multiexp per
   // case, which a device self-test must not spend.
   bool run_bulletproof_plus_reference_vector_self_test();

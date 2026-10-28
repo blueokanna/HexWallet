@@ -1,4 +1,5 @@
-# These evidence manifests hash exact bytes. Windows checkout must not alter
-# fixtures or the independently built reference harness through autocrlf.
-tests/fixtures/monero-bp-plus/** -text
-tests/reference/** -text
+# Transaction and crypto fixtures are byte-exact evidence. Windows checkout must
+# not normalise their line endings.
+tests/fixtures/**/*.bin -text
+tests/fixtures/**/*.inc -text
+src/generated/**/*.inc -text

@@ -10,6 +10,7 @@
 
 #include "base58.h"
 #include "CryptoPrimitives.h"
+#include "RandomSource.h"
 #include "WalletAddresses.h"
 #include "word_list.h"
 
@@ -36,7 +37,7 @@ class WipeOnExit {
 };
 
 int random_callback(void *, unsigned char *output, size_t length) {
-  esp_fill_random(output, length);
+  random_fill(output, length);
   return 0;
 }
 
@@ -224,7 +225,11 @@ WalletError bip39_generate_english_24(char *out, size_t out_size) {
   WipeOnExit wipe_entropy(entropy, sizeof(entropy));
   WipeOnExit wipe_digest(digest, sizeof(digest));
   WipeOnExit wipe_bits(bits, sizeof(bits));
-  esp_fill_random(entropy, sizeof(entropy));
+  // A seed must never be derived from a source that failed its own health
+  // tests; random_fill() zeroes the buffer in that case, so refuse here instead
+  // of turning 32 zero bytes into a deterministic mnemonic.
+  if (!random_healthy()) return WalletError::CryptoFailure;
+  random_fill(entropy, sizeof(entropy));
   if (!crypto_sha256(entropy, sizeof(entropy), digest)) {
     secure_zero(entropy, sizeof(entropy));
     return WalletError::CryptoFailure;
