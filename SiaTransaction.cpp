@@ -80,8 +80,6 @@ ChainError parse(const uint8_t *payload, size_t size, const uint8_t owner[32],
   if (r->count == 2 &&
       !chain_constant_time_equal(owner, r->outputs + 48 + 16, 32))
     return ChainError::WrongWallet;
-  // Exact conservation with carry detection. Input metadata still requires
-  // node/accumulator verification: Sia's input signature commits to its ID.
   uint8_t total[16];
   memcpy(total, r->fee, 16);
   if (zero(total, 16)) return ChainError::FeePolicy;
@@ -103,8 +101,6 @@ ChainError parse(const uint8_t *payload, size_t size, const uint8_t owner[32],
 }
 
 bool hash_request(const Request &r, uint8_t digest[32]) {
-  // consensus.State.InputSigHash: BLAKE2b-256("sia/sig/input|" || 2 ||
-  // V2TransactionSemantics). Empty unsupported arrays are explicit u64 counts.
   uint8_t bytes[256] = {};
   size_t n = 0;
   static const char kDomain[] = "sia/sig/input|";
@@ -114,8 +110,6 @@ bool hash_request(const Request &r, uint8_t digest[32]) {
   memcpy(bytes + n, r.parent_id, 32); n += 32;
   chain_write_u64_le(r.count, bytes + n); n += 8;
   memcpy(bytes + n, r.outputs, 48 * r.count); n += 48 * r.count;
-  // Siafund inputs/outputs, contracts/revisions/resolutions, attestations,
-  // arbitrary data: seven empty length-prefixed collections, then nil address.
   n += 7 * 8;
   bytes[n++] = 0;
   memcpy(bytes + n, r.fee, 16); n += 16;

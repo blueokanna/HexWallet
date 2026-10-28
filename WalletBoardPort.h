@@ -1,6 +1,7 @@
 #ifndef HEXWALLET_BOARD_PORT_H
 #define HEXWALLET_BOARD_PORT_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "WalletConfig.h"

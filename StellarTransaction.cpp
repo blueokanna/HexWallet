@@ -7,8 +7,7 @@
 namespace hexwallet {
 namespace {
 constexpr char kPublicNetwork[] = "Public Global Stellar Network ; September 2015";
-// Device spending policy, not a claim about the network's dynamic minimum fee.
-constexpr uint32_t kMaximumFee = 10000000; // one XLM per transaction
+constexpr uint32_t kMaximumFee = 10000000;
 #include "src/generated/StellarVectorsTest.inc"
 class XdrReader {
  public:
@@ -36,7 +35,6 @@ void hex_text(const uint8_t *bytes, size_t count, char *out) {
   out[2*count] = 0;
 }
 bool read_account(XdrReader &r, uint8_t key[32], char *text) {
-  // Muxed accounts need a distinct M-address review; never discard their ID.
   return r.u32() == 0 && r.bytes(key, 32) && stellar_address(key, text, kStellarAddressSize);
 }
 StellarError parse(const uint8_t *data, size_t size, const uint8_t owner[32],
@@ -53,8 +51,6 @@ StellarError parse(const uint8_t *data, size_t size, const uint8_t owner[32],
   if (memcmp(key, owner, 32)) return StellarError::WrongWallet;
   v.fee = r.u32(); v.sequence = r.u64();
   if (v.sequence == 0 || v.sequence > INT64_MAX) return StellarError::Malformed;
-  // Require an explicit finite time window. No dependence on an unauthenticated
-  // phone clock: signed Unix bounds are displayed, ledger enforces expiration.
   if (r.u32() != 1) return StellarError::Unsupported;
   v.min_time = r.u64(); v.max_time = r.u64();
   if (v.max_time == 0 || v.max_time <= v.min_time) return StellarError::Malformed;
@@ -65,7 +61,6 @@ StellarError parse(const uint8_t *data, size_t size, const uint8_t owner[32],
       const uint32_t length = r.u32();
       if (length > 28 || !r.bytes(v.memo, length)) return StellarError::Malformed;
       for (size_t i = 0; i < length; ++i) {
-        // No embedded NUL, control characters, bidi controls or invalid UTF-8.
         if (v.memo[i] < 0x20 || v.memo[i] > 0x7e) return StellarError::Unsupported;
       }
       uint8_t pad[3] = {};

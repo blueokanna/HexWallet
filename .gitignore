@@ -21,6 +21,9 @@ tests/host/obj-board/
 tests/host/*.log
 # Local LVGL checkout used by the board-port compile check (CI clones it).
 tests/host/lvgl_real/
+# Local EasyEDA Pro source project for the P4 board (binary, not firmware input).
+_board/
+_board.zip
 
 # Arduino / IDE
 .pio/

@@ -136,8 +136,10 @@ jobs:
         run: |
           # Compiles WalletBoardPort.cpp + WalletUi.cpp for every supported
           # board profile (AMOLED, AMOLED Plus, T-Display S3, T-Deck Max,
-          # T-Echo Lite) against the Xtensa toolchain and the real LVGL 9.5
-          # headers, catching driver syntax/type errors before flashing.
+          # T-Echo Lite, ESP32-P4 e-paper) against the Xtensa toolchain and the
+          # real LVGL 9.5 headers, catching driver syntax/type errors before
+          # flashing. WalletNfcPort.cpp is compiled both with synthetic pins and
+          # with the shipped P4 pin map.
           powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
 
       - name: Compile actual GxEPD2 panel path with real Arduino and LVGL

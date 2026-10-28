@@ -75,7 +75,10 @@ $boards = @(
   @{ Name = "amoled_plus"; Define = "-DHEXWALLET_BOARD=2" },
   @{ Name = "tdisplay_s3"; Define = "-DHEXWALLET_BOARD=3" },
   @{ Name = "tdeck_max"; Define = "-DHEXWALLET_BOARD=4" },
-  @{ Name = "t_echo_lite"; Define = "-DHEXWALLET_BOARD=5" }
+  @{ Name = "t_echo_lite"; Define = "-DHEXWALLET_BOARD=5" },
+  # Board 7 targets the ESP32-P4, but the Arduino/SPI/Wire API surface used by
+  # the board port is identical, so the Xtensa headers still type-check it.
+  @{ Name = "esp32p4_eink"; Define = "-DHEXWALLET_BOARD=7" }
 )
 
 $sources = @("WalletBoardPort.cpp", "WalletUi.cpp")
@@ -142,6 +145,20 @@ if ($nfcRc -ne 0) {
   $fail++
   Write-Output "----- WalletNfcPort.cpp [synthetic pins] -----"
   Get-Content $nfcLog -Encoding Unicode | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
+}
+
+# --- NFC port on the real P4 profile -------------------------------------
+# Board 7 is the only profile that ships a PN7161 pin map, so compile it there
+# too: the synthetic run above proves the code type-checks, this one proves the
+# shipped pin map is complete.
+$nfcRealLog = Join-Path $objDir "WalletNfcPort_board7.log"
+& $gcc -std=c++17 -O2 -Wall -Wno-unused-parameter "-DHEXWALLET_BOARD=7" $extraDefines $incArgs -c (Join-Path $root "WalletNfcPort.cpp") -o (Join-Path $objDir "WalletNfcPort_board7.o") *> $nfcRealLog
+$nfcRealRc = $LASTEXITCODE
+Write-Output ("  [nfc board7] WalletNfcPort.cpp => rc={0}" -f $nfcRealRc)
+if ($nfcRealRc -ne 0) {
+  $fail++
+  Write-Output "----- WalletNfcPort.cpp [board 7 pins] -----"
+  Get-Content $nfcRealLog -Encoding Unicode | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
 }
 
 if ($fail -gt 0) {

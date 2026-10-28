@@ -7,7 +7,9 @@
 
 class TwoWire {
  public:
-  void begin(int sda, int scl) { (void)sda; (void)scl; }
+  bool begin(int sda, int scl, uint32_t frequency = 0) {
+    (void)sda; (void)scl; (void)frequency; return true;
+  }
   void beginTransmission(uint8_t addr) { (void)addr; }
   uint8_t endTransmission(bool stopBit = true) { (void)stopBit; return 0; }
   size_t write(uint8_t data) { (void)data; return 1; }
@@ -17,5 +19,8 @@ class TwoWire {
 };
 
 extern TwoWire Wire;
+// The ESP32 core exposes a second controller as Wire1; the board port uses it
+// for the dedicated secure-element bus.
+extern TwoWire Wire1;
 
 #endif  // HEXWALLET_MOCK_WIRE_H

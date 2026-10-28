@@ -59,6 +59,51 @@ LVGL 每次只告诉我们哪块被重绘。`EinkDamage` 累积这些矩形并�
 - 矩形超过 16 个 → 直接塌缩成整屏，宁可全刷也不丢更新；
 - 所有矩形都裁剪到面板边界，越界不会写到缓冲区之外（自检里覆盖了贴边裁剪）。
 
+## ESP32-P4 板（`HEXWALLET_BOARD=7`）
+
+引脚不是猜的，是从 EasyEDA Pro 工程 `c26102103`
+（`ProPrj_c26102103_2026-10-28.epro2`，按 zip 解开后读 `.epru` 里的 `PAD_NET` 与网络名）
+导出来的。网络名与封装焊盘号可以逐条核对；**GPIO 编号在工程文件里并不存在**，是按
+ESP32-P4 数据手册的焊盘表换算的，第一次上电前请对照手册再确认一遍。
+
+| 功能 | 网络 | 焊盘 | 引脚 |
+| --- | --- | --- | --- |
+| 墨水屏 SCK | SPI_CLK | 7 | GPIO7 |
+| 墨水屏 MOSI | SPI_MOSI | 8 | GPIO8 |
+| 共享 MISO（PN7161 用） | SPI_MISO | 10 | GPIO9 |
+| 墨水屏 CS | EINK_CS | 17 | GPIO16 |
+| 墨水屏 DC | EINK_DC | 20 | GPIO19 |
+| 墨水屏 RST | EINK_RST | 18 | GPIO17 |
+| 墨水屏 BUSY | EINK_BUSY | 19 | GPIO18 |
+| SE051 SDA | 050_SDA | 11 | GPIO10 |
+| SE051 SCL | 050_SCL | 12 | GPIO11 |
+| SE051 RST | 050_RST | 13 | GPIO12 |
+| PN7161 NSS | SPI_NSS | 14 | GPIO13 |
+| PN7161 IRQ | IRQ | 15 | GPIO14 |
+| PN7161 VEN | VEN | 16 | GPIO15 |
+| 按键 SW1..SW4 | SW1..SW4 | 64/63/61/60 | GPIO33/32/31/30 |
+| 电池采样 | BAT_ADC | 22 | GPIO20 |
+
+必须说清楚的硬件事实：
+
+- **MIPI DSI 没接**。工程里 ESP32-P4 的 DSI 焊盘（35–40）一个网络都没有；墨水屏走 SPI，
+  所以这块板不存在“MIPI 墨水屏”路径，也没有为它写任何代码。
+- 2.9 寸裸屏排线（26 pin）上的 `GDR` / `RESE` / `PREVGH` / `PREVGL` 只连到无源网络，没有
+  任何 GPIO。板上没有可软件控制的升压/栅极使能，代码里也就不会虚构一个。
+- 面板与 PN7161 共用 SCK/MOSI/MISO、各自独立 CS；`epd_write_command()` 把一次“命令+数据”
+  包在同一个 `SPI.beginTransaction()` 里，CS 全程拉低，不会和 NFC 抢总线。
+- SE051 走独立的 `Wire1`，且先拉 `050_RST` 复位：热复位后的卡可能停在上一次会话的状态里，
+  一个“能应答 ATR 但状态不对”的卡不算可用。
+- 电池分压 R11/R12 在工程里是同一个器件 id（等值），所以共用的 1:2 换算对这块板成立。
+
+### 局刷在这块板上的真实状态
+
+`HEXWALLET_EPD_PARTIAL_LUT` 目前**没有定义**，所以 `EinkPanel` 对这块板返回
+`PartialUnsupported`，每次提交都是全刷。这不是没写完：缺的是一份只能由面板批次提供的
+153 字节波形 LUT。拿到后在板级配置里加一行
+`#define HEXWALLET_EPD_PARTIAL_LUT <symbol>`，局刷路径（只推窗口数据、预算内局刷、超预算
+自动全刷清鬼影）立刻生效；`EinkDamage` 已经按 LVGL 的脏矩形并集算好了窗口和“该不该全刷”。
+
 ## QR 码
 
 `QrCode.h/.cpp` 自带编码器与 1bpp 渲染器，不依赖第三方库：
@@ -131,17 +176,18 @@ LVGL 从 v8 起就是 **MIT**：可以商用、可以闭源分发、个人开发
 
 `src/generated/` 保存编译时包含的数据文件。生产目录使用普通 `.inc` 名称，测试向量统一使用 `*Test.inc`。它们不是独立编译单元，由根目录 `.cpp` 显式包含；Arduino 打包时请保留整个 src 目录。
 
-`tools/` 是维护工具：币种目录生成、参考测试向量、UTXO 核验以及手机链路参考客户端。它不烧录进固件，但开发和 CI 需要，不能整体删除。
+`tools/` 只剩三份数据快照（`fork_registry.json`、`miningpoolstats_coin_list.json`、
+`miningpoolstats_graveyard.json`），由 `tests/host/policy_check.ps1` 读取，不烧进固件。
+仓库里没有 Python/Node 工具链：目录生成和策略校验都是 PowerShell 加 C++ 自检，CI 同样
+不需要它们。
 
-已删除被固定版本参考构建取代的 `tests/reference/bp_plus_inputs.py` 和旧 `bp_plus_reference.ps1`。其他 Python 文件仍用于目录生成、链路测试、向量转换或审计，保留它们不会给设备增加网络功能。测试向量中的地址、掩码和秘密都是公开测试材料，禁止用于接收真实资产。
+测试向量里的地址、掩码和秘密都是公开测试材料，禁止用于接收真实资产。`tests/` 保存主机
+验证与交叉编译检查，不是链上交易验收的替代品；`build/`、对象文件和测试可执行文件属于
+可重新生成的构建产物。
 
-同时删除未被构建或测试引用的 `_masari_probe.py`：它是临时探针，使用普通 Base58 而非 CryptoNote 的分块编码，不适合作为地址正确性的依据。
-
-`tests/` 保存主机验证与交叉编译检查，不是链上交易验收的替代品。`build/`、对象文件和测试可执行文件属于可重新生成的构建产物。
-
-主控为 ESP32-P4NRW32X。等 PCB 确定后，在 WalletBoardPins.h 的板级配置中填写真实 PN7161 SPI、IRQ、VEN 引脚，并提供屏幕/触控配置；不要使用测试里的合成引脚连接硬件。
-
-功能完成度与未关闭的问题见根目录 AUDIT.md。
+主控为 ESP32-P4NRW32X。PN7161 的 SPI/IRQ/VEN 引脚已按工程网络写进板级配置（见本文的
+引脚表），不要用测试里的合成引脚去连硬件；合成引脚只用于让 NFC 代码在主机上被编译到。
+功能完成度与未关闭的缺口见 [chain-support.md](chain-support.md) 与 [security.md](security.md)。
 
 地址编码测试向量位于 `tests/fixtures/WalletForkAddressVectorsTest.inc`，使用公开私钥 1，禁止收款。仅 HEXWALLET_HOST_TEST 构建包含该文件，设备固件不包含它。
 

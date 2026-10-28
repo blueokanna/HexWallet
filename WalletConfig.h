@@ -34,6 +34,7 @@
 #define HEXWALLET_BOARD_T_DECK_MAX 4
 #define HEXWALLET_BOARD_T_ECHO_LITE 5
 #define HEXWALLET_BOARD_HEADLESS 6
+#define HEXWALLET_BOARD_ESP32P4_EINK 7
 
 #ifndef HEXWALLET_BOARD
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -43,8 +44,9 @@
 #endif
 #endif
 
-#if defined(CONFIG_IDF_TARGET_ESP32P4) && HEXWALLET_BOARD != HEXWALLET_BOARD_NONE && HEXWALLET_BOARD != HEXWALLET_BOARD_HEADLESS
-#error "No ESP32-P4 display board port is registered. Select HEADLESS until a verified P4 board port is available."
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && HEXWALLET_BOARD != HEXWALLET_BOARD_NONE && \
+    HEXWALLET_BOARD != HEXWALLET_BOARD_HEADLESS && HEXWALLET_BOARD != HEXWALLET_BOARD_ESP32P4_EINK
+#error "No ESP32-P4 board port is registered for this board id."
 #endif
 
 // ---------------------------------------------------------------------------

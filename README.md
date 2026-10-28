@@ -150,6 +150,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3 `
 
 The headless build uses `-DHEXWALLET_BOARD=6 -DHEXWALLET_ENABLE_LVGL=0`. See `partitions/hexwallet-16mb-ota.csv` for the flash layout.
 
+The ESP32-P4 hardware wallet (`--fqbn esp32:esp32:esp32p4`) selects its pin map with `-DHEXWALLET_BOARD=7`: 2.9" 128x296 SSD1680 e-paper on SPI, SE051C2HQ1 on `Wire1`, PN7161 on the shared SPI bus. Every pin comes from the EasyEDA project nets; see [docs/display.md](docs/display.md) for the table and for what is deliberately not enabled yet (the panel's partial-refresh LUT).
+
 ## Verification
 
 ```powershell
