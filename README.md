@@ -199,7 +199,7 @@ An offline signer cannot prove that ring decoys exist on chain; it proves ring c
 
 ## Phone link (NFC / USB)
 
-Sending is initiated by the phone. The wallet only reviews, authorizes and signs; it never builds the transaction and never talks to a node. The full wire format is in [docs/phone-link-protocol.md](docs/phone-link-protocol.md); `tools/phone_link_reference.py` is a tested phone-side reference implementation (pairing, handshake, encrypted requests) driven by `tests/test_phone_link.py` against the real firmware code.
+Sending is initiated by the phone. The wallet only reviews, authorizes and signs; it never builds the transaction and never talks to a node. The full wire format is in [docs/phone-link-protocol.md](docs/phone-link-protocol.md); the former Python phone reference client has been removed. The wire format and C++ host tests remain.
 
 - Receive: the phone calls `ADDRESS`; the device returns the derived public address and path. No private material crosses the link.
 - Send: `BEGIN_SIGN` → the device parses and validates the request (input ownership, change derivation, fee caps, token whitelist, CryptoNote ring/key-image/commitment binding) → the trusted display shows recipient/amount/fee with `APPROVE` / `REJECT` → after the physical press the phone calls `RESULT` and receives the signed transaction bytes.

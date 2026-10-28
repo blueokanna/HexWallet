@@ -4,6 +4,7 @@
 
 #include "WalletSecurity.h"
 #include "WalletConfig.h"
+#include "WalletCustody.h"
 
 namespace hexwallet {
 namespace {
@@ -370,6 +371,12 @@ namespace {
 // failure mode a real card produces when the static keys are wrong), and one
 // that authenticates. Only the second may ever satisfy the custody gate.
 bool g_fake_open = false;
+unsigned g_fake_closes = 0;
+
+bool fake_partial_open(char *, size_t) {
+  g_fake_open = true;
+  return false;
+}
 
 bool fake_open_without_session(char *reason, size_t reason_size) {
   (void)reason;
@@ -411,6 +418,7 @@ bool fake_public_key(uint32_t key_handle, uint8_t *public_key,
 
 void fake_close() {
   g_fake_open = false;
+  ++g_fake_closes;
 }
 
 const SecureElementBackend kFakeUnverified = {
@@ -422,6 +430,9 @@ const SecureElementBackend kFakeVerified = {
 const SecureElementBackend kFakeIncomplete = {
     "fake-incomplete", fake_open_with_session, nullptr, nullptr, nullptr,
     fake_close};
+const SecureElementBackend kFakePartial = {
+    "partial-open", fake_partial_open, fake_authenticated,
+    fake_sign, fake_public_key, fake_close};
 #endif
 
 }  // namespace
@@ -429,7 +440,7 @@ const SecureElementBackend kFakeIncomplete = {
 bool run_secure_element_self_tests() {
   bool passed = true;
 
-  // ISO 7816-3 CRC16/A published check value (CRC-16/CCITT-FALSE).
+  // CRC-16/CCITT-FALSE reference check, not a SE051 T=1 framing test.
   static const uint8_t kCheck[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
   passed = (iso7816_crc16(kCheck, sizeof(kCheck)) == 0x29B1) && passed;
   passed = (iso7816_crc16(nullptr, 0) == 0xFFFF) && passed;
@@ -519,6 +530,12 @@ bool run_secure_element_self_tests() {
   passed = !secure_element_register_backend(&kFakeIncomplete) &&
            !secure_element_ready() && passed;
 
+  g_fake_closes = 0;
+  passed = secure_element_register_backend(&kFakePartial) && passed;
+  passed = !secure_element_open(reason, sizeof(reason)) && !g_fake_open &&
+           g_fake_closes == 1 && !secure_element_ready() && passed;
+  secure_element_register_backend(nullptr);
+
   // A backend that opens the transport but never authenticates must leave the
   // gate closed and must be unregistered, because a real card that rejects the
   // static keys produces exactly this answer.
@@ -530,8 +547,15 @@ bool run_secure_element_self_tests() {
   passed = secure_element_register_backend(&kFakeVerified) && passed;
   passed = secure_element_open(reason, sizeof(reason)) && secure_element_ready() &&
            strcmp(secure_element_name(), "fake-verified") == 0 && passed;
+  passed = !secure_custody_backend_ready() &&
+           &active_secure_element_profile() == &software_only_profile() && passed;
   // ...but only one backend may be registered at a time.
   passed = !secure_element_register_backend(&kFakeVerified) && passed;
+  g_fake_open = false;
+  passed = !secure_element_ready() && passed;
+  g_fake_open = true;
+  // A recovered boolean cannot resurrect a session invalidated above.
+  passed = !secure_element_ready() && passed;
   secure_element_close();
   passed = !secure_element_ready() && passed;
   // Closing is idempotent, and removing the backend leaves nothing ready.

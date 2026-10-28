@@ -6,44 +6,24 @@
 
 namespace hexwallet {
 
-// Secure-element contract for the NXP SE051C2HQ1 (or any later part) plus the
-// primitives any GlobalPlatform SCP03 backend must be built from.
-//
-// Why this file exists instead of a finished driver: a custody backend can only
-// be claimed after it has been proven against a physical card (INITIALIZE
-// UPDATE + EXTERNAL AUTHENTICATE returning 0x9000, then a key generated inside
-// the card and a signature verified outside it). There is no card, no I2C
-// wiring and no licensed applet in this repository, so no backend is
-// registered and `secure_element_ready()` is false. That is deliberate: a
-// compiled-but-unproven driver would let the wallet claim hardware custody it
-// does not have.
-//
-// What is shipped and tested here:
-//   * ISO/IEC 7816-3 CRC16/A          - published check value
-//   * FIPS-197 AES-128                - published vector
-//   * RFC 4493 AES-CMAC               - published vectors
-//   * the backend contract and gate   - fail-closed behaviour under test
-//
-// What is NOT shipped: the SCP03 key-derivation/ICV layout and the T=1 over I2C
-// framing. Both are specified in documents that are not reproduced here and
-// neither can be validated without the part, so writing them now would be
-// guesswork dressed as protocol support. docs/se051-plug-and-trust.md lists
-// exactly what has to land, and in which order.
+// Authenticated backend lifecycle. Channel readiness is separate from wallet
+// custody: the latter requires handle-based derivation and transaction signing.
+// Se051ArduinoPort supplies the Arduino transport ABI for NXP Plug & Trust.
+// No SCP03 backend or production key provisioning is registered by this file.
+// See docs/se051-integration.md for the exact implementation boundary.
 
-// ISO/IEC 7816-3 CRC16/A: poly 0x1021, init 0xFFFF, no reflection, no xorout.
-// The published check value for "123456789" is 0x29B1.
+// Legacy API name: this is CRC-16/CCITT-FALSE, NOT CRC-A or a verified SE051
+// T=1 EDC. poly 0x1021, init 0xFFFF, no reflection, no xorout; check 0x29B1.
 uint16_t iso7816_crc16(const uint8_t *data, size_t size);
 
 // Structural validation of an answer-to-reset: TS must be 0x3B or 0x3F, the
 // TA/TB/TC/TD chain and the historical bytes must fit exactly, and when a TCK
 // byte is present the XOR of every byte after TS must be zero (ISO 7816-3
-// 8.2.5). An I2C ACK proves a device is at the address; a well-formed ATR is
-// the first evidence that it is a smart card.
+// 8.2.5). Structural validity does not authenticate a device or an applet.
 bool iso7816_atr_valid(const uint8_t *atr, size_t size);
 
-// AES-128, encryption direction only (SCP03 uses the forward cipher for CMAC
-// and CTR). The S-box is derived from the GF(2^8) inverse plus the affine
-// transform instead of a transcribed table, so there is no constant to mistype.
+// Reference AES-128/CMAC primitives, not the NXP secure-channel implementation.
+// The table-based S-box has not undergone target side-channel validation.
 struct Aes128Schedule {
   uint8_t round_keys[176];
 };

@@ -78,14 +78,13 @@ const SecureElementProfile &se051c2hq1_profile();
 const SecureElementProfile &target_secure_element_profile();
 const SecureElementProfile &software_only_profile();
 
-// Actual integration: MCU-only until a registered SecureElementBackend reports
-// an authenticated card session (SecureElementPort.h). A target profile, an
-// I2C ACK or a profile setter cannot activate it.
+// Actual wallet integration is MCU-only. SCP03 authentication does not prove
+// that derivation or transaction signing uses non-exportable SE objects.
 const SecureElementProfile &active_secure_element_profile();
 // Compatibility entry point; rejects all profile-only activation attempts.
 void set_active_secure_element_profile(const SecureElementProfile *profile);
-// True only when a registered backend holds an authenticated SE channel; there
-// is no backend in this source tree, so this is false unless a driver is added.
+// End-to-end wallet custody gate. Remains false while wallet signers take
+// plaintext MCU private keys, even if a transport backend authenticates.
 bool secure_custody_backend_ready();
 
 bool run_custody_self_tests();

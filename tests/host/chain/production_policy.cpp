@@ -8,6 +8,7 @@
 #include "WalletEngine.h"
 #include "WalletSession.h"
 #include "QrlXmss.h"
+#include "SecureElementPort.h"
 
 using namespace hexwallet;
 static bool zero(const void *v, size_t n) {
@@ -33,6 +34,20 @@ int main() {
   CHECK(wallet_session_load_master(&master) == WalletError::CustodyUnavailable);
   CHECK(zero(seed, sizeof(seed)) && zero(&master, sizeof(master)));
   CHECK(wallet_session_mnemonic_for_export() == nullptr);
+
+  // Regression: an authenticated transport must not unlock MCU seed custody.
+  const SecureElementBackend transport = {
+    "test-authenticated-channel", [](char *, size_t) { return true; },
+    []() { return true; },
+    [](uint32_t, const uint8_t *, uint8_t *, size_t *) { return false; },
+    [](uint32_t, uint8_t *, size_t *) { return false; }, []() {}};
+  CHECK(secure_element_register_backend(&transport));
+  CHECK(secure_element_open(nullptr, 0) && secure_element_ready());
+  CHECK(!secure_custody_backend_ready());
+  CHECK(&active_secure_element_profile() == &software_only_profile());
+  CHECK(wallet_session_generate() == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") == WalletError::CustodyUnavailable);
+  CHECK(secure_element_register_backend(nullptr));
 
   // Historical Substrate codecs are host-test only. Production has no
   // authenticated runtime metadata, so DOT/KSM must not be admitted at all.

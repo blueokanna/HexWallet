@@ -12,7 +12,8 @@
 #   5. the production policy binary refuses to open a wallet without a
 #      secure-element backend
 param(
-  [string]$ProductionPolicy = "build/chain-native/Release/production_policy.exe"
+  [string]$ProductionPolicy = "build/chain-native/Release/production_policy.exe",
+  [switch]$RegistryOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,12 +114,13 @@ foreach ($line in ((Read-Text "src/generated/WalletMiningCatalog.inc") -split "`
 # ---------------------------------------------------------------------------
 # 4. No network stack in the firmware
 # ---------------------------------------------------------------------------
-$networkInclude = [regex]'^\s*#\s*include\s*[<"](WiFi|HTTPClient|Ethernet|WebServer|WiFiClient|WiFiUdp|HTTPUpdate|WebSocket|NetworkClient|esp_http_client|esp_tls|mbedtls/ssl|lwip/)'
-foreach ($pattern in @("$root/*.cpp", "$root/*.h", "$root/*.ino")) {
-  foreach ($file in (Get-ChildItem -Path $pattern -File)) {
-    if ($networkInclude.IsMatch([System.IO.File]::ReadAllText($file.FullName))) {
-      Fail "network stack included in firmware: $($file.Name)"
-    }
+$networkInclude = [regex]'(?m)^\s*#\s*include\s*[<"](WiFi|HTTPClient|Ethernet|WebServer|WiFiClient|WiFiUdp|HTTPUpdate|WebSocket|NetworkClient|NetworkUdp|esp_http_client|esp_http_server|esp_https_ota|esp_wifi|esp_netif|esp_tls|mbedtls/ssl|lwip/)'
+$firmware = @(Get-ChildItem -LiteralPath $root -File) +
+            @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -File -Recurse)
+foreach ($file in $firmware) {
+  if ($file.Extension -notin @('.c', '.cpp', '.h', '.hpp', '.ino', '.inc')) { continue }
+  if ($networkInclude.IsMatch([System.IO.File]::ReadAllText($file.FullName))) {
+    Fail "network stack included in firmware: $($file.FullName)"
   }
 }
 
@@ -126,14 +128,16 @@ foreach ($pattern in @("$root/*.cpp", "$root/*.h", "$root/*.ino")) {
 # 5. Production policy binary
 # ---------------------------------------------------------------------------
 $policyPath = Join-Path $root $ProductionPolicy
-if (Test-Path $policyPath) {
+if ($RegistryOnly) {
+  Write-Output 'registry-only: production custody executable NOT verified'
+} elseif (Test-Path $policyPath) {
   $output = & $policyPath 2>&1
   $code = $LASTEXITCODE
   if ($code -ne 0 -or ($output -join "`n") -notmatch 'production_policy=pass') {
     Fail "production_policy.exe failed: $($output -join ' ')"
   }
 } else {
-  Write-Output "skip: $ProductionPolicy not built (run tests/host/build_chain_native.ps1)"
+  Fail "$ProductionPolicy not built; run tests/host/build_chain_native.ps1 or explicitly use -RegistryOnly for partial validation"
 }
 
 # ---------------------------------------------------------------------------
@@ -144,5 +148,6 @@ if ($failures.Count -ne 0) {
   Write-Output "policy: $($failures.Count) failure(s)"
   exit 1
 }
-Write-Output "graveyard-identities=$($graveyard.Count) registries=$($registries.Count) policy=pass"
+$scope = if ($RegistryOnly) { 'registry-policy' } else { 'policy' }
+Write-Output "graveyard-identities=$($graveyard.Count) registries=$($registries.Count) $scope=pass"
 exit 0

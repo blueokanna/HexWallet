@@ -73,7 +73,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 
 BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入“可签名”集合的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种不会进入钱包目录，只在 `tools/fork_registry.json` 和内部 profile 中保留地址原语，绝不会生成带签名的假钱包。
 
-`tools/fork_registry.json` 保留 104 行有官方来源或仍在 MiningPoolStats 活跃列表中的 Bitcoin 系参数，生成 130 个内部 profile；`WalletForkCatalog.inc` 只暴露其中 82 个同时通过地址来源核对和 legacy sighash 审计的 profile。其余 profile 仍用于地址向量测试，但不是用户钱包。`WalletForkAddressVectorsTest.inc` 用独立的 base58check/hash160 固定了 97 个 P2PKH 向量。`python tools/verify_utxo_sighash.py` 逐个读取上游 `chainparams.cpp`、`script/interpreter.cpp` 和 `primitives/transaction.h`：base58 版本不一致、存在活动 fork-id 代码、legacy serializer 写入 `nTime`、交易头额外序列化 `nTime`、或使用宽 `nType` 的链一律不进入签名目录；Ravencoin Classic（fork-id）、TrezarCoin/PulsarCoin/DeepOnion/Verge（`nTime` sighash）因此只保留内部地址 profile。运行 `python tools/generate_fork_profiles.py` 重新生成 profile、catalog、签名策略和向量。`run_network_profile_self_tests()` 会跑通每一条编码器和这些向量；首次收款前仍应使用该币种自己的参考钱包核对地址。
+`tools/fork_registry.json` 保存分叉链参数和来源审计；生成文件位于 `src/generated/`。Python 采集和生成脚本已移除，Arduino IDE 编译不依赖 Python。修改注册表时必须同步参数、签名策略与固定向量，并运行主机自检和 `tests/host/policy_check.ps1`，不能按地址格式推断签名兼容性。
 
 没有 SLIP-0044 coin type、可读官方 chainparams 或受支持地址编码的币种已从钱包删除，不再生成占位目录项。重新加入必须附官方证据，不能猜 version byte。
 
@@ -87,19 +87,19 @@ MiningPoolStats 快照（`tools/miningpoolstats_coin_list.json`，2026-10-23）�
 
 `WalletCustody` 把“哪些密钥能放进安全芯片”写成代码，而不是宣传语。默认的活动配置是纯 MCU；`wallet custody <id>` 会先打印安全芯片 I2C 探测结果（`not-configured`、`no-response`、`present-unverified`）。
 
-`SecureElementPort.h` 定义了真正的后端契约：`open`、`session_authenticated`、`sign_digest`、`public_key`、`close` 必须全部提供，每次启动只允许注册一个后端；如果后端在 `open()` 返回成功但 `session_authenticated()` 仍为假（这正是静态密钥不匹配、卡片被复位时的情形），后端会被立即注销，托管门保持关闭。`active_secure_element_profile()` 只有在这样的后端完成认证后才返回 SE051C2HQ1 配置，因此“器件型号”永远无法被提升为“硬件托管”。
+`SecureElementPort.h` 定义了真正的后端契约：`open`、`session_authenticated`、`sign_digest`、`public_key`、`close` 必须全部提供，每次启动只允许注册一个后端；如果后端在 `open()` 返回成功但 `session_authenticated()` 仍为假（这正是静态密钥不匹配、卡片被复位时的情形），后端会被立即注销，托管门保持关闭。认证通道不代表钱包已使用芯片内私钥；当前 `active_secure_element_profile()` 仍为 MCU-only，生产托管门保持关闭。
 
-当前**没有任何后端注册**，所以 `secure_element_ready()` 为假，`HEXWALLET_REQUIRE_SECURE_CUSTODY=1` 会拒绝生成/导入会话与装载种子。已实现并用公开向量固定的只有任何 SCP03 后端都需要的地基：ISO/IEC 7816-3 CRC16/A（校验值 `0x29B1`）、FIPS-197 AES-128（`69c4e0d8…`）、RFC 4493 AES-CMAC（四组长度）。**没有**写 SCP03 密钥派生/ICV 布局与 T=1 over I2C 帧格式——这两者必须对着真实卡片或许可的参考实现验证，凭记忆写出来只会得到“看起来能通”的通道。逐项缺口与验收条件见 [docs/security.md](docs/security.md)。
+当前没有注册 SCP03 签名后端。新增的 `Se051ArduinoPort.cpp` 只实现与 NXP 官方 SDK 对接的 Arduino I²C/计时接口；不会启用明文回退，也不会把通道成功宣称为完整托管。实现、构建要求与未完成项见 [SE051 集成说明](docs/se051-integration.md)。
 
 需要解密到 RAM 的 seed 仍然只受 MCU 保护；即使后端就绪，BIP32/SLIP-0010 派生仍在 MCU 内完成，SE 提升的是静态密钥与签名隔离，不等于“所有私钥都由安全芯片保护”。
 
 ### GRAVEYARD 身份
 
-MiningPoolStats 快照（`tools/miningpoolstats_graveyard.json`，记录抓取日期）中标注为 GRAVEYARD 的身份不允许进入任何面向用户的注册表。FLUX 已按此规则撤回（网络 profile、目录条目、ZIP-243 分支 ID 全部移除，ZIP-243 引擎保留给 ZEC）；MSR 与 QUBIC 同样不得回流。`tests/test_graveyard.py` 会逐行检查 `WalletNetworks.cpp`、`WalletCatalog.cpp`、三个生成文件与 `tools/fork_registry.json`，并校验矿池表每一行都指向目录里真实存在的条目。
+MiningPoolStats 快照（`tools/miningpoolstats_graveyard.json`，记录抓取日期）中标注为 GRAVEYARD 的身份不允许进入任何面向用户的注册表。FLUX 已按此规则撤回（网络 profile、目录条目、ZIP-243 分支 ID 全部移除，ZIP-243 引擎保留给 ZEC）；MSR 与 QUBIC 同样不得回流。`tests/host/policy_check.ps1` 会逐行检查 `WalletNetworks.cpp`、`WalletCatalog.cpp`、三个生成文件与 `tools/fork_registry.json`，并校验矿池表每一行都指向目录里真实存在的条目。
 
 ## 手机 App 连接（NFC / USB）
 
-HexWallet 的“发送”由手机发起：手机构造未签名交易，硬件钱包只做**审阅 + 授权 + 签名**，然后把已签名字节交回手机广播。设备不联网，也不保存交易。完整线格式见 [docs/phone-link-protocol.md](docs/phone-link-protocol.md)，手机端参考实现见 `tools/phone_link_reference.py`。
+HexWallet 的“发送”由手机发起：手机构造未签名交易，硬件钱包只做**审阅 + 授权 + 签名**，然后把已签名字节交回手机广播。设备不联网，也不保存交易。完整线格式见 [docs/phone-link-protocol.md](docs/phone-link-protocol.md)；旧手机端 Python 参考实现已移除。
 
 - **接收**：手机通过链路调用 `ADDRESS`，设备派生并返回地址（仅公钥/地址，不含私钥）。
 - **发送**：手机调用 `BEGIN_SIGN` → 设备解析并校验（输入归属、找零派生、手续费上限、合约白名单）→ 在可信屏幕显示收款地址/金额/手续费并给出 `APPROVE` / `REJECT` 按钮 → 用户按键后，手机再次调用 `RESULT` 取回签名。
@@ -605,7 +605,7 @@ ERC-20 Token 使用所属 EVM 网络的同一个账户地址，不要把 Token �
 
 - 已认证并加载钱包。
 - 输入是十六进制 PSBT v0。
-- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、Dash、DigiByte、Bitcoin Gold、Ravencoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、e-Gulden、LBRY、MazaCoin、Myriad、NewYorkCoin、Auroracoin、Bitcore、CPUchain、DigitalCoin、Einsteinium、Feathercoin、GoByte、Monacoin、Ritocoin、VIVO，以及各自的 SegWit profile）。生成器只接受带 `sighash_source`、且上游 `chainparams.cpp` 与 `script/interpreter.cpp` 已通过 `tools/verify_utxo_sighash.py` 核对的 `legacy` 行；fork-id 和 `nTime` sighash 链不会套用 Bitcoin legacy 签名。共享的 legacy/BIP143 算法由 Bitcoin 向量覆盖，但策略行不代表已经在对应主网广播验证。
+- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、Dash、DigiByte、Bitcoin Gold、Ravencoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、e-Gulden、LBRY、MazaCoin、Myriad、NewYorkCoin、Auroracoin、Bitcore、CPUchain、DigitalCoin、Einsteinium、Feathercoin、GoByte、Monacoin、Ritocoin、VIVO，以及各自的 SegWit profile）。生成器只接受带 `sighash_source`、且上游 `chainparams.cpp` 与 `script/interpreter.cpp` 已完成来源核对的 `legacy` 行；fork-id 和 `nTime` sighash 链不会套用 Bitcoin legacy 签名。共享的 legacy/BIP143 算法由 Bitcoin 向量覆盖，但策略行不代表已经在对应主网广播验证。
 - 输入属于该网络支持的 BIP44 P2PKH、BIP49 P2SH-P2WPKH 或 BIP84 P2WPKH 地址。
 - legacy 输入必须带 `non_witness_utxo`，其 txid 会与 outpoint 校验。这是 BIP-174 的强制要求；缺少它，恶意 PSBT 可以伪造被花费金额，从而污染手续费审查。
 - 交易满足金额、费率、输入输出和 sighash 限制（Bitcoin 系为 `SIGHASH_ALL`，BCH/eCash/BSV 为 `SIGHASH_FORKID`）。
@@ -647,7 +647,7 @@ ERR trusted-display-required-for-signing
 
 ## Zcash 透明交易审查和签名
 
-`zec inspect <payload-hex>` 使用 `magic "ZEC4", u32 branch_id, u32 unsigned_transaction_size, unsigned_v4_transaction, u8 input_count, {u64 value, u8 script_len + scriptPubKey, u32 account, u8 change, u32 address_index}*`。交易必须是透明-only v4，且所有 scriptSig 为空；任何 valueBalance、shielded spend/output 或 JoinSplit 都会返回 `unsupported`，不会降级成“看起来像透明交易”的签名。`tools/build_zcash_review_payload.py` 可以从未签名 v4 交易生成该 payload，并为每个输入打印 ZIP-243 摘要，供独立实现交叉核对。
+`zec inspect <payload-hex>` 使用 `magic "ZEC4", u32 branch_id, u32 unsigned_transaction_size, unsigned_v4_transaction, u8 input_count, {u64 value, u8 script_len + scriptPubKey, u32 account, u8 change, u32 address_index}*`。交易必须是透明-only v4，且所有 scriptSig 为空；任何 valueBalance、shielded spend/output 或 JoinSplit 都会返回 `unsupported`，不会降级成“看起来像透明交易”的签名。该 payload 应由手机或电脑按协议构建，并与独立实现核对摘要。
 
 审查界面显示分支 ID、输入/输出总额、手续费、估计 vbytes、expiry height、lock time 和每个 t1/t3 输出地址。`zec sign <code>` 会从设备种子重新推导 `m/44'/133'/account'/change/index`，校验 prevout 的 P2PKH 哈希，再用 ZIP-243 摘要生成 ECDSA DER 签名并输出完整 v4 交易和 `txid`。签名只使用 `SIGHASH_ALL`；分支 ID 固定在 `WalletNetworks` 的主网 NU6.2 策略 `0x5437f330`，升级网络时必须发布新固件并补充官方向量，不能由主机任意指定。
 
