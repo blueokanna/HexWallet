@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "CameraPort.h"
 #include "WalletConfig.h"
 
 namespace hexwallet {
@@ -73,6 +74,12 @@ SecureElementProbeState board_secure_element_probe();
 // Reads the answer-to-reset for diagnostics. Returns false when the bus is not
 // configured or the card did not answer with a structurally valid ATR.
 bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size);
+
+// OV9281 presence probe over SCCB. Returns NotConfigured until a board profile
+// defines the sensor's SCCB bus, which is the honest answer for the current PCB:
+// its CSI pads run into series resistors and the camera FPC footprint carries no
+// nets, so there is no sensor to address yet.
+CameraProbeState board_camera_probe();
 
 }  // namespace hexwallet
 

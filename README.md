@@ -159,6 +159,7 @@ powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
 powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
+powershell -ExecutionPolicy Bypass -File tests/host/qr_cross_check.ps1   # needs network once
 powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1   # needs build/chain-mbedtls
 powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1
 ```

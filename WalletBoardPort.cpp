@@ -787,6 +787,47 @@ SecureElementProbeState board_secure_element_probe() {
   return SecureElementProbeState::PresentUnverified;
 }
 
+#if defined(HEXWALLET_CAMERA_SCCB_SDA) && defined(HEXWALLET_CAMERA_SCCB_SCL)
+namespace {
+
+// SCCB is I2C with 16-bit register addressing. OmniVision devices never drive a
+// read without a preceding register write, so a read is write-then-repeated-start.
+bool camera_sccb_write(void *, uint8_t address, uint16_t reg, uint8_t value) {
+  Wire.beginTransmission(address);
+  Wire.write(static_cast<uint8_t>(reg >> 8));
+  Wire.write(static_cast<uint8_t>(reg & 0xFF));
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+bool camera_sccb_read(void *, uint8_t address, uint16_t reg, uint8_t *value) {
+  if (value == nullptr) return false;
+  Wire.beginTransmission(address);
+  Wire.write(static_cast<uint8_t>(reg >> 8));
+  Wire.write(static_cast<uint8_t>(reg & 0xFF));
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(address, static_cast<uint8_t>(1)) != 1) return false;
+  *value = static_cast<uint8_t>(Wire.read());
+  return true;
+}
+
+}  // namespace
+#endif
+
+CameraProbeState board_camera_probe() {
+#if defined(HEXWALLET_CAMERA_SCCB_SDA) && defined(HEXWALLET_CAMERA_SCCB_SCL)
+  static bool started = false;
+  if (!started) {
+    started = Wire.begin(HEXWALLET_CAMERA_SCCB_SDA, HEXWALLET_CAMERA_SCCB_SCL);
+  }
+  if (!started) return CameraProbeState::NotConfigured;
+  const CameraSccbBus bus = {nullptr, camera_sccb_write, camera_sccb_read, nullptr};
+  return camera_probe(bus, nullptr);
+#else
+  return CameraProbeState::NotConfigured;
+#endif
+}
+
 bool board_display_init() {
 #if !HEXWALLET_ENABLE_LVGL
   return false;

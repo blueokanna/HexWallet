@@ -139,8 +139,18 @@ jobs:
           # T-Echo Lite, ESP32-P4 e-paper) against the Xtensa toolchain and the
           # real LVGL 9.5 headers, catching driver syntax/type errors before
           # flashing. WalletNfcPort.cpp is compiled both with synthetic pins and
-          # with the shipped P4 pin map.
+          # with the shipped P4 pin map, and the OV9281 SCCB branch with
+          # synthetic camera pins.
           powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
+
+      - name: QR encoder cross-check against a reference implementation
+        shell: pwsh
+        run: |
+          # The in-tree QR self-test can only prove the encoder and its reader
+          # agree; a transposed format-information half is self-consistent and
+          # unscannable. This compares all 160 version/level/mask matrices with
+          # nayuki/QR-Code-generator at a pinned commit.
+          powershell -ExecutionPolicy Bypass -File tests/host/qr_cross_check.ps1
 
       - name: Compile actual GxEPD2 panel path with real Arduino and LVGL
         shell: pwsh

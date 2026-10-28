@@ -161,6 +161,25 @@ if ($nfcRealRc -ne 0) {
   Get-Content $nfcRealLog -Encoding Unicode | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
 }
 
+# --- Camera port on a synthetic SCCB pin map ------------------------------
+# The OV9281 branch is #if'd out for every shipped profile (the current PCB has
+# no camera nets), so compile it once with pins to keep the SCCB transport
+# type-checked instead of discovering a mistake when the sensor is wired.
+$cameraDefines = @(
+  "-DHEXWALLET_BOARD=7",
+  "-DHEXWALLET_CAMERA_SCCB_SDA=4",
+  "-DHEXWALLET_CAMERA_SCCB_SCL=5"
+)
+$cameraLog = Join-Path $objDir "WalletBoardPort_camera.log"
+& $gcc -std=c++17 -O2 -Wall -Wno-unused-parameter @cameraDefines $extraDefines $incArgs -c (Join-Path $root "WalletBoardPort.cpp") -o (Join-Path $objDir "WalletBoardPort_camera.o") *> $cameraLog
+$cameraRc = $LASTEXITCODE
+Write-Output ("  [camera] WalletBoardPort.cpp => rc={0}" -f $cameraRc)
+if ($cameraRc -ne 0) {
+  $fail++
+  Write-Output "----- WalletBoardPort.cpp [camera SCCB pins] -----"
+  Get-Content $cameraLog -Encoding Unicode | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
+}
+
 if ($fail -gt 0) {
   Write-Output "BOARD PORT COMPILE: $fail failure(s)"
   exit 1
