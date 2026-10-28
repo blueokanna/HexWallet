@@ -6,6 +6,7 @@ namespace hexwallet {
 bool wallet_cli_init(bool display_available);
 void wallet_cli_service();
 bool wallet_cli_is_authenticated();
+bool wallet_cli_review_active();
 void wallet_cli_lock();
 
 // USB data transport gate. It is closed by default and only the physical

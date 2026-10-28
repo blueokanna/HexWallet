@@ -1,4 +1,4 @@
-#include "CryptoExtended.h"
+﻿#include "CryptoExtended.h"
 
 #include <mbedtls/md.h>
 #include <stdio.h>
@@ -451,8 +451,6 @@ void sub_words(uint64_t out[4], const uint64_t right[4], const uint64_t left[4])
   }
 }
 
-// out = value mod L by binary long division. acc is kept below L at every
-// step, so the running remainder after consuming every bit is the answer.
 void reduce_mod_l(uint64_t *value, size_t word_count, uint8_t out[32]) {
   static const uint64_t kL[4] = {
     UINT64_C(0x5812631a5cf5d3ed),
@@ -772,25 +770,50 @@ void edwards_add(fe x3, fe y3, const fe x1, const fe y1, const fe x2,
   secure_zero(t4, sizeof(t4));
 }
 
-// Multiply the base point by a 32-byte little-endian scalar (MSB-first walk).
+// Complete extended Edwards addition (RFC 8032, section 5.1.4).
+// Keeping Z and T avoids field inversions inside the scalar multiplication.
+using ExtendedPoint = Ed25519ExtendedPoint;
+
+void extended_add(ExtendedPoint &out, const ExtendedPoint &p,
+                  const ExtendedPoint &q, const fe twice_d) {
+  fe a,b,c,d,e,f,g,h,u,v;
+  fe_sub(u,p.y,p.x); fe_sub(v,q.y,q.x); fe_mul(a,u,v);
+  fe_add(u,p.y,p.x); fe_add(v,q.y,q.x); fe_mul(b,u,v);
+  fe_mul(u,p.t,q.t); fe_mul(c,u,twice_d);
+  fe_mul(u,p.z,q.z); fe_add(d,u,u);
+  fe_sub(e,b,a); fe_sub(f,d,c); fe_add(g,d,c); fe_add(h,b,a);
+  fe_mul(out.x,e,f); fe_mul(out.y,g,h);
+  fe_mul(out.t,e,h); fe_mul(out.z,f,g);
+  secure_zero(a,sizeof(a)); secure_zero(b,sizeof(b));
+  secure_zero(c,sizeof(c)); secure_zero(d,sizeof(d));
+  secure_zero(e,sizeof(e)); secure_zero(f,sizeof(f));
+  secure_zero(g,sizeof(g)); secure_zero(h,sizeof(h));
+  secure_zero(u,sizeof(u)); secure_zero(v,sizeof(v));
+}
+
+// Fixed 256-bit walk, two complete additions and a masked selection per bit.
+// Only one inversion is needed when converting the final result to affine.
 void scalarmult_point(fe rx, fe ry, const fe px, const fe py,
                       const uint8_t *scalar) {
-  fe tx, ty, dbl_x, dbl_y;
-  fe_0(rx);
-  fe_1(ry);  // identity (0, 1)
+  ExtendedPoint base, acc, doubled, candidate;
+  fe twice_d, inverse_z;
+  fe_frombytes(twice_d,kEdwardsD); fe_add(twice_d,twice_d,twice_d);
+  fe_copy(base.x,px); fe_copy(base.y,py); fe_1(base.z); fe_mul(base.t,px,py);
+  fe_0(acc.x); fe_1(acc.y); fe_1(acc.z); fe_0(acc.t);
   for (int bit = 255; bit >= 0; --bit) {
-    edwards_add(dbl_x, dbl_y, rx, ry, rx, ry);
-    fe_copy(rx, dbl_x);
-    fe_copy(ry, dbl_y);
-    edwards_add(tx, ty, rx, ry, px, py);
+    extended_add(doubled,acc,acc,twice_d);
+    extended_add(candidate,doubled,base,twice_d);
     const int bit_value = (scalar[bit / 8] >> (bit % 8)) & 1;
-    fe_cmov(rx, rx, tx, bit_value);
-    fe_cmov(ry, ry, ty, bit_value);
+    fe_cmov(acc.x,doubled.x,candidate.x,bit_value);
+    fe_cmov(acc.y,doubled.y,candidate.y,bit_value);
+    fe_cmov(acc.z,doubled.z,candidate.z,bit_value);
+    fe_cmov(acc.t,doubled.t,candidate.t,bit_value);
   }
-  secure_zero(tx, sizeof(tx));
-  secure_zero(ty, sizeof(ty));
-  secure_zero(dbl_x, sizeof(dbl_x));
-  secure_zero(dbl_y, sizeof(dbl_y));
+  fe_invert(inverse_z,acc.z);
+  fe_mul(rx,acc.x,inverse_z); fe_mul(ry,acc.y,inverse_z);
+  secure_zero(&base,sizeof(base)); secure_zero(&acc,sizeof(acc));
+  secure_zero(&doubled,sizeof(doubled)); secure_zero(&candidate,sizeof(candidate));
+  secure_zero(twice_d,sizeof(twice_d)); secure_zero(inverse_z,sizeof(inverse_z));
 }
 
 void scalarmult_base(fe rx, fe ry, const uint8_t *scalar) {
@@ -962,7 +985,9 @@ bool edwards_decompress(fe x, fe y, const uint8_t point[32]) {
 
 void encode_point(uint8_t out[32], const fe x, const fe y) {
   fe_tobytes(out, y);
-  const uint8_t sign = static_cast<uint8_t>(x[0] & 1);
+  // Limbs may represent x + p, whose parity differs from canonical x.
+  // The sign bit must come from the reduced field encoding (including x=0).
+  const uint8_t sign = static_cast<uint8_t>(fe_isnegative(x));
   out[31] ^= static_cast<uint8_t>(sign << 7);
 }
 
@@ -989,21 +1014,50 @@ bool ed25519_public_key(const uint8_t seed[32], uint8_t out_public[32]) {
   return true;
 }
 
+bool ed25519_public_key_expanded(const uint8_t scalar[32],
+                                 uint8_t out_public[32]) {
+  if (scalar == nullptr || out_public == nullptr) return false;
+  fe rx, ry;
+  scalarmult_base(rx, ry, scalar);
+  encode_point(out_public, rx, ry);
+  secure_zero(rx, sizeof(rx));
+  secure_zero(ry, sizeof(ry));
+  return true;
+}
+
 bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
                   size_t message_size, uint8_t out_signature[64]) {
   if (seed == nullptr || out_signature == nullptr || (message == nullptr && message_size != 0)) {
     return false;
   }
+  uint8_t hash[64] = {};
+  bool ok = sha512(seed, 32, hash);
+  if (ok) {
+    hash[0] &= 248;
+    hash[31] &= 127;
+    hash[31] |= 64;
+    ok = ed25519_sign_expanded(hash, hash + 32, message, message_size,
+                               out_signature);
+  }
+  secure_zero(hash, sizeof(hash));
+  if (!ok) secure_zero(out_signature, 64);
+  return ok;
+}
+
+bool ed25519_sign_expanded(const uint8_t kL[32], const uint8_t kR[32],
+                           const uint8_t *message, size_t message_size,
+                           uint8_t out_signature[64]) {
+  if (out_signature == nullptr) return false;
+  secure_zero(out_signature, 64);
+  if (kL == nullptr || kR == nullptr ||
+      (message == nullptr && message_size != 0)) return false;
   uint8_t hash[64];
+  memcpy(hash, kL, 32);
+  memcpy(hash + 32, kR, 32);
   uint8_t public_key[32];
   uint8_t r_digest[64];
   uint8_t r_scalar[32];
   uint8_t k_bytes[64];
-  if (!sha512(seed, 32, hash)) return false;
-  hash[0] &= 248;
-  hash[31] &= 127;
-  hash[31] |= 64;
-
   fe rx, ry;
   scalarmult_base(rx, ry, hash);
   encode_point(public_key, rx, ry);
@@ -1276,8 +1330,168 @@ bool ed25519_point_mul_compressed(const uint8_t point[32],
   return true;
 }
 
+// Variable-time Shamir double-scalar multiplication. The operands are public
+// (verification equations), so skipping zero-bit additions is safe here and
+// roughly halves the point additions of two separate scalar multiplications.
+bool ed25519_double_scalar_mul(const uint8_t p1[32], const uint8_t s1[32],
+                               const uint8_t p2[32], const uint8_t s2[32],
+                               uint8_t out[32]) {
+  if (p1 == nullptr || s1 == nullptr || p2 == nullptr || s2 == nullptr ||
+      out == nullptr)
+    return false;
+  fe x1, y1, x2, y2, twice_d, inverse_z, rx, ry;
+  if (!edwards_decompress(x1, y1, p1) || !edwards_decompress(x2, y2, p2))
+    return false;
+  fe_frombytes(twice_d, kEdwardsD);
+  fe_add(twice_d, twice_d, twice_d);
+
+  ExtendedPoint a, b, both, acc, scratch;
+  fe_copy(a.x, x1); fe_copy(a.y, y1); fe_1(a.z); fe_mul(a.t, x1, y1);
+  fe_copy(b.x, x2); fe_copy(b.y, y2); fe_1(b.z); fe_mul(b.t, x2, y2);
+  extended_add(both, a, b, twice_d);
+  fe_0(acc.x); fe_1(acc.y); fe_1(acc.z); fe_0(acc.t);
+
+  for (int bit = 255; bit >= 0; --bit) {
+    extended_add(scratch, acc, acc, twice_d);
+    acc = scratch;
+    const int first = (s1[bit / 8] >> (bit % 8)) & 1;
+    const int second = (s2[bit / 8] >> (bit % 8)) & 1;
+    if (first && second) {
+      extended_add(scratch, acc, both, twice_d);
+      acc = scratch;
+    } else if (first) {
+      extended_add(scratch, acc, a, twice_d);
+      acc = scratch;
+    } else if (second) {
+      extended_add(scratch, acc, b, twice_d);
+      acc = scratch;
+    }
+  }
+  fe_invert(inverse_z, acc.z);
+  fe_mul(rx, acc.x, inverse_z);
+  fe_mul(ry, acc.y, inverse_z);
+  encode_point(out, rx, ry);
+  secure_zero(&a, sizeof(a));
+  secure_zero(&b, sizeof(b));
+  secure_zero(&both, sizeof(both));
+  secure_zero(&acc, sizeof(acc));
+  secure_zero(&scratch, sizeof(scratch));
+  secure_zero(x1, sizeof(x1)); secure_zero(y1, sizeof(y1));
+  secure_zero(x2, sizeof(x2)); secure_zero(y2, sizeof(y2));
+  secure_zero(twice_d, sizeof(twice_d));
+  secure_zero(inverse_z, sizeof(inverse_z));
+  secure_zero(rx, sizeof(rx)); secure_zero(ry, sizeof(ry));
+  return true;
+}
+
 void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]) {
   if (scalar != nullptr) sc_reduce_32(scalar);
+}
+
+// Cofactor clearing for Monero's scalarmult8. Doing the three doublings in
+// extended coordinates costs one field inversion instead of five, which is the
+// difference between a usable and an unusable Bulletproofs+ verification on an
+// MCU: the verifier derives 2*padded_outputs generators per proof.
+bool ed25519_point_mul8_compressed(const uint8_t in[32], uint8_t out[32]) {
+  if (in == nullptr || out == nullptr) return false;
+  fe x, y, twice_d;
+  if (!edwards_decompress(x, y, in)) return false;
+  ExtendedPoint point, scratch, doubled;
+  fe_copy(point.x, x);
+  fe_copy(point.y, y);
+  fe_1(point.z);
+  fe_mul(point.t, x, y);
+  fe_frombytes(twice_d, kEdwardsD);
+  fe_add(twice_d, twice_d, twice_d);
+  extended_add(scratch, point, point, twice_d);   // 2P
+  extended_add(doubled, scratch, scratch, twice_d); // 4P
+  extended_add(scratch, doubled, doubled, twice_d); // 8P
+  fe inverse_z, rx, ry;
+  fe_invert(inverse_z, scratch.z);
+  fe_mul(rx, scratch.x, inverse_z);
+  fe_mul(ry, scratch.y, inverse_z);
+  encode_point(out, rx, ry);
+  secure_zero(x, sizeof(x)); secure_zero(y, sizeof(y));
+  secure_zero(&point, sizeof(point)); secure_zero(&scratch, sizeof(scratch));
+  secure_zero(&doubled, sizeof(doubled));
+  secure_zero(twice_d, sizeof(twice_d));
+  secure_zero(inverse_z, sizeof(inverse_z));
+  secure_zero(rx, sizeof(rx)); secure_zero(ry, sizeof(ry));
+  return true;
+}
+
+void ed25519_extended_identity(Ed25519ExtendedPoint *point) {
+  if (point == nullptr) return;
+  fe_0(point->x); fe_1(point->y); fe_1(point->z); fe_0(point->t);
+}
+
+// acc += point * scalar for public verification operands. The window keeps one
+// decompression, one precomputation and no per-term inversion; the accumulator
+// stays in extended coordinates until the caller converts it once. A 3-bit
+// window (8 precomputed multiples) keeps the table at 2.5 KiB so the verifier
+// still fits the caller's stack.
+bool ed25519_extended_add_scaled(Ed25519ExtendedPoint *acc,
+                                 const uint8_t point[32],
+                                 const uint8_t scalar[32]) {
+  if (acc == nullptr || point == nullptr || scalar == nullptr) return false;
+  fe px, py, twice_d;
+  if (!edwards_decompress(px, py, point)) return false;
+  fe_frombytes(twice_d, kEdwardsD);
+  fe_add(twice_d, twice_d, twice_d);
+
+  constexpr int kDigits = 86; // ceil(256 / 3)
+  ExtendedPoint table[8];
+  fe_copy(table[0].x, px);
+  fe_copy(table[0].y, py);
+  fe_1(table[0].z);
+  fe_mul(table[0].t, px, py);
+  for (int index = 1; index < 8; ++index)
+    extended_add(table[index], table[index - 1], table[0], twice_d);
+
+  ExtendedPoint sum, doubled, added;
+  ed25519_extended_identity(&sum);
+  for (int digit_index = kDigits - 1; digit_index >= 0; --digit_index) {
+    for (int times = 0; times < 3; ++times) {
+      extended_add(doubled, sum, sum, twice_d);
+      sum = doubled;
+    }
+    const int shift = 3 * digit_index;
+    uint32_t window_value = scalar[shift / 8];
+    if (shift % 8 > 5 && shift / 8 + 1 < 32)
+      window_value |= static_cast<uint32_t>(scalar[shift / 8 + 1]) << 8;
+    const uint8_t digit =
+        static_cast<uint8_t>((window_value >> (shift % 8)) & 0x07);
+    if (digit != 0) {
+      extended_add(added, sum, table[digit - 1], twice_d);
+      sum = added;
+    }
+  }
+  extended_add(added, *acc, sum, twice_d);
+  *acc = added;
+  secure_zero(px, sizeof(px)); secure_zero(py, sizeof(py));
+  secure_zero(twice_d, sizeof(twice_d));
+  secure_zero(table, sizeof(table));
+  secure_zero(&sum, sizeof(sum));
+  secure_zero(&doubled, sizeof(doubled));
+  secure_zero(&added, sizeof(added));
+  return true;
+}
+
+bool ed25519_extended_to_compressed(const Ed25519ExtendedPoint *point,
+                                    uint8_t out[32]) {
+  if (point == nullptr || out == nullptr) return false;
+  fe inverse_z, rx, ry;
+  fe_invert(inverse_z, point->z);
+  fe_mul(rx, point->x, inverse_z);
+  fe_mul(ry, point->y, inverse_z);
+  encode_point(out, rx, ry);
+  secure_zero(inverse_z, sizeof(inverse_z));
+  secure_zero(rx, sizeof(rx)); secure_zero(ry, sizeof(ry));
+  return true;
+}
+
+void ed25519_scalar_reduce_wide(const uint8_t digest[64], uint8_t out[32]) {
+  if (digest != nullptr && out != nullptr) sc_reduce_64(digest, out);
 }
 
 void ed25519_scalar_muladd(uint8_t out[32], const uint8_t a[32],

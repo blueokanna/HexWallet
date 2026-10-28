@@ -26,6 +26,9 @@ constexpr size_t kZcashMaxScriptSigSize =
 constexpr size_t kZcashMaxTransactionSize = 4096;
 constexpr uint64_t kZcashZatsPerZec = 100000000ULL;
 constexpr uint64_t kZcashMaxZats = 21000000ULL * kZcashZatsPerZec;
+constexpr uint64_t kFluxMaxZats = 440000000ULL * kZcashZatsPerZec;
+// Parser upper bound across every admitted ZIP-243 transparent network.
+constexpr uint64_t kZcashTransparentParseMaxZats = kFluxMaxZats;
 constexpr uint32_t kZcashV4Version = 0x80000004UL;
 constexpr uint32_t kZcashSaplingVersionGroupId = 0x892F2085UL;
 

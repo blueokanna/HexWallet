@@ -15,9 +15,8 @@ namespace hexwallet
     constexpr UtxoAddressProfile kUtxoRavencoin = {0x3c, 0x7a, nullptr, false};
     constexpr UtxoAddressProfile kUtxoVertcoin = {0x47, 0x05, "vtc", false};
     constexpr UtxoAddressProfile kUtxoAxe = {0x8c, 0x13, "axe", false};
-    constexpr UtxoAddressProfile kUtxoXrp = {0x00, 0x00, nullptr, true};
 
-    #if defined(HEXWALLET_HOST_TEST)
+#if defined(HEXWALLET_HOST_TEST)
     struct ForkAddressVector
     {
       const char *id;
@@ -25,9 +24,9 @@ namespace hexwallet
     };
 
     const ForkAddressVector kForkAddressVectors[] = {
-#include "tests/fixtures/WalletForkAddressVectors.inc"
+#include "tests/fixtures/WalletForkAddressVectorsTest.inc"
     };
-    #endif
+#endif
   } // namespace
 
   const NetworkProfile kNetworkProfiles[] = {
@@ -49,6 +48,9 @@ namespace hexwallet
       {"vtc84", "VTC", "Vertcoin Native SegWit", 28, 28, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoVertcoin, 0, 0, 0, 0, nullptr},
       {"axe", "AXE", "Axe", 4242, 4242, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoAxe, 0, 0, 0, 0, nullptr},
       // --- EVM networks ------------------------------------------------------
+      // Official network references and supported envelopes: docs/evm-network-evidence.md.
+      {"xlayer", "OKB", "X Layer", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 196, 0, 0, nullptr},
+      {"zksync", "ETH", "zkSync Era", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 324, 0, 0, nullptr},
       {"eth", "ETH", "Ethereum", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1, 0, 0, nullptr},
       {"etc", "ETC", "Ethereum Classic", 61, 61, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 61, 0, 0, nullptr},
       {"cro", "CRO", "Cronos", 394, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 25, 0, 0, nullptr},
@@ -96,14 +98,60 @@ namespace hexwallet
       {"btn", "BTN", "Bitnet", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 210, 0, 0, nullptr},
       {"lrs", "LRS", "Larissa Chain", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 9898, 0, 0, nullptr},
       {"vbc", "VBC", "VirBiCoin", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 329, 0, 0, nullptr},
+      // Chain IDs below are from the chains' own network-information pages
+      // (Uniswap Unichain docs, Monad docs, Plasma docs, Berachain docs,
+      // Circle Arc docs). Derivation stays on coin type 60, except where the
+      // chain publishes its own SLIP-44 path.
+      {"unichain", "ETH", "Unichain", 130, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 130, 0, 0, nullptr},
+      {"monad", "MON", "Monad", 143, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 143, 0, 0, nullptr},
+      {"plasma", "XPL", "Plasma", 9745, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 9745, 0, 0, nullptr},
+      {"bera", "BERA", "Berachain", 80094, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 80094, 0, 0, nullptr},
+      // Arc uses USDC as its native gas token with 18 decimals; the native EVM
+      // value path already renders 18 decimals, so no token row is registered.
+      {"arc", "USDC", "Arc", 5042, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 5042, 0, 0, nullptr},
+      // EIP-155 registrations from chainid.network (chainlist): X Layer 196,
+      // zkSync Era 324, OKT Chain 66. Token rows are only added where the
+      // issuer publishes the contract (Circle USDC table below).
+      {"okt", "OKT", "OKT Chain", 66, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 66, 0, 0, nullptr},
       // --- Other existing chains ---------------------------------------------
-      {"xrp", "XRP", "XRP Ledger", 144, 144, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoXrp, 0, 0, 0, 0, nullptr},
+      {"xrp", "XRP", "XRP Ledger", 144, 144, 44, DerivationStyle::Bip44, AddressEncoding::Ripple, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"trx", "TRX", "TRON", 195, 195, 44, DerivationStyle::Bip44, AddressEncoding::Tron, {0, 0, nullptr, false}, 0x41, 0, 0, 0, nullptr},
+      {"xlm", "XLM", "Stellar", 148, 148, 44, DerivationStyle::StellarSep5, AddressEncoding::StellarStrKey, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xmr", "XMR", "Monero", 128, 128, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 18, 0, 0, 0, nullptr, 19, 42, false},
-      {"msr", "MSR", "Masari", 413, 413, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 28, 0, 0, 0, nullptr, 0, 0, false},
       // --- New multi-coin support (SLIP-0044) --------------------------------
       {"kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
+      // Flux (formerly Zelcash), transparent t1/t3 addresses; ZIP-243 v4.
+      {"flux", "FLUX", "Flux (transparent)", 19167, 19167, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
+      // Firo (formerly Zcoin) transparent P2PKH. SLIP-0044 136 (XZC).
+      {"firo", "FIRO", "Firo (transparent)", 136, 136, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x52, 0x07, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"vet", "VET", "VeChain", 818, 818, 44, DerivationStyle::Bip44, AddressEncoding::VeChainAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      // Flow EVM is a distinct address/transaction domain from Cadence accounts.
+      {"flow-evm", "FLOW", "Flow EVM Mainnet", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 747, 0, 0, nullptr},
+      {"sui", "SUI", "Sui", 784, 784, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::SuiEd25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"icx", "ICX", "ICON", 74, 74, 44, DerivationStyle::Bip44, AddressEncoding::IconAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      // Substrate ed25519 accounts. Ledger seed/path recovery equivalence has
+      // not been established by these SS58 encoding tests. The
+      // SS58 network prefix lives in account_version.
+      {"dot", "DOT", "Polkadot", 354, 354, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Ss58Ed25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"ksm", "KSM", "Kusama", 434, 434, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Ss58Ed25519, {0, 0, nullptr, false}, 2, 0, 0, 0, nullptr},
+      // TON wallet v4R2, SLIP-0044 607, default subwallet id for workchain 0.
+      {"ton", "TON", "TON", 607, 607, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::TonAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, false, 698983191},
+      {"hbar", "HBAR", "Hedera (Ed25519 alias)", 3030, 3030, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::HederaKeyAlias, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"sc", "SC", "Siacoin v2", 1991, 1991, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::SiaV2, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"xem", "XEM", "NEM mainnet", 43, 43, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Nem, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"dcr", "DCR", "Decred", 42, 42, 44, DerivationStyle::Bip44, AddressEncoding::DecredAddress, {0, 0, nullptr, false}, 0, 0, 0x073f, 0x071a, nullptr},
+      // Nervos CKB, SLIP-0044 309. Short bech32 address of the standard
+      // SECP256K1/blake160 lock script.
+      {"ckb", "CKB", "Nervos CKB", 309, 309, 44, DerivationStyle::Bip44, AddressEncoding::CkbAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      // Hive (SLIP-0044 3054). Accounts are named; the device derives the
+      // graphene "STM..." public key identity.
+      {"hive", "HIVE", "Hive", 3054, 3054, 44, DerivationStyle::Bip44, AddressEncoding::GraphenePubkey, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      // Default ledger account for an Ed25519 identity; not Ledger's secp256k1 path.
+      {"icp", "ICP", "Internet Computer", 223, 223, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::IcpLedgerAccount, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      // Qtum uses Bitcoin script and BIP143 rules with its own base58 versions
+      // and "qc" bech32 prefix. Only transparent UTXO transfers are admitted.
+      {"qtum", "QTUM", "Qtum", 2301, 2301, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x3a, 0x32, "qc", false}, 0, 0, 0, 0, nullptr},
       {"bch", "BCH", "Bitcoin Cash", 145, 145, 44, DerivationStyle::Bip44, AddressEncoding::CashAddr, {0, 0, nullptr, false}, 0, 0, 0, 0, "bitcoincash"},
       {"xec", "XEC", "eCash", 899, 899, 44, DerivationStyle::Bip44, AddressEncoding::CashAddr, {0, 0, nullptr, false}, 0, 0, 0, 0, "ecash"},
       {"bsv", "BSV", "Bitcoin SV", 236, 236, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x00, 0x05, nullptr, false}, 0, 0, 0, 0, nullptr},
@@ -114,11 +162,14 @@ namespace hexwallet
       {"nmc", "NMC", "Namecoin", 7, 7, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x34, 0x0d, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"sol", "SOL", "Solana", 501, 501, 44, DerivationStyle::SolanaBip44, AddressEncoding::Ed25519Base58, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"algo", "ALGO", "Algorand", 283, 283, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Ed25519Base32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"near", "NEAR", "NEAR Protocol", 397, 397, 44, DerivationStyle::NearSlip10, AddressEncoding::NearImplicit, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xtz", "XTZ", "Tezos (tz1)", 1729, 1729, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Ed25519Blake2bBase58, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
-      {"ada", "ADA", "Cardano", 1815, 1815, 1852, DerivationStyle::CardanoBip1852, AddressEncoding::Ed25519Blake2b224Bech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"ada", "ADA", "Cardano (Ledger CIP-1852)", 1815, 1815, 1852, DerivationStyle::CardanoBip1852, AddressEncoding::Ed25519Blake2b224Bech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"qubic", "QUBIC", "Qubic", 83293, 83293, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::QubicBase26, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"croorg", "CRO", "Crypto.org Chain", 394, 394, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "cro"},
       {"atom", "ATOM", "Cosmos Hub", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "cosmos"},
+      {"osmo", "OSMO", "Osmosis", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "osmo"},
+      {"tia", "TIA", "Celestia", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "celestia"},
       {"sei", "SEI", "SEI", 19000118, 19000118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "sei"},
       {"avax", "AVAX", "Avalanche X/P Chain", 9000, 9000, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Avalanche, {0, 0, nullptr, false}, 0, 0, 0, 0, "avax"},
       {"fil", "FIL", "Filecoin", 461, 461, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase32Filecoin, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
@@ -153,10 +204,10 @@ namespace hexwallet
       {"bch", SighashFamily::ForkId, 0},
       {"xec", SighashFamily::ForkId, 0},
       {"bsv", SighashFamily::ForkId, 0},
-      // Zcash mainnet NU6.2. Updating the branch id is a consensus change and
-      // requires a firmware release plus new ZIP-243 vectors, never a config
-      // flag.
       {"zec", SighashFamily::ZcashZip243, 0},
+      {"flux", SighashFamily::ZcashZip243, 0},
+      {"firo", SighashFamily::Bitcoin, 0},
+      {"qtum", SighashFamily::Bitcoin, 0},
 #include "src/generated/WalletForkSigningPolicies.inc"
   };
 
@@ -165,7 +216,9 @@ namespace hexwallet
 
   const ZcashNetworkPolicy kZcashNetworkPolicies[] = {
       // NU6.2 (zcash/src/consensus/upgrades.cpp, mainnet activation 3364600).
-      {"zec", 0x5437f330},
+      {"zec", 0x5437f330, 21000000ULL * 100000000ULL},
+      // Flux uses the Sapling v4 format and the Flux upgrade branch id.
+      {"flux", 0x76b809bb, 440000000ULL * 100000000ULL},
   };
 
   const size_t kZcashNetworkPolicyCount =
@@ -210,7 +263,8 @@ namespace hexwallet
   bool network_supports_token_accounts(const NetworkProfile &network)
   {
     return (network.encoding == AddressEncoding::Evm && network.evm_chain_id != 0) ||
-           network.encoding == AddressEncoding::Ed25519Base58;
+           network.encoding == AddressEncoding::Ed25519Base58 ||
+           network.encoding == AddressEncoding::Tron;
   }
 
   bool network_supports_eip1559(const NetworkProfile &network)
@@ -218,6 +272,8 @@ namespace hexwallet
     if (network.encoding != AddressEncoding::Evm)
       return false;
     static const char *const kEip1559Networks[] = {
+        "xlayer",
+        "zksync",
         "eth",
         "matic",
         "opt",
@@ -230,6 +286,11 @@ namespace hexwallet
         "cro",
         "kava",
         "core",
+        "unichain",
+        "monad",
+        "plasma",
+        "bera",
+        "arc",
     };
     for (const char *id : kEip1559Networks)
     {
@@ -305,6 +366,13 @@ namespace hexwallet
         0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0,
         0x62, 0x95, 0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d,
         0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98};
+    const uint8_t test_uncompressed[kUncompressedPublicKeySize] = {
+        0x04, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0,
+        0x62, 0x95, 0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d,
+        0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98,
+        0x48, 0x3a, 0xda, 0x77, 0x26, 0xa3, 0xc4, 0x65, 0x5d, 0xa4, 0xfb,
+        0xfc, 0x0e, 0x11, 0x08, 0xa8, 0xfd, 0x17, 0xb4, 0x48, 0xa6, 0x85,
+        0x54, 0x19, 0x9c, 0x47, 0xd0, 0x8f, 0xfb, 0x10, 0xd4, 0xb8};
     char test_address[128];
     size_t test_size = sizeof(test_address);
     const NetworkProfile *komodo = find_network_profile("fork_komodo");
@@ -348,6 +416,82 @@ namespace hexwallet
     test_size = sizeof(test_address);
     if (digibyte == nullptr || address_p2pkh(digibyte->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
         strcmp(test_address, "DFpN6QqFfUm3gKNaxN6tNcab1FArL9cZLE") != 0)
+    {
+      return false;
+    }
+    const NetworkProfile *firo = find_network_profile("firo");
+    const NetworkProfile *qtum = find_network_profile("qtum");
+    const NetworkProfile *vechain = find_network_profile("vet");
+    const NetworkProfile *icon = find_network_profile("icx");
+    const NetworkProfile *polkadot = find_network_profile("dot");
+    const NetworkProfile *kusama = find_network_profile("ksm");
+    const NetworkProfile *ton = find_network_profile("ton");
+    const NetworkProfile *decred = find_network_profile("dcr");
+    const NetworkProfile *ckb = find_network_profile("ckb");
+    test_size = sizeof(test_address);
+    if (firo == nullptr || address_p2pkh(firo->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "aBPjJ4LEarrcCrd6EBRTb8jVjUZuHQFVnD") != 0)
+    {
+      return false;
+    }
+    test_size = sizeof(test_address);
+    if (qtum == nullptr || address_p2pkh(qtum->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "QXHFfTBKYXjaaTH1e7Rox8CcdNPGHVhM59") != 0)
+    {
+      return false;
+    }
+    if (vechain == nullptr ||
+        address_vechain(test_uncompressed, test_address,
+                        sizeof(test_address)) != WalletError::Ok ||
+        strcmp(test_address, "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf") != 0)
+    {
+      return false;
+    }
+    if (icon == nullptr ||
+        address_icon(test_uncompressed, test_address,
+                     sizeof(test_address)) != WalletError::Ok ||
+        strcmp(test_address, "hx0502987e630ea7ebb2bf1d84a65a727109385bcf") != 0)
+    {
+      return false;
+    }
+    const uint8_t substrate_public_key[32] = {
+        0x03, 0xa1, 0x07, 0xbf, 0xf3, 0xce, 0x10, 0xbe, 0x1d, 0x70, 0xdd,
+        0x18, 0xe7, 0x4b, 0xc0, 0x99, 0x67, 0xe4, 0xd6, 0x30, 0x9b, 0xa5,
+        0x0d, 0x5f, 0x1d, 0xdc, 0x86, 0x64, 0x12, 0x55, 0x31, 0xb8};
+    if (polkadot == nullptr ||
+        address_ss58(polkadot->account_version, substrate_public_key,
+                     test_address, sizeof(test_address)) != WalletError::Ok ||
+        strcmp(test_address, "15kypVvwBLVS1eFtT9tb2ZS2HLXLbsy5iZaddcFzRrm5izi") != 0)
+    {
+      return false;
+    }
+    if (kusama == nullptr ||
+        address_ss58(kusama->account_version, substrate_public_key,
+                     test_address, sizeof(test_address)) != WalletError::Ok ||
+        strcmp(test_address, "Cf5Voajhm5wk8TBhWuwLq6HKFd7Sy91Tbfqrztrv93jeZkE") != 0)
+    {
+      return false;
+    }
+    if (ton == nullptr ||
+        address_ton(substrate_public_key, ton->ton_wallet_id, 0x51,
+                    test_address, sizeof(test_address)) != WalletError::Ok ||
+        strcmp(test_address, "UQDTcUOcJvwtMx4R6Vbb+uYCtJELCzAAvdD439fc2Y0UNpjM") != 0)
+    {
+      return false;
+    }
+    test_size = sizeof(test_address);
+    if (decred == nullptr ||
+        address_decred(decred->alt_p2pkh_version, test_public_key,
+                       test_address, &test_size) != WalletError::Ok ||
+        strcmp(test_address, "DsmcYVbP1Nmag2H4AS17UTvmWXmGeA7nLDx") != 0)
+    {
+      return false;
+    }
+    if (ckb == nullptr || ckb->encoding != AddressEncoding::CkbAddress ||
+        address_ckb(test_public_key, test_address, sizeof(test_address)) !=
+            WalletError::Ok ||
+        strcmp(test_address,
+               "ckb1qyq829u0x32fchlfe5dqc4awh5q70h0eyj0q2zdh7f") != 0)
     {
       return false;
     }
@@ -526,7 +670,7 @@ namespace hexwallet
     // Peercoin v<3 transactions serialize nTime; the Bitcoin legacy path cannot sign them.
     if (find_network_signing_policy("ppc") != nullptr)
       return false;
-    #if defined(HEXWALLET_HOST_TEST)
+#if defined(HEXWALLET_HOST_TEST)
     for (const ForkAddressVector &vector : kForkAddressVectors)
     {
       const NetworkProfile *network = find_network_profile(vector.id);
@@ -539,7 +683,7 @@ namespace hexwallet
         return false;
       }
     }
-    #endif
+#endif
     const NetworkProfile *rootstock = find_network_profile("rsk");
     if (ethereum == nullptr || ethereum->evm_chain_id != 1 ||
         ethereum_classic == nullptr ||
@@ -551,8 +695,7 @@ namespace hexwallet
         rootstock == nullptr || rootstock->evm_chain_id != 30 ||
         monero == nullptr || monero->account_version != 18 ||
         monero->cryptonote_integrated_prefix != 19 ||
-        monero->cryptonote_subaddress_prefix != 42 || masari == nullptr ||
-        masari->account_version != 28 || masari->cryptonote_subaddress_prefix != 0 ||
+        monero->cryptonote_subaddress_prefix != 42 || masari != nullptr ||
         zcash == nullptr || zcash->encoding != AddressEncoding::ZcashTransparent ||
         zcash->alt_p2pkh_version != 0x1cb8 || zcash->alt_p2sh_version != 0x1cbd ||
         zcash_policy == nullptr || zcash_policy->branch_id != 0x5437f330 ||
@@ -565,8 +708,6 @@ namespace hexwallet
     {
       return false;
     }
-    // Type-2 support is chain policy: Ethereum accepts it, ETC/BSC/Rootstock
-    // must stay on legacy EIP-155 transactions.
     return network_supports_eip1559(*ethereum) &&
            !network_supports_eip1559(*ethereum_classic) &&
            !network_supports_eip1559(*bsc) &&

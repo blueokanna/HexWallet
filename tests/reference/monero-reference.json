@@ -1,0 +1,51 @@
+{
+  "version": "v0.18.4.0",
+  "repository": "https://github.com/monero-project/monero",
+  "commit": "f1311d4237404ab7da76241dbf10e92a65132cc4",
+  "files": [
+    {
+      "path": "src/ringct/bulletproofs_plus.cc",
+      "sha256": "02f240549b5c51a47d48494303a5bfe781ab4041e51e13bd2e5a3b35c52a7832"
+    },
+    {
+      "path": "src/ringct/bulletproofs_plus.h",
+      "sha256": "8712ccafa8203521e4e13ec125bf30492fd749e02500b5374b49cc89464b721b"
+    },
+    {
+      "path": "src/ringct/multiexp.cc",
+      "sha256": "d247d029694e283b6479ba0b1094972b8eeb1420fe9792838c74f9d064d1e426"
+    },
+    {
+      "path": "src/ringct/multiexp.h",
+      "sha256": "98afc760b1ca4f9cec654ba87556cb3a21d381235c1144a4a60265a17e1cc91a"
+    },
+    {
+      "path": "src/crypto/crypto-ops.c",
+      "sha256": "eaae64573d4fb2dfd976eea629423fcfdc637fe59def48e7ef272d36fe1968f1"
+    },
+    {
+      "path": "src/crypto/crypto-ops-data.c",
+      "sha256": "13c85018e9d2c6ec36aba625c4a7693f4267e403b6e50a2b27ece0e4f66c298d"
+    },
+    {
+      "path": "src/crypto/crypto-ops.h",
+      "sha256": "076d877952d6aea1b0191b25850ca878d307cf0c1a812f8a38f1a0cc68731dbb"
+    },
+    {
+      "path": "src/crypto/keccak.c",
+      "sha256": "1fbfb9d4c857dab9f80ad2b6019e146ae64e8d1856ffdc5d03f66275c47ae5ca"
+    },
+    {
+      "path": "src/crypto/keccak.h",
+      "sha256": "dde2bdb591a893b8ca5890b7e3d5be906812d4b3977e9006b5434e1cf35d3be7"
+    },
+    {
+      "path": "contrib/epee/include/int-util.h",
+      "sha256": "6d30dfce132862c59345f099d92c1478a4a0882eb289b57d45345eb0b7d040bd"
+    },
+    {
+      "sha256": "2a78720488efa9529f64c30a21ad259f986bb33c2caf5bf620297e433f9b92ab",
+      "path": "src/crypto/hash-ops.h"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# These evidence manifests hash exact bytes. Windows checkout must not alter
+# fixtures or the independently built reference harness through autocrlf.
+tests/fixtures/monero-bp-plus/** -text
+tests/reference/** -text

@@ -15,6 +15,9 @@ struct WalletUiTransactionOutput {
   const char *amount_text;
   const char *address;
   const char *ownership;
+  // Rendered separately, without the summary line's fixed-size buffer.
+  // SPL uses this for the full mint, source account and integer precision.
+  const char *details;
 };
 
 struct WalletUiTransactionReview {
@@ -24,6 +27,12 @@ struct WalletUiTransactionReview {
   uint64_t fee;
   uint64_t fee_rate;
   const char *fee_text;
+  const char *fee_label; // nullptr preserves MAX FEE; SOL uses EST. FEE
+  // Optional total spent (sum of outputs plus fee). Null hides the line.
+  const char *total_text;
+  // Optional honest caveat shown in warning colour (for example that ring
+  // decoys are host-supplied and cannot be chain-verified offline).
+  const char *note;
   const char *approval_code;
   // Link-originated requests use on-device APPROVE/REJECT buttons instead of
   // the six-digit code that the serial host must echo back.
@@ -38,7 +47,14 @@ bool wallet_ui_ready();
 void wallet_ui_show_port_error();
 void wallet_ui_set_authenticated(bool authenticated);
 void wallet_ui_set_status(const char *status);
+// Renders `status` immediately; call before a multi-second MCU computation so
+// the trusted display is not frozen on the previous screen.
+void wallet_ui_show_busy(const char *status);
 void wallet_ui_show_catalog();
+// Copies the complete public address/path into wrapping display labels. False
+// means there is no working trusted display; callers must not claim verification.
+bool wallet_ui_show_address(const char *network, const char *address,
+                            const char *path);
 void wallet_ui_show_transaction(const WalletUiTransactionReview &review);
 void wallet_ui_show_pairing(uint32_t code, const char *fingerprint);
 void wallet_ui_service();

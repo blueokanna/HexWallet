@@ -17,7 +17,7 @@ REGISTRY = ROOT / "tools" / "fork_registry.json"
 PROFILES_OUT = ROOT / "src/generated/WalletForkProfiles.inc"
 CATALOG_OUT = ROOT / "src/generated/WalletForkCatalog.inc"
 POLICIES_OUT = ROOT / "src/generated/WalletForkSigningPolicies.inc"
-VECTORS_OUT = ROOT / "tests/fixtures/WalletForkAddressVectors.inc"
+VECTORS_OUT = ROOT / "tests/fixtures/WalletForkAddressVectorsTest.inc"
 
 BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 TEST_PUBKEY = bytes.fromhex(

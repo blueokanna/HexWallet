@@ -17,6 +17,12 @@ constexpr uint8_t kMinHeight = 4;
 constexpr uint8_t kMaxHeight = 12;
 constexpr uint8_t kHashShake256 = 2;
 
+struct WipeOnExit {
+  void *data;
+  size_t size;
+  ~WipeOnExit() { secure_zero(data, size); }
+};
+
 void to_bytes_be(uint64_t value, uint8_t *out, size_t size) {
   for (size_t index = size; index != 0; --index) {
     out[index - 1] = static_cast<uint8_t>(value);
@@ -172,6 +178,7 @@ int treehash(uint8_t out[kN], uint8_t height, const uint8_t sk_seed[kN],
              const uint8_t pub_seed[kN], const uint32_t root_addr[8],
              QrlProgressHook progress, void *context) {
   uint8_t stack[(kMaxHeight + 1) * kN];
+  WipeOnExit wipe_stack{stack, sizeof(stack)};
   uint8_t levels[kMaxHeight + 1];
   size_t offset = 0;
   uint32_t ots_addr[8];
@@ -257,11 +264,13 @@ bool encode_text(const uint8_t address[kQrlAddressBytes], char *out,
 WalletError qrl_xmss_public_key_ex(const uint8_t seed[kQrlSeedSize], uint8_t height,
                                    QrlProgressHook progress, void *context,
                                    uint8_t out_public_key[kQrlPublicKeySize]) {
+  if (out_public_key != nullptr) secure_zero(out_public_key, kQrlPublicKeySize);
   if (seed == nullptr || out_public_key == nullptr || height < kMinHeight ||
       height > kMaxHeight || (height & 1U) != 0) {
     return WalletError::InvalidArgument;
   }
   uint8_t expanded[3 * kN];
+  WipeOnExit wipe_expanded{expanded, sizeof(expanded)};
   if (!crypto_shake256(seed, kQrlSeedSize, expanded, sizeof(expanded))) {
     return WalletError::CryptoFailure;
   }
@@ -291,6 +300,7 @@ WalletError qrl_xmss_public_key(const uint8_t seed[kQrlSeedSize], uint8_t height
 
 WalletError qrl_address_from_public_key(
   const uint8_t public_key[kQrlPublicKeySize], char *out, size_t out_size) {
+  if (out != nullptr && out_size != 0) out[0] = '\0';
   if (public_key == nullptr || out == nullptr || out_size < kQrlAddressTextSize) {
     return WalletError::InvalidArgument;
   }
@@ -323,10 +333,12 @@ WalletError qrl_address_from_public_key(
 WalletError qrl_xmss_address_ex(const uint8_t seed[kQrlSeedSize], uint8_t height,
                                 QrlProgressHook progress, void *context,
                                 char *out, size_t out_size) {
+  if (out != nullptr && out_size != 0) out[0] = '\0';
   if (out == nullptr || out_size < kQrlAddressTextSize) {
     return WalletError::InvalidArgument;
   }
   uint8_t public_key[kQrlPublicKeySize];
+  WipeOnExit wipe_public{public_key, sizeof(public_key)};
   const WalletError result = qrl_xmss_public_key_ex(seed, height, progress, context, public_key);
   if (result != WalletError::Ok) return result;
   const WalletError encoded = qrl_address_from_public_key(public_key, out, out_size);
@@ -340,13 +352,28 @@ WalletError qrl_xmss_address(const uint8_t seed[kQrlSeedSize], uint8_t height,
 }
 
 WalletError qrl_seed_from_bip39(const uint8_t bip39_seed[kSeedSize],
+                                uint32_t address_index,
                                 uint8_t out_seed[kQrlSeedSize]) {
+  if (out_seed != nullptr) secure_zero(out_seed, kQrlSeedSize);
   if (bip39_seed == nullptr || out_seed == nullptr) return WalletError::InvalidArgument;
-  static const char kDomain[] = "HexWallet/QRL/v1";
+  // Preserve the original wallet's index-zero tree for recovery. Older builds
+  // ignored every index; their nonzero paths also refer to this legacy tree.
+  if (address_index == 0) {
+    static const char legacy_domain[] = "HexWallet/QRL/v1";
+    uint8_t legacy[sizeof(legacy_domain) - 1 + kSeedSize];
+    memcpy(legacy, legacy_domain, sizeof(legacy_domain) - 1);
+    memcpy(legacy + sizeof(legacy_domain) - 1, bip39_seed, kSeedSize);
+    const bool ok = crypto_shake256(legacy, sizeof(legacy), out_seed, kQrlSeedSize);
+    secure_zero(legacy, sizeof(legacy));
+    if (!ok) secure_zero(out_seed, kQrlSeedSize);
+    return ok ? WalletError::Ok : WalletError::CryptoFailure;
+  }
+  static const char kDomain[] = "HexWallet/QRL/v2";
   constexpr size_t kDomainSize = sizeof(kDomain) - 1;
-  uint8_t buffer[kDomainSize + kSeedSize];
+  uint8_t buffer[kDomainSize + 4 + kSeedSize];
   memcpy(buffer, kDomain, kDomainSize);
-  memcpy(buffer + kDomainSize, bip39_seed, kSeedSize);
+  to_bytes_be(address_index, buffer + kDomainSize, 4);
+  memcpy(buffer + kDomainSize + 4, bip39_seed, kSeedSize);
   const bool ok = crypto_shake256(buffer, sizeof(buffer), out_seed, kQrlSeedSize);
   secure_zero(buffer, sizeof(buffer));
   if (!ok) secure_zero(out_seed, kQrlSeedSize);
@@ -380,6 +407,36 @@ bool qrl_address_validate(const char *address) {
   return valid;
 }
 
+size_t qrl_xmss_signature_size(uint8_t height) {
+  if (height < kMinHeight || height > kMaxHeight || (height & 1U) != 0) return 0;
+  return 4 + kN + kWotsLen * kN + static_cast<size_t>(height) * kN;
+}
+
+uint32_t qrl_xmss_leaf_count(uint8_t height) {
+  if (height < kMinHeight || height > kMaxHeight || (height & 1U) != 0) return 0;
+  return static_cast<uint32_t>(1) << height;
+}
+
+bool qrl_ots_index_usable(uint8_t height, uint32_t burned_high_water,
+                          uint32_t candidate) {
+  const uint32_t leaves = qrl_xmss_leaf_count(height);
+  if (leaves == 0 || candidate >= leaves) return false;
+  // A candidate below the durable high-water mark is a reuse attempt; skipped
+  // indices above it stay burned because the mark only moves forward.
+  return candidate >= burned_high_water;
+}
+
+bool qrl_ots_next_high_water(uint8_t height, uint32_t burned_high_water,
+                             uint32_t candidate, uint32_t *next_high_water) {
+  if (next_high_water == nullptr) return false;
+  *next_high_water = 0;
+  if (!qrl_ots_index_usable(height, burned_high_water, candidate)) return false;
+  const uint32_t advanced = candidate + 1;
+  *next_high_water =
+    advanced > burned_high_water ? advanced : burned_high_water;
+  return true;
+}
+
 bool run_qrl_xmss_self_tests() {
   // qrllib tests/cpp/qrl/xmssBasicSHAKE256_test.cpp: 48 zero bytes, height 4.
   static const char kExpected[] =
@@ -399,8 +456,61 @@ bool run_qrl_xmss_self_tests() {
   passed = passed && qrl_xmss_public_key(bad_seed, 14, public_key) == WalletError::InvalidArgument;
   uint8_t bip39[kSeedSize] = {};
   uint8_t qrl_seed[kQrlSeedSize];
-  passed = passed && qrl_seed_from_bip39(bip39, qrl_seed) == WalletError::Ok;
+  passed = passed && qrl_seed_from_bip39(bip39, 0, qrl_seed) == WalletError::Ok;
+  // Address indices must produce distinct keys: v1 folded no index into the
+  // domain separator and every index returned the same address.
+  uint8_t indexed[kQrlSeedSize];
+  passed = passed &&
+           qrl_seed_from_bip39(bip39, 1, indexed) == WalletError::Ok &&
+           !crypto_constant_time_equal(qrl_seed, indexed, kQrlSeedSize) &&
+           qrl_seed_from_bip39(bip39, 0, nullptr) ==
+               WalletError::InvalidArgument;
+  if (passed) {
+    char address_zero[kQrlAddressTextSize];
+    char address_one[kQrlAddressTextSize];
+    passed = qrl_xmss_address(qrl_seed, 4, address_zero, sizeof(address_zero)) ==
+                 WalletError::Ok &&
+             qrl_xmss_address(indexed, 4, address_one, sizeof(address_one)) ==
+                 WalletError::Ok &&
+             strcmp(address_zero, address_one) != 0;
+    secure_zero(address_zero, sizeof(address_zero));
+    secure_zero(address_one, sizeof(address_one));
+  }
+  secure_zero(indexed, sizeof(indexed));
   secure_zero(qrl_seed, sizeof(qrl_seed));
+
+  // qrllib tests/cpp/qrl/xmssBasicSHAKE256_test.cpp (SignatureLen): 2308 at
+  // height 4 and 2372 at height 6 for 67 WOTS+ chains of 32 bytes.
+  passed = passed && qrl_xmss_signature_size(4) == 2308 &&
+           qrl_xmss_signature_size(6) == 2372 &&
+           qrl_xmss_signature_size(10) == 2500 &&
+           qrl_xmss_signature_size(3) == 0 &&
+           qrl_xmss_signature_size(5) == 0 &&
+           qrl_xmss_signature_size(14) == 0;
+  passed = passed && qrl_xmss_leaf_count(4) == 16 &&
+           qrl_xmss_leaf_count(10) == 1024 &&
+           qrl_xmss_leaf_count(12) == 4096 &&
+           qrl_xmss_leaf_count(5) == 0;
+
+  // One-time-signature index ledger (RFC 8391 4.1.9 / 4.1.12).
+  uint32_t next = 0;
+  passed = passed && qrl_ots_index_usable(4, 0, 0) &&
+           qrl_ots_next_high_water(4, 0, 0, &next) && next == 1 &&
+           qrl_ots_index_usable(4, 0, 15) &&
+           qrl_ots_next_high_water(4, 0, 15, &next) && next == 16 &&
+           !qrl_ots_index_usable(4, 6, 5) &&
+           !qrl_ots_index_usable(4, 0, 16) &&
+           !qrl_ots_next_high_water(4, 6, 5, &next) && next == 0 &&
+           !qrl_ots_next_high_water(4, 0, 16, &next) &&
+           !qrl_ots_next_high_water(5, 0, 0, &next) &&
+           !qrl_ots_next_high_water(4, 0, 0, nullptr);
+  // A skipped index burns everything below it; the mark never moves backwards.
+  passed = passed && qrl_ots_index_usable(12, 7, 4095) &&
+           qrl_ots_next_high_water(12, 7, 4095, &next) && next == 4096 &&
+           qrl_ots_next_high_water(12, 7, 9, &next) && next == 10 &&
+           !qrl_ots_index_usable(12, 7, 4096) &&
+           !qrl_ots_index_usable(12, 4096, 4095);
+
   secure_zero(public_key, sizeof(public_key));
   secure_zero(address, sizeof(address));
   secure_zero(seed, sizeof(seed));

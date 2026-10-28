@@ -1,4 +1,4 @@
-# Device-side compile smoke check.
+﻿# Device-side compile smoke check.
 #
 # Compiles every firmware C++ source (excluding the Arduino-sketch-only files)
 # with the selected Xtensa or P4 RISC-V toolchain from Arduino core 3.3.10,
@@ -58,15 +58,16 @@ $includes = @(
 # can compile with the curated include set is kept in this list.
 $sources = @(
   "CryptoPrimitives.cpp",
-  "Blake2b.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
+  "SolanaTransaction.cpp",
+  "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "WalletLinkCrypto.cpp", "WalletLink.cpp", "WalletNfcApdu.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
+  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
   "WalletCustody.cpp",
   "WalletSecurity.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",
-  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp"
+  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "TronTransaction.cpp", "CosmosTransaction.cpp", "StellarTransaction.cpp", "AlgorandTransaction.cpp", "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletSigning.cpp", "NearTransaction.cpp", "TezosTransaction.cpp", "XrpTransaction.cpp", "Totp.cpp", "EinkFrame.cpp"
 )
 
 $objDir = Join-Path $PSScriptRoot "obj-device/$Target"
@@ -83,16 +84,16 @@ foreach ($s in $sources) {
   $obj = Join-Path $objDir ($s -replace '\.cpp$', '.o')
   # Windows PowerShell wraps stderr warnings as non-terminating errors.
   # Judge native compilation by its exit status, not by the presence of stderr.
-  $LASTEXITCODE = $null
+  $global:LASTEXITCODE = $null
   $ErrorActionPreference = "Continue"
   & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter -DMBEDTLS_ALLOW_PRIVATE_ACCESS $incArgs -c $src -o $obj *> $log
-  $rc = $LASTEXITCODE
+  $rc = $global:LASTEXITCODE
   $ErrorActionPreference = "Stop"
   Write-Output ("  {0} => rc={1}" -f $s, $rc)
   if ($rc -ne 0) {
     $fail++
     Write-Output "----- $s compiler output -----"
-    Get-Content $log -Encoding Unicode | Select-Object -First 30 | ForEach-Object { Write-Output $_ }
+    Get-Content $log | Select-Object -First 30 | ForEach-Object { Write-Output $_ }
   }
 }
 if ($fail -gt 0) {
@@ -101,3 +102,4 @@ if ($fail -gt 0) {
 }
 Write-Output "DEVICE COMPILE ($Target): all sources OK"
 exit 0
+

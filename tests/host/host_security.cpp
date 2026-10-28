@@ -47,6 +47,12 @@ WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size,
   return WalletError::CryptoFailure;
 }
 
+WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path,
+                                  HdPrivateNode *out_node) {
+  (void)master; (void)path; (void)out_node;
+  return WalletError::CryptoFailure;
+}
+
 WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
                                    const uint8_t message[kPrivateKeySize],
                                    const uint8_t aux_rand[kPrivateKeySize],
@@ -54,6 +60,23 @@ WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
   (void)private_key;
   (void)message;
   (void)aux_rand;
+  (void)out_signature;
+  return WalletError::CryptoFailure;
+}
+
+WalletError uncompressed_public_key_from_private(
+    const uint8_t private_key[kPrivateKeySize],
+    uint8_t out_public[kUncompressedPublicKeySize]) {
+  (void)private_key;
+  (void)out_public;
+  return WalletError::CryptoFailure;
+}
+
+WalletError secp256k1_sign_digest_recoverable(
+    const uint8_t private_key[kPrivateKeySize], const uint8_t digest[kPrivateKeySize],
+    RecoverableSignature *out_signature) {
+  (void)private_key;
+  (void)digest;
   (void)out_signature;
   return WalletError::CryptoFailure;
 }

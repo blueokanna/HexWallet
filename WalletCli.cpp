@@ -1,8 +1,10 @@
 #include "WalletCli.h"
 
 #include <Arduino.h>
+#include <esp_timer.h>
 #include <Preferences.h>
 #include <esp_system.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "BitcoinTransaction.h"
@@ -12,6 +14,7 @@
 #include "EvmTransaction.h"
 #include "KaspaTransaction.h"
 #include "ZcashTransaction.h"
+#include "Totp.h"
 #include "WalletBoardPort.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
@@ -24,6 +27,7 @@
 #include "WalletTokens.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
+#include "WalletSigning.h"
 
 namespace hexwallet {
 #if HEXWALLET_ENABLE_CLI
@@ -142,6 +146,7 @@ const char *error_text(WalletError error) {
     case WalletError::InvalidPath: return "invalid-path";
     case WalletError::HardenedPublicDerivation: return "hardened-public-derivation";
     case WalletError::Aborted: return "aborted";
+    case WalletError::CustodyUnavailable: return "secure-custody-unavailable";
   }
   return "unknown";
 }
@@ -222,6 +227,7 @@ void show_help() {
   Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD] [offset] | mining show <symbol> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
+  Serial.println("OK totp: totp time | totp time <unix> | totp <base32> [digits] [period] [sha1|sha256|sha512] | totp clear");
   Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
   Serial.println("OK link: link status | link pair confirm | link pair reject");
 #if HEXWALLET_ENABLE_SECRET_EXPORT
@@ -609,7 +615,7 @@ bool qrl_progress_hook(uint32_t completed, uint32_t total, void *context) {
 
 void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
                    const uint8_t *seed, uint32_t address_index,
-                   bool include_private) {
+                   bool include_private, bool show_on_device = false) {
   DerivedAddress derived;
   const WalletError result =
     network.encoding == AddressEncoding::QrlXmss
@@ -621,6 +627,11 @@ void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
     Serial.print(network.id);
     Serial.print(" error=");
     Serial.println(error_text(result));
+    return;
+  }
+  if (show_on_device && !wallet_ui_show_address(network.id, derived.address, derived.path)) {
+    clear_derived_address(&derived);
+    Serial.println("ERR trusted-display-unavailable");
     return;
   }
   Serial.print("network=");
@@ -670,11 +681,14 @@ void show_addresses(uint32_t address_index, const NetworkProfile *only_network, 
   }
   if (only_network != nullptr) {
     print_derived(*only_network, master, have_seed ? seed : nullptr,
-                  address_index, include_secrets);
+                  address_index, include_secrets, !include_secrets);
   } else {
     for (size_t index = 0; index < kNetworkProfileCount; ++index) {
       const NetworkProfile &network = kNetworkProfiles[index];
       if (network.explicit_only_derivation) continue;
+      WalletCatalogEntry entry{};
+      if (!wallet_catalog_find(network.id, &entry) ||
+          !wallet_catalog_has(entry, WalletCapabilityAddress)) continue;
       print_derived(network, master, have_seed ? seed : nullptr,
                     address_index, include_secrets);
     }
@@ -757,6 +771,11 @@ void handle_wallet_token(char *arguments) {
     Serial.println(error_text(result));
     return;
   }
+  if (!wallet_ui_show_address(network->id, derived.address, derived.path)) {
+    clear_derived_address(&derived);
+    Serial.println("ERR trusted-display-unavailable");
+    return;
+  }
   Serial.print("OK token=");
   Serial.print(token->id);
   Serial.print(" network=");
@@ -783,6 +802,10 @@ const char *key_scheme_text(KeyScheme scheme) {
     case KeyScheme::CryptoNoteEdwards: return "cryptonote-edwards";
     case KeyScheme::Bls12381G1: return "bls12-381-g1";
     case KeyScheme::XmssShake256: return "xmss-shake256";
+    case KeyScheme::CardanoEd25519Bip32: return "cardano-ed25519-bip32";
+    case KeyScheme::ErgoSchnorr: return "ergo-sigma-schnorr";
+    case KeyScheme::NemKeccakEd25519: return "nem-keccak-ed25519";
+    case KeyScheme::Unsupported: return "unsupported";
   }
   return "unknown";
 }
@@ -797,7 +820,7 @@ void handle_wallet_custody(char *arguments) {
   const CustodyPlan plan =
     plan_key_custody(*entry.network, active_secure_element_profile());
   const SecureElementProbeState probe = board_secure_element_probe();
-  Serial.print("se050-probe=");
+  Serial.print("secure-element-probe=");
   Serial.print(probe == SecureElementProbeState::NotConfigured
                    ? "not-configured"
                    : (probe == SecureElementProbeState::NoResponse
@@ -1836,9 +1859,137 @@ void run_self_tests() {
   Serial.println(transport ? "pass" : "FAIL");
 }
 
+void handle_totp(char *command) {
+  if (!require_authentication()) return;
+  if (strcmp(command, "totp time") == 0) {
+    uint64_t now = 0;
+    if (!totp_clock_unix(static_cast<uint64_t>(esp_timer_get_time()) / 1000U, &now)) {
+      Serial.println("ERR totp-clock-not-set");
+      return;
+    }
+    Serial.print("OK unix=");
+    Serial.println(static_cast<unsigned long long>(now));
+    return;
+  }
+  if (strncmp(command, "totp time ", 10) == 0) {
+    char *end = nullptr;
+    const unsigned long long unix_seconds = strtoull(command + 10, &end, 10);
+    if (end == command + 10 || *end != '\0' || unix_seconds == 0) {
+      Serial.println("ERR invalid-unix-time");
+      return;
+    }
+    if (!totp_clock_set_unix(unix_seconds, static_cast<uint64_t>(esp_timer_get_time()) / 1000U)) {
+      Serial.println("ERR invalid-unix-time");
+      return;
+    }
+    Serial.println("OK totp-clock-set");
+    return;
+  }
+  if (strcmp(command, "totp clear") == 0) {
+    totp_clock_clear();
+    Serial.println("OK totp-clock-cleared");
+    return;
+  }
+  if (strncmp(command, "totp ", 5) != 0 || command[5] == '\0') {
+    Serial.println("ERR invalid-totp-command");
+    return;
+  }
+  char secret_text[128] = {};
+  char *save = nullptr;
+  char *token = strtok_r(command + 5, " ", &save);
+  if (token == nullptr || strlen(token) >= sizeof(secret_text)) {
+    Serial.println("ERR invalid-totp-secret");
+    return;
+  }
+  memcpy(secret_text, token, strlen(token) + 1);
+  uint32_t digits = kTotpDefaultDigits;
+  uint32_t period = kTotpDefaultPeriod;
+  TotpAlgorithm algorithm = TotpAlgorithm::Sha1;
+  uint8_t fields = 0;
+  while ((token = strtok_r(nullptr, " ", &save)) != nullptr) {
+    if (fields == 0) {
+      char *end = nullptr;
+      const unsigned long value = strtoul(token, &end, 10);
+      if (end == token || *end != '\0' || value < 6 || value > 8) {
+        Serial.println("ERR invalid-totp-digits");
+        secure_zero(secret_text, sizeof(secret_text));
+        return;
+      }
+      digits = static_cast<uint32_t>(value);
+    } else if (fields == 1) {
+      char *end = nullptr;
+      const unsigned long value = strtoul(token, &end, 10);
+      if (end == token || *end != '\0' || value < 1 || value > 300) {
+        Serial.println("ERR invalid-totp-period");
+        secure_zero(secret_text, sizeof(secret_text));
+        return;
+      }
+      period = static_cast<uint32_t>(value);
+    } else if (fields == 2) {
+      if (strcmp(token, "sha1") == 0) algorithm = TotpAlgorithm::Sha1;
+      else if (strcmp(token, "sha256") == 0) algorithm = TotpAlgorithm::Sha256;
+      else if (strcmp(token, "sha512") == 0) algorithm = TotpAlgorithm::Sha512;
+      else {
+        Serial.println("ERR invalid-totp-algorithm");
+        secure_zero(secret_text, sizeof(secret_text));
+        return;
+      }
+    } else {
+      Serial.println("ERR invalid-totp-command");
+      secure_zero(secret_text, sizeof(secret_text));
+      return;
+    }
+    ++fields;
+  }
+  uint8_t secret[kTotpSecretMaxBytes] = {};
+  size_t secret_size = 0;
+  const TotpError decode = totp_base32_decode(secret_text, secret, sizeof(secret),
+                                              &secret_size);
+  secure_zero(secret_text, sizeof(secret_text));
+  if (decode != TotpError::Ok) {
+    Serial.println("ERR invalid-totp-secret");
+    secure_zero(secret, sizeof(secret));
+    return;
+  }
+  uint64_t now = 0;
+  if (!totp_clock_unix(static_cast<uint64_t>(esp_timer_get_time()) / 1000U, &now)) {
+    Serial.println("ERR totp-clock-not-set; use totp time <unix>");
+    secure_zero(secret, sizeof(secret));
+    return;
+  }
+  uint32_t code = 0;
+  const TotpError generated = totp_generate_unix(
+      secret, secret_size, now, period, digits, algorithm, &code);
+  secure_zero(secret, sizeof(secret));
+  if (generated != TotpError::Ok) {
+    Serial.println("ERR totp-generation-failed");
+    return;
+  }
+  char output[64];
+  snprintf(output, sizeof(output), "OK code=%0*u remaining=%u",
+           static_cast<int>(digits), code,
+           static_cast<unsigned>(period - static_cast<uint32_t>(now % period)));
+  Serial.println(output);
+}
+
 void handle_line(char *command) {
   while (*command == ' ') ++command;
   if (*command == '\0') return;
+  // One trusted screen has one owner. A second transport/CLI command must not
+  // replace an approval screen while the original request remains signable.
+  const bool passive = strcmp(command, "help") == 0 || strcmp(command, "status") == 0 ||
+      strcmp(command, "lock") == 0 || strcmp(command, "link status") == 0;
+  if (!passive && (wallet_signing_active() || wallet_link_service_pairing_pending())) {
+    Serial.println("ERR device-review-active");
+    return;
+  }
+  const bool finish_cli = strcmp(command, "tx reject") == 0 ||
+      strncmp(command, "tx sign ", 8) == 0 || strncmp(command, "evm sign ", 9) == 0 ||
+      strncmp(command, "kaspa sign ", 11) == 0 || strncmp(command, "zec sign ", 9) == 0;
+  if (transaction_pending && !passive && !finish_cli) {
+    Serial.println("ERR transaction-review-active");
+    return;
+  }
   if (strcmp(command, "help") == 0) show_help();
   else if (strcmp(command, "status") == 0) show_status();
   else if (strncmp(command, "coin ", 5) == 0) handle_coin(command);
@@ -1857,6 +2008,7 @@ void handle_line(char *command) {
   else if (strncmp(command, "zec ", 4) == 0) handle_zcash(command);
   else if (strncmp(command, "link ", 5) == 0) handle_link(command);
   else if (strncmp(command, "tx ", 3) == 0) handle_transaction(command);
+  else if (strncmp(command, "totp", 4) == 0) handle_totp(command);
   else Serial.println("ERR unknown-command; use help");
 }
 
@@ -2048,6 +2200,14 @@ void wallet_cli_service() {
 bool wallet_cli_is_authenticated() {
 #if HEXWALLET_ENABLE_CLI
   return authenticated;
+#else
+  return false;
+#endif
+}
+
+bool wallet_cli_review_active() {
+#if HEXWALLET_ENABLE_CLI
+  return transaction_pending;
 #else
   return false;
 #endif

@@ -320,8 +320,10 @@ bool hkdf_sha256(const uint8_t *salt, size_t salt_size, const uint8_t *ikm,
   return ok;
 }
 
-// HKDF-mod-r per EIP-2333 (salt hashed before first extraction; the initial
-// salt is the 20-byte ASCII string "BLS-SIG-KEYGEN-SALT-").
+// HKDF-mod-r as Chia/bls-signatures implements it: the first extraction uses
+// the raw ASCII salt "BLS-SIG-KEYGEN-SALT-"; only a zero result rehashes the
+// salt. Hashing the salt first (literal EIP-2333 text) yields keys that no
+// Chia wallet derives, so the raw-first order is the compatible one.
 bool hkdf_mod_r(const uint8_t *ikm, size_t ikm_size, uint8_t out_sk[32]) {
   static const uint8_t kSaltPrefix[] = "BLS-SIG-KEYGEN-SALT-";
   constexpr size_t kSaltPrefixSize = sizeof(kSaltPrefix) - 1;
@@ -333,13 +335,16 @@ bool hkdf_mod_r(const uint8_t *ikm, size_t ikm_size, uint8_t out_sk[32]) {
   memcpy(salt, kSaltPrefix, kSaltPrefixSize);
   size_t salt_size = kSaltPrefixSize;
   uint8_t okm[48];
+  bool first = true;
   while (ok) {
-    // salt = H(salt)
-    if (!sha256(salt, salt_size, salt)) {
-      ok = false;
-      break;
+    if (!first) {
+      if (!sha256(salt, salt_size, salt)) {
+        ok = false;
+        break;
+      }
+      salt_size = 32;
     }
-    salt_size = 32;
+    first = false;
     uint8_t extract_input[256 + 1];
     if (ikm_size > sizeof(extract_input) - 1) {
       ok = false;
@@ -532,17 +537,29 @@ bool eip2333_derive_child(const uint8_t parent_sk[32], uint32_t index,
   return ok;
 }
 
+// EIP-2333 12381'/8444'/0'/index' secret key. The standard puzzle's synthetic
+// key is derived from this key plus the hidden puzzle hash, so address and
+// signing must both start here.
+bool chia_standard_private_key(const uint8_t *seed, size_t seed_size,
+                               uint32_t address_index, uint8_t out_sk[32]) {
+  if (seed == nullptr || out_sk == nullptr || seed_size == 0) return false;
+  if (!hkdf_mod_r(seed, seed_size, out_sk)) return false;
+  const uint32_t path[4] = { 12381, 8444, 0, address_index };
+  for (size_t index = 0; index < 4; ++index) {
+    if (!eip2333_derive_child(out_sk, path[index], out_sk)) {
+      secure_zero(out_sk, 32);
+      return false;
+    }
+  }
+  return true;
+}
+
 bool chia_standard_address(const uint8_t *seed, size_t seed_size,
                            uint32_t address_index, char *out, size_t out_size) {
   if (seed == nullptr || out == nullptr || seed_size == 0) return false;
   uint8_t sk[32];
-  if (!hkdf_mod_r(seed, seed_size, sk)) return false;
-  const uint32_t path[4] = { 12381, 8444, 0, address_index };
-  for (size_t index = 0; index < 4; ++index) {
-    if (!eip2333_derive_child(sk, path[index], sk)) {
-      secure_zero(sk, sizeof(sk));
-      return false;
-    }
+  if (!chia_standard_private_key(seed, seed_size, address_index, sk)) {
+    return false;
   }
   uint8_t pubkey[48];
   if (!bls12_381_g1_public_key(sk, pubkey)) {

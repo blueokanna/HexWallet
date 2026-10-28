@@ -5,15 +5,7 @@
 #include <stdint.h>
 
 namespace hexwallet {
-
-// CryptoNote/RingCT key layer. These are the consensus-critical primitives
-// shared by Monero and its forks; transaction construction, CLSAG and
-// Bulletproofs build on top of them. Official Monero tests/crypto/tests.txt
-// vectors cover the key primitives; CLSAG still needs external transaction vectors.
-
 constexpr size_t kCryptoNoteKeySize = 32;
-
-// Keccak-256 followed by sc_reduce32.
 bool cryptonote_hash_to_scalar(const uint8_t *data, size_t size,
                                uint8_t out_scalar[kCryptoNoteKeySize]);
 
@@ -50,6 +42,18 @@ bool cryptonote_generate_key_image(
     const uint8_t public_key[kCryptoNoteKeySize],
     const uint8_t secret_key[kCryptoNoteKeySize],
     uint8_t out_key_image[kCryptoNoteKeySize]);
+
+// Hs(derivation || varint(output_index)). This is the per-output amount /
+// commitment key used by RCT type 4 and later, and the offset that
+// derive_public_key adds to the destination spend key.
+bool cryptonote_derivation_to_scalar(const uint8_t derivation[kCryptoNoteKeySize],
+                                     uint64_t output_index,
+                                     uint8_t out_scalar[kCryptoNoteKeySize]);
+
+// out = scalar * G (the Ed25519 base point), used for the transaction public
+// key. Returns false when the scalar is zero or the point is invalid.
+bool cryptonote_scalar_to_point(const uint8_t scalar[kCryptoNoteKeySize],
+                                uint8_t out_point[kCryptoNoteKeySize]);
 
 bool cryptonote_derive_view_tag(const uint8_t derivation[kCryptoNoteKeySize],
                                 uint64_t output_index, uint8_t *out_tag);
@@ -91,7 +95,6 @@ bool cryptonote_clsag_verify(const uint8_t message[kCryptoNoteKeySize],
                              const CryptoNoteClsag &signature);
 
 bool run_cryptonote_ringct_self_tests();
-// Host/CLI diagnostic: deterministic CLSAG sign/verify and tamper rejection.
 bool run_cryptonote_clsag_self_test();
 
 }  // namespace hexwallet

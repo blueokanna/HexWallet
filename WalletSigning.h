@@ -5,10 +5,20 @@
 #include <stdint.h>
 
 #include "BitcoinTransaction.h"
+#include "CryptoNoteSigning.h"
 #include "EvmTransaction.h"
+#include "CosmosTransaction.h"
 #include "KaspaTransaction.h"
+#include "TronTransaction.h"
 #include "WalletUi.h"
 #include "ZcashTransaction.h"
+#include "SolanaTransaction.h"
+#include "StellarTransaction.h"
+#include "AlgorandTransaction.h"
+#include "ChainTransaction.h"
+#include "NearTransaction.h"
+#include "TezosTransaction.h"
+#include "XrpTransaction.h"
 
 namespace hexwallet {
 
@@ -18,6 +28,16 @@ enum class WalletSigningKind : uint8_t {
   Evm,
   Kaspa,
   Zcash,
+  CryptoNote,
+  Solana,
+  Tron,
+  Cosmos,
+  Stellar,
+  Algorand,
+  Near,
+  Tezos,
+  Xrp,
+  Chain,
 };
 
 enum class WalletSigningError : uint8_t {
@@ -54,6 +74,16 @@ struct WalletSigningSession {
     EvmSigningRequest evm;
     KaspaTransaction kaspa;
     ZcashSigningRequest zcash;
+    CryptoNoteSigningState cryptonote;
+    SolanaTransaction solana;
+    TronTransaction tron;
+    CosmosTransaction cosmos;
+    StellarTransaction stellar;
+    AlgorandTransaction algorand;
+    NearTransaction near;
+    TezosTransaction tezos;
+    XrpTransaction xrp;
+    ChainTransaction chain;
   } request;
 };
 
@@ -72,9 +102,58 @@ WalletSigningError wallet_signing_begin_evm(const char *network_id,
 WalletSigningError wallet_signing_begin_kaspa(const uint8_t *payload,
                                               size_t payload_size,
                                               uint32_t now_ms);
-WalletSigningError wallet_signing_begin_zcash(const uint8_t *payload,
+WalletSigningError wallet_signing_begin_zcash(const char *network_id,
+                                              const uint8_t *payload,
                                               size_t payload_size,
                                               uint32_t now_ms);
+// CryptoNote (Monero type-6 RingCT). The payload carries the serialized
+// transaction plus the host's ring data; every amount, fee, destination and
+// key image is re-derived and verified on device before the review is shown.
+WalletSigningError wallet_signing_begin_cryptonote(const char *network_id,
+                                                   uint32_t address_index,
+                                                   const uint8_t *payload,
+                                                   size_t payload_size,
+                                                   uint32_t now_ms);
+
+WalletSigningError wallet_signing_begin_solana(const char *network_id,
+    uint32_t address_index, const uint8_t *message, size_t size, uint32_t now_ms);
+
+WalletSigningError wallet_signing_begin_stellar(const char *network_id,
+    uint32_t address_index, const uint8_t *payload, size_t size, uint32_t now_ms);
+
+WalletSigningError wallet_signing_begin_algorand(const char *network_id,
+    uint32_t address_index, const uint8_t *payload, size_t size, uint32_t now_ms);
+WalletSigningError wallet_signing_begin_near(const char *network_id,
+    uint32_t address_index, const uint8_t *payload, size_t size, uint32_t now_ms);
+WalletSigningError wallet_signing_begin_tezos(const char *network_id,
+    uint32_t address_index, const uint8_t *payload, size_t size, uint32_t now_ms);
+WalletSigningError wallet_signing_begin_xrp(const char *network_id,
+    uint32_t address_index, const uint8_t *payload, size_t size, uint32_t now_ms);
+
+// Account-model adapters that share the ChainTransaction envelope (currently
+// VET and ICX). The payload carries its own chain magic and is parsed by the
+// adapter, never signed blindly.
+WalletSigningError wallet_signing_begin_chain(const char *network_id,
+    uint32_t address_index, const uint8_t *payload, size_t size,
+    uint32_t now_ms);
+
+// Native TRX and registered TRC-20 transfers. The payload is the raw
+// `raw_data` protobuf bytes; the phone attaches the returned 65-byte
+// r||s||v signature.
+WalletSigningError wallet_signing_begin_tron(const char *network_id,
+                                             uint32_t address_index,
+                                             const uint8_t *payload,
+                                             size_t payload_size,
+                                             uint32_t now_ms);
+
+// Cosmos SDK native MsgSend for atom/osmo/tia. The payload is the compact
+// review structure documented in docs/cosmos-signing.md; the returned bytes are
+// the complete TxRaw protobuf.
+WalletSigningError wallet_signing_begin_cosmos(const char *network_id,
+                                               uint32_t address_index,
+                                               const uint8_t *payload,
+                                               size_t payload_size,
+                                               uint32_t now_ms);
 
 // User decision from the trusted display. Approval is only ever produced by
 // the on-screen buttons; there is deliberately no API to approve in code.

@@ -260,26 +260,6 @@ const TokenProfile *find_token(const NetworkProfile &network,
   return nullptr;
 }
 
-bool find_contract_standard(const NetworkProfile &network,
-                            const uint8_t contract[kEvmAddressSize],
-                            EvmTokenStandard *out) {
-  if (out == nullptr) return false;
-  uint8_t candidate[kEvmAddressSize];
-  for (size_t index = 0; index < kTokenProfileCount; ++index) {
-    const TokenProfile &token = kTokenProfiles[index];
-    if (strcmp(token.network_id, network.id) != 0 ||
-        !decode_contract(token.contract_or_mint, candidate) ||
-        !crypto_constant_time_equal(candidate, contract, sizeof(candidate))) {
-      continue;
-    }
-    *out = token_evm_standard(token.standard);
-    secure_zero(candidate, sizeof(candidate));
-    return *out != EvmTokenStandard::Unknown;
-  }
-  secure_zero(candidate, sizeof(candidate));
-  return false;
-}
-
 int compare_uint256(const uint8_t left[kEvmUint256Size],
                     const uint8_t right[kEvmUint256Size]) {
   for (size_t index = 0; index < kEvmUint256Size; ++index) {
@@ -402,6 +382,7 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
                                           const HdPrivateNode &master,
                                           uint32_t address_index,
                                           EvmSigningRequest *out) {
+  if (out != nullptr) clear_evm_request(out);
   if (transaction == nullptr || out == nullptr || transaction_size == 0 ||
       transaction_size > kEvmMaxUnsignedTransactionSize ||
       network.encoding != AddressEncoding::Evm || network.evm_chain_id == 0 ||
@@ -486,8 +467,11 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     EvmTokenStandard standard = parsed.token != nullptr
                                     ? token_evm_standard(parsed.token->standard)
                                     : EvmTokenStandard::Unknown;
+    // A selector describes an ABI shape, not the implementation at an address.
+    // Never infer trusted transfer semantics from an unregistered contract.
     if (standard == EvmTokenStandard::Unknown) {
-      find_contract_standard(network, parsed.contract, &standard);
+      secure_zero(native_value, sizeof(native_value));
+      return EvmTransactionError::Unsupported;
     }
     DecodedTokenCalldata decoded = {};
     if (!token_decode_calldata(data->data, data->size, standard, &decoded)) {
@@ -571,7 +555,7 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   secure_zero(native_value, sizeof(native_value));
 
   address_text(parsed.recipient, parsed.recipient_address);
-  const uint8_t decimals = parsed.token == nullptr ? 0 : parsed.token->decimals;
+  const uint8_t decimals = !parsed.has_call ? 18 : (parsed.token == nullptr ? 0 : parsed.token->decimals);
   if (!uint256_to_text(parsed.amount, decimals, parsed.amount_text)) {
     return EvmTransactionError::InvalidAmount;
   }
@@ -663,10 +647,59 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   return EvmTransactionError::Ok;
 }
 
+namespace {
+
+// The two hashes bind the exact unsigned bytes, but a second parse must also
+// agree with everything the trusted display showed. Comparing the reviewed
+// fields explicitly catches a future parser that derives different display
+// data from the same bytes (for example a registry or formatting change).
+bool evm_same_review(const EvmSigningRequest &reviewed,
+                     const EvmSigningRequest &request) {
+  return reviewed.type == request.type &&
+         reviewed.network == request.network &&
+         reviewed.token == request.token &&
+         reviewed.address_index == request.address_index &&
+         reviewed.nonce == request.nonce &&
+         reviewed.gas_limit == request.gas_limit &&
+         reviewed.gas_price_or_max_fee == request.gas_price_or_max_fee &&
+         reviewed.max_priority_fee == request.max_priority_fee &&
+         reviewed.maximum_fee == request.maximum_fee &&
+         reviewed.has_native_value == request.has_native_value &&
+         reviewed.has_call == request.has_call &&
+         reviewed.data_size == request.data_size &&
+         reviewed.call.standard == request.call.standard &&
+         reviewed.call.function == request.call.function &&
+         crypto_constant_time_equal(reviewed.contract, request.contract,
+                                    kEvmAddressSize) &&
+         crypto_constant_time_equal(reviewed.recipient, request.recipient,
+                                    kEvmAddressSize) &&
+         crypto_constant_time_equal(reviewed.amount, request.amount,
+                                    kEvmUint256Size) &&
+         crypto_constant_time_equal(reviewed.native_value,
+                                    request.native_value, kEvmUint256Size) &&
+         crypto_constant_time_equal(reviewed.data, request.data,
+                                    reviewed.data_size) &&
+         strcmp(reviewed.from_address, request.from_address) == 0 &&
+         strcmp(reviewed.recipient_address, request.recipient_address) == 0 &&
+         strcmp(reviewed.amount_text, request.amount_text) == 0 &&
+         strcmp(reviewed.token_id_text, request.token_id_text) == 0 &&
+         strcmp(reviewed.value_text, request.value_text) == 0 &&
+         strcmp(reviewed.min_amount_text, request.min_amount_text) == 0 &&
+         strcmp(reviewed.native_value_text, request.native_value_text) == 0 &&
+         strcmp(reviewed.remote_address_text, request.remote_address_text) == 0 &&
+         strcmp(reviewed.maximum_fee_text, request.maximum_fee_text) == 0;
+}
+
+}  // namespace
+
 EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
                                          const HdPrivateNode &master,
                                          uint8_t *out_transaction,
                                          size_t *in_out_size) {
+  if (in_out_size == nullptr) return EvmTransactionError::InvalidArgument;
+  const size_t capacity = *in_out_size;
+  *in_out_size = 0;
+  if (out_transaction != nullptr) secure_zero(out_transaction, capacity);
   if (out_transaction == nullptr || in_out_size == nullptr || request.network == nullptr ||
       request.unsigned_transaction_size == 0 || request.address_index >= kHardenedOffset) {
     return EvmTransactionError::InvalidArgument;
@@ -679,7 +712,7 @@ EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
   const bool same_request = crypto_constant_time_equal(validated.request_hash, request.request_hash,
                                                         sizeof(request.request_hash)) &&
       crypto_constant_time_equal(validated.signing_hash, request.signing_hash,
-                                 sizeof(request.signing_hash));
+                                 sizeof(request.signing_hash)) && evm_same_review(validated, request);
   if (!same_request) {
     clear_evm_request(&validated);
     return EvmTransactionError::WrongWallet;
@@ -701,10 +734,13 @@ EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
   }
   size_t signed_size = 0;
   const bool serialized = serialize_transaction(validated, &signature, out_transaction,
-                                                *in_out_size, &signed_size);
+                                                capacity, &signed_size);
   secure_zero(&signature, sizeof(signature));
   clear_evm_request(&validated);
-  if (!serialized) return EvmTransactionError::BufferTooSmall;
+  if (!serialized) {
+    secure_zero(out_transaction, capacity);
+    return EvmTransactionError::BufferTooSmall;
+  }
   *in_out_size = signed_size;
   return EvmTransactionError::Ok;
 }
@@ -825,8 +861,7 @@ bool run_evm_transaction_self_test() {
           EvmTransactionError::Ok && parsed.token == usdc && strcmp(parsed.amount_text, "1") == 0;
   clear_evm_request(&parsed);
 
-  // ERC-721 safeTransferFrom through the untyped whitelist path. The `from`
-  // field must match the derived wallet or evm_parse_transaction rejects it.
+  // A syntactically valid ERC-721 call to an unregistered contract is refused.
   DerivedAddress nft_wallet;
   uint8_t nft_from[kEvmAddressSize] = {};
   uint8_t nft_to[kEvmAddressSize];
@@ -853,11 +888,7 @@ bool run_evm_transaction_self_test() {
   passed = passed && nft_derived && nft_built &&
       serialize_transaction(nft_transfer, nullptr, actual, sizeof(actual), &actual_size) &&
       evm_parse_transaction(actual, actual_size, *ethereum, master, 0, &parsed) ==
-          EvmTransactionError::Ok && parsed.has_call &&
-      parsed.call.standard == EvmTokenStandard::Erc721 &&
-      strcmp(parsed.token_id_text, "7") == 0 &&
-      strcmp(parsed.amount_text, "1") == 0 &&
-      strcmp(parsed.recipient_address, expected_nft_recipient) == 0;
+          EvmTransactionError::Unsupported;
   clear_evm_request(&parsed);
   secure_zero(&nft_transfer, sizeof(nft_transfer));
   secure_zero(nft_from, sizeof(nft_from));

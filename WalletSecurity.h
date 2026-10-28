@@ -28,6 +28,7 @@ enum class WalletError : uint8_t {
   InvalidPath,
   HardenedPublicDerivation,
   Aborted,
+  CustodyUnavailable,
 };
 
 struct HdPrivateNode {

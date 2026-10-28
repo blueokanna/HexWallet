@@ -35,6 +35,22 @@ namespace hexwallet
     Blake2bBase58Ergo,       // base58check(0x01 + blake2b-256(secp256k1 pubkey)) (ERG)
     Bech32mBlsChia,          // bech32m(blake3-tree-hash puzzle of BLS12-381 G1 key) (XCH)
     QrlXmss,                 // QRL: XMSS-SHAKE256 root committed by sha256 (QRL)
+    StellarStrKey,           // G address: Ed25519 + CRC16-XModem, base32
+    NearImplicit,            // lowercase hex Ed25519 public key (64 characters)
+    Ripple,                  // classic r-address: 0x00 + hash160, Ripple base58
+    VeChainAddress,          // 0x + keccak256(uncompressed pubkey)[12..31] (VET)
+    IconAddress,             // hx + sha3-256(uncompressed pubkey)[12..31] (ICX)
+    Ss58Ed25519,             // Substrate SS58 of a 32-byte Ed25519 key (DOT/KSM)
+    SuiEd25519,              // 0x + BLAKE2b-256(0x00 || Ed25519 public key)
+    TonAddress,              // TON wallet v4R2 user-friendly address (TON)
+    DecredAddress,           // base58check with 2-byte version + BLAKE-256d (DCR)
+    CkbAddress,              // bech32 short address of SECP256K1/blake160 (CKB)
+    GraphenePubkey,          // "STM" + base58(pubkey || RIPEMD160(pubkey)[:4]) (HIVE)
+    IcpPrincipal,            // SHA-224(pubkey) || 0x02 as base32 text (ICP)
+    HederaKeyAlias,          // 0.0.<DER Ed25519 public key>; numeric IDs require node lookup
+    SiaV2,                  // checksummed PolicyPublicKey hash (Sia v2)
+    Nem,                    // NEM mainnet Keccak-Ed25519 account
+    IcpLedgerAccount,       // default ICP ledger account identifier (32-byte CRC/hash)
   };
 
   // BIP32-style derivation policy per network. `derive_address` selects the path
@@ -45,9 +61,11 @@ namespace hexwallet
     Bip44,            // m/purpose'/coin'/account'/change/index (secp256k1)
     AllHardenedBip44, // m/44'/coin'/account'/change'/index' (SLIP-0010 ed25519)
     SolanaBip44,      // m/44'/501'/account'/0'/index' (SLIP-0010 ed25519)
-    CardanoBip1852,   // m/1852'/1815'/account'/role/index (SLIP-0010 ed25519, documented policy)
+    CardanoBip1852,   // CIP-0003 Ledger master + BIP32-Ed25519 m/1852'/1815'/account'/role/index
     ChiaEip2333,      // EIP-2333 master + [12381,8444,0,index]
     QrlXmss,          // BIP39 seed -> SHAKE-256 -> XMSS(sk_seed, pub_seed); no BIP32 path
+    StellarSep5,      // m/44'/148'/index'; account/change API selectors must be zero
+    NearSlip10,       // m/44'/397'/index'; account/change API selectors must be zero
   };
 
   struct NetworkProfile
@@ -69,6 +87,7 @@ namespace hexwallet
     uint16_t cryptonote_integrated_prefix;
     uint16_t cryptonote_subaddress_prefix;
     bool explicit_only_derivation;
+    uint32_t ton_wallet_id;
   };
 
   extern const NetworkProfile kNetworkProfiles[];
@@ -99,6 +118,7 @@ namespace hexwallet
   {
     const char *network_id;
     uint32_t branch_id;
+    uint64_t max_zats;
   };
 
   extern const ZcashNetworkPolicy kZcashNetworkPolicies[];

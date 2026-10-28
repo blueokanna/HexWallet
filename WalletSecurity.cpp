@@ -21,6 +21,20 @@ constexpr size_t kMaxPassphraseSize = 128;
 constexpr size_t kExtendedKeyPayloadSize = 78;
 constexpr size_t kExtendedKeyCheckedSize = 82;
 
+// Covers early returns as well as success paths. In particular, BIP32 child
+// nodes and reconstructed BIP39 entropy must not remain in worker stack RAM.
+class WipeOnExit {
+ public:
+  WipeOnExit(void *data, size_t size) : data_(data), size_(size) {}
+  ~WipeOnExit() { secure_zero(data_, size_); }
+  WipeOnExit(const WipeOnExit &) = delete;
+  WipeOnExit &operator=(const WipeOnExit &) = delete;
+  void release() { data_ = nullptr; }
+ private:
+  void *data_;
+  size_t size_;
+};
+
 int random_callback(void *, unsigned char *output, size_t length) {
   esp_fill_random(output, length);
   return 0;
@@ -197,6 +211,7 @@ bool is_ascii(const char *text) {
 }
 
 WalletError bip39_generate_english_24(char *out, size_t out_size) {
+  WipeOnExit output_on_failure(out, out_size);
   if (out == nullptr || out_size < kMnemonicTextSize) {
     return WalletError::BufferTooSmall;
   }
@@ -206,6 +221,9 @@ WalletError bip39_generate_english_24(char *out, size_t out_size) {
   uint8_t entropy[32];
   uint8_t digest[32];
   uint8_t bits[33];
+  WipeOnExit wipe_entropy(entropy, sizeof(entropy));
+  WipeOnExit wipe_digest(digest, sizeof(digest));
+  WipeOnExit wipe_bits(bits, sizeof(bits));
   esp_fill_random(entropy, sizeof(entropy));
   if (!crypto_sha256(entropy, sizeof(entropy), digest)) {
     secure_zero(entropy, sizeof(entropy));
@@ -238,6 +256,7 @@ WalletError bip39_generate_english_24(char *out, size_t out_size) {
   secure_zero(entropy, sizeof(entropy));
   secure_zero(digest, sizeof(digest));
   secure_zero(bits, sizeof(bits));
+  output_on_failure.release();
   return WalletError::Ok;
 }
 
@@ -250,6 +269,7 @@ WalletError bip39_validate_english(const char *mnemonic) {
     return WalletError::InvalidMnemonic;
   }
   uint8_t bits[33] = { 0 };
+  WipeOnExit wipe_bits(bits, sizeof(bits));
   uint16_t bit_position = 0;
   uint8_t word_count = 0;
   const char *cursor = mnemonic;
@@ -278,6 +298,7 @@ WalletError bip39_validate_english(const char *mnemonic) {
   const uint16_t entropy_bits = static_cast<uint16_t>(word_count) * 11 * 32 / 33;
   const uint8_t checksum_bits = entropy_bits / 32;
   uint8_t digest[32];
+  WipeOnExit wipe_digest(digest, sizeof(digest));
   if (!crypto_sha256(bits, entropy_bits / 8, digest)) {
     secure_zero(bits, sizeof(bits));
     return WalletError::CryptoFailure;
@@ -298,6 +319,7 @@ WalletError bip39_validate_english(const char *mnemonic) {
 
 WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
                                     uint8_t out_seed[kSeedSize]) {
+  WipeOnExit output_on_failure(out_seed, kSeedSize);
   if (out_seed == nullptr || passphrase == nullptr) {
     return WalletError::InvalidArgument;
   }
@@ -320,6 +342,7 @@ WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase
     reinterpret_cast<const unsigned char *>(salt), 8 + passphrase_length,
     2048, kSeedSize, out_seed);
   secure_zero(salt, sizeof(salt));
+  if (result == 0) output_on_failure.release();
   return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
 }
 
@@ -441,6 +464,7 @@ WalletError uncompressed_public_key_from_private(
 WalletError secp256k1_sign_digest_recoverable(
   const uint8_t private_key[kPrivateKeySize],
   const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature) {
+  WipeOnExit output_on_failure(out_signature, sizeof(RecoverableSignature));
   if (private_key == nullptr || digest == nullptr || out_signature == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidArgument;
   }
@@ -520,6 +544,7 @@ WalletError secp256k1_sign_digest_recoverable(
   mbedtls_ecp_point_free(&public_key);
   mbedtls_ecp_group_free(&group);
   if (result != 0) secure_zero(out_signature, sizeof(*out_signature));
+  if (result == 0) output_on_failure.release();
   return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
 }
 
@@ -773,11 +798,13 @@ bool secp256k1_schnorr_verify(const uint8_t xonly_public_key[kPrivateKeySize],
 }
 
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivateNode *out_node) {
+  WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
   if (seed == nullptr || out_node == nullptr || seed_size < 16 || seed_size > 64) {
     return WalletError::InvalidArgument;
   }
   static const uint8_t kBip32Key[] = "Bitcoin seed";
   uint8_t material[64];
+  WipeOnExit wipe_material(material, sizeof(material));
   if (!crypto_hmac_sha512(kBip32Key, sizeof(kBip32Key) - 1, seed, seed_size, material)) {
     return WalletError::CryptoFailure;
   }
@@ -791,16 +818,21 @@ WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivat
   out_node->parent_fingerprint = 0;
   out_node->child_number = 0;
   secure_zero(material, sizeof(material));
+  output_on_failure.release();
   return WalletError::Ok;
 }
 
 WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPrivateNode *out_node) {
+  WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
   if (parent == nullptr || out_node == nullptr || !valid_private_key(parent->private_key) || parent->depth == 255) {
     return WalletError::InvalidArgument;
   }
   uint8_t data[37];
   uint8_t material[64];
   uint8_t parent_public[kCompressedPublicKeySize];
+  WipeOnExit wipe_data(data, sizeof(data));
+  WipeOnExit wipe_material(material, sizeof(material));
+  WipeOnExit wipe_public(parent_public, sizeof(parent_public));
   const WalletError public_error = public_key_from_private(parent->private_key, parent_public);
   if (public_error != WalletError::Ok) {
     return public_error;
@@ -831,9 +863,9 @@ WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPri
   mbedtls_mpi_init(&parent_key);
   mbedtls_mpi_init(&child_key);
   const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&left, material, kPrivateKeySize) || mbedtls_mpi_read_binary(&parent_key, parent->private_key, kPrivateKeySize) || mbedtls_mpi_add_mpi(&child_key, &left, &parent_key) || mbedtls_mpi_mod_mpi(&child_key, &child_key, &group.N);
-  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 && mbedtls_mpi_cmp_mpi(&left, &group.N) < 0 && mbedtls_mpi_cmp_int(&child_key, 0) != 0;
+  bool valid = result == 0 && mbedtls_mpi_cmp_int(&left, 0) >= 0 && mbedtls_mpi_cmp_mpi(&left, &group.N) < 0 && mbedtls_mpi_cmp_int(&child_key, 0) != 0;
   if (valid) {
-    mbedtls_mpi_write_binary(&child_key, out_node->private_key, kPrivateKeySize);
+    valid = mbedtls_mpi_write_binary(&child_key, out_node->private_key, kPrivateKeySize) == 0;
     memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
     out_node->depth = parent->depth + 1;
     out_node->parent_fingerprint = parent_fingerprint;
@@ -846,6 +878,7 @@ WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPri
   secure_zero(data, sizeof(data));
   secure_zero(material, sizeof(material));
   secure_zero(parent_public, sizeof(parent_public));
+  if (valid) output_on_failure.release();
   return valid ? WalletError::Ok : WalletError::InvalidChild;
 }
 
@@ -928,10 +961,12 @@ WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPubli
 
 WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path,
                                    HdPrivateNode *out_node) {
+  WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
   if (master == nullptr || path == nullptr || out_node == nullptr || path[0] != 'm' || (path[1] != '\0' && path[1] != '/')) {
     return WalletError::InvalidPath;
   }
   HdPrivateNode current = *master;
+  WipeOnExit wipe_current(&current, sizeof(current));
   const char *cursor = path + 1;
   while (*cursor != '\0') {
     ++cursor;
@@ -956,7 +991,8 @@ WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path
       secure_zero(&current, sizeof(current));
       return WalletError::InvalidPath;
     }
-    HdPrivateNode next;
+    HdPrivateNode next = {};
+    WipeOnExit wipe_next(&next, sizeof(next));
     const WalletError result = hd_private_derive(&current, index, &next);
     secure_zero(&current, sizeof(current));
     if (result != WalletError::Ok) {
@@ -965,6 +1001,7 @@ WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path
     current = next;
   }
   *out_node = current;
+  output_on_failure.release();
   return WalletError::Ok;
 }
 

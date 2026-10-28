@@ -94,7 +94,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    path = ROOT / "src/generated/RingCtAmountVectors.inc"
+    path = ROOT / "src/generated/RingCtAmountVectorsTest.inc"
     expected = render()
     if args.check:
         if path.read_text(encoding="utf-8") != expected:

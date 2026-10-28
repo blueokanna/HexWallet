@@ -131,8 +131,8 @@ BIP32 引擎。该策略是代码而非宣传：`wallet custody <id>` 会输出�
    `0x02 ‖ left ‖ right`）。
 7. `bech32m("xch", puzzle_hash)`。
 
-已验证地址（权威）：seed `c55257…`（64 B）→ `xch1sqh8a9…`；64×`0x01`
-seed → `xch1wv0k6…`；16 字节 `000102…0f` seed → `xch14jaaa4…`。
+已验证地址（权威）：seed `c55257…`（64 B）→ `xch1yvsm3y…`；64×`0x01`
+seed → `xch14e2x9…`。向量由 blspy 生成；Chia 的 HKDF 使用原始盐，而不是先哈希。
 
 ## 备选地址编码器
 

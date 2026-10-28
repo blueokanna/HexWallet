@@ -19,6 +19,8 @@ namespace hexwallet
     // SHA-512/256 (FIPS 180-4): SHA-512 compression with the 512/256 initial
     // values, truncated to 256 bits. Used by the Algorand address checksum.
     bool crypto_sha512_256(const uint8_t *data, size_t size, uint8_t out[32]);
+    // First 32 bytes of SHA-512 (XRPL's SHA-512Half).
+    bool crypto_sha512_half(const uint8_t *data, size_t size, uint8_t out[32]);
 
     // BLAKE2b (RFC 7693) without key. out_size must be in [1, 64].
     bool crypto_blake2b(const uint8_t *data, size_t size, uint8_t *out,
@@ -68,10 +70,21 @@ namespace hexwallet
 
     // Derive the 32-byte Ed25519 public key from a 32-byte seed.
     bool ed25519_public_key(const uint8_t seed[32], uint8_t out_public[32]);
+    // Cardano/BIP32-Ed25519 expanded secret: scalar is already clamped.
+    bool ed25519_public_key_expanded(const uint8_t scalar[32],
+                                     uint8_t out_public[32]);
 
     // RFC 8032 pure Ed25519 signature (64 bytes) over an arbitrary message.
     bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
                       size_t message_size, uint8_t out_signature[64]);
+    bool ed25519_sign_expanded(const uint8_t kL[32], const uint8_t kR[32],
+                               const uint8_t *message, size_t message_size,
+                               uint8_t out_signature[64]);
+    // BIP32-Ed25519: kL is the expanded scalar and kR the nonce prefix.
+    // Neither half may be hashed or clamped again as if it were a seed.
+    bool ed25519_sign_expanded(const uint8_t kL[32], const uint8_t kR[32],
+                               const uint8_t *message, size_t message_size,
+                               uint8_t out_signature[64]);
 
     // Strict RFC 8032 verification. Rejects non-canonical S, invalid points and
     // small-order public keys. Used by the phone link handshake; it is not a
@@ -91,7 +104,32 @@ namespace hexwallet
                                       const uint8_t right[32], uint8_t out[32]);
     bool ed25519_point_mul_compressed(const uint8_t point[32],
                                       const uint8_t scalar[32], uint8_t out[32]);
+    // Three doublings in extended coordinates. Cheap cofactor clearing for
+    // public points such as the Bulletproofs+ generators.
+    bool ed25519_point_mul8_compressed(const uint8_t in[32], uint8_t out[32]);
+
+    // Extended-coordinate accumulator for multi-scalar equations over public
+    // data. Terms are added without per-term inversions; convert once with
+    // ed25519_extended_to_compressed(). Secrets must never go through this API.
+    struct Ed25519ExtendedPoint {
+      int64_t x[10];
+      int64_t y[10];
+      int64_t z[10];
+      int64_t t[10];
+    };
+    void ed25519_extended_identity(Ed25519ExtendedPoint *point);
+    bool ed25519_extended_add_scaled(Ed25519ExtendedPoint *acc,
+                                     const uint8_t point[32],
+                                     const uint8_t scalar[32]);
+    bool ed25519_extended_to_compressed(const Ed25519ExtendedPoint *point,
+                                        uint8_t out[32]);
+    // Variable-time p1*s1 + p2*s2 for public verification operands.
+    bool ed25519_double_scalar_mul(const uint8_t p1[32], const uint8_t s1[32],
+                                   const uint8_t p2[32], const uint8_t s2[32],
+                                   uint8_t out[32]);
     void ed25519_scalar_reduce_mod_l(uint8_t scalar[32]);
+    // Reduce the full little-endian 512-bit digest (NEM Keccak-Ed25519).
+    void ed25519_scalar_reduce_wide(const uint8_t digest[64], uint8_t out[32]);
     // (a * b + c) mod L, the operation Monero's sc_muladd exposes.
     void ed25519_scalar_muladd(uint8_t out[32], const uint8_t a[32],
                                const uint8_t b[32], const uint8_t c[32]);
@@ -134,6 +172,11 @@ namespace hexwallet
     // Chia standard-coin address at m/12381'/8444'/0'/index'.
     bool chia_standard_address(const uint8_t *seed, size_t seed_size,
                                uint32_t address_index, char *out, size_t out_size);
+
+    // EIP-2333 secret key behind that address. Signing must use this key, not
+    // a separate derivation, or the signature would not match the address.
+    bool chia_standard_private_key(const uint8_t *seed, size_t seed_size,
+                                   uint32_t address_index, uint8_t out_sk[32]);
 
     // ---------------------------------------------------------------------------
 

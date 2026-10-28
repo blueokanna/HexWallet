@@ -19,6 +19,7 @@ enum class TokenStandard : uint8_t {
   Erc6551,
   LayerZeroOft,
   LayerZeroOnft,
+  Trc20,
 };
 
 enum TokenCapability : uint8_t {

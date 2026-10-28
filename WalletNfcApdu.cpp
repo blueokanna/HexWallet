@@ -186,10 +186,12 @@ bool run_wallet_nfc_apdu_self_test() {
     0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
   };
   WalletLinkCallbacks callbacks = {};
-  WalletLinkDevice link;
+  // Both objects own multi-kilobyte buffers (the APDU one is two full link
+  // frames), so they cannot live on the boot self-test task's stack.
+  static WalletLinkDevice link;
   if (!link.init(kIdentitySeed, callbacks, nullptr)) return false;
 
-  WalletNfcApdu app;
+  static WalletNfcApdu app;
   if (!app.init(&link)) return false;
 
   uint8_t response[512];

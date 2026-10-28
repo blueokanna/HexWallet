@@ -7,6 +7,7 @@
 namespace hexwallet {
 
 constexpr size_t kSha256Size = 32;
+constexpr size_t kSha224Size = 28;
 constexpr size_t kSha512Size = 64;
 constexpr size_t kRipemd160Size = 20;
 constexpr size_t kKeccak256Size = 32;
@@ -14,6 +15,11 @@ constexpr size_t kKeccak512Size = 64;
 constexpr size_t kShake256Size = 32;
 
 bool crypto_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
+// SHA-224 (FIPS 180-4), used by the Internet Computer principal derivation.
+bool crypto_sha224(const uint8_t *data, size_t size, uint8_t out[kSha224Size]);
+// Portable SHA-224 that does not depend on the selected mbedtls digest set.
+bool crypto_sha224_local(const uint8_t *data, size_t size,
+                         uint8_t out[kSha224Size]);
 bool crypto_double_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
 // Concatenates up to three segments before hashing.  Needed to compute the
 // txid of a segwit previous transaction without materialising a stripped copy.

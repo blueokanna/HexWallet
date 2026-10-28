@@ -6,7 +6,9 @@
 
 namespace hexwallet {
 constexpr size_t kLinkProtocolVersion = 1;
-constexpr size_t kLinkMaxPayload = 4608;
+// CryptoNote review payloads carry the serialized transaction plus a 16-member
+// ring for each input, so the frame budget is larger than the UTXO/EVM paths.
+constexpr size_t kLinkMaxPayload = 16384;
 constexpr size_t kLinkHeaderSize = 18;
 constexpr size_t kLinkMaxFrameSize =
     kLinkHeaderSize + kLinkMaxPayload + 32;

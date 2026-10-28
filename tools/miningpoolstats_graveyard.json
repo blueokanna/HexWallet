@@ -607,7 +607,5 @@
       "m": true
     }
   },
-  "exceptions": [
-    "masari"
-  ]
+  "exceptions": []
 }

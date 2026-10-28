@@ -11,11 +11,23 @@
 
 namespace hexwallet {
 namespace {
-
 constexpr uint8_t kMagic[4] = { 'H', 'W', 'L', 'K' };
 constexpr uint8_t kDirectionDeviceToPhone = 1;
 constexpr uint8_t kDirectionPhoneToDevice = 2;
 constexpr uint32_t kPairingTimeoutMs = 60UL * 1000UL;
+
+// Every link request is handled on the Arduino loop task, which has 8 KiB of
+// stack. Two kLinkMaxPayload frames there would overflow it, so the request and
+// reply scratch space is static; the link processes one request at a time.
+uint8_t *link_request_scratch() {
+  static uint8_t buffer[kLinkMaxPayload];
+  return buffer;
+}
+
+uint8_t *link_reply_scratch() {
+  static uint8_t buffer[kLinkMaxPayload];
+  return buffer;
+}
 
 void write_le32(uint8_t *out, uint32_t value) {
   out[0] = static_cast<uint8_t>(value);
@@ -455,11 +467,12 @@ WalletLinkStatus WalletLinkDevice::handle_secure_request(
 
   uint8_t nonce[12];
   make_session_nonce(session_id_, kDirectionPhoneToDevice, rx_sequence_, nonce);
-  uint8_t plaintext[kLinkMaxPayload];
+  uint8_t *plaintext = link_request_scratch();
   const bool opened = link_aead_open(key_c2d_, nonce, frame.header,
                                       kLinkHeaderSize, frame.payload,
                                       frame.payload_size, frame.tag, plaintext);
   if (!opened) {
+    secure_zero(plaintext, kLinkMaxPayload);
     reset_session();
     return WalletLinkStatus::AuthenticationFailed;
   }
@@ -468,16 +481,17 @@ WalletLinkStatus WalletLinkDevice::handle_secure_request(
   last_activity_ms_ = now_ms;
 
   if (callbacks_.handle_request == nullptr) {
-    secure_zero(plaintext, sizeof(plaintext));
+    secure_zero(plaintext, kLinkMaxPayload);
     return WalletLinkStatus::RequestFailed;
   }
-  uint8_t reply[kLinkMaxPayload];
+  uint8_t *reply = link_reply_scratch();
   size_t reply_size = 0;
   const WalletLinkStatus request_status = callbacks_.handle_request(
-      context_, plaintext, frame.payload_size, reply, sizeof(reply), &reply_size);
-  secure_zero(plaintext, sizeof(plaintext));
+      context_, plaintext, frame.payload_size, reply, kLinkMaxPayload,
+      &reply_size);
+  secure_zero(plaintext, kLinkMaxPayload);
   if (request_status != WalletLinkStatus::Ok || reply_size > kLinkMaxPayload) {
-    secure_zero(reply, sizeof(reply));
+    secure_zero(reply, kLinkMaxPayload);
     return WalletLinkStatus::RequestFailed;
   }
 
@@ -485,7 +499,7 @@ WalletLinkStatus WalletLinkDevice::handle_secure_request(
   if (!build_header(WalletLinkType::Response, session_id_, tx_sequence_,
                     reply_size, header) ||
       response_capacity < kLinkHeaderSize + reply_size + kLinkTagSize) {
-    secure_zero(reply, sizeof(reply));
+    secure_zero(reply, kLinkMaxPayload);
     return WalletLinkStatus::BufferTooSmall;
   }
   uint8_t response_nonce[12];
@@ -495,7 +509,7 @@ WalletLinkStatus WalletLinkDevice::handle_secure_request(
       link_aead_seal(key_d2c_, response_nonce, header, sizeof(header), reply,
                      reply_size, response + kLinkHeaderSize,
                      response + kLinkHeaderSize + reply_size);
-  secure_zero(reply, sizeof(reply));
+  secure_zero(reply, kLinkMaxPayload);
   if (!sealed) return WalletLinkStatus::AuthenticationFailed;
   memcpy(response, header, sizeof(header));
   *response_size = kLinkHeaderSize + reply_size + kLinkTagSize;
@@ -662,8 +676,8 @@ bool run_wallet_link_self_test() {
   memcpy(pair_signed + 32, kPhoneNonce, 32);
   ok = ok && sign_domain(kPhoneSeed, "HWLK1-PAIR", pair_signed,
                          sizeof(pair_signed), pair_request + 64);
-  uint8_t frame[kLinkMaxFrameSize];
-  uint8_t response[kLinkMaxFrameSize];
+  static uint8_t frame[kLinkMaxFrameSize];
+  static uint8_t response[kLinkMaxFrameSize];
   size_t frame_size = 0;
   size_t response_size = 0;
   ok = ok && wallet_link_frame_encode(WalletLinkType::PairRequest, 0, 0,
@@ -680,7 +694,7 @@ bool run_wallet_link_self_test() {
     uint8_t other_public[32];
     uint8_t other_request[128];
     uint8_t other_signed[64];
-    uint8_t other_frame[kLinkMaxFrameSize];
+    static uint8_t other_frame[kLinkMaxFrameSize];
     ok = ok && ed25519_public_key(kOtherSeed, other_public);
     memcpy(other_request, other_public, 32);
     memset(other_request + 32, 0x21, 32);
@@ -742,7 +756,7 @@ bool run_wallet_link_self_test() {
 
   uint8_t secure_plain[4] = { 1, 2, 3, 4 };
   uint8_t secure_header[kLinkHeaderSize];
-  uint8_t secure_frame[kLinkMaxFrameSize];
+  static uint8_t secure_frame[kLinkMaxFrameSize];
   uint8_t secure_nonce[12];
   const uint32_t session_id = device.session_id();
   ok = ok && session_id == phone_session_id && session_id != 0 &&
@@ -799,7 +813,7 @@ bool run_wallet_link_self_test() {
     WalletLinkDevice fresh;
     PairStore fresh_store = { {}, false, 0, 0 };
     ok = ok && fresh.init(kDeviceSeed, callbacks, &fresh_store);
-    uint8_t fresh_frame[kLinkMaxFrameSize];
+    static uint8_t fresh_frame[kLinkMaxFrameSize];
     size_t fresh_size = 0;
     ok = ok && wallet_link_frame_encode(WalletLinkType::PairRequest, 0, 0,
                                         pair_request, sizeof(pair_request),

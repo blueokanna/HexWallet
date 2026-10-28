@@ -1,5 +1,6 @@
 #include "WalletBoardPort.h"
 #include "WalletBoardPins.h"
+#include "EinkFrame.h"
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -7,6 +8,27 @@
 
 #if HEXWALLET_ENABLE_LVGL
 #include <lvgl.h>
+#endif
+
+#if defined(HEXWALLET_DISPLAY_KIND_EINK)
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DECK_MAX
+#ifndef HEXWALLET_EPD_DRIVER_HEADER
+#define HEXWALLET_EPD_DRIVER_HEADER <gdeq/GxEPD2_310_GDEQ031T10.h>
+#define HEXWALLET_EPD_DRIVER_CLASS GxEPD2_310_GDEQ031T10
+#endif
+#endif
+#if defined(HEXWALLET_EPD_DRIVER_HEADER)
+#if __has_include(HEXWALLET_EPD_DRIVER_HEADER)
+#include HEXWALLET_EPD_DRIVER_HEADER
+#define HEXWALLET_HAS_GXEPD2 1
+#endif
+#endif
+#ifndef HEXWALLET_HAS_GXEPD2
+#define HEXWALLET_HAS_GXEPD2 0
+#endif
+#if defined(HEXWALLET_REQUIRE_EPD_DRIVER) && !HEXWALLET_HAS_GXEPD2
+#error "Required GxEPD2 panel header was not found"
+#endif
 #endif
 
 namespace hexwallet {
@@ -17,6 +39,7 @@ namespace {
 // ===========================================================================
 bool g_display_ready = false;
 bool g_touch_ready = false;
+bool g_review_frame_pending = true;
 void *board_alloc(size_t bytes) {
 #if defined(BOARD_HAS_PSRAM)
   if (void *p = ps_malloc(bytes)) return p;
@@ -316,44 +339,21 @@ static bool st7789_init() {
 // ===========================================================================
 #elif defined(HEXWALLET_HAS_DISPLAY) && defined(HEXWALLET_DISPLAY_KIND_EINK)
 
-#if __has_include(<GxEPD2_BW.h>)
-#define HEXWALLET_HAS_GXEPD2 1
-#include <GxEPD2_BW.h>
-#else
-#define HEXWALLET_HAS_GXEPD2 0
-#endif
-
-#if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DECK_MAX
-#define HEXWALLET_EPD_DRIVER_CLASS GxEPD2_310_GDEQ031T10
-#endif
-
 #if HEXWALLET_HAS_GXEPD2
 #if defined(HEXWALLET_EPD_DRIVER_CLASS)
-static GxEPD2_BW<HEXWALLET_EPD_DRIVER_CLASS, HEXWALLET_EPD_DRIVER_CLASS::HEIGHT> s_epd(
-  HEXWALLET_EPD_DRIVER_CLASS(HEXWALLET_EPD_PIN_CS, HEXWALLET_EPD_PIN_DC,
-                             HEXWALLET_EPD_PIN_RST, HEXWALLET_EPD_PIN_BUSY));
-#endif
-#endif
-
-// 4x4 Bayer ordered-dither threshold matrix for 16bpp -> 1bpp conversion.
-static const uint8_t kBayer4[16] = {
-  0,
-  8,
-  2,
-  10,
-  12,
-  4,
-  14,
-  6,
-  3,
-  11,
-  1,
-  9,
-  15,
-  7,
-  13,
-  5,
+// LVGL owns the framebuffer; the panel class avoids an unused GFX framebuffer.
+class WalletEpd : public HEXWALLET_EPD_DRIVER_CLASS {
+ public:
+  using HEXWALLET_EPD_DRIVER_CLASS::HEXWALLET_EPD_DRIVER_CLASS;
+  bool busy() const { return _busy < 0 || digitalRead(_busy) == _busy_level; }
 };
+static WalletEpd s_epd(HEXWALLET_EPD_PIN_CS, HEXWALLET_EPD_PIN_DC,
+                                      HEXWALLET_EPD_PIN_RST, HEXWALLET_EPD_PIN_BUSY);
+static_assert(HEXWALLET_EPD_DRIVER_CLASS::WIDTH == HEXWALLET_EPD_WIDTH &&
+              HEXWALLET_EPD_DRIVER_CLASS::HEIGHT == HEXWALLET_EPD_HEIGHT,
+              "Configured EPD dimensions must match the panel driver");
+#endif
+#endif
 
 #endif  // e-ink section
 
@@ -404,6 +404,7 @@ static void color_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *p
   st_push_pixels(area->x1, area->y1, uint16_t(area->x2 - area->x1 + 1),
                  uint16_t(area->y2 - area->y1 + 1), px_map);
 #endif
+  if (lv_display_flush_is_last(disp)) g_review_frame_pending = false;
   lv_display_flush_ready(disp);
 }
 #endif  // color
@@ -411,36 +412,53 @@ static void color_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *p
 #if defined(HEXWALLET_DISPLAY_KIND_EINK)
 // 1bpp frame buffer for the e-paper (w*h/8 bytes).
 static uint8_t *s_eink_bw = nullptr;
+static bool s_eink_dirty = false;
+static uint32_t s_eink_dirty_ms = 0;
 
 static void eink_convert_to_bw(const uint8_t *frame16, uint16_t w, uint16_t h) {
-  const uint16_t *frame = reinterpret_cast<const uint16_t *>(frame16);
-  for (uint16_t y = 0; y < h; ++y) {
-    for (uint16_t x = 0; x < w; ++x) {
-      // LV_COLOR_16_SWAP is enabled (backward-compat swap in lv_refr.c before
-      // flush_cb), so the in-memory bytes are swapped; undo to get RGB565.
-      const uint16_t c16 = frame[size_t(y) * w + x];
-      const uint16_t c = uint16_t((c16 << 8) | (c16 >> 8));
-      const uint32_t r8 = ((c >> 11) & 0x1F) * 255 / 31;
-      const uint32_t g8 = ((c >> 5) & 0x3F) * 255 / 63;
-      const uint32_t b8 = (c & 0x1F) * 255 / 31;
-      const uint32_t lum = (r8 * 299 + g8 * 587 + b8 * 114) / 1000;  // 0..255
-      const uint8_t idx = uint8_t((y & 3) * 4 + (x & 3));
-      const bool on = lum < uint32_t(255 - kBayer4[idx] * 17);
-      const size_t bit = size_t(y) * w + x;
-      if (on) s_eink_bw[bit >> 3] |= uint8_t(0x80 >> (x & 7));
-      else s_eink_bw[bit >> 3] &= uint8_t(~(0x80 >> (x & 7)));
-    }
+  eink_convert_rgb565(frame16, w, h, 1,
+#if LV_COLOR_16_SWAP
+                      true,
+#else
+                      false,
+#endif
+                      s_eink_bw, eink_frame_size(w, h, 1));
+}
+
+// LVGL renders the whole frame into the direct buffer; flushing only marks it
+// dirty. The actual panel update is coalesced here so a screen transition does
+// not trigger several slow e-paper refreshes and never leaves a half frame.
+static void eink_service() {
+  if (!s_eink_dirty) return;
+  if (millis() - s_eink_dirty_ms < 120U) return;
+  s_eink_dirty = false;
+#if HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
+  if (s_eink_bw == nullptr || g_draw_buf == nullptr) return;
+  eink_convert_to_bw(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
+  // GxEPD2 takes bitmap bytes through writeImage, not writeScreenBuffer
+  // (which fills RAM with one byte). Our mask uses 1=black; GxEPD2 uses 0=black.
+  s_epd.writeImageForFullRefresh(s_eink_bw, 0, 0,
+      HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT, true, false, false);
+  // A full refresh is used on every committed screen. Partial refresh on a
+  // B/W panel ghosts text, which is unacceptable on an address/amount screen.
+  s_epd.refresh(false);
+  s_epd.powerOff();
+  if (s_epd.busy()) {
+    // GxEPD2 exposes no refresh error result. A still-active BUSY line is a
+    // detectable failure and must never release the approval barrier.
+    g_display_ready = false;
+    return;
   }
+  g_review_frame_pending = false;
+#endif
 }
 
 static void eink_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+  (void)area;
+  (void)px_map;
   if (lv_display_flush_is_last(disp)) {
-#if HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
-    eink_convert_to_bw(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
-    s_epd.writeScreenBuffer(s_eink_bw);
-    s_epd.refresh(true);
-    s_epd.powerOff();
-#endif
+    s_eink_dirty = true;
+    s_eink_dirty_ms = millis();
   }
   lv_display_flush_ready(disp);
 }
@@ -521,6 +539,14 @@ bool board_is_eink() {
   return board_display_kind() == DisplayKind::MonoEink;
 }
 
+uint8_t board_display_colors() {
+#if defined(HEXWALLET_EPD_COLORS)
+  return static_cast<uint8_t>(HEXWALLET_EPD_COLORS);
+#else
+  return 1;
+#endif
+}
+
 uint16_t board_display_width() {
 #if defined(HEXWALLET_DISPLAY_KIND_COLOR)
   return HEXWALLET_LCD_WIDTH;
@@ -586,7 +612,13 @@ bool board_user_button_pressed() {
 }
 
 SecureElementProbeState board_secure_element_probe() {
-#if defined(HEXWALLET_SE050_I2C_SDA) && defined(HEXWALLET_SE050_I2C_SCL)
+#if defined(HEXWALLET_SE051_I2C_SDA) && defined(HEXWALLET_SE051_I2C_SCL)
+  // Presence only. Never mark an applet authenticated or enable custody here.
+  Wire1.begin(HEXWALLET_SE051_I2C_SDA, HEXWALLET_SE051_I2C_SCL);
+  Wire1.beginTransmission(0x48);
+  return Wire1.endTransmission() == 0 ? SecureElementProbeState::PresentUnverified
+                                      : SecureElementProbeState::NoResponse;
+#elif defined(HEXWALLET_SE050_I2C_SDA) && defined(HEXWALLET_SE050_I2C_SCL)
   // Dedicated bus: a custody probe must not reconfigure the panel/touch bus.
   Wire1.begin(HEXWALLET_SE050_I2C_SDA, HEXWALLET_SE050_I2C_SCL);
   Wire1.beginTransmission(0x48);
@@ -613,13 +645,22 @@ bool board_display_init() {
   g_display_ready = true;
 
 #elif defined(HEXWALLET_DISPLAY_KIND_EINK)
+#if defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS > 1
+  // The current backend writes a 1bpp native buffer. Refuse to drive a colour
+  // panel with a monochrome class: that would silently render the red/yellow
+  // accents as black and cannot be described as colour support.
+  Serial.println("ERR: HEXWALLET_EPD_COLORS>1 needs a matching GxEPD2 3C/4C "
+                 "driver class; refusing a monochrome fallback");
+  g_display_ready = false;
+  return false;
+#endif
 #if HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
   s_eink_bw = static_cast<uint8_t *>(
-    board_alloc(size_t(HEXWALLET_EPD_WIDTH) * HEXWALLET_EPD_HEIGHT / 8));
+    board_alloc(eink_frame_size(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT, 1)));
   if (s_eink_bw == nullptr) return false;
+  SPI.begin(HEXWALLET_EPD_PIN_SCK, -1, HEXWALLET_EPD_PIN_MOSI, HEXWALLET_EPD_PIN_CS);
+  s_epd.selectSPI(SPI, SPISettings(4000000, MSBFIRST, SPI_MODE0));
   s_epd.init(0, true, 10, false);
-  s_epd.setRotation(0);
-  s_epd.setFullWindow();
   if (!lvgl_register_display(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
                              true, eink_flush_cb)) {
     return false;
@@ -656,8 +697,25 @@ bool board_display_init() {
 
 void board_display_service() {
 #if HEXWALLET_ENABLE_LVGL
-  if (g_display_ready) lv_timer_handler();
+  if (!g_display_ready) return;
+  lv_timer_handler();
+#if defined(HEXWALLET_DISPLAY_KIND_EINK)
+  eink_service();
 #endif
+#endif
+}
+
+void board_display_prepare_review() {
+  g_review_frame_pending = true;
+#if HEXWALLET_ENABLE_LVGL && defined(HEXWALLET_DISPLAY_KIND_EINK)
+  // Discard a pending frame from the previous view; only a subsequent LVGL
+  // flush of the new view is allowed to release the barrier.
+  s_eink_dirty = false;
+#endif
+}
+
+bool board_display_review_ready() {
+  return g_display_ready && !g_review_frame_pending;
 }
 
 }  // namespace hexwallet

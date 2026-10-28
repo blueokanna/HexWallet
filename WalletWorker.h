@@ -3,36 +3,27 @@
 
 #include <stdint.h>
 
-namespace hexwallet {
+namespace hexwallet
+{
+    using WalletWorkerJob = void (*)(void *context);
 
-// Second-core worker.
-//
-// The ESP32-S3/P4 have two high-performance cores. Long, non-UI work (boot
-// self-tests, key derivation) runs here so the main loop keeps servicing the
-// panel and the task watchdog.
-//
-// Contract:
-//   * One job at a time. begin() and wait() must be called from the same task;
-//     begin() refuses a second job while one is in flight.
-//   * The worker task blocks on a semaphore between jobs: it never spins and
-//     never starves the idle task that feeds the watchdog.
-//   * wait() is bounded. A timed-out job keeps running, so the caller must not
-//     reuse or free its argument.
-using WalletWorkerJob = void (*)(void *context);
+    bool wallet_worker_start();
+    void wallet_worker_stop();
+    bool wallet_worker_ready();
+    // Called by the single Arduino-loop owner. A successful begin borrows
+    // context until wait returns true; a wait timeout does not cancel a job.
+    bool wallet_worker_begin(WalletWorkerJob job, void *context);
+    bool wallet_worker_wait(uint32_t timeout_ms);
 
-bool wallet_worker_start();
-// Only call when no job is in flight.
-void wallet_worker_stop();
-bool wallet_worker_ready();
+    enum class WalletWorkerResult : uint8_t { Completed, Unavailable, TimedOut };
+    // Keeps the borrowed context alive until completion, even after a deadline.
+    // A late result must be discarded. service may update the UI/yield, but must
+    // not re-enter signing, process host requests, or stop the worker.
+    WalletWorkerResult wallet_worker_execute(WalletWorkerJob job, void *context,
+        uint32_t timeout_ms, uint32_t (*clock_ms)(), void (*service)());
 
-bool wallet_worker_begin(WalletWorkerJob job, void *context);
-bool wallet_worker_wait(uint32_t timeout_ms);
-// begin() + wait(); returns false when the job did not complete in time.
-bool wallet_worker_run(WalletWorkerJob job, void *context, uint32_t timeout_ms);
+    uint32_t wallet_worker_stack_free();
 
-// Minimum free stack seen by the worker in bytes; 0 when unavailable.
-uint32_t wallet_worker_stack_free();
-
-}  // namespace hexwallet
+}
 
 #endif

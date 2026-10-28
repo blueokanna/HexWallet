@@ -166,7 +166,7 @@ const ViewTagVector kViewTagVectors[] = {
   { "0fc47054f355ced4d67de73bfa12e4c78ff19089548fffa7d07a674741860f97", 1, "d6" },
 };
 
-#include "src/generated/ClsagReferenceVector.inc"
+#include "src/generated/ClsagReferenceVectorTest.inc"
 
 }  // namespace
 
@@ -270,6 +270,19 @@ bool cryptonote_generate_key_image(
                                                out_key_image);
   secure_zero(generator, sizeof(generator));
   return ok;
+}
+
+bool cryptonote_derivation_to_scalar(const uint8_t derivation[kCryptoNoteKeySize],
+                                     uint64_t output_index,
+                                     uint8_t out_scalar[kCryptoNoteKeySize]) {
+  if (derivation == nullptr || out_scalar == nullptr) return false;
+  return derivation_to_scalar(derivation, output_index, out_scalar);
+}
+
+bool cryptonote_scalar_to_point(const uint8_t scalar[kCryptoNoteKeySize],
+                                uint8_t out_point[kCryptoNoteKeySize]) {
+  if (scalar == nullptr || out_point == nullptr) return false;
+  return ed25519_point_mul_compressed(kBasePoint, scalar, out_point);
 }
 
 bool cryptonote_derive_view_tag(const uint8_t derivation[kCryptoNoteKeySize],

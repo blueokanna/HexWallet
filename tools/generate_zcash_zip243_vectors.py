@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate ZcashZip243Vectors.inc from the official ZIP-243 vectors.
+"""Regenerate ZcashZip243VectorsTest.inc from the official ZIP-243 vectors.
 
 Source: https://github.com/zcash/zcash-test-vectors/blob/master/test-vectors/json/zip_0243.json
 The in-tree JSON is kept so the checked-in .inc can be audited offline.
@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "tools" / "zcash_zip243_vectors.json"
-OUTPUT = ROOT / "src/generated/ZcashZip243Vectors.inc"
+OUTPUT = ROOT / "src/generated/ZcashZip243VectorsTest.inc"
 ROWS = (2, 3, 4, 11)
 
 

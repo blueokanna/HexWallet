@@ -4,8 +4,12 @@
 *.exe
 *.elf
 *.bin
+# Test fixtures that are intentionally raw binary (Masari transaction vector).
+!tests/fixtures/**/*.bin
 *.map
 *.a
+*.lib
+*.exp
 *.pdb
 *.ilk
 __pycache__/

@@ -33,7 +33,7 @@ class ForkAddressVectorTests(unittest.TestCase):
     def test_vectors_match_independent_encoder(self):
         registry = json.loads(
             (ROOT / "tools" / "fork_registry.json").read_text(encoding="utf-8"))
-        lines = (ROOT / "tests/fixtures/WalletForkAddressVectors.inc").read_text(
+        lines = (ROOT / "tests/fixtures/WalletForkAddressVectorsTest.inc").read_text(
             encoding="utf-8").splitlines()
         vectors = {match.group(1): match.group(2)
                    for line in lines for match in [VECTOR.search(line)] if match}

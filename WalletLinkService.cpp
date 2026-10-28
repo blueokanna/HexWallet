@@ -10,6 +10,7 @@
 #include "CryptoPrimitives.h"
 #include "WalletBoardPort.h"
 #include "WalletCatalog.h"
+#include "WalletCli.h"
 #include "WalletEngine.h"
 #include "WalletLink.h"
 #include "WalletNfcApdu.h"
@@ -28,7 +29,7 @@ constexpr char kIdentitySeedKey[] = "id_seed";
 constexpr char kPairedKey[] = "paired";
 constexpr char kPhoneKey[] = "phone";
 constexpr size_t kPhoneKeySize = 32;
-constexpr size_t kMaxRequest = 4096;
+constexpr size_t kMaxRequest = 16384;
 
 constexpr uint8_t kOpPing = 0x01;
 constexpr uint8_t kOpInfo = 0x02;
@@ -50,11 +51,26 @@ constexpr uint8_t kStatusNotApproved = 8;
 // The device is paired and reachable, but no wallet session is unlocked, so
 // no key material exists in RAM. The phone must ask the user to unlock.
 constexpr uint8_t kStatusLocked = 9;
+// The transaction parsed but violates local spending policy (for example the
+// Monero fee ceiling). Nothing was signed.
+constexpr uint8_t kStatusFeePolicy = 10;
 
 constexpr uint8_t kTxBitcoin = 1;
 constexpr uint8_t kTxEvm = 2;
 constexpr uint8_t kTxKaspa = 3;
 constexpr uint8_t kTxZcash = 4;
+constexpr uint8_t kTxCryptoNote = 5;
+constexpr uint8_t kTxSolana = 6;
+constexpr uint8_t kTxTron = 7;
+constexpr uint8_t kTxCosmos = 8;
+constexpr uint8_t kTxStellar = 9;
+constexpr uint8_t kTxAlgorand = 10;
+constexpr uint8_t kTxNear = 11;
+constexpr uint8_t kTxTezos = 12;
+constexpr uint8_t kTxXrp = 13;
+// Shared envelope for the account-model adapters (VET, ICX, ...). The payload
+// starts with the adapter's own magic and is never treated as opaque bytes.
+constexpr uint8_t kTxChain = 14;
 
 Preferences preferences;
 WalletLinkDevice link;
@@ -174,6 +190,11 @@ void pair_decision(bool approved) {
 }
 
 void show_pairing_code(void *, const uint8_t phone[32], uint32_t code) {
+  if (wallet_signing_active() || wallet_cli_review_active() ||
+      !board_has_display() || !wallet_ui_ready()) {
+    link.reset_pairing();
+    return;
+  }
   char fingerprint[17];
   snprintf(fingerprint, sizeof(fingerprint), "%02x%02x%02x%02x",
            phone[0], phone[1], phone[2], phone[3]);
@@ -183,17 +204,20 @@ void show_pairing_code(void *, const uint8_t phone[32], uint32_t code) {
 }
 
 void clear_pairing_prompt(void *) {
+  if (wallet_signing_active() || wallet_cli_review_active()) return;
   wallet_ui_set_decision_callback(nullptr);
   wallet_ui_show_catalog();
 }
 
 bool derive_public_address(const char *coin, uint32_t account,
                            uint32_t change, uint32_t index, char *address,
-                           size_t address_size, char *path, size_t path_size) {
+                           size_t address_size, char *path, size_t path_size,
+                           const uint32_t *subaddress) {
   WalletCatalogEntry entry;
   if (coin == nullptr || !wallet_catalog_find(coin, &entry) ||
       !wallet_catalog_has(entry, WalletCapabilityAddress) ||
       entry.network == nullptr ||
+      (subaddress != nullptr && entry.network->encoding != AddressEncoding::CryptoNote) ||
       entry.network->encoding == AddressEncoding::QrlXmss) {
     return false;
   }
@@ -202,9 +226,15 @@ bool derive_public_address(const char *coin, uint32_t account,
   uint8_t seed[kSeedSize];
   const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
   DerivedAddress derived;
-  const WalletError result = derive_address(
-      master, have_seed ? seed : nullptr, *entry.network, account, change,
-      index, &derived);
+  // Subaddress indices are only meaningful for CryptoNote; every other
+  // encoding keeps the plain BIP32 derivation.
+  const WalletError result =
+      (subaddress != nullptr && entry.network->encoding == AddressEncoding::CryptoNote)
+          ? derive_cryptonote_subaddress(master, *entry.network, account, change,
+                                         index, subaddress[0], subaddress[1],
+                                         &derived)
+          : derive_address(master, have_seed ? seed : nullptr, *entry.network,
+                           account, change, index, &derived);
   secure_zero(&master, sizeof(master));
   secure_zero(seed, sizeof(seed));
   if (result != WalletError::Ok) {
@@ -229,6 +259,7 @@ uint8_t status_for_signing(WalletSigningError error) {
     case WalletSigningError::Unsupported: return kStatusUnsupported;
     case WalletSigningError::NotApproved: return kStatusNotApproved;
     case WalletSigningError::Expired: return kStatusExpired;
+    case WalletSigningError::FeePolicy: return kStatusFeePolicy;
     case WalletSigningError::InvalidArgument: return kStatusInvalid;
     default: return kStatusInvalid;
   }
@@ -237,6 +268,7 @@ uint8_t status_for_signing(WalletSigningError error) {
 // The phone link is a signing transport with the same fail-closed policy as
 // the serial CLI: it needs an unlocked wallet and a working trusted display.
 bool link_signing_allowed() {
+  if (wallet_cli_review_active() || link.pairing_pending()) return false;
   const WalletTransportState transport_state = {
     wallet_session_is_loaded(), true, board_has_display()
   };
@@ -253,20 +285,42 @@ bool handle_address(Reader &reader, Writer &writer) {
   uint32_t index = 0;
   if (!reader.u8(&coin_size) || coin_size == 0 || coin_size > 32 ||
       !reader.bytes(&coin, coin_size) || !reader.u32(&account) ||
-      !reader.u32(&change) || !reader.u32(&index) || reader.offset != reader.size) {
+      !reader.u32(&change) || !reader.u32(&index)) {
     return writer.u8(kStatusInvalid);
   }
+  // Optional trailing CryptoNote subaddress indices (major, minor). Older
+  // phone builds stop after `index`, which keeps deriving the standard
+  // address.
+  uint32_t subaddress[2] = {0, 0};
+  bool has_subaddress = false;
+  if (reader.offset != reader.size) {
+    if (!reader.u32(&subaddress[0]) || !reader.u32(&subaddress[1]) ||
+        reader.offset != reader.size) {
+      return writer.u8(kStatusInvalid);
+    }
+    has_subaddress = true;
+  }
   char coin_id[33];
+  if (memchr(coin, 0, coin_size) != nullptr) return writer.u8(kStatusInvalid);
   memcpy(coin_id, coin, coin_size);
   coin_id[coin_size] = '\0';
   char address[kAddressTextSize];
   char path[kDerivationPathTextSize];
   if (!wallet_session_is_loaded()) return writer.u8(kStatusLocked);
+  // Do not replace a transaction's trusted review with an address supplied in
+  // a second host request. The caller must finish or cancel that review first.
+  if (wallet_signing_active() || wallet_cli_review_active() || link.pairing_pending())
+    return writer.u8(kStatusNotApproved);
+  if (!board_has_display() || !wallet_ui_ready()) return writer.u8(kStatusUnsupported);
   if (!derive_public_address(coin_id, account, change, index, address,
-                             sizeof(address), path, sizeof(path))) {
+                             sizeof(address), path, sizeof(path),
+                             has_subaddress ? subaddress : nullptr)) {
     return writer.u8(kStatusUnknownCoin);
   }
-  const bool ok = writer.u8(kStatusOk) && writer.text(address) && writer.text(path);
+  const bool shown = wallet_ui_show_address(coin_id, address, path);
+  const bool ok = shown
+      ? writer.u8(kStatusOk) && writer.text(address) && writer.text(path)
+      : writer.u8(kStatusUnsupported);
   secure_zero(address, sizeof(address));
   secure_zero(path, sizeof(path));
   return ok;
@@ -287,6 +341,7 @@ bool handle_begin_sign(Reader &reader, Writer &writer, uint32_t now_ms) {
     return writer.u8(kStatusInvalid);
   }
   char coin_id[33];
+  if (memchr(coin, 0, coin_size) != nullptr) return writer.u8(kStatusInvalid);
   memcpy(coin_id, coin, coin_size);
   coin_id[coin_size] = '\0';
 
@@ -308,7 +363,43 @@ bool handle_begin_sign(Reader &reader, Writer &writer, uint32_t now_ms) {
       error = wallet_signing_begin_kaspa(payload, payload_size, now_ms);
       break;
     case kTxZcash:
-      error = wallet_signing_begin_zcash(payload, payload_size, now_ms);
+      error = wallet_signing_begin_zcash(coin_id, payload, payload_size,
+                                        now_ms);
+      break;
+    case kTxCryptoNote:
+      error = wallet_signing_begin_cryptonote(coin_id, address_index, payload,
+                                              payload_size, now_ms);
+      break;
+    case kTxSolana:
+      error = wallet_signing_begin_solana(coin_id, address_index, payload,
+                                          payload_size, now_ms);
+      break;
+    case kTxTron:
+      error = wallet_signing_begin_tron(coin_id, address_index, payload,
+                                        payload_size, now_ms);
+      break;
+    case kTxCosmos:
+      error = wallet_signing_begin_cosmos(coin_id, address_index, payload,
+                                          payload_size, now_ms);
+      break;
+    case kTxStellar:
+      error = wallet_signing_begin_stellar(coin_id, address_index, payload,
+                                          payload_size, now_ms);
+      break;
+    case kTxAlgorand:
+      error = wallet_signing_begin_algorand(coin_id, address_index, payload, payload_size, now_ms);
+      break;
+    case kTxNear:
+      error = wallet_signing_begin_near(coin_id, address_index, payload, payload_size, now_ms);
+      break;
+    case kTxTezos:
+      error = wallet_signing_begin_tezos(coin_id, address_index, payload, payload_size, now_ms);
+      break;
+    case kTxXrp:
+      error = wallet_signing_begin_xrp(coin_id, address_index, payload, payload_size, now_ms);
+      break;
+    case kTxChain:
+      error = wallet_signing_begin_chain(coin_id, address_index, payload, payload_size, now_ms);
       break;
     default:
       return writer.u8(kStatusUnsupported);
@@ -541,6 +632,10 @@ bool wallet_link_service_pairing_pending() {
 }
 
 bool wallet_link_service_confirm_pairing() {
+#if !HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
+  // Production pairing is confirmed only by pair_decision on the local UI.
+  return false;
+#else
   if (!service_ready || !link.pairing_pending()) return false;
   const bool confirmed = link.confirm_pairing();
   if (confirmed) {
@@ -548,11 +643,13 @@ bool wallet_link_service_confirm_pairing() {
     wallet_ui_show_catalog();
   }
   return confirmed;
+#endif
 }
 
 void wallet_link_service_reject_pairing() {
   if (!service_ready) return;
   link.reset_pairing();
+  if (wallet_signing_active() || wallet_cli_review_active()) return;
   wallet_ui_set_decision_callback(nullptr);
   wallet_ui_show_catalog();
 }

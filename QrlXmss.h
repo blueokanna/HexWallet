@@ -44,11 +44,43 @@ WalletError qrl_xmss_address_ex(const uint8_t seed[kQrlSeedSize], uint8_t height
 WalletError qrl_xmss_address(const uint8_t seed[kQrlSeedSize], uint8_t height,
                              char *out, size_t out_size);
 
+// QRL has no BIP32 path, so the address index is folded into the domain
+// separator instead. Version 1 ignored the index and every index produced the
+// same address. Index zero preserves v1 for recovery; nonzero tree indices use
+// v2. Old nonzero paths must be recovered as tree zero. This is a wallet-specific
+// seed mapping, not QRL mnemonic compatibility, and is NOT an OTS leaf index.
 WalletError qrl_seed_from_bip39(const uint8_t bip39_seed[kSeedSize],
+                                uint32_t address_index,
                                 uint8_t out_seed[kQrlSeedSize]);
 
 // Verify the checksum and address-format nibble of a QRL display address.
 bool qrl_address_validate(const char *address);
+
+// Bytes of an XMSS signature for this height:
+//   4 (leaf index) || 32 (r) || kWotsLen*32 (WOTS+ signature) ||
+//   height*32 (auth path)
+// which is 2308 at height 4 and 2372 at height 6, matching qrllib's own
+// XmssBasicSHAKE256 SignatureLen test. Returns 0 for an unsupported height.
+size_t qrl_xmss_signature_size(uint8_t height);
+
+// Number of one-time signatures in a tree of this height (2^height), i.e. the
+// number of leaves a key generation has to build. Returns 0 for a bad height.
+uint32_t qrl_xmss_leaf_count(uint8_t height);
+
+// XMSS one-time-signature indices are single-use: signing twice with the same
+// leaf exposes the WOTS+ private key. RFC 8391 4.1.9 updates the private-key
+// state before the signature is released, and 4.1.12 makes the caller
+// responsible for that state. `burned_high_water` is the number of indices a
+// durable ledger has already reserved or skipped, so it is also the first index
+// that is still unused.
+//
+// qrl_ots_index_usable() answers whether `candidate` may be signed with.
+// qrl_ots_next_high_water() returns the value that *must* be persisted before
+// the signature leaves the device; skipped indices are burned, never reused.
+bool qrl_ots_index_usable(uint8_t height, uint32_t burned_high_water,
+                          uint32_t candidate);
+bool qrl_ots_next_high_water(uint8_t height, uint32_t burned_high_water,
+                             uint32_t candidate, uint32_t *next_high_water);
 
 bool run_qrl_xmss_self_tests();
 

@@ -154,8 +154,8 @@ the decision and reason.
 7. `bech32m("xch", puzzle_hash)`.
 
 Verified addresses (authoritative): seed `c55257…` (64 B) →
-`xch1sqh8a9…`, the 64×`0x01` seed → `xch1wv0k6…`, and the 16-byte
-`000102…0f` seed → `xch14jaaa4…`.
+`xch1yvsm3y…`, and the 64×`0x01` seed → `xch14e2x9…`.
+Vectors are generated with blspy: Chia HKDF uses the raw salt, not a prehashed one.
 
 ## Alt-address encoders
 

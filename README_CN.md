@@ -1,6 +1,6 @@
 # HexWallet CLI 使用与构建指南
 
-> 当前版本尚未完成生产验收，XMR/MSR 完整收发未实现。验证结果与未完成项见 [AUDIT.md](AUDIT.md)；Arduino 目录说明见 [docs/arduino-layout.md](docs/arduino-layout.md)。
+> 当前版本尚未完成生产验收，XMR 已能在设备上走通完整签名流程，但尚未获得全节点接收验收。Arduino 目录说明见 [docs/arduino-layout.md](docs/arduino-layout.md)。
 
 HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供 BIP39/BIP32 密钥派生、地址生成、受限的 Bitcoin PSBT 审查、受限的 EVM 交易审查，以及经过认证的 USB 串口 CLI。
 
@@ -37,17 +37,28 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 生成和校验英文 BIP39 助记词。
 - 使用 PBKDF2-HMAC-SHA512 派生 BIP39 seed。
 - 使用 BIP32 派生私钥、公钥和扩展密钥。
-- 为 Bitcoin 系、45 个 EVM 网络、Kaspa 和 Zcash transparent 生成地址；只有这些链会出现在钱包目录中。
+- 为 Bitcoin 系、53 个 EVM 网络、TRON、Cosmos（ATOM/OSMO/TIA）、Algorand、NEAR、Kaspa、Zcash transparent 和 Monero 生成地址；只有具备签名策略的链会出现在钱包目录中。
 - 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 目标只声明 secp256k1 + ECDSA + seed 封装能力（SCP03/applet 驱动尚未实现）；Kaspa Schnorr 和 Ed25519/BLS/XMSS 私钥保留在 MCU RAM。
-- 查询已登记 EVM Token 的合约地址、精度和账户地址。
+- 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
 - 审查并签名受限的 Bitcoin PSBT v0。
 - 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 输入、t1/t3 输出）：`zec inspect <ZEC4-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在启动自检中校验。
-- 审查并签名已登记 EVM 网络上的原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。选择器由固件用 Keccak-256 现场重算；ABI 必须严格符合规范偏移，未知选择器、非规范偏移、无法审阅的嵌套批量调用和未登记的 ERC-20 合约一律拒绝。
+- 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 合约。ERC-721 `safeTransferFrom`（`0x42842e0e`）和 ERC-1155 `safeTransferFrom`（`0xf242432a`）等唯一 selector 可在无合约注册表时审阅：设备显示合约地址、标准和明确的未登记警告，但无法离线验证合约身份或 NFT 元数据。ERC-20 必须登记 decimals/symbol；与 ERC-20 共享 selector 的 `transferFrom`、批量转移和 receiver hook 一律拒绝。TRON 的 TRC-721/1155 支持同一唯一 selector 子集，详见 [tron-signing.md](docs/tron-signing.md) 与 [adapter-status.md](docs/adapter-status.md)。
+
+- Monero type-6 审阅和 CLSAG 签名已接入；MSR 已移除。SOL 原生转账、SPL Token 与 Token-2022 `TransferChecked` 已接入设备批准流程；Token-2022 会显示扩展风险警告，要求额外 hook 账户的指令被拒绝，范围与独立向量见 [solana-signing.md](docs/solana-signing.md)。
+- TRON 原生 TRX、已登记 TRC-20（当前为 Tether 官方合约 USDT）的 `transfer(address,uint256)`，以及唯一 selector 的 TRC-721/1155 `safeTransferFrom` 已接入 `BEGIN_SIGN kind=7`；设备只接受 owner 权限、无 memo、单合约交易，NFT 合约未登记时会显示明确警告，范围与独立向量见 [tron-signing.md](docs/tron-signing.md)。
+- Stellar 的 SEP-0005 地址、主网 XDR Payment/CreateAccount、memo 和发行者审阅已接入 `BEGIN_SIGN kind=9`，返回完整签名 envelope；范围、独立 SDK 向量和离线限制见 [stellar-signing.md](docs/stellar-signing.md)。
+- Cosmos SDK 原生 `MsgSend`（ATOM/OSMO/TIA）已接入 `BEGIN_SIGN kind=8`：设备自行构建 `TxBody`/`AuthInfo`/`SignDoc`/`TxRaw`，只支持单消息、原生 denom、`SIGN_MODE_DIRECT`，不支持 IBC/memo/authz，范围见 [cosmos-signing.md](docs/cosmos-signing.md)。
+- Algorand 原生 `pay` 与 ASA `axfer`/opt-in 已接入 `BEGIN_SIGN kind=10`：设备只接受 canonical unsigned MessagePack，绑定主网 genesis、fee 和轮次窗口，显示 note/lease，返回 `{sig, txn}`；不支持 group、rekey、close、clawback、LogicSig 和应用调用，见 [algorand-signing.md](docs/algorand-signing.md)。
+- NEAR Borsh `TransactionV0` 原生 Transfer 已接入 `BEGIN_SIGN kind=11`：1–16 笔转账、128 位总额溢出拒绝、隐式账户 owner 绑定，返回 `tx || 0x00 || sig`；不支持 FunctionCall、访问密钥、委托或命名账户所有权，见 [near-signing.md](docs/near-signing.md)。
+- 离线 TOTP（RFC 6238，SHA-1/256/512）已实现并通过 RFC 6238/2202/4648 向量；认证后的 CLI 用 `totp time <unix>` 锚定时钟，`totp <base32>` 生成验证码，密钥不落盘、不回显。时钟与硬件 RTC 的边界见 [totp.md](docs/totp.md)。
+- Tezos（XTZ）manager operation 已接入 `BEGIN_SIGN kind=12`：可选 Ed25519 reveal、1–16 笔 tz1–tz4 原生转账、BLAKE2b-256(0x03 || forged) 摘要与 Ed25519 签名；不支持 KT1、Michelson、委托或 FA token，见 [tezos-signing.md](docs/tezos-signing.md)。
+- XRP 原生 Payment 已接入 `BEGIN_SIGN kind=13`：设备从 50 字节紧凑结构构建规范 XRPL 二进制，使用 SHA-512Half 与 secp256k1 DER 签名；classic r-address 使用 Ripple base58 + hash160。不支持 issued currency、path、memo、partial payment 或多签名，见 [xrp-signing.md](docs/xrp-signing.md)。
 
 以下能力明确不可用，也不会出现在钱包目录中：
 
-- Monero/Masari 交易签名：CryptoNote 地址层与 RingCT key 层（hash-to-scalar、key derivation、一次性公钥、key image、view tag）已实现并固定 Monero 官方向量；CLSAG 签名/验证和篡改拒绝已实现并自测，但 Bulletproofs+、ECDH 金额编码、decoy 选择和完整交易序列化尚未完成。CLSAG 还没有固定到外部 Monero 交易向量，因此不进入钱包目录。
-- Ergo、Hathor、Quai、Chia、QRL、Solana、Cardano、Cosmos、Algorand、Tezos、Filecoin、XRP、TRON 的交易签名。
+- 向 XMR 子地址发送或找零：子地址输入可以消费，但目的地址的交易公钥绑定与接收扫描向量尚未完成，这类输出会被拒绝。
+- Ergo、Hathor、Quai、Chia、QRL、Cardano、Filecoin 的交易签名。
+- TRON TRC-10、`transferFrom`（与 TRC-20 共享 selector）、NFT 批量转移、非空 NFT 回调数据、memo/data 字段、多合约交易和非 owner 权限。
 - Zcash shielded、JoinSplit、v3/v5，以及 t3 P2SH 花费。
 - Peercoin 交易签名：PPC v<3 交易在版本号后序列化 `nTime`，Bitcoin legacy 签名器会构造无效交易；在独立的 Peercoin sighash 模块和向量完成前，PPC 只作为内部地址原语，不进入钱包目录。
 - Kaspa v1 计算预算/covenant 交易；v0 的 `kaspa inspect` / `kaspa sign` 已实现。
@@ -60,7 +71,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 
 BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量已停止维护的分叉、只有区块浏览器而无地址规范的币种。HexWallet 不会用猜测填表。一个币种进入“可签名”集合的前提是：有独立参考向量的地址编码、明确的派生策略、固件实际可实现的签名算法，以及对应的托管策略。同一地址族（base58 版本、EVM chain ID、SLIP-0010、CryptoNote、XMSS）只需增加数据和一组向量，不需要新增密码学实现；没有可验证向量的币种不会进入钱包目录，只在 `tools/fork_registry.json` 和内部 profile 中保留地址原语，绝不会生成带签名的假钱包。
 
-`tools/fork_registry.json` 保留 104 行有官方来源或仍在 MiningPoolStats 活跃列表中的 Bitcoin 系参数，生成 130 个内部 profile；`WalletForkCatalog.inc` 只暴露其中 82 个同时通过地址来源核对和 legacy sighash 审计的 profile。其余 profile 仍用于地址向量测试，但不是用户钱包。`WalletForkAddressVectors.inc` 用独立的 base58check/hash160 固定了 97 个 P2PKH 向量。`python tools/verify_utxo_sighash.py` 逐个读取上游 `chainparams.cpp`、`script/interpreter.cpp` 和 `primitives/transaction.h`：base58 版本不一致、存在活动 fork-id 代码、legacy serializer 写入 `nTime`、交易头额外序列化 `nTime`、或使用宽 `nType` 的链一律不进入签名目录；Ravencoin Classic（fork-id）、TrezarCoin/PulsarCoin/DeepOnion/Verge（`nTime` sighash）因此只保留内部地址 profile。运行 `python tools/generate_fork_profiles.py` 重新生成 profile、catalog、签名策略和向量。`run_network_profile_self_tests()` 会跑通每一条编码器和这些向量；首次收款前仍应使用该币种自己的参考钱包核对地址。
+`tools/fork_registry.json` 保留 104 行有官方来源或仍在 MiningPoolStats 活跃列表中的 Bitcoin 系参数，生成 130 个内部 profile；`WalletForkCatalog.inc` 只暴露其中 82 个同时通过地址来源核对和 legacy sighash 审计的 profile。其余 profile 仍用于地址向量测试，但不是用户钱包。`WalletForkAddressVectorsTest.inc` 用独立的 base58check/hash160 固定了 97 个 P2PKH 向量。`python tools/verify_utxo_sighash.py` 逐个读取上游 `chainparams.cpp`、`script/interpreter.cpp` 和 `primitives/transaction.h`：base58 版本不一致、存在活动 fork-id 代码、legacy serializer 写入 `nTime`、交易头额外序列化 `nTime`、或使用宽 `nType` 的链一律不进入签名目录；Ravencoin Classic（fork-id）、TrezarCoin/PulsarCoin/DeepOnion/Verge（`nTime` sighash）因此只保留内部地址 profile。运行 `python tools/generate_fork_profiles.py` 重新生成 profile、catalog、签名策略和向量。`run_network_profile_self_tests()` 会跑通每一条编码器和这些向量；首次收款前仍应使用该币种自己的参考钱包核对地址。
 
 没有 SLIP-0044 coin type、可读官方 chainparams 或受支持地址编码的币种已从钱包删除，不再生成占位目录项。重新加入必须附官方证据，不能猜 version byte。
 
@@ -253,12 +264,14 @@ arduino-cli monitor -p COM7 -c baudrate=115200
 启动后先等待自检完成。成功输出应类似：
 
 ```text
-SELFTEST crypto=pass extended=pass cryptonote=pass cryptonote-ringct=pass qrl=pass custody=pass catalog=pass evm=pass bip39=pass bip32=pass bip84=pass evm-derive=pass bip340=pass address=pass networks=pass sighash=pass kaspa=pass calldata=pass tokens=pass transport=pass bitcoin=pass zcash-sighash=pass zcash=pass
+SELFTEST crypto=pass extended=pass cryptonote=pass cryptonote-ringct=pass cryptonote-tx=pass cryptonote-spend=pass cryptonote-signing=pass masari=pass qrl=pass custody=pass catalog=pass evm=pass bip39=pass bip32=pass bip84=pass evm-derive=pass bip340=pass address=pass networks=pass sighash=pass kaspa=pass calldata=pass tokens=pass transport=pass bitcoin=pass zcash-sighash=pass zcash=pass link-crypto=pass wallet-link=pass nfc-apdu=pass signing=pass
 ```
 
 `evm-derive` 使用 Conflux 官方 Ledger app 的 `m/44'/503'/0'/0/0` 向量，同时校验未压缩公钥和 `0x` 地址；host 侧 `address` 自检会用同一公钥独立重算地址。
 
-`cryptonote-ringct` 固定 Monero `tests/crypto/tests.txt` 的 hash_to_scalar、generate_key_derivation、derive_public_key、derive_secret_key、generate_key_image 和 derive_view_tag 向量。CLSAG 另有 3 成员确定性环的签名/验证与 `s`、`I`、message 篡改拒绝自测；它仍需要外部 Monero 交易向量才能在钱包目录中启用。
+`cryptonote-ringct` 固定 Monero `tests/crypto/tests.txt` 的 hash_to_scalar、generate_key_derivation、derive_public_key、derive_secret_key、generate_key_image 和 derive_view_tag 向量。`cryptonote-signing` 走通完整 payload → 审阅（含固定 Monero 参考构建生成的证明）→ 逐输入 CLSAG → 序列化；`masari` 校验上游真实交易向量（`tests/fixtures/masari/tx2.bin`）与 type-2 端到端签名。12 类篡改拒绝在 host 自检 `cryptonote-review` 中运行（设备启动只跑签名与 Masari 两项，避免拉长开机时间）。
+
+离线签名器无法证明 ring 诱饵真的在链上；它能证明的是 ring 内部一致、包含本机输出、offsets 与交易一致。手机被信任提供活跃诱饵，但永远不被信任金额、手续费和目的地址。
 
 只有所有项目都是 `pass`，钱包服务才会初始化。任何一项失败都会输出：
 
@@ -308,6 +321,8 @@ evm inspect <network> <index> <unsigned-rlp-hex>
 evm sign <six-digit-confirmation>
 zec inspect <ZEC4-payload-hex>
 zec sign <six-digit-confirmation>
+totp time <unix-seconds>
+totp <base32-secret> [6|7|8] [period] [sha1|sha256|sha512]
 tx reject
 selftest
 ```
@@ -546,7 +561,7 @@ wallet address eth 1
 wallet address btc 1
 ```
 
-钱包目录现在只暴露完整收/发/签名链。Monero、QRL、Chia 等仅地址 profile 不再出现在 `coin list` / `wallet address` 中；它们的编码器只作为内部测试原语保留。
+钱包目录现在只暴露具备完整收/发/签名链的币种。Monero 已开放（标准地址 / account 0），QRL、Chia 等仅地址 profile 不再出现在 `coin list` / `wallet address` 中；它们的编码器只作为内部测试原语保留。
 
 当前账户和 change 固定为 `0`，一般路径为：
 
@@ -626,7 +641,7 @@ ERR trusted-display-required-for-signing
 
 ## EVM 交易审查和签名
 
-当前接受已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账，以及白名单内的 ERC-20/721/1155/4626/777/3525/6551/OFT/ONFT 调用。45 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace 保持 legacy-only。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、非空 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
+当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 的 `safeTransferFrom` 唯一 selector 在空回调数据时可在没有 NFT 合约注册记录的情况下审阅，设备显示合约地址、标准与未登记警告，但无法离线验证合约身份或元数据；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。53 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 保持 legacy-only。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、非空 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
 
 审查 unsigned RLP：
 
@@ -797,8 +812,12 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `ZcashTransaction` | v4 透明交易、ZIP-243、t1 签名、t1/t3 输出 |
 | `CryptoNoteRingCt` | Monero hash-to-scalar、key derivation、一次性公钥、key image、view tag、CLSAG 签名/验证；key 层官方向量固定 |
 | `CryptoNoteOutputScan` | 用 view secret 在设备内判定输出归属，不导出查看密钥 |
-| `CryptoNoteTransaction` | RCT type 6 严格解析/逐字节重写 + 承诺平衡校验（尚不含 Bulletproofs+ 验证与 CLSAG 签名接入） |
-| `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序） |
+| `CryptoNoteTransaction` | RCT type-6 严格解析/逐字节重写 + 承诺平衡校验 + CLSAG 签名接入（`cryptonote_sign_input`） |
+| `CryptoNoteSpend` | 设备侧 XMR 发送组装：一次性输出、金额/承诺、伪输出掩码求解、逐输入 CLSAG、序列化 |
+| `CryptoNoteReview` | 按网络策略（手续费上限、ring 大小）、key offsets 与 RCT 绑定、CLSAG `D` 校验、诚实的诱饵边界说明 |
+| `CryptoNoteSigning` | 手机 payload 解析 → 审阅 → 逐输入 CLSAG → 序列化交易；会话状态与清零 |
+| `CryptoNoteMasari` | Legacy regression source; MSR is not exposed as a wallet |
+| `WalletBoardPort` | 板卡配置（引脚、面板驱动、LVGL 缓冲、flush/触摸回调、供电时序）；EPD 刷新策略见 [epd-lvgl.md](docs/epd-lvgl.md) |
 | `WalletBoardPins` | 全部五块受支持 LilyGO 板卡的逐引脚定义 |
 | `EvmTransaction` | EIP-155、EIP-1559、原生转账和白名单 Token 调用 |
 | `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 与 LayerZero OFT/ONFT 的选择器白名单和规范 ABI 解码 |

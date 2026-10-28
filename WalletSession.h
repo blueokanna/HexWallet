@@ -8,6 +8,9 @@
 namespace hexwallet {
 
 bool wallet_session_is_loaded();
+// False when production custody is required but no real SE-backed wallet
+// session backend is integrated. Hardware presence alone is insufficient.
+bool wallet_session_custody_available();
 WalletError wallet_session_generate();
 WalletError wallet_session_import(const char *mnemonic);
 WalletError wallet_session_load_master(HdPrivateNode *master);

@@ -24,6 +24,9 @@ bool board_has_display();
 bool board_has_touch();
 bool board_is_color();
 bool board_is_eink();
+// 1 for monochrome e-paper, 3 for black/white/red, 4 for black/white/red/
+// yellow. The panel driver class must match this value; the fallback is 1.
+uint8_t board_display_colors();
 
 // Display lifecycle. board_display_init() calls lv_init() and registers the
 // display (and input device, when touch is present) before returning true.
@@ -31,6 +34,10 @@ bool board_is_eink();
 // fail-closed state (no UI surfaces).
 bool board_display_init();
 void board_display_service();
+// A new approval screen must finish rendering and panel transfer before it can
+// accept APPROVE. This is a software barrier, not optical verification.
+void board_display_prepare_review();
+bool board_display_review_ready();
 
 uint16_t board_display_width();
 uint16_t board_display_height();
@@ -48,8 +55,8 @@ uint16_t board_battery_millivolts();
 bool board_has_user_button();
 bool board_user_button_pressed();
 
-// SE050 presence probe. "PresentUnverified" means an I2C device answered at
-// 0x48; it does not prove the part is an SE050C1H1, that SCP03 was
+// SE05x presence probe. "PresentUnverified" means an I2C device answered at
+// 0x48; it does not prove the part is the requested SE051C2HQ1, that SCP03 was
 // established, or that a key was imported. The wallet therefore keeps the
 // MCU-only custody profile until a real applet driver verifies the device.
 enum class SecureElementProbeState : uint8_t {

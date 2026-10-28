@@ -286,7 +286,7 @@ namespace hexwallet
         TxOutputView &output = view->outputs[index];
         if (!read_u64(&cursor, &output.value))
           return ZcashError::Truncated;
-        if (output.value > kZcashMaxZats)
+        if (output.value > kZcashTransparentParseMaxZats)
           return ZcashError::InvalidAmount;
         uint64_t script_size;
         result = read_compact_size(&cursor, &script_size);
@@ -772,7 +772,7 @@ namespace hexwallet
       return true;
     }
 
-#include "src/generated/ZcashZip243Vectors.inc"
+#include "src/generated/ZcashZip243VectorsTest.inc"
 
   } // namespace
 
@@ -1069,7 +1069,7 @@ namespace hexwallet
       {
         return ZcashError::Truncated;
       }
-      if (value > kZcashMaxZats)
+      if (value > policy->max_zats)
         return ZcashError::InvalidAmount;
       if (*script_size != kP2pkhScriptSize)
         return ZcashError::Unsupported;
@@ -1209,7 +1209,8 @@ namespace hexwallet
     for (size_t index = 0; index < request.input_count; ++index)
     {
       const ZcashInput &input = request.inputs[index];
-      if (input.value > kZcashMaxZats || input.script_size != kP2pkhScriptSize ||
+      if (input.value > zcash_policy->max_zats ||
+          input.script_size != kP2pkhScriptSize ||
           !p2pkh_script(input.script, input.script_size) ||
           !add_u64(input_total, input.value, &input_total))
       {
@@ -1219,7 +1220,7 @@ namespace hexwallet
     for (size_t index = 0; index < request.output_count; ++index)
     {
       const ZcashOutput &output = request.outputs[index];
-      if (output.value > kZcashMaxZats ||
+      if (output.value > zcash_policy->max_zats ||
           !transparent_script(output.script, output.script_size) ||
           !add_u64(output_total, output.value, &output_total))
       {

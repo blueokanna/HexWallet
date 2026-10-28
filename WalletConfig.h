@@ -1,6 +1,24 @@
 #ifndef HEXWALLET_CONFIG_H
 #define HEXWALLET_CONFIG_H
 
+// Local spending safety policy (0.1 XMR), not Monero consensus or a live fee
+// estimate. Only firmware configuration can change this; host requests cannot.
+#ifndef HEXWALLET_XMR_MAX_FEE_ATOMIC
+#define HEXWALLET_XMR_MAX_FEE_ATOMIC 100000000000ULL
+#endif
+
+// Masari has the same 12-decimal coin unit; 0.1 MSR is the local ceiling.
+#ifndef HEXWALLET_MSR_MAX_FEE_ATOMIC
+#define HEXWALLET_MSR_MAX_FEE_ATOMIC 100000000000ULL
+#endif
+
+// Masari's RCTTypeBulletproof (type 3) verifier is implemented but has not
+// yet been validated against a mainnet transaction vector. It stays disabled
+// by default so a malformed proof can never be treated as accepted.
+#ifndef HEXWALLET_MSR_ENABLE_RCT_TYPE3
+#define HEXWALLET_MSR_ENABLE_RCT_TYPE3 0
+#endif
+
 #if defined(ARDUINO_ARCH_ESP32)
 #include <sdkconfig.h>
 #endif
@@ -58,15 +76,29 @@
 #define HEXWALLET_RUN_SELF_TESTS 1
 #endif
 
-// Stack for the second-core crypto worker (bytes). The boot self-tests run
-// there so the display can come up in parallel; BLS/XMSS need real headroom.
+// Stack for the second-core crypto worker (bytes). The boot self-tests and the
+// CryptoNote review run there so the 8 KiB Arduino loop task never has to hold
+// the Bulletproofs+ verifier; BLS/XMSS need real headroom too.
 #ifndef HEXWALLET_WORKER_STACK_BYTES
 #define HEXWALLET_WORKER_STACK_BYTES (24 * 1024)
 #endif
 
-// Upper bound for a full boot self-test pass on the worker.
+// Local SOL fee ceiling; base fee remains an offline network-schedule assumption.
+#ifndef HEXWALLET_SOL_MAX_FEE_LAMPORTS
+#define HEXWALLET_SOL_MAX_FEE_LAMPORTS 10000000ULL
+#endif
+
+// Upper bound for one worker job. CryptoNote review is the longest job: the
+// trust model caps it (16 outputs, 2 proofs), so this is only a runaway guard.
+#ifndef HEXWALLET_WORKER_JOB_TIMEOUT_MS
+#define HEXWALLET_WORKER_JOB_TIMEOUT_MS 120000UL
+#endif
+
+// Upper bound for a full boot self-test pass on the worker. It includes the
+// eight pinned Bulletproofs+ reference proofs, a mainnet proof and a complete
+// CryptoNote signing round trip, so the MCU needs minutes, not seconds.
 #ifndef HEXWALLET_SELFTEST_TIMEOUT_MS
-#define HEXWALLET_SELFTEST_TIMEOUT_MS 120000UL
+#define HEXWALLET_SELFTEST_TIMEOUT_MS 300000UL
 #endif
 
 #ifndef HEXWALLET_ENABLE_CLI
@@ -123,6 +155,21 @@
 
 #ifndef HEXWALLET_ENABLE_SECRET_EXPORT
 #define HEXWALLET_ENABLE_SECRET_EXPORT 0
+#endif
+
+// The ESP32-P4/SE051 production target must never silently fall back to the
+// current plaintext MCU session. A developer can explicitly select 0 for
+// public test seeds; that is a software wallet, not SE-backed custody.
+#ifndef HEXWALLET_REQUIRE_SECURE_CUSTODY
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#define HEXWALLET_REQUIRE_SECURE_CUSTODY 1
+#else
+#define HEXWALLET_REQUIRE_SECURE_CUSTODY 0
+#endif
+#endif
+
+#if HEXWALLET_REQUIRE_SECURE_CUSTODY && HEXWALLET_ENABLE_SECRET_EXPORT
+#error "Secure custody cannot be combined with plaintext secret export."
 #endif
 
 #ifndef HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
