@@ -33,6 +33,7 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 #include "WalletLinkCrypto.h"
 #include "WalletLink.h"
 #include "WalletLinkService.h"
+#include "Mascot.h"
 #include "WalletNfcApdu.h"
 #include "WalletSecurity.h"
 #include "WalletSigning.h"
@@ -239,6 +240,13 @@ void setup()
   {
     Serial.print("WARN: no display on ");
     Serial.println(hexwallet::board_name());
+  }
+
+  // Companion counters (level, bond, signed/rejected) survive a reboot; a first
+  // boot simply has nothing stored yet, which is not an error.
+  if (!hexwallet::mascot_nvs_begin())
+  {
+    Serial.println("INFO: companion starts fresh (no stored state)");
   }
 
 #if HEXWALLET_RUN_SELF_TESTS

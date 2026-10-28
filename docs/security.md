@@ -121,7 +121,62 @@ The 32-bit build and the host build compile the same `RandomSource.cpp`; the
 host build substitutes a deterministic xoshiro256** stream for `esp_fill_random`
 so tests are reproducible while the health tests still run.
 
-## SE051C2HQ1 custody backend: what is shipped, what is missing
+## 可信验证（`TrustAnchor`）
+
+“可信验证”被拆成两半，因为它们的失效方式完全不同：设备可信不代表交易是对的，交易对
+也不代表固件没被换掉。
+
+### 一、设备信任等级（`TrustAnchor.h`）
+
+| 等级 | 判据 | 含义 |
+| --- | --- | --- |
+| `verified` | secure boot **且** flash encryption | 代码来源可验、flash 内容加密 |
+| `encrypted` | 只有 flash encryption | 数据静止加密，但代码可为攻击者所改 |
+| `unprotected` | 两者皆无 | 裸片，仅供台面调试 |
+| `unknown` | 平台未回答（主机/未知硅片） | 不做任何宣称 |
+
+数据来源是 eFuse 与应用描述符（`esp_secure_boot_enabled()`、`esp_flash_encryption_enabled()`、
+`esp_app_desc_t::app_elf_sha256`），**不是固件自己写的一个字段**。ELF 摘要全零视为“未测量”，
+不会被当成“匹配”。
+
+签名路径真的用到了它：
+
+```c
+if (!trust_signing_allowed(trust_state())) {
+  wallet_signing_clear();
+  wallet_ui_set_status("Trusted boot required. Signing refused.");
+  return WalletSigningError::Unsupported;
+}
+```
+
+策略开关是 `HEXWALLET_REQUIRE_VERIFIED_BOOT`，默认 **0**：bring-up 板没烧 eFuse，一上来
+就拒绝签名只会让人把保护关掉；量产板必须在构建参数里打开它（
+`-DHEXWALLET_REQUIRE_VERIFIED_BOOT=1`）。
+
+### 二、审阅封条（`ReviewSeal`）
+
+签名真正的风险窗口是“用户看到的”和“实际签的”之间。封条把这段窗口钉住：
+
+1. 渲染审阅页时 `review_seal_build()` 把**屏上显示的每一行文字**（带长度前缀、带顺序）
+   连同 8 字节 nonce 一起做 SHA-256；
+2. 面板确认这一帧真的提交后，`review_seal_mark_displayed()` 才把封条置为已展示；
+3. 签名时 `review_seal_authorize()` 重算并对**常量时间**比较；文本变了、过期了、已经用过
+   一次，都直接烧掉封条并返回 false。
+
+单次使用是刻意的：一次展示只授权一次签名，重放同一份审阅在密码学上不可行。
+自检覆盖了这些情况——多一个尾随空格、两行换序、截断一行、换 nonce、过期、二次使用。
+
+`WalletSigning` 里另外补了一道更粗但更关键的闸：`wallet_signing_sign()` 现在要求
+`board_display_review_ready()`，也就是面板必须已经提交完这一帧；一个“批准”如果比它自己
+的屏幕活得久，就不再能签任何东西。
+
+### 还没有接上的部分（说清楚）
+
+`ReviewSeal` 已经在库里实现并自检，但 `WalletSigning` 的各 `begin_*` 还没有把各自的
+审阅文案交给它——那需要把 14 个链的显示字符串统一进一个结构。当前生效的是“帧已提交 +
+单次消费 + 过期”这三层，封条的逐行绑定仍是缺口，不是已完成项。
+
+
 
 *Merged from docs/se051-plug-and-trust.md.*
 

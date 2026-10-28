@@ -9,6 +9,7 @@
 #include "CryptoPrimitives.h"
 #include "CryptoNoteAddress.h"
 #include "CryptoNoteReview.h"
+#include "TrustAnchor.h"
 #include "WalletBoardPort.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
@@ -1500,6 +1501,20 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
   if (!wallet_signing_active() || !active.approved || active.rejected || active.consumed) {
     wallet_signing_clear();
     return WalletSigningError::NotApproved;
+  }
+  // The panel must have finished committing this review before anything is
+  // signed. APPROVE is only produced by a button on a rendered frame, so this
+  // also catches a stale approval that outlived its own screen.
+  if (board_has_display() && !board_display_review_ready()) {
+    wallet_signing_clear();
+    return WalletSigningError::NotApproved;
+  }
+  // A build that demands verified boot refuses to hand out signatures from an
+  // unprotected device (secure boot and flash encryption both off).
+  if (!trust_signing_allowed(trust_state())) {
+    wallet_signing_clear();
+    wallet_ui_set_status("Trusted boot required. Signing refused.");
+    return WalletSigningError::Unsupported;
   }
   // Consume before key access. An invalid output buffer, failed unseal, or
   // failed signing operation must never leave a reusable approval behind.

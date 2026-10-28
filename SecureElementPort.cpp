@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "WalletSecurity.h"
+#include "WalletConfig.h"
 
 namespace hexwallet {
 namespace {
@@ -158,12 +159,13 @@ uint16_t iso7816_crc16(const uint8_t *data, size_t size) {
 }
 
 bool iso7816_atr_valid(const uint8_t *atr, size_t size) {
-  if (atr == nullptr || size < 2) return false;
+  if (atr == nullptr || size < 2 || size > 33) return false;
   if (atr[0] != 0x3B && atr[0] != 0x3F) return false;
   // T0: Y1 (TA1/TB1/TC1/TD1 present) in the high nibble, K historical bytes in
   // the low nibble.
   uint8_t interface_bits = static_cast<uint8_t>(atr[1] >> 4);
   size_t offset = 2;
+  bool requires_tck = false;
   while (interface_bits != 0) {
     size_t count = 0;
     if ((interface_bits & 0x01U) != 0) ++count;  // TA
@@ -171,6 +173,9 @@ bool iso7816_atr_valid(const uint8_t *atr, size_t size) {
     if ((interface_bits & 0x04U) != 0) ++count;  // TC
     if ((interface_bits & 0x08U) != 0) ++count;  // TD
     if (offset + count > size) return false;
+    // TCK is mandatory if any TD announces a protocol other than T=0.
+    if ((interface_bits & 0x08U) != 0 &&
+        (atr[offset + count - 1] & 0x0fU) != 0) requires_tck = true;
     // TD is the last of the interface bytes and carries the next Y.
     interface_bits = (interface_bits & 0x08U) != 0
                          ? static_cast<uint8_t>(atr[offset + count - 1] >> 4)
@@ -180,7 +185,7 @@ bool iso7816_atr_valid(const uint8_t *atr, size_t size) {
   offset += static_cast<size_t>(atr[1] & 0x0F);
   if (offset > size) return false;
   const size_t trailing = size - offset;
-  if (trailing == 0) return true;
+  if (!requires_tck) return trailing == 0;
   if (trailing != 1) return false;
   // TCK is chosen so that the XOR of every byte after TS is zero.
   uint8_t checksum = 0;
@@ -317,6 +322,9 @@ bool secure_element_open(char *reason, size_t reason_size) {
   }
   if (g_open) secure_element_close();
   if (!g_backend->open(reason, reason_size)) {
+    // Open can fail after allocating transport or SCP03 key contexts.
+    // Close must tolerate partial initialization and is mandatory on failure.
+    g_backend->close();
     g_open = false;
     return false;
   }
@@ -335,7 +343,11 @@ bool secure_element_open(char *reason, size_t reason_size) {
 }
 
 bool secure_element_ready() {
-  return g_backend != nullptr && g_open && g_backend->session_authenticated();
+  if (g_backend == nullptr || !g_open) return false;
+  if (g_backend->session_authenticated()) return true;
+  // A lost session cannot become ready again without a fresh open/handshake.
+  secure_element_close();
+  return false;
 }
 
 const char *secure_element_name() {
@@ -353,6 +365,7 @@ void secure_element_close() {
 
 namespace {
 
+#if defined(HEXWALLET_HOST_TEST)
 // Two fake backends: one that opens the transport but never authenticates (the
 // failure mode a real card produces when the static keys are wrong), and one
 // that authenticates. Only the second may ever satisfy the custody gate.
@@ -409,6 +422,7 @@ const SecureElementBackend kFakeVerified = {
 const SecureElementBackend kFakeIncomplete = {
     "fake-incomplete", fake_open_with_session, nullptr, nullptr, nullptr,
     fake_close};
+#endif
 
 }  // namespace
 
@@ -478,6 +492,8 @@ bool run_secure_element_self_tests() {
   static const uint8_t kAtrShortHistorical[] = {0x3B, 0x02, 0x14};
   static const uint8_t kAtrBadTs[] = {0x00, 0x00};
   static const uint8_t kAtrTruncated[] = {0x3B};
+  static const uint8_t kAtrMissingTck[] = {0x3B, 0x80, 0x01};
+  static const uint8_t kAtrUnexpectedTck[] = {0x3B, 0x00, 0x00};
   passed = iso7816_atr_valid(kAtrMinimal, sizeof(kAtrMinimal)) && passed;
   passed = iso7816_atr_valid(kAtrInverse, sizeof(kAtrInverse)) && passed;
   passed = iso7816_atr_valid(kAtrHistorical, sizeof(kAtrHistorical)) && passed;
@@ -486,8 +502,13 @@ bool run_secure_element_self_tests() {
   passed = !iso7816_atr_valid(kAtrShortHistorical, sizeof(kAtrShortHistorical)) && passed;
   passed = !iso7816_atr_valid(kAtrBadTs, sizeof(kAtrBadTs)) && passed;
   passed = !iso7816_atr_valid(kAtrTruncated, sizeof(kAtrTruncated)) && passed;
+  passed = !iso7816_atr_valid(kAtrMissingTck, sizeof(kAtrMissingTck)) && passed;
+  passed = !iso7816_atr_valid(kAtrUnexpectedTck, sizeof(kAtrUnexpectedTck)) && passed;
   passed = !iso7816_atr_valid(nullptr, 0) && passed;
 
+  // Never replace a real card session with test backends in device firmware.
+#if defined(HEXWALLET_HOST_TEST)
+  if (g_backend != nullptr) return false;
   // Gate behaviour: nothing registered means nothing ready.
   secure_element_register_backend(nullptr);
   char reason[96];
@@ -519,6 +540,7 @@ bool run_secure_element_self_tests() {
            strcmp(secure_element_name(), "") == 0 && passed;
 
   secure_zero(reason, sizeof(reason));
+#endif
   secure_zero(mac, sizeof(mac));
   secure_zero(other_mac, sizeof(other_mac));
   secure_zero(cipher, sizeof(cipher));

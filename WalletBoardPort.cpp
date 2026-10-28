@@ -573,6 +573,82 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 }
 #endif
 
+// ---------------------------------------------------------------------------
+//  Physical buttons as a keypad input device
+//
+// A board without a touch controller still has to approve or reject a
+// transaction, and to poke the companion. Four buttons map to
+// prev / next / enter / escape, which is everything LVGL group navigation
+// needs. Debounced here: a bouncing contact must never count as a second press
+// on an APPROVE button.
+// ---------------------------------------------------------------------------
+#if defined(HEXWALLET_PIN_BUTTON_1) && (HEXWALLET_PIN_BUTTON_1 >= 0)
+
+static constexpr uint32_t kButtonDebounceMs = 25;
+
+static uint8_t button_mask() {
+  uint8_t mask = 0;
+  if (digitalRead(HEXWALLET_PIN_BUTTON_1) == LOW) mask |= 0x01;
+#if defined(HEXWALLET_PIN_BUTTON_2)
+  if (digitalRead(HEXWALLET_PIN_BUTTON_2) == LOW) mask |= 0x02;
+#endif
+#if defined(HEXWALLET_PIN_BUTTON_3)
+  if (digitalRead(HEXWALLET_PIN_BUTTON_3) == LOW) mask |= 0x04;
+#endif
+#if defined(HEXWALLET_PIN_BUTTON_4)
+  if (digitalRead(HEXWALLET_PIN_BUTTON_4) == LOW) mask |= 0x08;
+#endif
+  return mask;
+}
+
+static uint32_t button_key(uint8_t mask) {
+  if ((mask & 0x01) != 0) return LV_KEY_PREV;
+  if ((mask & 0x02) != 0) return LV_KEY_NEXT;
+  if ((mask & 0x04) != 0) return LV_KEY_ENTER;
+  if ((mask & 0x08) != 0) return LV_KEY_ESC;
+  return LV_KEY_ENTER;
+}
+
+static void buttons_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+  (void)indev;
+  static uint8_t stable = 0;
+  static uint8_t candidate = 0;
+  static uint32_t candidate_since = 0;
+  static uint32_t held_key = LV_KEY_ENTER;
+
+  const uint8_t sample = button_mask();
+  const uint32_t now = millis();
+  if (sample != candidate) {
+    candidate = sample;
+    candidate_since = now;
+  }
+  if (now - candidate_since >= kButtonDebounceMs) stable = candidate;
+
+  if (stable != 0) {
+    held_key = button_key(stable);
+    data->key = held_key;
+    data->state = LV_INDEV_STATE_PRESSED;
+  } else {
+    data->key = held_key;
+    data->state = LV_INDEV_STATE_RELEASED;
+  }
+}
+
+static void buttons_init_pins() {
+  pinMode(HEXWALLET_PIN_BUTTON_1, INPUT_PULLUP);
+#if defined(HEXWALLET_PIN_BUTTON_2)
+  pinMode(HEXWALLET_PIN_BUTTON_2, INPUT_PULLUP);
+#endif
+#if defined(HEXWALLET_PIN_BUTTON_3)
+  pinMode(HEXWALLET_PIN_BUTTON_3, INPUT_PULLUP);
+#endif
+#if defined(HEXWALLET_PIN_BUTTON_4)
+  pinMode(HEXWALLET_PIN_BUTTON_4, INPUT_PULLUP);
+#endif
+}
+
+#endif  // buttons
+
 static bool lvgl_register_display(
   uint16_t width, uint16_t height, bool full_frame,
   void (*flush_cb)(lv_display_t *, const lv_area_t *, uint8_t *)) {

@@ -38,6 +38,8 @@
 #include "../../EinkPanel.h"
 #include "../../QrCode.h"
 #include "../../CameraPort.h"
+#include "../../TrustAnchor.h"
+#include "../../Mascot.h"
 #include "../../WalletLink.h"
 #include "../../WalletLinkCrypto.h"
 #include "../../WalletNfcApdu.h"
@@ -69,6 +71,8 @@ int main() {
   const bool eink_panel = hexwallet::run_eink_panel_self_tests();
   const bool qr_code = hexwallet::run_qr_code_self_tests();
   const bool camera_port = hexwallet::run_camera_port_self_tests();
+  const bool trust_anchor = hexwallet::run_trust_anchor_self_tests();
+  const bool mascot = hexwallet::run_mascot_self_tests();
   const bool networks = hexwallet::run_network_profile_self_tests();
   const bool sighash = hexwallet::run_bitcoin_sighash_self_tests();
   const bool kaspa = hexwallet::run_kaspa_self_tests();
@@ -119,6 +123,8 @@ int main() {
   printf("eink-panel=%s\n", eink_panel ? "pass" : "FAIL");
   printf("qrcode=%s\n", qr_code ? "pass" : "FAIL");
   printf("camera-port=%s\n", camera_port ? "pass" : "FAIL");
+  printf("trust-anchor=%s\n", trust_anchor ? "pass" : "FAIL");
+  printf("mascot=%s\n", mascot ? "pass" : "FAIL");
   printf("networks=%s\n", networks ? "pass" : "FAIL");
   printf("sighash=%s\n", sighash ? "pass" : "FAIL");
   printf("kaspa=%s\n", kaspa ? "pass" : "FAIL");
@@ -145,5 +151,5 @@ int main() {
   printf("link-crypto=%s\n", link_crypto ? "pass" : "FAIL");
   printf("wallet-link=%s\n", wallet_link ? "pass" : "FAIL");
   printf("nfc-apdu=%s\n", nfc_apdu ? "pass" : "FAIL");
-  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && catalog && mining && tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
+  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && catalog && mining && tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
 }

@@ -23,8 +23,13 @@ using namespace hexwallet;
 namespace {
 
 qrcodegen::QrCode::Ecc reference_level(QrEcc ecc) {
-  return ecc == QrEcc::Low ? qrcodegen::QrCode::Ecc::LOW
-                           : qrcodegen::QrCode::Ecc::MEDIUM;
+  switch (ecc) {
+    case QrEcc::Low: return qrcodegen::QrCode::Ecc::LOW;
+    case QrEcc::Medium: return qrcodegen::QrCode::Ecc::MEDIUM;
+    case QrEcc::Quartile: return qrcodegen::QrCode::Ecc::QUARTILE;
+    case QrEcc::High: return qrcodegen::QrCode::Ecc::HIGH;
+  }
+  return qrcodegen::QrCode::Ecc::LOW;
 }
 
 }  // namespace
@@ -36,7 +41,7 @@ int main() {
   int size_mismatches = 0;
 
   for (uint8_t version = 1; version <= kQrMaxVersion; ++version) {
-    for (QrEcc ecc : {QrEcc::Low, QrEcc::Medium}) {
+    for (QrEcc ecc : {QrEcc::Low, QrEcc::Medium, QrEcc::Quartile, QrEcc::High}) {
       const size_t capacity = qr_capacity(version, ecc);
       for (size_t index = 0; index < capacity; ++index) {
         payload[index] = static_cast<uint8_t>('A' + (index % 26));
@@ -48,14 +53,14 @@ int main() {
         QrCode mine = {};
         if (!qr_encode_masked(payload, capacity, ecc, mask, &mine)) {
           printf("FAIL encode v%u lvl%u mask%u\n", version,
-                 ecc == QrEcc::Low ? 0 : 1, mask);
+                 (int)ecc, mask);
           return 2;
         }
         const qrcodegen::QrCode reference = qrcodegen::QrCode::encodeSegments(
             segments, reference_level(ecc), version, version, mask, false);
         if (reference.getSize() != mine.size) {
           printf("FAIL size v%u lvl%u mask%u\n", version,
-                 ecc == QrEcc::Low ? 0 : 1, mask);
+                 (int)ecc, mask);
           ++size_mismatches;
           continue;
         }
@@ -75,7 +80,7 @@ int main() {
         }
         if (differing != 0) {
           printf("FAIL v%u lvl%u mask%u modules=%d\n", version,
-                 ecc == QrEcc::Low ? 0 : 1, mask, differing);
+                 (int)ecc, mask, differing);
           ++mismatches;
         }
         ++checked;

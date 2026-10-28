@@ -69,7 +69,7 @@ $cppSources = @(
   "CryptoNoteSigning.cpp",
   "CryptoNoteMasari.cpp",
   "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp",
+  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MascotArt.cpp",
   "BitcoinTransaction.cpp",
   "KaspaTransaction.cpp",
   "TronTransaction.cpp",
@@ -159,7 +159,7 @@ $catalogSources = @(
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
   "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
   "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "host_security.cpp"
+  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MascotArt.cpp", "host_security.cpp"
 )
 $catalogObjs = @()
 foreach ($s in $catalogSources) {

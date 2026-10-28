@@ -12,8 +12,12 @@ namespace hexwallet {
 // fingerprints, pairing codes) plus a 1bpp renderer for the e-paper.
 //
 // Supported set, deliberately bounded and enforced:
-//   * byte mode, versions 1-10 (21x21 .. 57x57), ECC level L or M
+//   * byte mode, versions 1-10 (21x21 .. 57x57), ECC levels L, M, Q and H
 //   * up to 271 payload bytes (v10-L); longer input is refused, never truncated
+//
+// The wallet never asks for L: qr_encode_best() walks H -> Q -> M, so a symbol
+// degrades in robustness only when the payload genuinely does not fit, and it
+// refuses rather than dropping below M.
 //
 // Versions 1-6 are always a single RS block; 7-10 need interleaving and a
 // version-information block, and both are implemented here rather than skipped,
@@ -26,7 +30,10 @@ namespace hexwallet {
 // scanner. Scan one code off the panel before shipping a screen that relies on
 // it.
 
-enum class QrEcc : uint8_t { Low = 0, Medium = 1 };
+enum class QrEcc : uint8_t { Low = 0, Medium = 1, Quartile = 2, High = 3 };
+
+// Short label for the panel ("H", "Q", "M", "L").
+const char *qr_ecc_name(QrEcc ecc);
 
 constexpr uint8_t kQrMaxVersion = 10;
 constexpr uint8_t kQrMaxModules = 57;  // 17 + 4 * kQrMaxVersion
@@ -48,6 +55,14 @@ size_t qr_capacity(uint8_t version, QrEcc ecc);
 // Smallest version that holds the payload. The mask is chosen by the standard
 // penalty score.
 bool qr_encode(const uint8_t *payload, size_t size, QrEcc ecc, QrCode *out);
+
+// Wallet policy: robustness first. Tries H, then Q, then M - never L - and
+// reports the level it settled on. A wallet QR is scanned off a low-contrast
+// e-paper panel by a phone at an angle; L would be a false economy. Returns
+// false when even M cannot hold the payload at the largest supported version,
+// in which case the caller must show the text instead of a symbol.
+bool qr_encode_best(const uint8_t *payload, size_t size, QrCode *out,
+                    QrEcc *chosen);
 
 // Deterministic variant with an explicit mask. The host cross-check compares
 // its matrices against a reference encoder, which only works when both sides

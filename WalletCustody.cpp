@@ -160,9 +160,10 @@ const SecureElementProfile &target_secure_element_profile() {
   return kSe051C2;
 }
 const SecureElementProfile &active_secure_element_profile() {
-  // A part description is not custody. The SE051 profile only becomes active
-  // once a registered backend reports an authenticated card session.
-  return secure_element_ready() ? kSe051C2 : kSoftwareOnly;
+  // SSS channel authentication does not change the wallet's key ownership.
+  // WalletSession still returns plaintext seeds and every transaction signer
+  // still accepts MCU private keys. Never promote that path to SE custody.
+  return kSoftwareOnly;
 }
 
 void set_active_secure_element_profile(const SecureElementProfile *profile) {
@@ -172,7 +173,10 @@ void set_active_secure_element_profile(const SecureElementProfile *profile) {
 }
 
 bool secure_custody_backend_ready() {
-  return secure_element_ready();
+  // A production session may open only after derivation, review-bound signing
+  // and recovery use non-exportable handles end to end. A working SCP03 channel
+  // alone is insufficient; allowing it here would unlock the RAM-only wallet.
+  return false;
 }
 
 bool run_custody_self_tests() {
