@@ -1503,11 +1503,14 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
     return WalletSigningError::NotApproved;
   }
   // The panel must have finished committing this review before anything is
-  // signed. APPROVE is only produced by a button on a rendered frame, so this
-  // also catches a stale approval that outlived its own screen.
-  if (board_has_display() && !board_display_review_ready()) {
-    wallet_signing_clear();
-    return WalletSigningError::NotApproved;
+  // signed, and the review seal must still be armed and unused. APPROVE is only
+  // produced by a button on a rendered frame, so this also catches a stale
+  // approval that outlived its own screen.
+  if (board_has_display()) {
+    if (!board_display_review_ready() || !wallet_ui_review_authorize()) {
+      wallet_signing_clear();
+      return WalletSigningError::NotApproved;
+    }
   }
   // A build that demands verified boot refuses to hand out signatures from an
   // unprotected device (secure boot and flash encryption both off).

@@ -15,18 +15,10 @@ T=1/APDU/SCP03 session, identity/OEF verification, sealed seed storage or usable
 non-exportable signing-key backend. `active_secure_element_profile()` remains
 MCU-only and cannot be promoted by a profile setter.
 
-`SecureElementPort.h` now defines the backend contract that a real driver has to
-satisfy, and the gate that enforces it: a backend must supply every operation,
-only one may be registered per boot, and a backend that reports a successful
-`open()` while `session_authenticated()` is still false is unregistered and the
-gate stays closed. `active_secure_element_profile()` returns the SE051C2HQ1
-capability description only while such a backend is authenticated, so nothing in
-the firmware can turn a part number into a custody claim. ISO 7816-3 CRC16/A,
-AES-128 and AES-CMAC are implemented and pinned to their published vectors
-because any SCP03 backend needs them; the SCP03 derivation/ICV layout and the
-T=1 over I2C framing are **not** written, because neither can be validated
-without the part and guessing them would produce a channel that only looks
-right. See [se051-plug-and-trust.md](security.md).
+Authenticated-channel lifecycle, Arduino transport and wallet custody are distinct.
+See [SE051 integration](se051-integration.md) for the implemented port, pinned NXP
+revision, tests and remaining requirements. Even a successful SCP03 handshake
+does not unlock the current plaintext MCU seed session.
 
 The target description now reflects SE051C2HQ1. NXP's
 [AN12973, Table 3](https://www.nxp.com/docs/en/application-note/AN12973.pdf)
@@ -170,95 +162,30 @@ if (!trust_signing_allowed(trust_state())) {
 `board_display_review_ready()`，也就是面板必须已经提交完这一帧；一个“批准”如果比它自己
 的屏幕活得久，就不再能签任何东西。
 
-### 还没有接上的部分（说清楚）
+### 接到哪里了
 
-`ReviewSeal` 已经在库里实现并自检，但 `WalletSigning` 的各 `begin_*` 还没有把各自的
-审阅文案交给它——那需要把 14 个链的显示字符串统一进一个结构。当前生效的是“帧已提交 +
-单次消费 + 过期”这三层，封条的逐行绑定仍是缺口，不是已完成项。
+`WalletUi.cpp` 在渲染审阅页时把**它真正写到屏上的每一行**（网络、每个输出的金额/地址/
+归属、手续费、合计、备注）连同 8 字节随机 nonce 做 SHA-256，得到封条，并在屏上显示
+`SEAL xxxxxxxx`。三种状态由 `TrustAnchor` 统一裁决：
 
+1. 面板报告这一帧提交完成（`board_display_review_ready()`）后才 `review_seal_mark_displayed()`；
+2. `wallet_signing_sign()` 在取私钥之前调用 `wallet_ui_review_authorize()`，未展示、已过期、
+   已用过一律拒绝；
+3. 授权即消费——**一次展示只允许一次签名**。
 
+14 条链共用同一个 `wallet_ui_show_transaction()` 出口，所以绑定不需要逐链实现；新增链只要
+走这个出口就自动被覆盖。自检覆盖：多一个尾随空格、两行换序、截断一行、换 nonce、过期、
+二次使用、未展示就授权。
 
-*Merged from docs/se051-plug-and-trust.md.*
+仍然缺的是**封条码与宿主侧的对照**：宿主拿不到设备屏上那 8 个字符，就无法向第三方证明
+“设备当时显示的就是这笔交易”。把封条码随签名一起回传是协议改动（手机链路与 CLI 都要改），
+没有做，也不假装做了。
 
-Status: **no backend is registered, so `secure_element_ready()` is false and the
-wallet cannot claim secure-element custody.** This page exists so the gap is a
-plan with acceptance criteria instead of a claim.
+## NXP SE051 集成
 
-The reference implementation most people reach for is NXP's
-[Plug & Trust middleware](https://github.com/NXP/plug-and-trust). It is
-separately licensed, it is not vendored in this repository, and its host stack
-is far larger than this firmware's entire crypto layer. Nothing below copies it;
-the goal is a small, auditable backend that satisfies the same wire protocol.
+接口实现、固定上游版本、故障测试与生产验收缺口统一记录在 [SE051 集成说明](se051-integration.md)。旧版关于认证成功即可激活 SE 托管的说明已撤回：认证通道不能证明派生和签名没有暴露 MCU 私钥。
 
-### What landed
-
-`SecureElementPort.h/.cpp`:
-
-| Piece | Verified by |
-| --- | --- |
-| ISO/IEC 7816-3 CRC16/A (poly 0x1021, init 0xFFFF) | check value `0x29B1` for `"123456789"` |
-| AES-128 forward cipher | FIPS-197 C.1 (`69c4e0d8…b4c55a`) |
-| AES-128-CMAC | RFC 4493 §4, all four message lengths |
-| Backend contract + gate | host self-tests: unregistered, incomplete, unauthenticated and authenticated paths |
-
-The gate is the part that matters for custody:
-
-- A backend must supply **all** of open, session_authenticated, sign_digest,
-  public_key and close, or registration fails.
-- Only one backend may be registered per boot.
-- If `open()` returns success while `session_authenticated()` is false, the
-  backend is **unregistered** and the gate stays closed. This is the exact shape
-  of "the card answered but the static keys were wrong", and it must never
-  produce a usable custody state.
-- `active_secure_element_profile()` returns the SE051C2HQ1 profile only while a
-  backend reports an authenticated session, so a profile setter cannot promote
-  hardware custody (there is a regression test for that in
-  `tests/host/chain/production_policy.cpp`).
-
-### What is deliberately not written yet
-
-| Missing piece | Why it is not here | Accept criteria |
-| --- | --- | --- |
-| SCP03 key derivation and ICV layout | The derivation-data layout and the command/response ICV conventions have to be validated against the licensed reference implementation or a real card; guessing them would produce a channel that looks right and fails in the field | Golden values for `INITIALIZE UPDATE` + `EXTERNAL AUTHENTICATE` from GPC's own test vectors or from a captured session on the target applet |
-| T=1 over I2C framing | NAD/PCB/LEN conventions and the EDC mode are interface-profile facts for this part, not something I can assert from memory | Loopback test on the board: `t1_encode` → card → `t1_decode`, plus abort/resync paths |
-| Applet command set (key generate, sign, delete) | This is the NXP applet's private API, not a public spec | Object IDs, key policy, access rules and the exact sign command documented and exercised on hardware |
-| Provisioning and SCP03 static keys | Per-device secrets; must never be in git, in chat or in a build log | Factory step with a sealed key store, `HEXWALLET_REQUIRE_SECURE_CUSTODY=1` build, and a provisioning log that records only key IDs |
-| Anti-rollback / sealed seed storage | Needs the applet's secure counter and file system | Test that a restored seed cannot reuse a QRL leaf index and that a wiped MCU cannot recover the seed from the card |
-
-Until every row is done, the shipped, tested position stays what the security
-review says: MCU-only derivation, `HEXWALLET_REQUIRE_SECURE_CUSTODY=1` refuses
-session generation/import, and no coin capability is promoted.
-
-### Wiring a backend (when the parts exist)
-
-1. Implement `SecureElementBackend` in a new translation unit, e.g.
-   `se051_backend.cpp`. Keep the static SCP03 keys in a sealed store, never in
-   `constexpr` arrays that end up in flash images.
-2. `open()` must: power/reset the card, read ATR, `INITIALIZE UPDATE`, verify
-   the card cryptogram, `EXTERNAL AUTHENTICATE`, require `0x9000`. Return a
-   short ASCII reason otherwise.
-3. `session_authenticated()` must re-check the channel, not cache a bool set at
-   open time, so a card reset or a failed MAC invalidates it.
-4. `sign_digest()` must reject digests the applet policy does not allow, and
-   must never return a signature when the card's status word is not `0x9000`.
-5. Call `secure_element_register_backend(&backend)` exactly once during boot,
-   before `secure_custody_backend_ready()` is consulted.
-6. `run_secure_element_self_tests()` must keep passing, and the production
-   policy binary must still refuse to open a session without the card.
-
-### Field rules
-
-- The card is the only secret store. The MCU never persists a seed when a
-  backend is registered; `HEXWALLET_ENABLE_SECRET_EXPORT` is already forced to 0
-  next to `HEXWALLET_REQUIRE_SECURE_CUSTODY`.
-- No network code exists in the firmware, and `tests/test_asset_coverage.py`
-  fails the build if a WiFi/HTTP/TLS header appears. Transaction data reaches
-  the device only through the local USB serial CLI or the NFC phone link.
-- Every signing decision is shown on the trusted display first. A card that
-  signs whatever it is handed is not a hardware wallet; the review layer is what
-  makes the SE useful, and it stays in MCU flash.
-
-## 硬件能力就绪度（由 `tools/hardware_readiness.py` 生成）
+## 历史硬件能力记录（原生成脚本已移除）
 
 *Merged from docs/hardware-readiness.md.*
 

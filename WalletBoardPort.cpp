@@ -1,4 +1,5 @@
 #include "WalletBoardPort.h"
+#include "Se051ArduinoPort.h"
 #include "WalletBoardPins.h"
 #include "EinkFrame.h"
 #include "SecureElementPort.h"
@@ -712,6 +713,16 @@ bool board_is_eink() {
   return board_display_kind() == DisplayKind::MonoEink;
 }
 
+bool board_partial_refresh_supported() {
+#if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+  // The native driver refuses partial updates until the board profile supplies a
+  // waveform LUT, so this answer is the one the UI should trust.
+  return s_epd_native.partial_supported();
+#else
+  return false;
+#endif
+}
+
 uint8_t board_display_colors() {
 #if defined(HEXWALLET_EPD_COLORS)
   return static_cast<uint8_t>(HEXWALLET_EPD_COLORS);
@@ -837,30 +848,20 @@ bool secure_element_bus_ready() {
 }  // namespace
 
 bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size) {
-  if (out == nullptr || size == nullptr || capacity < 2) return false;
-  *size = 0;
-  if (!secure_element_bus_ready()) return false;
-  const size_t take = capacity < 33 ? capacity : 33;
-  const size_t received = Wire1.requestFrom(kSecureElementAddress,
-                                            static_cast<uint8_t>(take));
-  if (received < 2 || received > take) return false;
-  for (size_t index = 0; index < received; ++index) {
-    out[index] = static_cast<uint8_t>(Wire1.read());
-  }
-  if (!iso7816_atr_valid(out, received)) return false;
-  *size = received;
-  return true;
+  if (size != nullptr) *size = 0;
+  if (out != nullptr) secure_zero(out, capacity);
+  // SE051 ATR is obtained with NXP's T=1 reset exchange, not an arbitrary
+  // Wire.requestFrom(). Keep this legacy diagnostic unsupported until the
+  // session owner supplies its captured protocol response.
+  return false;
 }
 
 SecureElementProbeState board_secure_element_probe() {
+  if (se051_transport_in_use()) return SecureElementProbeState::PresentUnverified;
   if (!secure_element_bus_ready()) return SecureElementProbeState::NotConfigured;
-  uint8_t atr[33];
-  size_t size = 0;
-  if (!board_secure_element_atr(atr, sizeof(atr), &size)) {
-    return SecureElementProbeState::NoResponse;
-  }
-  secure_zero(atr, sizeof(atr));
-  return SecureElementProbeState::PresentUnverified;
+  Wire1.beginTransmission(kSecureElementAddress);
+  return Wire1.endTransmission() == 0 ? SecureElementProbeState::PresentUnverified
+                                     : SecureElementProbeState::NoResponse;
 }
 
 #if defined(HEXWALLET_CAMERA_SCCB_SDA) && defined(HEXWALLET_CAMERA_SCCB_SCL)

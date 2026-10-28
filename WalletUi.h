@@ -56,6 +56,16 @@ void wallet_ui_show_catalog();
 bool wallet_ui_show_address(const char *network, const char *address,
                             const char *path);
 void wallet_ui_show_transaction(const WalletUiTransactionReview &review);
+
+// Trusted-verification tie between the panel and the signer.
+//
+// wallet_ui_show_transaction() hashes the exact strings it renders into a review
+// seal and shows its 8-character code under the review. The seal is armed only
+// after the panel reports the frame committed, and wallet_ui_review_authorize()
+// consumes it exactly once: displayed, fresh, unused. An approval that outlives
+// its own screen therefore cannot sign anything.
+bool wallet_ui_review_seal_code(char out[9]);
+bool wallet_ui_review_authorize();
 void wallet_ui_show_pairing(uint32_t code, const char *fingerprint);
 void wallet_ui_service();
 

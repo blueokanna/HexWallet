@@ -3,7 +3,7 @@
 # run_qr_code_self_tests() proves the encoder and its own reader agree; it cannot
 # prove a scanner would accept the symbol. This check compiles QrCode.cpp and
 # nayuki/QR-Code-generator (pinned commit) into one binary and compares every
-# module of versions 1-10 x level L/M x mask 0-7 against it.
+# module of versions 1-10 x levels L/M/Q/H x masks 0-7 against it.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File tests/host/qr_cross_check.ps1
@@ -23,26 +23,31 @@ if (-not (Test-Path $vcvars)) {
   exit 2
 }
 
-if (-not (Test-Path (Join-Path $reference "cpp\qrcodegen.cpp"))) {
+$referenceCpp = Join-Path $reference "cpp\qrcodegen.cpp"
+if (-not (Test-Path $referenceCpp)) {
   New-Item -ItemType Directory -Force -Path $reference | Out-Null
-  # git writes progress to stderr; with $ErrorActionPreference = "Stop" that
-  # would surface as a terminating error record, so silence it explicitly.
-  git -C $reference init --quiet 2>$null
-  git -C $reference remote add origin https://github.com/nayuki/QR-Code-generator.git 2>$null
-  git -C $reference fetch --depth 1 origin $referenceCommit 2>$null | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "failed to fetch the reference QR encoder" }
-  git -C $reference checkout --detach FETCH_HEAD --quiet 2>$null
-  if ($LASTEXITCODE -ne 0) { throw "failed to check out the reference QR encoder" }
+  if (-not (Test-Path (Join-Path $reference ".git"))) {
+    cmd /c "git -C `"$reference`" init --quiet" | Out-Null
+  }
+  cmd /c "git -C `"$reference`" fetch --depth 1 https://github.com/nayuki/QR-Code-generator.git $referenceCommit" | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "ERROR: failed to fetch the reference QR encoder"
+    exit 1
+  }
+  cmd /c "git -C `"$reference`" checkout --detach FETCH_HEAD --quiet" | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "ERROR: failed to check out the reference QR encoder"
+    exit 1
+  }
 }
 
 $outDir = Join-Path $PSScriptRoot "obj-qr"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $source = Join-Path $PSScriptRoot "qr_cross_check.cpp"
-$refCpp = Join-Path $reference "cpp\qrcodegen.cpp"
 $exe = Join-Path $outDir "qr_cross_check.exe"
 $log = Join-Path $outDir "build.log"
 $command = "`"$vcvars`" >nul 2>&1 && cl /nologo /std:c++17 /EHsc /O2 " +
-           "/I`"$root`" /I`"$reference\cpp`" `"$source`" `"$refCpp`" /Fe:`"$exe`" /Fo:`"$outDir\\`""
+           "/I`"$root`" /I`"$reference\cpp`" `"$source`" `"$referenceCpp`" /Fe:`"$exe`" /Fo:`"$outDir\\`""
 cmd /c $command *> $log
 if ($LASTEXITCODE -ne 0) {
   Write-Output "QR CROSS CHECK: build failed"
@@ -51,8 +56,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & $exe
-$verdict = $LASTEXITCODE
-if ($verdict -ne 0) {
+if ($LASTEXITCODE -ne 0) {
   Write-Output "QR CROSS CHECK: FAILED"
   exit 1
 }

@@ -77,7 +77,13 @@ namespace hexwallet
   // Single use: a second call fails, so one displayed review authorizes one
   // signature.
   bool review_seal_authorize(ReviewSeal *seal, const char *const *lines,
-                             size_t line_count, uint32_t now_ms);
+                           size_t line_count, uint32_t now_ms);
+
+// Same authorization rules, for callers whose rendered text is immutable and
+// owned by them (the LVGL labels). Skips the re-hash: the digest was taken from
+// exactly those labels when the screen was built, and the screen cannot mutate
+// them afterwards. Displayed / fresh / unused are still enforced.
+bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now_ms);
 
   // Eight uppercase hex characters shown under the review and comparable on the
   // host side.

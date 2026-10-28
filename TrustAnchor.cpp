@@ -199,7 +199,17 @@ namespace hexwallet
     return true;
   }
 
-  void review_seal_code(const ReviewSeal &seal, char out[9])
+  bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now_ms) {
+  if (seal == nullptr || !seal->displayed || seal->consumed) return false;
+  if (static_cast<int32_t>(now_ms - seal->expires_ms) >= 0) {
+    seal->consumed = true;
+    return false;
+  }
+  seal->consumed = true;
+  return true;
+}
+
+void review_seal_code(const ReviewSeal &seal, char out[9])
   {
     static const char kHex[] = "0123456789ABCDEF";
     for (size_t index = 0; index < 4; ++index)
@@ -266,7 +276,20 @@ namespace hexwallet
     passed = !review_seal_authorize(&swapped, lines_b, 3, 1200) && passed;
     passed = !review_seal_authorize(&swapped, same, 3, 1200) && passed;
 
-    // The short code is the first four digest bytes, so it changes with the seal.
+    // The rendered-text variant enforces the same clock and single-use rules.
+  ReviewSeal rendered = {};
+  passed = review_seal_build(&rendered, kNonce, lines_a, 3, 1000, 200) && passed;
+  passed = !review_seal_authorize_rendered(&rendered, 1100) && passed;  // not armed
+  review_seal_mark_displayed(&rendered);
+  passed = review_seal_authorize_rendered(&rendered, 1100) && passed;
+  passed = !review_seal_authorize_rendered(&rendered, 1100) && passed;  // used once
+  ReviewSeal stale = {};
+  passed = review_seal_build(&stale, kNonce, lines_a, 3, 1000, 100) && passed;
+  review_seal_mark_displayed(&stale);
+  passed = !review_seal_authorize_rendered(&stale, 1200) && passed;
+  passed = !review_seal_authorize_rendered(&stale, 1050) && passed;  // burned
+
+  // The short code is the first four digest bytes, so it changes with the seal.
     char code_a[9] = {};
     char code_b[9] = {};
     review_seal_code(seal, code_a);

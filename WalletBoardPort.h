@@ -26,6 +26,9 @@ bool board_has_display();
 bool board_has_touch();
 bool board_is_color();
 bool board_is_eink();
+// True when the panel can update a sub-rectangle without a full refresh.
+// E-paper only: it is what makes the companion animation affordable.
+bool board_partial_refresh_supported();
 // 1 for monochrome e-paper, 3 for black/white/red, 4 for black/white/red/
 // yellow. The panel driver class must match this value; the fallback is 1.
 uint8_t board_display_colors();
@@ -57,12 +60,9 @@ uint16_t board_battery_millivolts();
 bool board_has_user_button();
 bool board_user_button_pressed();
 
-// SE05x presence probe. "PresentUnverified" now requires a well-formed ATR, not
-// just an I2C ACK: an ACK proves something sits at the address, an ATR with a
-// valid TA/TB/TC/TD chain and TCK proves it is a smart card. Neither is proof
-// that the part is the requested SE051C2HQ1, that SCP03 was established, or
-// that a key was imported, so the wallet keeps the MCU-only custody profile
-// until a real applet driver verifies the device.
+// Presence only: an I2C ACK or an open SDK transport, never device identity,
+// authenticated channel or key-custody attestation. Does not touch an open
+// SDK transport. Run diagnostics on the same serialized worker as SE sessions.
 enum class SecureElementProbeState : uint8_t {
   NotConfigured = 0,
   NoResponse,
@@ -71,8 +71,8 @@ enum class SecureElementProbeState : uint8_t {
 
 SecureElementProbeState board_secure_element_probe();
 
-// Reads the answer-to-reset for diagnostics. Returns false when the bus is not
-// configured or the card did not answer with a structurally valid ATR.
+// Legacy diagnostic, unsupported. ATR must come from NXP's T=1 reset exchange.
+// Clears outputs and returns false without consuming bytes on the SE bus.
 bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size);
 
 // OV9281 presence probe over SCCB. Returns NotConfigured until a board profile
