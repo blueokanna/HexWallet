@@ -66,7 +66,7 @@ class CoverageTests(unittest.TestCase):
 
     def test_firmware_does_not_import_network_clients(self):
         # Dependency guard, not a claim that all possible networking APIs are caught.
-        forbidden=re.compile(r'^\s*#\s*include\s*[<\"](?:WiFi|HTTPClient|Ethernet|WebServer|NetworkClient|esp_http_client|lwip/)',re.M)
+        forbidden=re.compile(r'^\s*#\s*include\s*[<\"](?:WiFi|HTTPClient|Ethernet|WebServer|WiFiClient|WiFiUdp|HTTPUpdate|WebSocket|NetworkClient|esp_http_client|esp_tls|mbedtls/ssl|lwip/)',re.M)
         for pattern in ('*.cpp','*.h','*.ino'):
             for path in ROOT.glob(pattern):
                 self.assertIsNone(forbidden.search(path.read_text(encoding='utf8')),str(path))

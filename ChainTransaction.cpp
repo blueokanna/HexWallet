@@ -29,6 +29,12 @@
 namespace hexwallet {
 namespace {
 
+// The historical SCALE codec has no authenticated runtime metadata, so it must
+// never be compiled into a build that promises production custody.
+#if defined(HEXWALLET_REQUIRE_SECURE_CUSTODY) && defined(HEXWALLET_LEGACY_SUBSTRATE_TEST_ONLY)
+#error "Historical Substrate codec is test-only and cannot be part of a production custody build."
+#endif
+
 struct FamilyMap {
   ChainFamily family;
   const char *network_id;

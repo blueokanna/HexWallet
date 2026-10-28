@@ -53,6 +53,25 @@ Ethereum、BSC、Polygon、Arbitrum 和 KAIA 的 ERC-721/1155 唯一 selector �
 | --- | --- | --- |
 | QUBIC | Qubic 身份是 FourQ 曲线 + KangarooTwelve，不是 Ed25519/SHA3。旧实现用 Ed25519 公钥的 SHA3/base26 结果冒充地址，会产出不可花费的身份 | 网络 profile、`AddressEncoding::QubicBase26`、base26 编码器和自检向量已整体删除；`find_network_profile("qubic")` 必须返回 `nullptr`（生产策略测试断言）。没有 FourQ/K12 实现与独立向量前不得重新登记 |
 | FLUX | 2026-10-23 的 MiningPoolStats 快照把 FLUX 归入 GRAVEYARD；项目规则禁止 GRAVEYARD 身份进入生产注册表（与 MSR 同样处理） | 目录条目、网络 profile、ZIP-243 签名策略与分支 ID 已移除。ZIP-243 引擎仍由 ZEC 使用并有独立向量；FLUX 在 `tools/coin_coverage_report.py` 中保留为 REQUESTED，报告显示 `ABSENT` |
+| MSR | Masari 已不在活跃列表 | 仅保留底层算法回归材料；无 profile、无目录条目、无签名入口 |
+
+`tests/test_graveyard.py` 现在同时检查 `WalletNetworks.cpp`、`WalletCatalog.cpp`、
+三个生成文件与 `tools/fork_registry.json`，并断言 FLUX/MSR/QUBIC 不会回流；矿池表
+的每一行还必须指向目录里真实存在的条目，否则测试失败。
+
+## 只登记地址的链：还差什么
+
+DOT/KSM、XCH、QRL 只登记地址。把它们变成“可发送”，需要下面这些**缺一不可**的
+工程件；只加一条 `SIGN` 标记会让用户在不知情的情况下签出无效交易，所以不做。
+
+| 链 | 缺的东西 | 验收标准 |
+| --- | --- | --- |
+| DOT / KSM | 可信 runtime metadata：需要在构建期固定一份 metadata 及其哈希，并要求签名载荷携带 `CheckMetadataHash`（mode 1）与该哈希一致；同时固定 spec_version 与交易版本 | 设备能拒绝任何 `spec_version`/metadata 哈希不符的载荷；`transfer_keep_alive` 与 `transfer_allow_death` 的字段有 upstream 向量；mortal era 与 tip 的显示经过审阅 |
+| XCH | BLS12-381 私密标量的常数时间运算（当前 G1/G2 使用变时 MPI），以及 AGG_SIG_ME 与输出绑定的完整覆盖（已完成） | 常数时间实现的独立评审 + 侧信道测试；签名只对屏上显示的 `CREATE_COIN` 生效 |
+| QRL | XMSS 一次性签名的持久化预留与防回滚：需要至少两个独立存储槽 + 单调计数器，能抵抗掉电与种子恢复后的索引复用 | 掉电测试（写一半断电）、恢复测试（同一种子重新导入必须从高水位继续或拒绝签名）、以及 OTS 索引在屏上显示 |
+
+这三项都不是“再接一条链”，而是各自独立的密码学/存储工程；在没有硬件与上游
+向量的情况下写出来只会是“看起来支持”。
 
 每条链仍需确定支持的交易类型、派生路径、网络域、序列化规则、签名算法、设备显示字段、费用/重放策略和上游独立向量，再完成链路集成及节点验收。不能仅增加 ticker、复用 Bitcoin sighash 或套用 EVM profile。
 

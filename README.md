@@ -9,6 +9,7 @@ The public wallet catalog is filtered by the configured signing policies. This f
 ## Security model
 
 - BIP39/BIP32 derivation and all signing happen on the device. Secret export is disabled by default (`HEXWALLET_ENABLE_SECRET_EXPORT=0`).
+- Secure-element custody is a contract, not a claim: `SecureElementPort.h` requires every backend operation, allows one backend per boot, and unregisters a backend that reports success without an authenticated card session. No backend ships today, so the SE051C2HQ1 profile never becomes active and `HEXWALLET_REQUIRE_SECURE_CUSTODY=1` refuses to open a wallet. See [docs/se051-plug-and-trust.md](docs/se051-plug-and-trust.md).
 - Every signing request is parsed into a bounded review structure and displayed on the trusted UI. Phone-link signing requires a single-use on-device approval with a 120-second lifetime.
 - Bitcoin PSBT inputs must commit to wallet-owned UTXOs. Zcash payloads must carry every prevout value/script, and the signer re-derives and checks each P2PKH hash. Kaspa payloads are validated against BIP340 keys and KIP-0009 mass.
 - Fee caps, amount bounds, duplicate-input checks, canonical encoding checks, and explicit refusal of unsupported transaction families are enforced before ECDSA/Schnorr.
@@ -84,6 +85,7 @@ Generated fork profiles are admitted only after `tools/verify_utxo_sighash.py` c
 | `WalletSigning` | Shared on-device review + approve + sign session |
 | `WalletUi` | Trusted-display transaction review |
 | `WalletCustody` | MCU vs secure-element capability policy |
+| `SecureElementPort` | SE051 backend contract, custody gate, ISO 7816-3 CRC16/A, AES-128, AES-CMAC |
 | `BitcoinTransaction` | PSBT v0, legacy/BIP143/fork-id sighash, serialization |
 | `EvmTransaction` | RLP, EIP-155/EIP-1559, token-call review and signing |
 | `KaspaTransaction` | BLAKE2b sighash, KIP-0009 mass, BIP340 signing, protobuf |
@@ -179,6 +181,7 @@ tokens=pass
 link-crypto=pass
 wallet-link=pass
 nfc-apdu=pass
+secure-element=pass
 ```
 
 `run_zcash_sighash_self_tests()` checks the published ZIP-243 transparent vector and selected `zcash-test-vectors` rows covering shielded hashes, JoinSplits and ALL/NONE/SINGLE. `run_zcash_transaction_self_test()` runs the full ECDSA/scriptSig/round-trip path on the device.

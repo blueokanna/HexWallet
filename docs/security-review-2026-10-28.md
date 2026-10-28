@@ -11,6 +11,19 @@ T=1/APDU/SCP03 session, identity/OEF verification, sealed seed storage or usable
 non-exportable signing-key backend. `active_secure_element_profile()` remains
 MCU-only and cannot be promoted by a profile setter.
 
+`SecureElementPort.h` now defines the backend contract that a real driver has to
+satisfy, and the gate that enforces it: a backend must supply every operation,
+only one may be registered per boot, and a backend that reports a successful
+`open()` while `session_authenticated()` is still false is unregistered and the
+gate stays closed. `active_secure_element_profile()` returns the SE051C2HQ1
+capability description only while such a backend is authenticated, so nothing in
+the firmware can turn a part number into a custody claim. ISO 7816-3 CRC16/A,
+AES-128 and AES-CMAC are implemented and pinned to their published vectors
+because any SCP03 backend needs them; the SCP03 derivation/ICV layout and the
+T=1 over I2C framing are **not** written, because neither can be validated
+without the part and guessing them would produce a channel that only looks
+right. See [se051-plug-and-trust.md](se051-plug-and-trust.md).
+
 The target description now reflects SE051C2HQ1. NXP's
 [AN12973, Table 3](https://www.nxp.com/docs/en/application-note/AN12973.pdf)
 lists ECDSA/Koblitz and standard Ed25519. This does not mean Cardano expanded

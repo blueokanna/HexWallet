@@ -28,7 +28,7 @@
 | XMR | host-proposed tx review with amount binding | SOURCE_MATCH | CryptoNoteReview.cpp:540 |
 | XMR | one-time secret derived per spent output | SOURCE_MATCH | CryptoNoteReview.cpp:467 |
 | XMR | view-key export command | NOT_FOUND | — |
-| XMR | spend key zeroized after signing | SOURCE_MATCH | WalletSigning.cpp:1062 |
+| XMR | spend key zeroized after signing | SOURCE_MATCH | WalletSigning.cpp:1061 |
 | Platform | second core task pinned | SOURCE_MATCH | WalletWorker.cpp:140 |
 | Platform | PSRAM allocator available | SOURCE_MATCH | WalletBoardPort.cpp:45 |
 | Platform | decoy matrix / tx context placed in PSRAM | NOT_FOUND | — |

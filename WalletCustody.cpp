@@ -1,5 +1,7 @@
 #include "WalletCustody.h"
 
+#include "SecureElementPort.h"
+
 #include <string.h>
 
 namespace hexwallet {
@@ -158,7 +160,9 @@ const SecureElementProfile &target_secure_element_profile() {
   return kSe051C2;
 }
 const SecureElementProfile &active_secure_element_profile() {
-  return kSoftwareOnly;
+  // A part description is not custody. The SE051 profile only becomes active
+  // once a registered backend reports an authenticated card session.
+  return secure_element_ready() ? kSe051C2 : kSoftwareOnly;
 }
 
 void set_active_secure_element_profile(const SecureElementProfile *profile) {
@@ -168,7 +172,7 @@ void set_active_secure_element_profile(const SecureElementProfile *profile) {
 }
 
 bool secure_custody_backend_ready() {
-  return false;
+  return secure_element_ready();
 }
 
 bool run_custody_self_tests() {

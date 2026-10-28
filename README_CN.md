@@ -83,9 +83,19 @@ BIP39 社区列表和 miningpoolstats 都不是协议规范：其中包含大量
 
 `python tools/generate_mining_catalog.py` 生成随固件发布的 `WalletMiningCatalog.inc`，只保留能解析到完整签名钱包的行。未支持条目保留在 `tools/miningpoolstats_coin_list.json` 供后续按家族扩展，不进入固件。CLI 提供 `mining stats`、`mining list [ASIC|GPU|CPU|HDD] [offset]` 和 `mining show <symbol>`。
 
-### SE050 托管边界
+### SE050 / SE051C2HQ1 托管边界
 
-`WalletCustody` 把“哪些密钥能放进安全芯片”写成代码，而不是宣传语。默认的活动配置是纯 MCU；`wallet custody <id>` 会先打印 SE050 I2C 探测结果（`not-configured`、`no-response`、`present-unverified`）。只有在板级移植建立 SCP03 并认证 applet 后调用 `set_active_secure_element_profile()`，才会显示 secp256k1/ECDSA 可以由 SE 托管；仅检测到 0x48 有器件不会启用“密钥在 SE 内”的声明。保守的 SE050C1H1 目标配置只声明 secp256k1、ECDSA 和 seed 封装：BIP32 派生仍在 MCU 完成，secp256k1 子密钥经 SCP03 导入后可以留在 applet 内做 ECDSA。Kaspa 的 BIP340 Schnorr 以及内部保留的 Ed25519/BLS/XMSS 原语都不是 SE050 原语，私钥只能在 MCU RAM 中派生并在使用后清零。需要解密到 RAM 的 seed 只受 MCU 保护；SE 提升的是静态密钥和 ECDSA 隔离，不等于“所有私钥都由 SE050 保护”。
+`WalletCustody` 把“哪些密钥能放进安全芯片”写成代码，而不是宣传语。默认的活动配置是纯 MCU；`wallet custody <id>` 会先打印安全芯片 I2C 探测结果（`not-configured`、`no-response`、`present-unverified`）。
+
+`SecureElementPort.h` 定义了真正的后端契约：`open`、`session_authenticated`、`sign_digest`、`public_key`、`close` 必须全部提供，每次启动只允许注册一个后端；如果后端在 `open()` 返回成功但 `session_authenticated()` 仍为假（这正是静态密钥不匹配、卡片被复位时的情形），后端会被立即注销，托管门保持关闭。`active_secure_element_profile()` 只有在这样的后端完成认证后才返回 SE051C2HQ1 配置，因此“器件型号”永远无法被提升为“硬件托管”。
+
+当前**没有任何后端注册**，所以 `secure_element_ready()` 为假，`HEXWALLET_REQUIRE_SECURE_CUSTODY=1` 会拒绝生成/导入会话与装载种子。已实现并用公开向量固定的只有任何 SCP03 后端都需要的地基：ISO/IEC 7816-3 CRC16/A（校验值 `0x29B1`）、FIPS-197 AES-128（`69c4e0d8…`）、RFC 4493 AES-CMAC（四组长度）。**没有**写 SCP03 密钥派生/ICV 布局与 T=1 over I2C 帧格式——这两者必须对着真实卡片或许可的参考实现验证，凭记忆写出来只会得到“看起来能通”的通道。逐项缺口与验收条件见 [docs/se051-plug-and-trust.md](docs/se051-plug-and-trust.md)。
+
+需要解密到 RAM 的 seed 仍然只受 MCU 保护；即使后端就绪，BIP32/SLIP-0010 派生仍在 MCU 内完成，SE 提升的是静态密钥与签名隔离，不等于“所有私钥都由安全芯片保护”。
+
+### GRAVEYARD 身份
+
+MiningPoolStats 快照（`tools/miningpoolstats_graveyard.json`，记录抓取日期）中标注为 GRAVEYARD 的身份不允许进入任何面向用户的注册表。FLUX 已按此规则撤回（网络 profile、目录条目、ZIP-243 分支 ID 全部移除，ZIP-243 引擎保留给 ZEC）；MSR 与 QUBIC 同样不得回流。`tests/test_graveyard.py` 会逐行检查 `WalletNetworks.cpp`、`WalletCatalog.cpp`、三个生成文件与 `tools/fork_registry.json`，并校验矿池表每一行都指向目录里真实存在的条目。
 
 ## 手机 App 连接（NFC / USB）
 
