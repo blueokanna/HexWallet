@@ -35,7 +35,9 @@ This restriction is tested in a separately compiled production-policy executable
   displayed CREATE_COIN outputs. Device address derivation is also blocked:
   current G1/G2 secret arithmetic uses variable-time MPI operations.
 - Qubic's old Ed25519/SHA3 substitute cannot produce native FourQ/K12 identities.
-  It now fails rather than returning a plausible-looking address. See the
+  The profile, `AddressEncoding::QubicBase26` case, base26 encoder and its
+  self-test vector were removed outright; the production-policy test asserts
+  that `find_network_profile("qubic")` is `nullptr`. See the
   [Qubic technical whitepaper](https://whitepaper.qubic.org/file/qubic-whitepaper.pdf).
 - QRL legacy XMSS public derivation is compared against qrllib. Index zero
   preserves the original v1 wallet tree; nonzero tree indices use a separate v2

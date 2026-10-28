@@ -99,7 +99,6 @@ const CatalogSeed kCatalog[] = {
   { "dgb84", "DGB", "DigiByte Native SegWit", 20, WalletCapabilityAddress, "dgb84", "P2WPKH address and BIP143 signing" },
   { "nmc", "NMC", "Namecoin", 7, WalletCapabilityAddress, "nmc", "P2PKH address and Bitcoin-sighash signing" },
   { "zec", "ZEC", "Zcash", 133, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zec", "transparent t1/t3 address; v4 transparent ZIP-243 review and signing (NU6.2)" },
-  { "flux", "FLUX", "Flux", 19167, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "flux", "transparent t1/t3 v4 ZIP-243 transfer; no shielded or FluxNode transactions" },
   { "firo", "FIRO", "Firo", 136, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "firo", "transparent P2PKH address and Bitcoin-sighash PSBT signing; no privacy (Lelantus/Spark) transactions" },
   { "qtum", "QTUM", "Qtum", 2301, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "qtum", "P2PKH address and Bitcoin/BIP143 PSBT signing; no Qtum EVM contract calls" },
   { "vet", "VET", "VeChain", 818, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vet", "native VET transfer; one clause, empty data, mainnet chain tag; no VIP-191 delegation or contract calls" },

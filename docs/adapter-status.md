@@ -25,7 +25,6 @@
 | ICX | 独立 `icx_sendTransaction` canonical 序列化、SHA3-256、secp256k1 recoverable 签名 | 仅原生 ICX 转账；无 SCORE 调用；nid/nonce/timestamp 由手机提供且需节点校验。见 [erg-xch-review-binding.md](erg-xch-review-binding.md) |
 | DOT / KSM | Ed25519 SS58 地址；生产签名入口关闭 | 历史 SCALE 编解码保留测试；没有可信 runtime metadata / signed extensions 校验，不能声明当前主网转账可用 |
 | DCR | 独立 BLAKE-256、legacy prefix/witness sighash、P2PKH 地址、secp256k1 签名 | 仅单输入透明 P2PKH 转账；无 stake ticket、treasury、mix。见 [erg-xch-review-binding.md](erg-xch-review-binding.md) |
-| FLUX | 复用 Zcash v4 透明 ZIP-243 引擎，分支 ID `0x76b809bb`、SLIP-0044 19167、t1/t3 地址 | 仅透明 UTXO；无 shielded、FluxNode 特殊交易 |
 | CKB | Molecule `RawTransaction`、`ckb-default-hash` BLAKE2b、SECP256K1/blake160 lock、recoverable 签名 | 仅单输入、1–2 个输出、无 type script；无 DAO/UDT。见 [erg-xch-review-binding.md](erg-xch-review-binding.md) |
 | SUI | 独立 BCS split-gas 原生 SUI 转账、Ed25519 地址与签名；真实固件代码通过官方 SDK 对照 | 无 Move 调用、赞助交易或代币；真机与节点验收待完成。见 [sui-filecoin-signing.md](sui-filecoin-signing.md) |
 | FIL | 修正 f1 地址编码；独立 CBOR `Send`、CID 签名、f1 发送方；真实固件代码通过 SDK 对照 | f0/f1/f3 接收方；无 actor 调用、BLS 签名；真机与节点验收待完成。见 [sui-filecoin-signing.md](sui-filecoin-signing.md) |
@@ -46,7 +45,14 @@ Ethereum、BSC、Polygon、Arbitrum 和 KAIA 的 ERC-721/1155 唯一 selector �
 
 ## 尚未完成的独立适配器
 
-新增转账子集：SC v2 单输入 PolicyPublicKey、XEM 原生 v1 transfer、ICP 固定 ledger transfer、Flow EVM 原生转账、Ethereum LSK ERC-20。它们均不等于全功能链适配；Flow Cadence、旧 Lisk L1、多签、staking、任意合约等仍未接入。DOT/KSM、ERG、XCH 不准入生产签名。详细格式及证据见 [native-transfer-adapters.md](native-transfer-adapters.md)。
+新增转账子集：SC v2 单输入 PolicyPublicKey、XEM 原生 v1 transfer、ICP 固定 ledger transfer、Flow EVM 原生转账、Ethereum LSK ERC-20。它们均不等于全功能链适配；Flow Cadence、旧 Lisk L1、多签、staking、任意合约等仍未接入。DOT/KSM 与 XCH 不准入生产签名（ERG 的 P2PK 路径已准入）。详细格式及证据见 [native-transfer-adapters.md](native-transfer-adapters.md)。
+
+## 已撤回或从未成立的准入
+
+| 名称 | 原因 | 当前状态 |
+| --- | --- | --- |
+| QUBIC | Qubic 身份是 FourQ 曲线 + KangarooTwelve，不是 Ed25519/SHA3。旧实现用 Ed25519 公钥的 SHA3/base26 结果冒充地址，会产出不可花费的身份 | 网络 profile、`AddressEncoding::QubicBase26`、base26 编码器和自检向量已整体删除；`find_network_profile("qubic")` 必须返回 `nullptr`（生产策略测试断言）。没有 FourQ/K12 实现与独立向量前不得重新登记 |
+| FLUX | 2026-10-23 的 MiningPoolStats 快照把 FLUX 归入 GRAVEYARD；项目规则禁止 GRAVEYARD 身份进入生产注册表（与 MSR 同样处理） | 目录条目、网络 profile、ZIP-243 签名策略与分支 ID 已移除。ZIP-243 引擎仍由 ZEC 使用并有独立向量；FLUX 在 `tools/coin_coverage_report.py` 中保留为 REQUESTED，报告显示 `ABSENT` |
 
 每条链仍需确定支持的交易类型、派生路径、网络域、序列化规则、签名算法、设备显示字段、费用/重放策略和上游独立向量，再完成链路集成及节点验收。不能仅增加 ticker、复用 Bitcoin sighash 或套用 EVM profile。
 

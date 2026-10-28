@@ -800,8 +800,7 @@ void show_zcash_review(const ZcashSigningRequest &request) {
   snprintf(fee, sizeof(fee), "%llu.%08lu ZEC",
            static_cast<unsigned long long>(request.fee / kZcashZatsPerZec),
            static_cast<unsigned long>(request.fee % kZcashZatsPerZec));
-  show_review(strcmp(request.chain.network_id, "flux") == 0 ? "FLUX" : "ZCASH",
-              request.fee, 0, fee, outputs, count);
+  show_review("ZCASH", request.fee, 0, fee, outputs, count);
 }
 
 bool show_cryptonote_review(const CryptoNoteSigningState &request) {

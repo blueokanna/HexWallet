@@ -35,11 +35,6 @@ namespace hexwallet
     bool base32_encode(const uint8_t *data, size_t size, char *out, size_t out_size,
                        bool lowercase, bool pad);
 
-    // Qubic identity: base26 of a big-endian digest with alphabet
-    // "123456789abcdefghijkmnopqrstuvwxyz" (no 0/l/o). Variable length <= 60.
-    bool qubic_base26_encode(const uint8_t *digest, size_t digest_size, char *out,
-                             size_t out_size);
-
     // CashAddr (bitcoin-cash.info spec): prefix ':' payload with poly-mod checksum.
     // type_bits is 0 for P2PKH and 8 for P2SH (also << 3 per the spec layout is NOT
     // applied here; type_bits already carries the shifted value, e.g. 0x00/0x08).

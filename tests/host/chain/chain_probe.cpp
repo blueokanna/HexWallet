@@ -99,15 +99,17 @@ int main(int argc, char **argv) {
     return error == EvmTransactionError::Ok ? 0 : 1;
   }
 
-  if (strcmp(argv[1], "flux") == 0) {
+  const NetworkProfile *zcash_network = find_network_profile(argv[1]);
+  if (zcash_network != nullptr &&
+      zcash_network->encoding == AddressEncoding::ZcashTransparent) {
     if (!payload_size) return 0;
-    const NetworkProfile *flux = find_network_profile("flux");
     const ZcashNetworkPolicy *zcash_policy =
-        find_zcash_network_policy("flux");
-    if (flux == nullptr || zcash_policy == nullptr) return 1;
+        find_zcash_network_policy(zcash_network->id);
+    if (zcash_policy == nullptr) return 1;
     const ZcashChainParams chain = {
-        flux->id, flux->alt_p2pkh_version, flux->alt_p2sh_version,
-        zcash_policy->branch_id, flux->derivation_coin_type};
+        zcash_network->id, zcash_network->alt_p2pkh_version,
+        zcash_network->alt_p2sh_version, zcash_policy->branch_id,
+        zcash_network->derivation_coin_type};
     ZcashSigningRequest request = {};
     ZcashError error = zcash_parse_review_payload(payload, payload_size, chain,
                                                   &request);
@@ -117,6 +119,7 @@ int main(int argc, char **argv) {
            static_cast<unsigned long long>(request.fee),
            static_cast<unsigned long long>(request.input_total),
            static_cast<unsigned long long>(request.output_total));
+    printf("recipient=%s\n", request.outputs[0].address);
     hex("request_hash", request.request_hash, 32);
     uint8_t output[kZcashMaxTransactionSize] = {};
     size_t output_size = sizeof(output);

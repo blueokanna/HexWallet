@@ -408,16 +408,6 @@ namespace hexwallet
     return ok ? WalletError::Ok : WalletError::BufferTooSmall;
   }
 
-  WalletError address_qubic(const uint8_t public_key[32], char *out,
-                            size_t out_size)
-  {
-    (void)public_key;
-    if (out != nullptr && out_size != 0) out[0] = '\0';
-    // FourQ/K12 identity derivation is not implemented. Never return a
-    // plausible-looking address from an unrelated curve/hash combination.
-    return WalletError::InvalidArgument;
-  }
-
   WalletError address_filecoin(const uint8_t public_key[kUncompressedPublicKeySize],
                                char *out, size_t out_size)
   {
@@ -983,7 +973,6 @@ namespace hexwallet
         0x22,
     };
     passed = selftest_report("kaspa official", kaspa_bech32_encode("kaspa", 0, kKaspaOfficial, 32, address, sizeof(address)) && strcmp(address, "kaspa:qp0l70zd5x85ttwd6jv7g3s3a8llzj96d8dncn4zmhv4tlzx5k2jyqh70xmfj") == 0) && passed;
-    passed = selftest_report("qubic unsupported", address_qubic(kEdPk, address, sizeof(address)) == WalletError::InvalidArgument && address[0] == '\0') && passed;
     // Zondax filecoin-signing-tools 2.4.3, keyRecover(private key 1, false).
     passed = selftest_report("filecoin", address_filecoin(kPkOneUncompressed, address, sizeof(address)) == WalletError::Ok && strcmp(address, "f1wcuzrs736zqzbbjjdgl2wvyyufuk4pefbymzf2i") == 0) && passed;
     address_size = sizeof(address);

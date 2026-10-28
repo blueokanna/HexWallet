@@ -121,8 +121,6 @@ namespace hexwallet
       // --- New multi-coin support (SLIP-0044) --------------------------------
       {"kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
-      // Flux (formerly Zelcash), transparent t1/t3 addresses; ZIP-243 v4.
-      {"flux", "FLUX", "Flux (transparent)", 19167, 19167, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
       // Firo (formerly Zcoin) transparent P2PKH. SLIP-0044 136 (XZC).
       {"firo", "FIRO", "Firo (transparent)", 136, 136, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x52, 0x07, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"vet", "VET", "VeChain", 818, 818, 44, DerivationStyle::Bip44, AddressEncoding::VeChainAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
@@ -165,7 +163,6 @@ namespace hexwallet
       {"near", "NEAR", "NEAR Protocol", 397, 397, 44, DerivationStyle::NearSlip10, AddressEncoding::NearImplicit, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xtz", "XTZ", "Tezos (tz1)", 1729, 1729, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Ed25519Blake2bBase58, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"ada", "ADA", "Cardano (Ledger CIP-1852)", 1815, 1815, 1852, DerivationStyle::CardanoBip1852, AddressEncoding::Ed25519Blake2b224Bech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
-      {"qubic", "QUBIC", "Qubic", 83293, 83293, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::QubicBase26, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"croorg", "CRO", "Crypto.org Chain", 394, 394, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "cro"},
       {"atom", "ATOM", "Cosmos Hub", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "cosmos"},
       {"osmo", "OSMO", "Osmosis", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "osmo"},
@@ -205,7 +202,6 @@ namespace hexwallet
       {"xec", SighashFamily::ForkId, 0},
       {"bsv", SighashFamily::ForkId, 0},
       {"zec", SighashFamily::ZcashZip243, 0},
-      {"flux", SighashFamily::ZcashZip243, 0},
       {"firo", SighashFamily::Bitcoin, 0},
       {"qtum", SighashFamily::Bitcoin, 0},
 #include "src/generated/WalletForkSigningPolicies.inc"
@@ -217,8 +213,6 @@ namespace hexwallet
   const ZcashNetworkPolicy kZcashNetworkPolicies[] = {
       // NU6.2 (zcash/src/consensus/upgrades.cpp, mainnet activation 3364600).
       {"zec", 0x5437f330, 21000000ULL * 100000000ULL},
-      // Flux uses the Sapling v4 format and the Flux upgrade branch id.
-      {"flux", 0x76b809bb, 440000000ULL * 100000000ULL},
   };
 
   const size_t kZcashNetworkPolicyCount =

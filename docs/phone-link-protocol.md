@@ -141,7 +141,7 @@ request_id(4) | status(1) | 数据...
 | 0x06 | RESULT | review_id(8) | 未批准时 `pending`；批准后 status + len(2) + 已签名交易 |
 | 0x07 | CANCEL | review_id(8) | rejected |
 
-`kind`：1=UTXO/PSBT，2=EVM，3=Kaspa，4=Zcash/Flux（`coin_id=zec|flux`，payload 为 `ZEC4`；Flux 使用分支 ID `0x76b809bb`），5=CryptoNote（XMR；MSR 已移除），
+`kind`：1=UTXO/PSBT，2=EVM，3=Kaspa，4=Zcash（`coin_id=zec`，payload 为 `ZEC4`），5=CryptoNote（XMR；MSR 已移除），
 6=Solana，7=TRON（payload 为 `raw_data`，返回 `r||s||v` 65 字节签名），
 8=Cosmos（ATOM/OSMO/TIA，payload 为 [cosmos-signing.md](cosmos-signing.md) 定义的紧凑结构，
 返回完整 `TxRaw`），9=Stellar（`coin_id=xlm`，主网网络哈希与 unsigned envelope XDR，返回完整 signed envelope；详见 [stellar-signing.md](stellar-signing.md)），

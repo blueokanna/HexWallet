@@ -225,9 +225,6 @@ WalletError derive_ed25519_address(const NetworkProfile &network,
         result = address_tezos_tz1(public_key, out->address, &size);
         break;
       }
-    case AddressEncoding::QubicBase26:
-      result = address_qubic(public_key, out->address, sizeof(out->address));
-      break;
     case AddressEncoding::Ss58Ed25519:
       result = address_ss58(network.account_version, public_key, out->address,
                             sizeof(out->address));
@@ -278,9 +275,6 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
     return WalletError::InvalidArgument;
   }
   memset(out, 0, sizeof(*out));
-  // Qubic uses FourQ/KangarooTwelve. The old Ed25519/SHA3/base26 substitute
-  // does not derive a spendable Qubic identity.
-  if (network.encoding == AddressEncoding::QubicBase26) return WalletError::InvalidArgument;
   out->network = &network;
   if (!build_path_text(network, account, change, address_index, out->path,
                        sizeof(out->path))) {
@@ -331,7 +325,7 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
   }
 
   // Ed25519 networks use SLIP-0010 from the seed.
-  if (network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::QubicBase26 || network.encoding == AddressEncoding::StellarStrKey || network.encoding == AddressEncoding::NearImplicit || network.encoding == AddressEncoding::Ss58Ed25519 || network.encoding == AddressEncoding::TonAddress || network.encoding == AddressEncoding::SuiEd25519 || network.encoding == AddressEncoding::HederaKeyAlias || network.encoding == AddressEncoding::IcpPrincipal || network.encoding == AddressEncoding::SiaV2 || network.encoding == AddressEncoding::Nem || network.encoding == AddressEncoding::IcpLedgerAccount) {
+  if (network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::StellarStrKey || network.encoding == AddressEncoding::NearImplicit || network.encoding == AddressEncoding::Ss58Ed25519 || network.encoding == AddressEncoding::TonAddress || network.encoding == AddressEncoding::SuiEd25519 || network.encoding == AddressEncoding::HederaKeyAlias || network.encoding == AddressEncoding::IcpPrincipal || network.encoding == AddressEncoding::SiaV2 || network.encoding == AddressEncoding::Nem || network.encoding == AddressEncoding::IcpLedgerAccount) {
     if (seed == nullptr) {
       clear_derived_address(out);
       return WalletError::InvalidArgument;

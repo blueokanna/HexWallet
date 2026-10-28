@@ -78,10 +78,6 @@ WalletError address_avalanche_xp(const char *hrp,
 WalletError address_kaspa(const uint8_t public_key[kCompressedPublicKeySize],
                           char *out, size_t out_size);
 
-// Qubic: base26(sha3-256(ed25519 pubkey)).
-WalletError address_qubic(const uint8_t public_key[32], char *out,
-                          size_t out_size);
-
 // Filecoin f1: "f1" + base32(payload || checksum), with payload = BLAKE2b-160
 // of the full 65-byte uncompressed SEC1 public key (including 0x04).
 WalletError address_filecoin(const uint8_t public_key[kUncompressedPublicKeySize],

@@ -436,13 +436,13 @@
       "name": "hive-0",
       "network": "hive",
       "index": 0,
-      "payload": "484956313412efcdab894002df6a0e746573742d6163636f756e742d310668697665696f0a312e32333420484956450568656c6c6f",
+      "payload": "484956313412efcdab89c0dcde6a0e746573742d6163636f756e742d310668697665696f0a312e32333420484956450568656c6c6f",
       "address": "STM6cnz45GHmHeNt3eq6rKhsMHSkFhNuPVHAHe2oqHm38eoZ6rstM",
       "recipient": "hiveio",
       "amount": "1.234 HIVE",
       "fee": "0 HIVE (resource credits required)",
-      "hash": "21a39f9bc725b95111b20b8bd248923d3d823b209ba94258aa0c8e92902f660e",
-      "signed": "1f2653dedb7c2002c266a6295a6036a31086d24c361753b145109d236a6d45882477116206b5ef244eda629b558ac2338a2d9af385b5c0b7d77b30d0611c87655a"
+      "hash": "d010952b9a49fe0ed299780aa2dcb301a315bf29344b82d679413c149fee47aa",
+      "signed_size": 65
     },
     {
       "name": "ada-0",

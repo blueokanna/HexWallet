@@ -21,7 +21,7 @@ The public wallet catalog is filtered by the configured signing policies. This f
 | --- | --- | --- | --- |
 | Bitcoin | BIP44/BIP49/BIP84 | PSBT v0, `SIGHASH_ALL` | Native SegWit, nested SegWit, legacy P2PKH |
 | Bitcoin-family forks | P2PKH / SegWit profiles | Legacy sighash or BIP143 + `SIGHASH_FORKID` | Litecoin, Dogecoin, Dash, DigiByte, Bitcoin Gold, Ravencoin, Namecoin, Vertcoin, Axe, BCH, BSV, XEC, Sugarchain, e-Gulden, LBRY, MazaCoin, Myriad, NewYorkCoin, Auroracoin, Bitcore, CPUchain, DigitalCoin, Einsteinium, Feathercoin, GoByte, Monacoin, Ritocoin, VIVO, and other source-verified generated profiles |
-| EVM | BIP44 secp256k1 | EIP-155 / EIP-1559, native and whitelisted token calls | 53 registered networks |
+| EVM | BIP44 secp256k1 | EIP-155 / EIP-1559, native and whitelisted token calls | 54 registered networks |
 | XRP | BIP44 secp256k1, `m/44'/144'/0'/0/i` | Native Payment, canonical XRPL binary, SHA-512Half, secp256k1 DER | No issued currency, paths, memo, partial payments or multisig |
 | TRON | BIP44 secp256k1, `m/44'/195'/0'/0/i` | Owner-permission `TransferContract`, registered TRC-20, and unique-selector TRC-721/1155 `safeTransferFrom` | No TRC-10, batch NFT, callback data, memo, multi-contract or multisig; unregistered NFT contracts are shown with a warning |
 | Stellar | SEP-0005 Ed25519, `m/44'/148'/i'` | Public-network XDR Payment/CreateAccount, issued-asset issuer and memo review | Up to eight operations; G addresses; no fee bump, muxed accounts, Soroban or multisig |
@@ -33,6 +33,21 @@ The public wallet catalog is filtered by the configured signing policies. This f
 | Kaspa | BIP44 secp256k1 | BIP340 Schnorr, v0 transactions | `SIGHASH_ALL`, KIP-0009 mass |
 | Zcash | BIP44 secp256k1, t1/t3 addresses | ZIP-243, v4 transparent, NU6.2 | t1 P2PKH inputs; t1/t3 outputs |
 | Monero | BIP44 ed25519, `m/44'/128'/0'/0/i` | RCT type 6, CLSAG, Bulletproofs+, 16-member rings | Standard and subaddress spending, account 0 |
+| Cardano | Ledger CIP-1852 Ed25519-BIP32, `m/1852'/1815'/a'/role/i` | Native ADA body review and Ed25519-BIP32 signing | Body carries no input value/owner; UTxO ownership and balance need a node; no tokens, scripts or staking |
+| Ergo | BIP44 secp256k1 | P2PK ProveDlog: the device rebuilds the tx-id preimage and returns a complete 56-byte-proof transaction | One external output with every token listed; host-supplied fee; no scripts, multisig or non-P2PK inputs |
+| VeChain | BIP44 secp256k1, `m/44'/818'/0'/0/i` | Compact payload, canonical RLP, BLAKE2b-256, recoverable signature | Single-clause native VET only; no contract calls, multi-clause or VIP-191 delegation |
+| ICON | BIP44 secp256k1, `m/44'/74'/0'/0/i` | `icx_sendTransaction` canonical text, SHA3-256 | Native ICX only; no SCORE calls; nid/nonce/timestamp need node checks |
+| Sui | SLIP-0010 Ed25519, `m/44'/784'/0'/0'/i'` | BCS split-gas native SUI transfer, Ed25519 address and signature | No Move calls, sponsorship or tokens |
+| Filecoin | BIP44 secp256k1, `m/44'/461'/0'/0/i` | CBOR `Send`, CID digest, f1 sender | f1 recipients only; no actor calls or BLS |
+| TON | SLIP-0010 Ed25519, `m/44'/607'/0'/0'/i'` | Wallet v4R2 cell/BoC serialization, user-friendly address | Native transfer with an empty body; no jettons or comments |
+| Decred | BIP44 secp256k1, `m/44'/42'/0'/0/i` | BLAKE-256, legacy prefix/witness sighash, P2PKH | Single-input transparent transfer; no staking, treasury or mix |
+| Nervos CKB | BIP44 secp256k1, `m/44'/309'/0'/0/i` | Molecule `RawTransaction`, `ckb-default-hash` BLAKE2b, SECP256K1/blake160 lock | One input, 1–2 outputs, no type script; no DAO or UDT |
+| Hive | BIP44 secp256k1, `m/44'/3054'/0'/0/i` | Single transfer, binary asset, graphene compact signature | `STM` is a public key, not a receive address; account ownership needs a node; no encrypted memo |
+| Internet Computer | SLIP-0010 Ed25519, `m/44'/223'/0'/0'/i'` | Fixed ICP ledger canister Candid transfer, request id, CBOR envelope | Default ledger account only; no arbitrary canisters, ICRC or staking |
+
+Address-only profiles (no transaction signing): DOT/KSM (SS58), Chia (bech32m
+address; BLS secret-scalar arithmetic is not constant time yet), QRL (XMSS
+public derivation; no one-time-signature reservation or signing).
 
 The strict catalog is generated from `WalletForkCatalog.inc` and `WalletCatalog.cpp`. A profile whose network lacks a signing policy is internal test data, not a user wallet.
 
@@ -44,7 +59,9 @@ Generated fork profiles are admitted only after `tools/verify_utxo_sighash.py` c
 - Spending t3 P2SH Zcash outputs. Sending to t3 is supported; the wallet does not implement P2SH redeem-script signing.
 - Peercoin signing. PPC v<3 transactions serialize `nTime`; the Bitcoin legacy signer would build an invalid transaction. PPC is an internal address primitive, not a wallet, until a dedicated Peercoin sighash family with vectors lands.
 - Sending or making change to XMR subaddresses. Subaddress inputs can be spent, but destination transaction public keys and receiver-scanning vectors are not complete; these outputs are rejected.
-- Ergo, Hathor, Quai, Chia, QRL, Cardano, and Filecoin transaction signing.
+- Chia and QRL transaction signing, and DOT/KSM signing. Chia needs a constant-time BLS scalar path; QRL has no one-time-signature reservation; Substrate needs authenticated runtime metadata.
+- Qubic. Its identity is a FourQ point hashed with KangarooTwelve, so no Ed25519/SHA3 substitute is shipped: the profile and encoder were removed rather than returning a plausible-looking address.
+- Flux. The MiningPoolStats snapshot of 2026-10-23 lists FLUX under GRAVEYARD, and graveyard identities are not admitted to production registries. The ZIP-243 engine remains in use for Zcash.
 - TRON TRC-10, `transferFrom` (shared with TRC-20), batch NFT transfers, non-empty NFT callback data, memo/data fields, multi-contract transactions, and non-owner permissions.
 - Cosmos IBC transfers, memo, authz/feegrant, non-native denoms, JSON/amino signing modes and multi-message transactions.
 - Arbitrary EVM calldata, contract creation, unknown tokens, non-standard typed transactions, and non-empty access lists.

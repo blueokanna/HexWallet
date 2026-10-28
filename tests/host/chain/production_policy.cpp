@@ -34,23 +34,36 @@ int main() {
   CHECK(zero(seed, sizeof(seed)) && zero(&master, sizeof(master)));
   CHECK(wallet_session_mnemonic_for_export() == nullptr);
 
-  const char *blocked[] = {"dot", "ksm", "erg", "xch"};
-  const ChainFamily families[] = {ChainFamily::Polkadot, ChainFamily::Kusama,
-      ChainFamily::Ergo, ChainFamily::Chia};
-  for (size_t i = 0; i < 4; ++i) {
+  // Historical Substrate codecs are host-test only. Production has no
+  // authenticated runtime metadata, so DOT/KSM must not be admitted at all.
+  static const char *const kBlockedNetworks[] = {"dot", "ksm"};
+  for (const char *blocked : kBlockedNetworks) {
     ChainFamily family = ChainFamily::None;
-    CHECK(!chain_family_for_network(blocked[i], &family));
+    CHECK(!chain_family_for_network(blocked, &family));
     WalletCatalogEntry entry{};
-    CHECK(wallet_catalog_find(blocked[i], &entry));
+    CHECK(wallet_catalog_find(blocked, &entry));
     CHECK(!wallet_catalog_has(entry, WalletCapabilitySigning));
-    ChainTransaction tx{};
-    const uint8_t payload = 0;
-    CHECK(chain_review_transaction(families[i], &payload, 1, master, seed, 0, &tx) == ChainError::Unsupported);
-    tx.family = families[i]; tx.payload_size = 1;
-    uint8_t out[65]; memset(out, 0xa5, sizeof(out)); size_t n = 64;
-    CHECK(chain_sign_transaction(tx, master, seed, out, &n) == ChainError::Unsupported);
-    CHECK(n == 0 && zero(out, 64) && out[64] == 0xa5);
   }
+
+  // Chia is address-only: the BLS secret scalar path is variable time, so even
+  // address derivation is refused on a production build.
+  WalletCatalogEntry xch{};
+  CHECK(wallet_catalog_find("xch", &xch));
+  CHECK(wallet_catalog_has(xch, WalletCapabilityAddress));
+  CHECK(!wallet_catalog_has(xch, WalletCapabilitySigning));
+  ChainFamily chia_family = ChainFamily::None;
+  CHECK(chain_family_for_network("xch", &chia_family));
+  CHECK(chia_family == ChainFamily::Chia);
+
+  // Ergo P2PK signing is admitted; a one-byte frame is not a review request and
+  // every failure path must clear the caller's output range.
+  WalletCatalogEntry erg{};
+  CHECK(wallet_catalog_find("erg", &erg));
+  CHECK(wallet_catalog_has(erg, WalletCapabilitySigning));
+  ChainFamily erg_family = ChainFamily::None;
+  CHECK(chain_family_for_network("erg", &erg_family));
+  CHECK(erg_family == ChainFamily::Ergo);
+
   WalletCatalogEntry hive{};
   CHECK(wallet_catalog_find("hive", &hive));
   CHECK(!wallet_catalog_has(hive, WalletCapabilityAddress));
@@ -58,11 +71,26 @@ int main() {
   DerivedAddress address{};
   CHECK(derive_address(master, seed, *find_network_profile("xch"), 0, 0, 0, &address) != WalletError::Ok);
   CHECK(zero(&address, sizeof(address)));
-  CHECK(derive_address(master, seed, *find_network_profile("qubic"), 0, 0, 0, &address) == WalletError::InvalidArgument);
-  CHECK(zero(&address, sizeof(address)));
-  CHECK(key_scheme_for(*find_network_profile("qubic")) == KeyScheme::Unsupported);
+  // Qubic needs FourQ/KangarooTwelve. The former Ed25519/SHA3/base26 substitute
+  // could not produce a spendable identity, so the profile is gone; it must not
+  // reappear without a native implementation and independent vectors.
+  CHECK(find_network_profile("qubic") == nullptr);
   CHECK(derive_address(master, seed, *find_network_profile("qrl"), 1, 0, 0, &address) == WalletError::InvalidArgument);
   CHECK(derive_address(master, seed, *find_network_profile("qrl"), 0, 1, 0, &address) == WalletError::InvalidArgument);
+  static const ChainFamily kGuardedFamilies[] = {ChainFamily::Chia,
+                                                 ChainFamily::Ergo};
+  for (ChainFamily family : kGuardedFamilies) {
+    ChainTransaction tx{};
+    const uint8_t payload = 0;
+    CHECK(chain_review_transaction(family, &payload, 1, master, seed, 0, &tx) != ChainError::Ok);
+    tx.family = family;
+    tx.payload_size = 1;
+    uint8_t out[65];
+    memset(out, 0xa5, sizeof(out));
+    size_t n = 64;
+    CHECK(chain_sign_transaction(tx, master, seed, out, &n) != ChainError::Ok);
+    CHECK(n == 0 && zero(out, 64) && out[64] == 0xa5);
+  }
   CHECK(run_clvm_self_tests());
   CHECK(run_custody_self_tests());
   puts("production_policy=pass");

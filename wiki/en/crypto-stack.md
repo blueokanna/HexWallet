@@ -159,7 +159,12 @@ Vectors are generated with blspy: Chia HKDF uses the raw salt, not a prehashed o
 
 ## Alt-address encoders
 
-Solana (base58), Algorand, Tezos `tz1`, Qubic, cashaddr (BCH + eCash),
+Solana (base58), Algorand, Tezos `tz1`, cashaddr (BCH + eCash),
 Avalanche `X-`, Cosmos bech32 (CRO/SEI), and Cardano base addresses are
 implemented in `WalletAltAddresses.cpp` and pass the full `alt-addresses`
 host suite.
+
+Qubic is intentionally absent: its identity is a FourQ point hashed with
+KangarooTwelve, and the former Ed25519/SHA3/base26 substitute produced
+unspendable identities. The encoder, the profile and the enum case were removed
+rather than left as a plausible-looking address source.

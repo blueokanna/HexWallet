@@ -37,7 +37,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 生成和校验英文 BIP39 助记词。
 - 使用 PBKDF2-HMAC-SHA512 派生 BIP39 seed。
 - 使用 BIP32 派生私钥、公钥和扩展密钥。
-- 为 Bitcoin 系、53 个 EVM 网络、TRON、Cosmos（ATOM/OSMO/TIA）、Algorand、NEAR、Kaspa、Zcash transparent 和 Monero 生成地址；只有具备签名策略的链会出现在钱包目录中。
+- 为 Bitcoin 系、54 个 EVM 网络、TRON、Cosmos（ATOM/OSMO/TIA）、Algorand、NEAR、Tezos、XRP、Stellar、Solana、Kaspa、Zcash、Monero、Cardano、Ergo、VeChain、ICON、Sui、Filecoin、TON、Decred、Nervos CKB、Hive 和 Internet Computer 生成地址；只有同时具备地址、审查与签名的链才会出现在钱包目录中。DOT/KSM、Chia、QRL 只登记地址，签名入口关闭。
 - 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 目标只声明 secp256k1 + ECDSA + seed 封装能力（SCP03/applet 驱动尚未实现）；Kaspa Schnorr 和 Ed25519/BLS/XMSS 私钥保留在 MCU RAM。
 - 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
 - 审查并签名受限的 Bitcoin PSBT v0。
@@ -57,7 +57,9 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 以下能力明确不可用，也不会出现在钱包目录中：
 
 - 向 XMR 子地址发送或找零：子地址输入可以消费，但目的地址的交易公钥绑定与接收扫描向量尚未完成，这类输出会被拒绝。
-- Ergo、Hathor、Quai、Chia、QRL、Cardano、Filecoin 的交易签名。
+- Chia、QRL 与 DOT/KSM 的交易签名：Chia 需要常数时间 BLS 标量路径，QRL 没有一次性签名预留，Substrate 需要可信 runtime metadata。
+- Qubic：身份是 FourQ 曲线点经 KangarooTwelve 得到，不提供 Ed25519/SHA3 替代实现；网络 profile 与编码器已删除，不会返回“看起来合理”的地址。
+- FLUX：2026-10-23 的 MiningPoolStats 快照将其归入 GRAVEYARD，按项目规则不得进入生产目录；ZIP-243 引擎仍由 ZEC 使用。
 - TRON TRC-10、`transferFrom`（与 TRC-20 共享 selector）、NFT 批量转移、非空 NFT 回调数据、memo/data 字段、多合约交易和非 owner 权限。
 - Zcash shielded、JoinSplit、v3/v5，以及 t3 P2SH 花费。
 - Peercoin 交易签名：PPC v<3 交易在版本号后序列化 `nTime`，Bitcoin legacy 签名器会构造无效交易；在独立的 Peercoin sighash 模块和向量完成前，PPC 只作为内部地址原语，不进入钱包目录。
@@ -561,7 +563,7 @@ wallet address eth 1
 wallet address btc 1
 ```
 
-钱包目录现在只暴露具备完整收/发/签名链的币种。Monero 已开放（标准地址 / account 0），QRL、Chia 等仅地址 profile 不再出现在 `coin list` / `wallet address` 中；它们的编码器只作为内部测试原语保留。
+钱包目录只暴露具备真实路径的条目：DOT/KSM 与 Chia（XCH）只登记地址、不声明签名；QRL 与 Peercoin 仅作为内部 profile 存在，不出现在 `coin list` / `wallet address` 中。仅地址 profile 不表示该链可发送。
 
 当前账户和 change 固定为 `0`，一般路径为：
 

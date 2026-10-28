@@ -21,7 +21,7 @@ namespace hexwallet
     Evm,                     // keccak-256 hex 0x... account
     Tron,                    // keccak-256 base58check with 0x41 version
     CryptoNote,              // Monero/Masari keccak-reduce standard address
-    ZcashTransparent,        // 2-byte-version base58check t1/t3 (ZEC, FLUX transparent)
+    ZcashTransparent,        // 2-byte-version base58check t1/t3 (ZEC)
     CashAddr,                // CashAddr base32 with poly-mod checksum (BCH, XEC)
     Ed25519Base58,           // ed25519 pubkey base58 (SOL)
     Ed25519Base32,           // ed25519 pubkey + sha512/256 checksum, base32 no-pad (ALGO)
@@ -30,7 +30,6 @@ namespace hexwallet
     Bech32Cosmos,            // bech32 hash160(secp256k1) with chain hrp (CRO-native, SEI)
     Bech32Avalanche,         // "X-" bech32 0x00 + hash160(secp256k1) (AVAX X/P)
     KaspaBech32,             // custom bech32, x-only secp256k1 pubkey (KAS)
-    QubicBase26,             // base26(sha3-256(ed25519 pubkey)) (QUBIC)
     Blake2bBase32Filecoin,   // base32(0x01 + blake2b-160(secp256k1 pubkey)) (FIL)
     Blake2bBase58Ergo,       // base58check(0x01 + blake2b-256(secp256k1 pubkey)) (ERG)
     Bech32mBlsChia,          // bech32m(blake3-tree-hash puzzle of BLS12-381 G1 key) (XCH)

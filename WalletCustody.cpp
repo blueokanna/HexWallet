@@ -52,8 +52,6 @@ KeyScheme key_scheme_for(const NetworkProfile &network) {
       return KeyScheme::ErgoSchnorr;
     case AddressEncoding::Nem:
       return KeyScheme::NemKeccakEd25519;
-    case AddressEncoding::QubicBase26:
-      return KeyScheme::Unsupported;
     case AddressEncoding::Bech32mBlsChia:
       return KeyScheme::Bls12381G1;
     case AddressEncoding::QrlXmss:

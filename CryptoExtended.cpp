@@ -507,51 +507,6 @@ namespace hexwallet
     return true;
   }
 
-  bool qubic_base26_encode(const uint8_t *digest, size_t digest_size, char *out,
-                           size_t out_size)
-  {
-    static const char kAlphabet[] = "123456789abcdefghijkmnopqrstuvwxyz";
-    if (digest == nullptr || out == nullptr || digest_size == 0)
-      return false;
-    uint8_t buffer[64];
-    if (digest_size > sizeof(buffer))
-      return false;
-    memcpy(buffer, digest, digest_size);
-    char reversed[60];
-    size_t length = 0;
-    bool any = true;
-    while (any && length < sizeof(reversed))
-    {
-      uint16_t remainder = 0;
-      any = false;
-      for (size_t index = 0; index < digest_size; ++index)
-      {
-        const uint16_t current =
-            static_cast<uint16_t>((remainder << 8) | buffer[index]);
-        buffer[index] = static_cast<uint8_t>(current / 26);
-        remainder = static_cast<uint16_t>(current % 26);
-        if (buffer[index] != 0)
-          any = true;
-      }
-      reversed[length++] = kAlphabet[remainder];
-    }
-    if (length == 0)
-      reversed[length++] = kAlphabet[0];
-    if (out_size < length + 1)
-    {
-      secure_zero(buffer, sizeof(buffer));
-      return false;
-    }
-    for (size_t index = 0; index < length; ++index)
-    {
-      out[index] = reversed[length - 1 - index];
-    }
-    out[length] = '\0';
-    secure_zero(buffer, sizeof(buffer));
-    secure_zero(reversed, sizeof(reversed));
-    return true;
-  }
-
   namespace
   {
 
@@ -1313,12 +1268,6 @@ namespace hexwallet
         0x22,
     };
     passed = selftest_report("kaspa payload", kaspa_bech32_encode("kaspa", 0, kKaspaPayload, sizeof(kKaspaPayload), kaspa, sizeof(kaspa)) && strcmp(kaspa, "kaspa:qp0l70zd5x85ttwd6jv7g3s3a8llzj96d8dncn4zmhv4tlzx5k2jyqh70xmfj") == 0) && passed;
-
-    // Qubic base26 of SHA3-256(32 zero bytes).
-    uint8_t zero_hash[32];
-    passed = passed && crypto_sha3_256(zeros, sizeof(zeros), zero_hash);
-    char qubic[64];
-    passed = selftest_report("qubic zero-hash", qubic_base26_encode(zero_hash, sizeof(zero_hash), qubic, sizeof(qubic)) && strcmp(qubic, "3mj9k21j99ekmh8bg8k96drkf6m7g84f1j6h833ok47ph13kefajkdb") == 0) && passed;
 
     // RFC 8032 Ed25519 test vectors 1 and 2.
     static const uint8_t kEdSeed1[32] = {
@@ -2177,7 +2126,6 @@ namespace hexwallet
 
     secure_zero(digest, sizeof(digest));
     secure_zero(blake64, sizeof(blake64));
-    secure_zero(zero_hash, sizeof(zero_hash));
     return passed;
   }
 

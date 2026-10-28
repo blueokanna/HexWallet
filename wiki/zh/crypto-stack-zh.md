@@ -137,8 +137,12 @@ seed → `xch14e2x9…`。向量由 blspy 生成；Chia 的 HKDF 使用原始盐
 ## 备选地址编码器
 
 `WalletAltAddresses.cpp` 实现了 Solana（base58）、Algorand、Tezos `tz1`、
-Qubic、cashaddr（BCH + eCash）、Avalanche `X-`、Cosmos bech32
+cashaddr（BCH + eCash）、Avalanche `X-`、Cosmos bech32
 （CRO/SEI）、Cardano base 地址，并通过完整 `alt-addresses` 主机套件。
+
+Qubic 被有意排除：它的身份是 FourQ 曲线点经 KangarooTwelve 得到的，旧的
+Ed25519/SHA3/base26 替代实现只会产出不可花费的身份。该编码器、网络 profile
+和枚举项已整体删除，而不是留着一个“看起来合理”的地址来源。
 
 ## 大数卫生（经验教训）
 

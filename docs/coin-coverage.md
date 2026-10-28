@@ -35,7 +35,7 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 | DOGE | SIGN | doge, dogechain |
 | LTC | SIGN | ltc, ltc49, ltc84 |
 | FIRO | SIGN | firo |
-| FLUX | SIGN | flux |
+| FLUX | ABSENT | no profile in this tree |
 | BTG | SIGN | btg, btg49, btg84 |
 | AION | ABSENT | no Aion adapter |
 | USDT | TOKEN | eth:eth-usdt, bsc:bsc-usdt, arb1:arb-usdt, avaxc:avaxc-usdt, opt:opt-usdt, kaia:kaia-usdt, celo:celo-usdt, trx:trx-usdt |
@@ -103,9 +103,9 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 | LSK | TOKEN | eth:eth-lsk |
 | XEM | SIGN | xem |
 
-合计：SIGN 57 / REVIEW 0 / ADDRESS 3 / TOKEN 6 / ABSENT 24（共 90 个）
+合计：SIGN 56 / REVIEW 0 / ADDRESS 3 / TOKEN 6 / ABSENT 25（共 90 个）
 
-目录声明签名入口：XMR, ZEC, DASH, RVN, BTC, BCH, ADA, AVAX, ATOM, CKB, XEC, CRO, DCR, ALGO, ETH, SOL, DOGE, LTC, FIRO, FLUX, BTG, USDC, BNB, ETC, FIL, FTM, KAS, MNT, NEAR, POL, SUI, TON, TRX, VET, XLM, XPL, XRP, ONE, BSV, ERG, DGB, XTZ, CFX, KAIA, FLOW, BERA, TIA, OSMO, GLMR, HBAR, SEI, ICP, SC, ICX, QTUM, HIVE, XEM
+目录声明签名入口：XMR, ZEC, DASH, RVN, BTC, BCH, ADA, AVAX, ATOM, CKB, XEC, CRO, DCR, ALGO, ETH, SOL, DOGE, LTC, FIRO, BTG, USDC, BNB, ETC, FIL, FTM, KAS, MNT, NEAR, POL, SUI, TON, TRX, VET, XLM, XPL, XRP, ONE, BSV, ERG, DGB, XTZ, CFX, KAIA, FLOW, BERA, TIA, OSMO, GLMR, HBAR, SEI, ICP, SC, ICX, QTUM, HIVE, XEM
 
 
 ## 本次要求的资产与网络组合

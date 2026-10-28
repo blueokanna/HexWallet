@@ -7,8 +7,8 @@ shows the destination/amount on the trusted display, and signs a digest that it
 recomputes from the payload. The host cannot submit an opaque digest.
 
 Link transaction kind: `14` (`kTxChain`). The `coin_id` selects the adapter and
-the payload starts with the adapter's own magic. Firo, Qtum and Flux do **not**
-use this path: they are served by the Bitcoin/Zcash engines.
+the payload starts with the adapter's own magic. Firo and Qtum do **not** use
+this path: they are served by the Bitcoin engine, and ZEC by the Zcash engine.
 
 ## VeChain (VET)
 
@@ -240,19 +240,20 @@ whose signing digest is
 As with DCR, `capacity` for the input is supplied by the phone; the device
 cannot prove it from the out point.
 
-## Flux (FLUX)
+## Zcash (ZEC)
 
-Flux reuses the Zcash v4 transparent ZIP-243 engine with the Flux branch id
-`0x76b809bb`, SLIP-0044 coin type `19167`, and t1/t3 base58 prefixes
-`0x1cb8`/`0x1cbd`. The phone-link kind is `4` with `coin_id=flux`; the payload
-is the existing `ZEC4` review structure. The device prints FLUX on the review
-screen and returns the complete signed v4 transaction. Shielded components
-and FluxNode-specific transaction types are rejected. The transparent supply
-cap is 440,000,000 FLUX.
+The Zcash v4 transparent ZIP-243 engine runs with the mainnet NU6.2 branch id
+`0x5437f330`, SLIP-0044 coin type `133`, and t1/t3 base58 prefixes
+`0x1cb8`/`0x1cbd`. The phone-link kind is `4` with `coin_id=zec`; the payload is
+the `ZEC4` review structure built by `tools/build_zcash_review_payload.py`. The
+device prints ZCASH on the review screen and returns the complete signed v4
+transaction. Shielded components and non-v4 transaction versions are rejected,
+and the transparent supply cap is 21,000,000 ZEC.
 
-Vector: derived address for the test seed index 0 is
-`t1YEDM4VMCkUMnjRRZeTScifJcJrGyXKBuG`; the native probe verifies the
-secp256k1 signature against the ZIP-243 digest with the Flux branch id.
+Flux used to share this engine with the Flux branch id `0x76b809bb`. It was
+withdrawn on 2026-10-28: the MiningPoolStats snapshot of 2026-10-23 lists FLUX
+in its GRAVEYARD category, and the project rules forbid graveyard identities in
+production registries. ZEC keeps the engine, so no signing code was lost.
 
 | Chain | Encoding | Path |
 | --- | --- | --- |
@@ -263,7 +264,7 @@ secp256k1 signature against the ZIP-243 digest with the Flux branch id.
 | TON | v4R2 user-friendly address of the ed25519 public key | `m/44'/607'/0'/0'/index'` |
 | DCR | base58check `0x073f` of RIPEMD160(BLAKE256(pubkey)) | `m/44'/42'/0'/0/index` |
 | CKB | bech32 `ckb` + `0x01 0x00` + blake160(pubkey) | `m/44'/309'/0'/0/index` |
-| FLUX | t1/t3 base58check `0x1cb8`/`0x1cbd` | `m/44'/19167'/0'/0/index` |
+| ZEC | t1/t3 base58check `0x1cb8`/`0x1cbd` | `m/44'/133'/0'/0/index` |
 | ADA | Ledger CIP-1852 base address | `m/1852'/1815'/account'/role/index` |
 | HIVE | `"STM" + base58(pubkey ‖ RIPEMD160(pubkey)[0..3])` | `m/44'/3054'/0'/0/index` |
 | ICP | `SHA-224(pubkey) ‖ 0x02` as dash-grouped base32 with a CRC-32 prefix | `m/44'/223'/0'/0'/index'` |
