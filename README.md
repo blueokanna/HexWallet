@@ -85,7 +85,9 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `WalletSigning` | Shared on-device review + approve + sign session |
 | `WalletUi` | Trusted-display transaction review |
 | `WalletCustody` | MCU vs secure-element capability policy |
-| `SecureElementPort` | SE051 backend contract, custody gate, ISO 7816-3 CRC16/A, AES-128, AES-CMAC |
+| `SecureElementPort` | SE051 backend contract, custody gate, ISO 7816-3 CRC16/A + ATR, AES-128, AES-CMAC |
+| `EinkPanel` | SSD1680-class command sequence, partial-refresh state machine, damage policy |
+| `QrCode` | Byte-mode QR v1-3 (L/M) encoder and 1bpp renderer |
 | `BitcoinTransaction` | PSBT v0, legacy/BIP143/fork-id sighash, serialization |
 | `EvmTransaction` | RLP, EIP-155/EIP-1559, token-call review and signing |
 | `KaspaTransaction` | BLAKE2b sighash, KIP-0009 mass, BIP340 signing, protobuf |
@@ -180,6 +182,8 @@ link-crypto=pass
 wallet-link=pass
 nfc-apdu=pass
 secure-element=pass
+eink-panel=pass
+qrcode=pass
 ```
 
 `run_zcash_sighash_self_tests()` checks the published ZIP-243 transparent vector and selected `zcash-test-vectors` rows covering shielded hashes, JoinSplits and ALL/NONE/SINGLE. `run_zcash_transaction_self_test()` runs the full ECDSA/scriptSig/round-trip path on the device.

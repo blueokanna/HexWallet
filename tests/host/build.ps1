@@ -1,4 +1,4 @@
-# Builds and runs the host-side self-tests for the extended crypto stack.
+﻿# Builds and runs the host-side self-tests for the extended crypto stack.
 # Uses MSVC (cl.exe from Visual Studio 2022) and the mbedtls headers bundled
 # with the ESP32 Arduino core; mbedtls_host.c provides the runtime for the
 # subset of mbedtls the firmware uses, so the API surface matches the device.
@@ -69,7 +69,7 @@ $cppSources = @(
   "CryptoNoteSigning.cpp",
   "CryptoNoteMasari.cpp",
   "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp",
+  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
   "BitcoinTransaction.cpp",
   "KaspaTransaction.cpp",
   "TronTransaction.cpp",
@@ -159,7 +159,7 @@ $catalogSources = @(
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
   "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
   "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "host_security.cpp"
+  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "host_security.cpp"
 )
 $catalogObjs = @()
 foreach ($s in $catalogSources) {
