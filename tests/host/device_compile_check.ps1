@@ -96,6 +96,59 @@ foreach ($s in $sources) {
     Get-Content $log | Select-Object -First 30 | ForEach-Object { Write-Output $_ }
   }
 }
+# --- Arduino-parity compile ------------------------------------------------
+# The curated include set above is smaller than the one arduino-cli uses, and it
+# does not define ARDUINO. That combination let a build break in CI while every
+# local check stayed green: TrustAnchor.cpp included <esp_flash_encryption.h>,
+# which the Arduino core does not ship, and nothing here compiled that branch.
+# These sources are therefore also compiled exactly the way arduino-cli does it:
+# every component include directory plus -DARDUINO.
+$paritySources = @("TrustAnchor.cpp")
+# arduino-cli builds its include path from the SDK's flags/includes file, which
+# is a list of "-iprefix + iwithprefixbefore" pairs. Reproducing that exact
+# mechanism here turned out to be fragile, so this step spells the same directory
+# set out with -I: every component include directory, the per-chip register
+# headers, and the flash-mode directory that carries sdkconfig.h. A header that
+# IDF has but the bundle lacks must fail here, not only in CI.
+$parityArgs = @()
+$parityArgs += "-I" + (Join-Path $core "cores\esp32")
+$parityArgs += "-I" + $root
+$parityArgs += "-I" + $mbedtlsInclude
+$parityArgs += "-I" + $mbedtlsPort
+foreach ($dir in Get-ChildItem (Join-Path $libs "include") -Directory -Recurse -ErrorAction SilentlyContinue) {
+  # Component includes sit at include/<component>/include and, for per-chip
+  # headers, at include/<component>/<chip>/include. Register maps are
+  # "register" directories whose chips add a hw_ver* level. All of them are on
+  # arduino-cli's include path.
+  if ($dir.Name -eq "include" -or $dir.Name -eq "register" -or $dir.Name -like "hw_ver*") {
+    $parityArgs += "-I" + $dir.FullName
+  }
+}
+foreach ($mode in @("dio_qspi", "qio_qspi")) {
+  $modeInclude = Join-Path $libs "$mode\include"
+  if (Test-Path $modeInclude) { $parityArgs += "-I" + $modeInclude }
+}
+foreach ($s in $paritySources) {
+  $src = Join-Path $root $s
+  $obj = Join-Path $objDir ($s -replace '\.cpp$', '.arduino.o')
+  $log = Join-Path $objDir "compile-arduino.log"
+  $global:LASTEXITCODE = $null
+  $ErrorActionPreference = "Continue"
+  # LVGL is not on this include path; the parity step is about the Arduino/IDF
+  # branches, so the UI is switched off instead of pointing at a missing header.
+  & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter `
+      -DARDUINO=10819 -DARDUINO_ARCH_ESP32 -DESP_PLATFORM -DHEXWALLET_ENABLE_LVGL=0 `
+      -DMBEDTLS_ALLOW_PRIVATE_ACCESS @parityArgs -c $src -o $obj *> $log
+  $rc = $global:LASTEXITCODE
+  $ErrorActionPreference = "Stop"
+  Write-Output ("  [arduino-parity] {0} => rc={1}" -f $s, $rc)
+  if ($rc -ne 0) {
+    $fail++
+    Write-Output "----- $s [arduino-parity] compiler output -----"
+    Get-Content $log | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
+  }
+}
+
 if ($fail -gt 0) {
   Write-Output "DEVICE COMPILE: $fail source(s) FAILED"
   exit 1

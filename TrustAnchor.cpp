@@ -7,10 +7,28 @@
 #include "WalletSecurity.h"
 
 #if defined(ARDUINO)
-#include <esp_app_desc.h>
-#include <esp_flash_encryption.h>
-#include <esp_ota_ops.h>
-#include <esp_secure_boot.h>
+// The Arduino core ships neither esp_flash_encryption.h nor the private
+// bootloader headers that esp_secure_boot.h pulls in (soc/efuse_reg.h,
+// rom/efuse.h, ...). That is what broke the CI device build. What *is* available
+// is documented here rather than papered over:
+//
+//   * esp_flash_encryption_enabled() is defined by libbootloader_support.a
+//     (checked with nm) even though its header is missing, so the prototype is
+//     declared locally and the real eFuse-backed answer is used;
+//   * secure boot cannot be read at runtime without those private headers, so the
+//     sdkconfig that arduino-cli compiles with is used instead. CONFIG_SECURE_BOOT
+//     means the bootloader refuses unsigned images; it does not prove the eFuses
+//     are burned, and TrustState records which of the two it is.
+#include <esp_err.h>
+#include <esp_ota_ops.h> // brings esp_app_desc_t and esp_partition.h
+
+extern "C" bool esp_flash_encryption_enabled(void);
+
+#if defined(CONFIG_SECURE_BOOT) || defined(CONFIG_SECURE_BOOT_V2_ENABLED)
+#define HEXWALLET_SECURE_BOOT_COMPILED 1
+#else
+#define HEXWALLET_SECURE_BOOT_COMPILED 0
+#endif
 #endif
 
 namespace hexwallet
@@ -30,15 +48,32 @@ namespace hexwallet
     }
 
 #if defined(ARDUINO)
+    bool flash_encryption_state(bool *known)
+    {
+      // The symbol is part of bootloader_support on every core this firmware
+      // targets, so the answer is always known; only the header may be absent.
+      *known = true;
+      return esp_flash_encryption_enabled();
+    }
+
+    bool secure_boot_state()
+    {
+      return HEXWALLET_SECURE_BOOT_COMPILED != 0;
+    }
+
     void read_platform_state(TrustState *state)
     {
       state->reported = true;
-      state->secure_boot_enabled = esp_secure_boot_enabled();
-      state->flash_encryption_enabled = esp_flash_encryption_enabled();
+      state->secure_boot_enabled = secure_boot_state();
+      // Compiled-in secure boot, not a runtime eFuse read: the header chain for a
+      // runtime check is not shipped by the Arduino core.
+      state->secure_boot_from_config = HEXWALLET_SECURE_BOOT_COMPILED != 0;
+      state->flash_encryption_enabled =
+          flash_encryption_state(&state->flash_encryption_known);
       const esp_partition_t *running = esp_ota_get_running_partition();
       state->running_from_ota_slot =
           running != nullptr && running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0;
-      const esp_app_desc_t *description = esp_app_get_description();
+      const esp_app_desc_t *description = esp_ota_get_app_description();
       if (description != nullptr)
       {
         memcpy(state->app_elf_sha256, description->app_elf_sha256,
@@ -89,6 +124,10 @@ namespace hexwallet
   TrustLevel trust_level(const TrustState &state)
   {
     if (!state.reported)
+      return TrustLevel::Unknown;
+    // Without a readable flash-encryption state the device cannot be classified,
+    // so it is never promoted to Verified.
+    if (!state.flash_encryption_known)
       return TrustLevel::Unknown;
     if (state.secure_boot_enabled && state.flash_encryption_enabled)
     {
@@ -228,6 +267,10 @@ void review_seal_code(const ReviewSeal &seal, char out[9])
     TrustState state = {};
     passed = trust_level(state) == TrustLevel::Unknown && passed;
     state.reported = true;
+    // Reported but unreadable encryption state is still "unknown", never
+    // "unprotected": the device must not be classified on a guess.
+    passed = trust_level(state) == TrustLevel::Unknown && passed;
+    state.flash_encryption_known = true;
     passed = trust_level(state) == TrustLevel::Unprotected && passed;
     state.flash_encryption_enabled = true;
     passed = trust_level(state) == TrustLevel::Encrypted && passed;

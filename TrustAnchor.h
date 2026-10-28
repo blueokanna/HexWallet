@@ -40,6 +40,13 @@ namespace hexwallet
     bool reported;
     bool secure_boot_enabled;
     bool flash_encryption_enabled;
+    // False when the platform exposes neither the flash-encryption API nor the
+    // eFuse counter. "Cannot tell" is kept separate from "off": a wrong "off"
+    // would be as misleading as a wrong "on".
+    bool flash_encryption_known;
+    // True when secure_boot_enabled came from CONFIG_SECURE_BOOT (compiled-in
+    // bootloader policy) rather than a runtime eFuse read.
+    bool secure_boot_from_config;
     bool running_from_ota_slot;
     bool app_elf_sha256_valid;
     uint8_t app_elf_sha256[32];
