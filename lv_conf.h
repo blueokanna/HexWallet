@@ -20,9 +20,15 @@
 /*====================
    MEMORY SETTINGS
  *====================*/
+/* LVGL 9 allocates through a stdlib backend, not a fixed pool. The v8-era
+ * LV_MEM_SIZE knob below is kept only so older configs still parse; the pool it
+ * used to reserve lived in .dram0.bss and cost 96 KiB of a 320 KiB DRAM segment.
+ * malloc/free comes from the platform heap, which is where a PSRAM-equipped board
+ * wants it, and nothing is reserved up front. */
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (96U * 1024U)
-#define LV_MEM_ADR 0     /* 0: use the built-in pool */
+#define LV_MEM_SIZE (32U * 1024U)
+#define LV_MEM_ADR 0
 /* LV_MEM_POOL_INCLUDE / LV_MEM_POOL_ALLOC must stay UNDEFINED when
  * LV_MEM_ADR == 0: lv_mem_core_builtin.c does `#include LV_MEM_POOL_INCLUDE`
  * under `#ifdef`, so an empty definition breaks the build with a bare

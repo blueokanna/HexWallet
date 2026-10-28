@@ -74,6 +74,19 @@
 #define HEXWALLET_HAS_LVGL 0
 #endif
 
+// The full vector suite (crypto, chains, link, signing) carries its fixtures as
+// static arrays: 461 KiB of .bss in the ESP32-S3 image, on a 320 KiB DRAM
+// segment. Those vectors belong in CI, which runs them on every commit; the
+// device keeps the runtime checks (RNG health, custody gate, seal logic). Enable
+// on a bench unit with -DHEXWALLET_DEVICE_SELF_TESTS=1.
+#ifndef HEXWALLET_DEVICE_SELF_TESTS
+#if defined(ARDUINO)
+#define HEXWALLET_DEVICE_SELF_TESTS 0
+#else
+#define HEXWALLET_DEVICE_SELF_TESTS 1
+#endif
+#endif
+
 #ifndef HEXWALLET_RUN_SELF_TESTS
 #define HEXWALLET_RUN_SELF_TESTS 1
 #endif

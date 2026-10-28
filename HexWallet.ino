@@ -212,7 +212,7 @@ void setup()
   Serial.begin(115200);
 
   bool self_tests_queued = false;
-#if HEXWALLET_RUN_SELF_TESTS
+#if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
   self_test_report = SelfTestReport{};
   self_tests_queued = hexwallet::wallet_worker_start() &&
                       hexwallet::wallet_worker_begin(run_self_tests,
@@ -249,7 +249,7 @@ void setup()
     Serial.println("INFO: companion starts fresh (no stored state)");
   }
 
-#if HEXWALLET_RUN_SELF_TESTS
+#if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
   if (self_tests_queued)
   {
     if (display_available) hexwallet::wallet_ui_show_busy("Running self-tests...");

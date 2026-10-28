@@ -19,6 +19,14 @@ namespace hexwallet
 {
   namespace
   {
+    // Review-seal state lives outside the LVGL guard: wallet_ui_review_authorize()
+    // and wallet_ui_review_seal_code() are compiled on every target, and a headless
+    // build must still be able to say that no review is armed.
+    constexpr uint32_t kReviewSealWindowMs = 120UL * 1000UL;
+
+    ReviewSeal review_seal = {};
+    bool review_seal_valid = false;
+
 #if HEXWALLET_ENABLE_LVGL
 
     bool initialized = false;
@@ -116,10 +124,6 @@ namespace hexwallet
     lv_obj_t *search_field = nullptr;
     lv_obj_t *coin_list = nullptr;
     lv_obj_t *keyboard = nullptr;
-constexpr uint32_t kReviewSealWindowMs = 120UL * 1000UL;
-
-ReviewSeal review_seal = {};
-bool review_seal_valid = false;
 
 
     // Defined below the catalog view, which is the first screen to draw it.
