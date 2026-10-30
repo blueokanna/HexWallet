@@ -36,6 +36,7 @@ KeyScheme key_scheme_for(const NetworkProfile &network) {
     case AddressEncoding::CryptoNote:
       return KeyScheme::CryptoNoteEdwards;
     case AddressEncoding::Ed25519Base58:
+    case AddressEncoding::Aeternity:
     case AddressEncoding::Ed25519Base32:
     case AddressEncoding::Ed25519Blake2bBase58:
     case AddressEncoding::StellarStrKey:

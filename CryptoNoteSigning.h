@@ -19,7 +19,10 @@ namespace hexwallet
   constexpr size_t kCryptoNoteMaxSignOutputs = kCryptoNoteMaxTxOutputs;
   // Version 1 carries only standard-address inputs/outputs. Version 2 appends
   // the owning subaddress (major, minor) to every input and output record.
+  // Version 3 additionally carries transaction secrets for Monero's
+  // additional tx-public-key vector and a per-output key selector.
   constexpr uint8_t kCryptoNoteSigningPayloadVersion = 2;
+  constexpr uint8_t kCryptoNoteSigningPayloadVersionAdditionalKeys = 3;
   constexpr uint8_t kCryptoNoteSigningPayloadVersionStandardOnly = 1;
   constexpr size_t kCryptoNoteMaxSigningPayload = 16384;
 
@@ -41,9 +44,11 @@ namespace hexwallet
   struct CryptoNoteSigningOutput
   {
     bool change;
-    // Wire value 0 = standard, 1 = subaddress. Only 0 is currently admitted:
-    // subaddress outputs need additional transaction-public-key binding.
+    // Wire value 0 = standard, 1 = subaddress.
     uint8_t address_type;
+    // Version 3 only: zero selects tx_secret; nonzero is a one-based index
+    // into additional_tx_secrets.
+    uint8_t tx_key_index;
     uint8_t spend_public[kCryptoNoteKeySize];
     uint8_t view_public[kCryptoNoteKeySize];
     uint64_t amount;
@@ -67,6 +72,8 @@ namespace hexwallet
       MasariTransaction masari;
     } chain;
     uint8_t tx_secret[kCryptoNoteKeySize];
+    uint8_t additional_tx_key_count;
+    uint8_t additional_tx_secrets[kCryptoNoteMaxSignOutputs][kCryptoNoteKeySize];
     uint32_t address_index;
     uint8_t input_count;
     uint8_t output_count;

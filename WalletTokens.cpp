@@ -7,6 +7,10 @@
 namespace hexwallet {
 namespace {
 
+// TRC-10 identifiers are capped at 32 bytes by the chain. Mirrors
+// TronTransaction's kTronAssetIdSize without pulling that module in here.
+constexpr size_t kTrc10IdMaxLength = 32;
+
 bool is_hex(char value) {
   return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') ||
          (value >= 'A' && value <= 'F');
@@ -62,13 +66,13 @@ const TokenProfile kTokenProfiles[] = {
     {"eth-wbtc", "eth", "WBTC", "Wrapped Bitcoin", TokenStandard::Erc20,
      "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 8, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 account address and transfer signing supported"},
-    {"bsc-usdt", "bsc", "USDT", "Binance-Peg BSC-USD", TokenStandard::Erc20,
+    {"bsc-usdt", "bsc", "USDT", "Binance-Peg BSC-USD", TokenStandard::Bep20,
      "0x55d398326f99059fF775485246999027B3197955", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 account address and transfer signing supported"},
-    {"bsc-usdc", "bsc", "USDC", "Binance-Peg USD Coin", TokenStandard::Erc20,
+    {"bsc-usdc", "bsc", "USDC", "Binance-Peg USD Coin", TokenStandard::Bep20,
      "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 account address and transfer signing supported"},
-    {"bsc-busd", "bsc", "BUSD", "Binance USD", TokenStandard::Erc20,
+    {"bsc-busd", "bsc", "BUSD", "Binance USD", TokenStandard::Bep20,
      "0xe9e7CEA3Dedca5984780Bafc599bD69ADd087D56", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 account address and transfer signing supported"},
     {"matic-usdc", "matic", "USDC", "USD Coin", TokenStandard::Erc20,
@@ -126,14 +130,77 @@ const TokenProfile kTokenProfiles[] = {
     {"matic-dai", "matic", "DAI", "Dai Stablecoin", TokenStandard::Erc20,
      "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 transfer; on-chain symbol/decimals verified via Polygon RPC"},
-    {"bsc-dai", "bsc", "DAI", "Dai Stablecoin", TokenStandard::Erc20,
+    {"bsc-dai", "bsc", "DAI", "Dai Stablecoin", TokenStandard::Bep20,
      "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
-    {"bsc-btcb", "bsc", "BTCB", "Bitcoin BEP2", TokenStandard::Erc20,
+    {"bsc-btcb", "bsc", "BTCB", "Bitcoin BEP2", TokenStandard::Bep20,
      "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
-    {"bsc-eth", "bsc", "ETH", "Ethereum Token", TokenStandard::Erc20,
+    {"bsc-eth", "bsc", "ETH", "Ethereum Token", TokenStandard::Bep20,
      "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    // BEP-20 set verified by eth_call(symbol, decimals) against
+    // https://bsc-dataseed.binance.org on 2026-10-28. CAKE reports the
+    // on-chain symbol "Cake"; the registry keeps the canonical ticker.
+    {"bsc-wbnb", "bsc", "WBNB", "Wrapped BNB", TokenStandard::Bep20,
+     "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-cake", "bsc", "CAKE", "PancakeSwap Token", TokenStandard::Bep20,
+     "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol Cake, decimals 18"},
+    {"bsc-fdusd", "bsc", "FDUSD", "First Digital USD", TokenStandard::Bep20,
+     "0xc5f0f7b66764F6ec8C8Dff7BA683102295E16409", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-tusd", "bsc", "TUSD", "TrueUSD", TokenStandard::Bep20,
+     "0x40af3827F39D0eACBF4A168f8D4ee67c121D11c9", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-link", "bsc", "LINK", "ChainLink Token", TokenStandard::Bep20,
+     "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-dot", "bsc", "DOT", "Polkadot Token", TokenStandard::Bep20,
+     "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-ada", "bsc", "ADA", "Binance-Peg Cardano Token", TokenStandard::Bep20,
+     "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-xrp", "bsc", "XRP", "Binance-Peg XRP Token", TokenStandard::Bep20,
+     "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-doge", "bsc", "DOGE", "Binance-Peg Dogecoin", TokenStandard::Bep20,
+     "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", 8, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-shib", "bsc", "SHIB", "Shiba Inu", TokenStandard::Bep20,
+     "0x2859e4544C4bB03966803b044A93563Bd2D0DD4D", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-uni", "bsc", "UNI", "Uniswap", TokenStandard::Bep20,
+     "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-aave", "bsc", "AAVE", "Aave Token", TokenStandard::Bep20,
+     "0xfb6115445Bff7b52FeB98650C87f44907E58f802", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-atom", "bsc", "ATOM", "Cosmos Token", TokenStandard::Bep20,
+     "0x0Eb3a705fc54725037CC9e008bDede697f62F335", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-xvs", "bsc", "XVS", "Venus", TokenStandard::Bep20,
+     "0xcF6BB5389c92Bdda8a3747Ddb454cB7a64626C63", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-bsw", "bsc", "BSW", "Biswap", TokenStandard::Bep20,
+     "0x965F527D9159dCe6288a2219DB51fc6Eef120dD1", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-ankr", "bsc", "ANKR", "Ankr", TokenStandard::Bep20,
+     "0xf307910A4c7bbc79691fD374889b36d8531B08e3", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-comp", "bsc", "COMP", "Compound", TokenStandard::Bep20,
+     "0x52CE071Bd9b1C4B00A0b92D298c512478CaD67e8", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-beth", "bsc", "BETH", "Binance Beacon ETH", TokenStandard::Bep20,
+     "0x250632378E573c6Be1AC2f97Fcdf00515d0Aa91B", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-avax", "bsc", "AVAX", "Binance-Peg Avalanche Token", TokenStandard::Bep20,
+     "0x1CE0c2827e2eF14D5C4f29a091d735A204794041", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
+    {"bsc-pendle", "bsc", "PENDLE", "Pendle", TokenStandard::Bep20,
+     "0xb3Ed0A426155B79B898849803E3B36552f7ED507", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "BEP-20 transfer; on-chain symbol/decimals verified via BSC RPC"},
     {"arb-dai", "arb1", "DAI", "Dai Stablecoin", TokenStandard::Erc20,
      "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", 18, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
@@ -156,6 +223,20 @@ const TokenProfile kTokenProfiles[] = {
     {"trx-usdt", "trx", "USDT", "Tether USD", TokenStandard::Trc20,
      "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "TRC-20 transfer; contract verified against Tether supported-protocols table"},
+    // TRC-10 has no contract address: the chain keys the asset by a numeric id
+    // that its issuance record mirrors. Id, abbr and precision below were read
+    // back from that record with wallet/getassetissuebyid. A TRC-10 transfer
+    // still signs when the id is unregistered; it then renders the exact base
+    // units instead of an issuer-defined decimal place.
+    {"trx-btt-trc10", "trx", "BTT", "BitTorrent", TokenStandard::Trc10,
+     "1002000", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "TRC-10 transfer; id and precision verified via TronGrid getassetissuebyid"},
+    {"trx-jst-trc10", "trx", "JST", "JUST", TokenStandard::Trc10,
+     "1003000", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "TRC-10 transfer; id and precision verified via TronGrid getassetissuebyid"},
+    {"trx-seed-trc10", "trx", "SEED", "SEED", TokenStandard::Trc10,
+     "1000001", 0, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "TRC-10 transfer; id and precision verified via TronGrid getassetissuebyid"},
 };
 
 const size_t kTokenProfileCount = sizeof(kTokenProfiles) / sizeof(kTokenProfiles[0]);
@@ -185,6 +266,7 @@ bool token_supports_transfer_signing(const TokenProfile &token) {
 const char *token_standard_text(TokenStandard standard) {
   switch (standard) {
     case TokenStandard::Erc20: return "ERC-20";
+    case TokenStandard::Bep20: return "BEP-20";
     case TokenStandard::Erc721: return "ERC-721";
     case TokenStandard::Erc1155: return "ERC-1155";
     case TokenStandard::Erc4626: return "ERC-4626";
@@ -194,6 +276,7 @@ const char *token_standard_text(TokenStandard standard) {
     case TokenStandard::LayerZeroOft: return "LayerZero OFT";
     case TokenStandard::LayerZeroOnft: return "LayerZero ONFT";
     case TokenStandard::Trc20: return "TRC-20";
+    case TokenStandard::Trc10: return "TRC-10";
   }
   return "unknown";
 }
@@ -201,6 +284,9 @@ const char *token_standard_text(TokenStandard standard) {
 EvmTokenStandard token_evm_standard(TokenStandard standard) {
   switch (standard) {
     case TokenStandard::Erc20: return EvmTokenStandard::Erc20;
+    // BEP-20 is the BSC deployment of the ERC-20 ABI. It is kept as a distinct
+    // display label but uses the exact same transfer/balance calldata path.
+    case TokenStandard::Bep20: return EvmTokenStandard::Erc20;
     case TokenStandard::Erc721: return EvmTokenStandard::Erc721;
     case TokenStandard::Erc1155: return EvmTokenStandard::Erc1155;
     case TokenStandard::Erc4626: return EvmTokenStandard::Erc4626;
@@ -209,8 +295,9 @@ EvmTokenStandard token_evm_standard(TokenStandard standard) {
     case TokenStandard::Erc6551: return EvmTokenStandard::Erc6551;
     case TokenStandard::LayerZeroOft: return EvmTokenStandard::LayerZeroOft;
     case TokenStandard::LayerZeroOnft: return EvmTokenStandard::LayerZeroOnft;
-    // TRC-20 is not an EVM ABI profile; it is reviewed by TronTransaction.
+    // TRC-20/TRC-10 are not EVM ABI profiles; TronTransaction reviews them.
     case TokenStandard::Trc20: return EvmTokenStandard::Unknown;
+    case TokenStandard::Trc10: return EvmTokenStandard::Unknown;
   }
   return EvmTokenStandard::Unknown;
 }
@@ -230,6 +317,22 @@ bool run_token_profile_self_tests() {
           !b58check_dec(decoded, &decoded_size, token.contract_or_mint) ||
           decoded_size != 21 || decoded[0] != 0x41) {
         return false;
+      }
+    } else if (token.standard == TokenStandard::Trc10) {
+      // The chain-assigned id is a canonical decimal string; anything else
+      // would never match the bytes a node resolves.
+      const NetworkProfile *network = token_network(token);
+      const size_t length = strlen(token.contract_or_mint);
+      if (network == nullptr || network->encoding != AddressEncoding::Tron ||
+          length == 0 || length > kTrc10IdMaxLength ||
+          token.contract_or_mint[0] < '1' || token.contract_or_mint[0] > '9') {
+        return false;
+      }
+      for (size_t index = 1; index < length; ++index) {
+        if (token.contract_or_mint[index] < '0' ||
+            token.contract_or_mint[index] > '9') {
+          return false;
+        }
       }
     } else if (!valid_evm_contract(token.contract_or_mint) ||
                token_evm_standard(token.standard) == EvmTokenStandard::Unknown) {

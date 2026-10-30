@@ -18,10 +18,16 @@ constexpr size_t kEvmMaxUnsignedTransactionSize = 768;
 constexpr size_t kEvmMaxSignedTransactionSize = 896;
 constexpr size_t kEvmAmountTextSize = 96;
 constexpr size_t kEvmBytes32TextSize = kTokenBytes32TextSize;
+constexpr size_t kEvmMaxAccessListBytes = 384;
+constexpr size_t kEvmMaxAccessListAddresses = 8;
+constexpr size_t kEvmMaxAccessListKeys = 8;
+constexpr size_t kEvmAccessListTextSize = 1400;
+constexpr size_t kEvmReviewTextSize = 3072;
 
 enum class EvmTransactionType : uint8_t {
   LegacyEip155,
   Eip1559,
+  Eip2930,
 };
 
 enum class EvmTransactionError : uint8_t {
@@ -53,6 +59,12 @@ struct EvmSigningRequest {
   uint8_t amount[kEvmUint256Size];
   uint8_t data[kEvmMaxDataSize];
   uint16_t data_size;
+  // Canonical RLP list payload, without its outer prefix. Preserve order and
+  // duplicates: EIP-2930 charges each occurrence and signs the exact list.
+  uint8_t access_list[kEvmMaxAccessListBytes];
+  uint16_t access_list_size;
+  uint8_t access_list_addresses;
+  uint8_t access_list_keys;
   // Native value carried by a payable contract call (OFT/ONFT LayerZero fee,
   // ERC-6551 call value). ERC-20/721/1155/3525/4626/777 calls must leave it 0.
   uint8_t native_value[kEvmUint256Size];
@@ -86,6 +98,13 @@ EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
                                          size_t *in_out_size);
 const char *evm_transaction_error_text(EvmTransactionError error);
 void clear_evm_request(EvmSigningRequest *request);
+// Complete addresses and storage keys for the trusted display. Fails instead
+// of truncating; empty access lists produce an empty string.
+bool evm_access_list_details(const EvmSigningRequest &request, char *out, size_t size);
+// Envelope, sender, full contract identity and call fields followed by the
+// complete access list. Fails and clears the output if the review cannot fit.
+bool evm_review_details(const EvmSigningRequest &request, char *out, size_t size);
+const char *evm_transaction_type_text(EvmTransactionType type);
 bool run_evm_transaction_self_test();
 
 }  // namespace hexwallet

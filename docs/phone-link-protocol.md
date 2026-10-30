@@ -1,4 +1,4 @@
-> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](chain-protocols.md)。TRON 使用 kind=7，payload 为原始 `raw_data`，详见 [tron-signing.md](chain-protocols.md)。Cosmos（ATOM/OSMO/TIA）使用 kind=8，payload 为紧凑审阅结构，返回完整 `TxRaw`，详见 [cosmos-signing.md](chain-protocols.md)。Stellar 使用 kind=9；Algorand kind=10；NEAR kind=11；VET/ICX/TON/DCR/CKB 使用 kind=14，详见 [chain-signing.md](chain-protocols.md)。
+> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](chain-protocols.md)。TRON 使用 kind=7，payload 为原始 `raw_data`，详见 [tron-signing.md](chain-protocols.md)。Cosmos（ATOM/OSMO/TIA）使用 kind=8，payload 为紧凑审阅结构，返回完整 `TxRaw`，详见 [cosmos-signing.md](chain-protocols.md)。Stellar 使用 kind=9；Algorand kind=10；NEAR kind=11；Dash 使用 kind=15，VET/ICX/TON/DCR/CKB 使用 kind=14，详见 [chain-signing.md](chain-protocols.md)。
 
 # 手机 ↔ 硬件钱包链路协议（v1）
 
@@ -8,7 +8,7 @@
 > 现状：BTC/LTC/RVN 家族的 UTXO（PSBT）、EVM（EIP-155/1559 + 白名单合约）、Kaspa（BIP340 v0）、
 > Zcash（v4 透明 ZIP-243）以及 XMR/MSR（CryptoNote type-5/`kind=5`）已经走通
 > “手机请求 → 设备审阅 → 按键批准 → 设备签名 → 返回给手机”。
-> XMR/MSR 的剩余限制（子地址目的地址/找零、Masari RCT type 3、诱饵链上存在性）见文末“CryptoNote 限制”。
+> XMR/MSR 的剩余限制（MSR 子地址、Masari RCT type 3、诱饵链上存在性）见文末“CryptoNote 限制”。
 
 ## 1. 传输层
 
@@ -141,15 +141,15 @@ request_id(4) | status(1) | 数据...
 | 0x06 | RESULT | review_id(8) | 未批准时 `pending`；批准后 status + len(2) + 已签名交易 |
 | 0x07 | CANCEL | review_id(8) | rejected |
 
-`kind`：1=UTXO/PSBT，2=EVM，3=Kaspa，4=Zcash（`coin_id=zec`，payload 为 `ZEC4`），5=CryptoNote（XMR；MSR 已移除），
+`kind`：1=UTXO/PSBT，2=EVM，3=Kaspa，4=Zcash（`coin_id=zec`，payload 为 `ZEC4`，花费 t3 P2SH-P2PK 时用带 redeem 记录的 `ZEC5`），5=CryptoNote（XMR；MSR 已移除），
 6=Solana，7=TRON（payload 为 `raw_data`，返回 `r||s||v` 65 字节签名），
-8=Cosmos（ATOM/OSMO/TIA，payload 为 [cosmos-signing.md](chain-protocols.md) 定义的紧凑结构，
-返回完整 `TxRaw`），9=Stellar（`coin_id=xlm`，主网网络哈希与 unsigned envelope XDR，返回完整 signed envelope；详见 [stellar-signing.md](chain-protocols.md)），
+8=Cosmos（ATOM/OSMO/TIA，payload 为 [Cosmos 范围与证据](chain-protocols.md) 定义的紧凑结构：
+v1 为原生 denom、无 memo，v2 追加 denom 与 memo，返回完整 `TxRaw`），9=Stellar（`coin_id=xlm`，主网网络哈希与 unsigned envelope XDR，返回完整 signed envelope；详见 [stellar-signing.md](chain-protocols.md)），
 10=Algorand（`coin_id=algo`，payload 为 canonical unsigned MessagePack，返回 `{sig, txn}`；详见 [algorand-signing.md](chain-protocols.md)），
 11=NEAR（`coin_id=near`，payload 为 unsigned Borsh `TransactionV0`，返回 `tx || 0x00 || sig`；详见 [near-signing.md](chain-protocols.md)），
 12=Tezos（`coin_id=xtz`，payload 为 manager operation 原始字节，返回 `forged || signature`；详见 [tezos-signing.md](chain-protocols.md)），
 13=XRP（`coin_id=xrp`，payload 为 50 字节 Payment 审阅结构，返回完整 signed binary；详见 [xrp-signing.md](chain-protocols.md)），
-14=Chain（`coin_id=vet|icx|ton|dcr|ckb|ada|hive|sui|fil|dot|ksm`。SUI 的 payload 是原始 BCS TransactionData，返回 97 字节 `flag||signature||public_key`；FIL 的 payload 是原始 CBOR Message，返回完整 SignedMessage CBOR；ADA 的 payload 是原始 Conway body CBOR，返回 `[body, witness_set, true, null]`，三者都不带自定义 magic，详见 [sui-filecoin-signing.md](chain-protocols.md) 与 [chain-signing.md](chain-protocols.md)。其他 payload 以各链 magic 开头；VET 返回完整 signed RLP，ICX/TON/DCR/CKB 返回各自签名或完整签名交易，HIVE 返回 65 字节 graphene 签名，详见 [chain-signing.md](chain-protocols.md)；DOT/KSM 使用 `DOT2` payload（短命期 era + tip），返回 v4 signed extrinsic，详见 [chain-signing.md](chain-protocols.md)）。
+15=Dash（`coin_id=dash`，payload 为紧凑审阅结构，返完整签名交易，详见 [chain-protocols.md](chain-protocols.md)）。14=Chain（`coin_id=vet|icx|ton|dcr|ckb|ada|hive|sui|fil|dot|ksm`。SUI 的 payload 是原始 BCS TransactionData，返回 97 字节 `flag||signature||public_key`；FIL 的 payload 是原始 CBOR Message，返回完整 SignedMessage CBOR；ADA 的 payload 是原始 Conway body CBOR，返回 `[body, witness_set, true, null]`，三者都不带自定义 magic，详见 [sui-filecoin-signing.md](chain-protocols.md) 与 [chain-signing.md](chain-protocols.md)。其他 payload 以各链 magic 开头；VET 返回完整 signed RLP，ICX/TON/DCR/CKB 返回各自签名或完整签名交易，HIVE 返回 65 字节 graphene 签名，详见 [chain-signing.md](chain-protocols.md)；DOT/KSM 使用 `DOT2` payload（短命期 era + tip），返回 v4 signed extrinsic，详见 [chain-signing.md](chain-protocols.md)）。
 
 状态字节：`0` ok、`1` pending（等待按键）、`2` rejected、`3` unknown-coin、`4` invalid、
 `5` expired、`6` unsupported、`8` not-approved、`9` **locked**（设备已配对但钱包未解锁，RAM 里没有任何密钥）、
@@ -159,7 +159,8 @@ request_id(4) | status(1) | 数据...
 `BEGIN_SIGN` 的 `payload_len` 上限为 16384 字节（CryptoNote 交易远大于 UTXO 请求），
 APDU/链路分片已按此调整；超过上限返回 `invalid`，不会截断解析。
 `address_index` 同时用于派生地址与派生签名密钥，两者必须同源（`m/44'/128'/0'/0/<index>`），
-子地址输入消费已接入；子地址目的地址和子地址找零仍拒绝。
+子地址输入消费已接入；XMR 子地址目的地只接受本节定义的 `R=rD` 或
+payload v3 additional-key 绑定，未绑定输出与 MSR 子地址仍拒绝。
 
 `ADDRESS` 只返回公钥/地址，永远不返回私钥；`QrlXmss` 等密钥生成代价高的网络在链路上直接拒绝。
 末尾追加 `major(4)、minor(4)` 时返回 CryptoNote 子地址（`path` 会带 `+major/minor` 后缀）；旧客户端不带这两个字段，行为保持不变。
@@ -178,7 +179,7 @@ APDU/链路分片已按此调整；超过上限返回 `invalid`，不会截断�
 
 ### 5.1 发送（签名）时序
 
-1. 手机构造未签名交易（PSBT / EIP-155 原始 RLP / Kaspa review payload / ZEC4 payload / CryptoNote payload），
+1. 手机构造未签名交易（PSBT / EIP-155 原始 RLP / Kaspa review payload / ZEC4 或 ZEC5 payload / CryptoNote payload），
    通过 `BEGIN_SIGN` 发出。
 2. 设备解析并按自身策略校验：输入必须属于本钱包、找零与地址重新派生校验、手续费上限、重复输入、金额范围、
    合约白名单与 ABI 子集。任何一项失败都不会进入审阅界面。
@@ -219,13 +220,17 @@ APDU/链路分片已按此调整；超过上限返回 `invalid`，不会截断�
 
 ## 7. CryptoNote（XMR / MSR）
 
-`kind=5`，`address_index` 为 `m/44'/128'/0'/0/<index>` 的子索引。payload 版本 2（版本 1 仍被接受，等价于全部子地址字段为 0）：
+`kind=5`，`address_index` 为 `m/44'/128'/0'/0/<index>` 的子索引。XMR
+payload 版本 3 支持子地址目的地；版本 2（以及仅标准地址的版本 1）仍被接受：
 
 ```
-u8   version = 2
+u8   version = 1, 2 或 3
 u16  tx_len
 u8[] tx                     已序列化但未签名的交易（XMR: RCT type 6 / MSR: RCT 1-3）
-u8[32] tx_secret            tx_extra 中一次性公钥对应的私钥
+u8[32] tx_secret            主交易私钥；标准交易为 R=rG，单一子地址目的地为 R=rD
+if version >= 3:
+  u8   additional_tx_key_count
+  u8[32] additional_tx_secret[additional_tx_key_count]
 u8   input_count
 u8   output_count
 u8   flags                  bit0 表示每个输出附带 mask（仅 MSR）；其余位必须为 0
@@ -251,20 +256,27 @@ ring_size x { u8[32] dest, u8[32] mask }
 每个 output：
 
 ```
-u8   out_flags              bit0 找零；bit1 子地址（当前拒绝）；其余位必须为 0
+u8   out_flags              bit0 找零；bit1 子地址；其余位必须为 0
 u8[32] spend_public
 u8[32] view_public
 u64  amount
-u32  subaddress_major       找零输出所属子地址（0/0 = 标准地址）
+u32  subaddress_major       找零输出所属子地址（外部输出必须为 0/0）
 u32  subaddress_minor
 u8[32] mask                 仅请求头 flags bit0 == 1 时存在
+if version >= 3:
+  u8   tx_key_index          0 = tx_secret；非零为 additional_tx_secret 的一基索引
 ```
+
+`tx_key_index` 属于当前 output 记录，必须在该记录的 `mask`（若存在）之后立即出现；
+不能把所有 output 的 selector 集中放在 output 列表末尾。
 
 子地址语义：
 
 - 设备用 `b + Hs("SubAddr" || a || major || minor)` 作为该输入的消费私钥，再派生一次性私钥；标准地址（0/0）保持不变。
-- 输出仅支持标准地址：所有输出的 `major/minor` 必须为零，子地址类型返回 `6 unsupported`。
-- XMR/MSR 的子地址发送需要 `rD` / 附加交易公钥绑定及接收扫描回归，不能仅凭子地址公钥所有权检查开放。
+- XMR 的单一子地址目的地使用 `R=rD`，不带 additional key；混合标准地址/子地址或多个子地址目的地必须使用版本 3。版本 3 的 `tx_extra` 必须包含一个 additional-public-keys 向量，长度必须等于输出数，且第 `i` 个 additional secret 的公钥必须逐字节匹配该向量第 `i` 项。
+- 对外部子地址，`tx_key_index` 必须为 `i+1`（输出索引 `i` 的一基索引）；标准地址和找零必须使用主交易私钥（索引 0）。additional 公钥按 Monero 规则验证为 `s_i*C_i`（子地址）或 `s_i*G`（标准地址），并重新计算 output key、金额密文、view tag 和 commitment。
+- 外部子地址的 `major/minor` 必须为零，因为设备根据已验证的 spend/view 公钥重新编码并显示完整地址；只有找零可以携带索引，且设备会从本钱包 spend/view secret 重新派生并核对。
+- MSR 仍只接受标准地址；其 legacy/RCT 路径没有 XMR additional-key 语义。XMR 子地址输入消费与目的地址构造分别验证，不能只凭公钥所有权放行。
 
 设备行为：
 
@@ -292,5 +304,5 @@ u8[32] mask                 仅请求头 flags bit0 == 1 时存在
 
 - **诱饵链上存在性**：设备只能证明 ring 内部一致、包含本机输出、offsets 与交易一致，不能证明诱饵真的在链上。手机被信任“提供活跃诱饵”，但永远不被信任金额、手续费、目的地址。
 - **Masari RCT type 3（标准 Bulletproofs）**：验证器已实现，但还没有主网向量，默认 `HEXWALLET_MSR_ENABLE_RCT_TYPE3=0` 并返回 `6 unsupported`。验证路径：`python tools/fetch_masari_bulletproof_vector.py --hash <txid> --url <masari-daemon>` 生成 `tests/fixtures/masari/tx3.bin`，主机自检会解析该交易、校验 Bulletproof 并拒绝单字节篡改；通过后才可用 `-DHEXWALLET_MSR_ENABLE_RCT_TYPE3=1` 构建。
-- **子地址目的地址/找零**：XMR/MSR 均拒绝；子地址输入消费与目的地址构造是不同路径。
+- **子地址目的地址/找零**：XMR 单一子地址和版本 3 additional-key 目的地会验证；MSR 仍拒绝。子地址输入消费与目的地址构造是不同路径。
 - **全节点验收**：本地审阅/签名回归不是链上接收证明，广播后仍需手机侧节点验收。

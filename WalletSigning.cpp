@@ -16,6 +16,7 @@
 #include "WalletEngine.h"
 #include "WalletNetworks.h"
 #include "WalletSession.h"
+#include "SensitiveValue.h"
 #include "WalletWorker.h"
 #include "WalletAltAddresses.h"
 #include "CryptoExtended.h"
@@ -58,6 +59,43 @@ void service_crypto_wait() {
   delay(1);
 }
 
+// Common worker/key lifecycle; chain codecs and their error policies stay typed.
+template <typename Transaction, typename Error>
+struct SeedSignJob {
+  const Transaction *request;
+  const uint8_t *seed;
+  uint8_t *out;
+  size_t *size;
+  Error (*sign)(const Transaction &, const uint8_t *, uint8_t *, size_t *);
+  Error error;
+  static void run(void *context) {
+    auto *job = static_cast<SeedSignJob *>(context);
+    job->error = job->sign(*job->request, job->seed, job->out, job->size);
+  }
+};
+
+template <typename Transaction, typename Error>
+WalletSigningError sign_seed_transaction(const Transaction &request, const char *busy,
+    Error (*sign)(const Transaction &, const uint8_t *, uint8_t *, size_t *),
+    WalletSigningError (*map_error)(Error), uint8_t *out, size_t *size) {
+  SensitiveValue<uint8_t[kSeedSize]> seed;
+  if (wallet_session_load_seed(seed.get()) != WalletError::Ok) {
+    wallet_signing_clear();
+    return WalletSigningError::NoWallet;
+  }
+  wallet_ui_show_busy(busy);
+  SeedSignJob<Transaction, Error> job{&request, seed.get(), out, size, sign, Error::CryptoFailure};
+  // execute drains a timed-out worker before releasing its borrowed seed.
+  const WalletWorkerResult result = wallet_worker_execute(
+      SeedSignJob<Transaction, Error>::run, &job, HEXWALLET_WORKER_JOB_TIMEOUT_MS,
+      millis, service_crypto_wait);
+  const Error error = job.error;
+  secure_zero(&job, sizeof(job));
+  wallet_signing_clear();
+  if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
+  if (result != WalletWorkerResult::Completed) return WalletSigningError::Unsupported;
+  return map_error(error);
+}
 struct ChainPrepareJob {
   ChainFamily family;
   const uint8_t *payload;
@@ -68,6 +106,33 @@ struct ChainPrepareJob {
   ChainTransaction *request;
   ChainError error;
 };
+struct DashPrepareJob {
+  const uint8_t *payload;
+  size_t size;
+  DashChainParams chain;
+  const HdPrivateNode *master;
+  DashTransaction *request;
+  DashError error;
+};
+struct DashSignJob {
+  const DashTransaction *request;
+  const HdPrivateNode *master;
+  uint8_t *out;
+  size_t *size;
+  DashError error;
+};
+void run_dash_prepare_job(void *context) {
+  auto *job = static_cast<DashPrepareJob *>(context);
+  job->error = dash_parse_review_payload(job->payload, job->size,
+                                         job->chain, job->request);
+  if (job->error == DashError::Ok)
+    job->error = dash_validate_inputs(*job->request, *job->master);
+}
+void run_dash_sign_job(void *context) {
+  auto *job = static_cast<DashSignJob *>(context);
+  job->error = dash_sign_transaction(*job->request, *job->master,
+                                     job->out, job->size);
+}
 struct ChainSignJob {
   const ChainTransaction *request;
   const HdPrivateNode *master;
@@ -87,31 +152,6 @@ void run_chain_sign_job(void *context) {
       job->out, job->size);
 }
 
-struct SolanaSignJob {
-  const SolanaTransaction *request;
-  const uint8_t *seed;
-  uint8_t *out;
-  size_t *size;
-  SolanaError error;
-};
-struct StellarSignJob {
-  const StellarTransaction *request;
-  const uint8_t *seed;
-  uint8_t *out;
-  size_t *size;
-  StellarError error;
-};
-struct AlgorandSignJob {
-  const AlgorandTransaction *request;
-  const uint8_t *seed;
-  uint8_t *out;
-  size_t *size;
-  AlgorandError error;
-};
-void run_algorand_sign_job(void *context) {
-  auto *job = static_cast<AlgorandSignJob *>(context);
-  job->error = algorand_sign_transaction(*job->request, job->seed, job->out, job->size);
-}
 WalletSigningError map_algorand_error(AlgorandError error) {
   switch (error) {
     case AlgorandError::Ok: return WalletSigningError::Ok;
@@ -126,17 +166,6 @@ WalletSigningError map_algorand_error(AlgorandError error) {
     default: return WalletSigningError::ParseFailed;
   }
 }
-struct NearSignJob {
-  const NearTransaction *request;
-  const uint8_t *seed;
-  uint8_t *out;
-  size_t *size;
-  NearError error;
-};
-void run_near_sign_job(void *context) {
-  auto *job = static_cast<NearSignJob *>(context);
-  job->error = near_sign_transaction(*job->request, job->seed, job->out, job->size);
-}
 WalletSigningError map_near_error(NearError error) {
   switch (error) {
     case NearError::Ok: return WalletSigningError::Ok;
@@ -148,17 +177,6 @@ WalletSigningError map_near_error(NearError error) {
     case NearError::InvalidAmount: return WalletSigningError::InvalidArgument;
     default: return WalletSigningError::ParseFailed;
   }
-}
-struct TezosSignJob {
-  const TezosTransaction *request;
-  const uint8_t *seed;
-  uint8_t *out;
-  size_t *size;
-  TezosError error;
-};
-void run_tezos_sign_job(void *context) {
-  auto *job = static_cast<TezosSignJob *>(context);
-  job->error = tezos_sign_transaction(*job->request, job->seed, job->out, job->size);
 }
 WalletSigningError map_tezos_error(TezosError error) {
   switch (error) {
@@ -212,10 +230,6 @@ WalletSigningError map_chain_error(ChainError error) {
   }
   return WalletSigningError::ParseFailed;
 }
-void run_stellar_sign_job(void *context) {
-  auto *job = static_cast<StellarSignJob *>(context);
-  job->error = stellar_sign_transaction(*job->request, job->seed, job->out, job->size);
-}
 WalletSigningError map_stellar_error(StellarError error) {
   switch (error) {
     case StellarError::Ok: return WalletSigningError::Ok;
@@ -229,10 +243,6 @@ WalletSigningError map_stellar_error(StellarError error) {
     case StellarError::InvalidAmount: return WalletSigningError::InvalidArgument;
     default: return WalletSigningError::ParseFailed;
   }
-}
-void run_solana_sign_job(void *context) {
-  SolanaSignJob *job = static_cast<SolanaSignJob *>(context);
-  job->error = solana_sign_transaction(*job->request, job->seed, job->out, job->size);
 }
 WalletSigningError map_solana_error(SolanaError error) {
   switch (error) {
@@ -340,8 +350,23 @@ WalletSigningError map_zcash_error(ZcashError error) {
   }
 }
 
-WalletSigningError map_cryptonote_error(CryptoNoteTxError error) {
+WalletSigningError map_dash_error(DashError error) {
   switch (error) {
+    case DashError::Ok: return WalletSigningError::Ok;
+    case DashError::WrongWallet: return WalletSigningError::WrongWallet;
+    case DashError::FeePolicy: return WalletSigningError::FeePolicy;
+    case DashError::CryptoFailure: return WalletSigningError::CryptoFailure;
+    case DashError::BufferTooSmall: return WalletSigningError::BufferTooSmall;
+    // A special transaction type is a form this firmware does not implement,
+    // not a parse failure: the phone should stop offering it.
+    case DashError::Unsupported: return WalletSigningError::Unsupported;
+    case DashError::InvalidArgument:
+    case DashError::InvalidAmount: return WalletSigningError::InvalidArgument;
+    default: return WalletSigningError::ParseFailed;
+  }
+}
+
+WalletSigningError map_cryptonote_error(CryptoNoteTxError error) {  switch (error) {
     case CryptoNoteTxError::Ok: return WalletSigningError::Ok;
     case CryptoNoteTxError::Unsupported: return WalletSigningError::Unsupported;
     case CryptoNoteTxError::FeePolicy: return WalletSigningError::FeePolicy;
@@ -426,7 +451,7 @@ void show_bitcoin_review(const BitcoinSigningRequest &request) {
               nullptr, outputs, count);
 }
 
-void show_evm_review(const EvmSigningRequest &request) {
+bool show_evm_review(const EvmSigningRequest &request) {
   WalletUiTransactionOutput output = {};
   char amount[256];
   const char *asset = request.network == nullptr ? "?" : request.network->symbol;
@@ -453,108 +478,162 @@ void show_evm_review(const EvmSigningRequest &request) {
                               : request.recipient_address;
   output = { 0, amount, recipient,
              request.has_call ? evm_token_standard_name(request.call.standard) : "NATIVE" };
-  char details[192] = {};
-  if (request.has_call) {
-    static const char kHex[] = "0123456789abcdef";
-    char contract[2 + 2 * kEvmAddressSize + 1];
-    contract[0] = '0';
-    contract[1] = 'x';
-    for (size_t index = 0; index < kEvmAddressSize; ++index) {
-      contract[2 + 2 * index] = kHex[request.contract[index] >> 4];
-      contract[3 + 2 * index] = kHex[request.contract[index] & 0x0f];
-    }
-    contract[2 + 2 * kEvmAddressSize] = '\0';
-    const int written = snprintf(
-        details, sizeof(details), "CONTRACT\n%s\nSTANDARD\n%s%s", contract,
-        evm_token_standard_name(request.call.standard),
-        request.token == nullptr
-            ? "\nUNREGISTERED: verify the contract address with the issuer"
-            : "");
-    if (written > 0 && static_cast<size_t>(written) < sizeof(details)) {
-      output.details = details;
-    }
-  }
+  char details[kEvmReviewTextSize];
+  if (!evm_review_details(request, details, sizeof(details))) return false;
+  output.details = details;
   char fee[128];
   snprintf(fee, sizeof(fee), "%s %s", request.maximum_fee_text,
            request.network == nullptr ? "?" : request.network->symbol);
   show_review(request.network == nullptr ? "EVM" : request.network->symbol,
               request.maximum_fee, 0, fee, &output, 1);
+  return true;
 }
 
 bool show_tron_review(const TronTransaction &request) {
   WalletUiTransactionOutput output = {};
-  char details[384];
-  const TronKind kind = request.review.kind;
-  const bool token = kind != TronKind::Native;
+  char details[448];
+  const TronTransferReview &review = request.review;
+  const TronKind kind = review.kind;
+  const bool native = kind == TronKind::Native;
+  const bool token = !native;
+  const bool trc10 = kind == TronKind::Trc10;
   const bool nft = kind == TronKind::Trc721 || kind == TronKind::Trc1155;
+  // fee_limit only exists for the contract-call shapes reviewed here.
+  const bool charges_fee_limit = kind == TronKind::Trc20 || nft;
+  char memo[kTronMemoTextSize + 8] = {};
+  if (review.has_memo) {
+    const int memo_written =
+        snprintf(memo, sizeof(memo), "\nMEMO\n%s", review.memo_text);
+    if (memo_written < 0 || static_cast<size_t>(memo_written) >= sizeof(memo)) {
+      return false;
+    }
+  }
+  char precision[24] = {};
+  if (trc10) {
+    const int precision_written =
+        review.asset_registered
+            ? snprintf(precision, sizeof(precision), "%u",
+                       static_cast<unsigned>(review.token_decimals))
+            : snprintf(precision, sizeof(precision), "issuer-defined");
+    if (precision_written < 0 ||
+        static_cast<size_t>(precision_written) >= sizeof(precision)) {
+      return false;
+    }
+  }
+  const char *method = review.method_text[0] == '\0' ? "-" : review.method_text;
   int written = 0;
   if (nft) {
     written = snprintf(
         details, sizeof(details),
-        "CONTRACT\n%s\nSTANDARD\n%s\nTOKEN ID\n%s\n"
+        "CONTRACT\n%s\nMETHOD\n%s\nSTANDARD\n%s\nTOKEN ID\n%s\n"
         "UNREGISTERED: verify the contract address with the issuer\n"
-        "FEE LIMIT\n%llu.%06llu TRX\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x",
-        request.review.token_contract_text, request.review.token_symbol,
-        request.review.token_id_text,
-        static_cast<unsigned long long>(request.review.fee_limit_sun / kTronSunPerTrx),
-        static_cast<unsigned long long>(request.review.fee_limit_sun % kTronSunPerTrx),
-        static_cast<long long>(request.review.expiration_ms),
-        request.review.tx_id[0], request.review.tx_id[1],
-        request.review.tx_id[2], request.review.tx_id[3],
-        request.review.tx_id[4], request.review.tx_id[5],
-        request.review.tx_id[6], request.review.tx_id[7]);
+        "FEE LIMIT\n%llu.%06llu TRX\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x%s",
+        review.token_contract_text, method, review.token_symbol,
+        review.token_id_text,
+        static_cast<unsigned long long>(review.fee_limit_sun / kTronSunPerTrx),
+        static_cast<unsigned long long>(review.fee_limit_sun % kTronSunPerTrx),
+        static_cast<long long>(review.expiration_ms),
+        review.tx_id[0], review.tx_id[1], review.tx_id[2], review.tx_id[3],
+        review.tx_id[4], review.tx_id[5], review.tx_id[6], review.tx_id[7], memo);
+  } else if (trc10) {
+    // The identifier is printed byte for byte: the node resolves the transfer
+    // by these bytes, not by a symbol.
+    written = snprintf(
+        details, sizeof(details),
+        "TRC-10 ASSET ID\n%s\nPRECISION\n%s\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x%s%s",
+        review.asset_id_text, precision,
+        static_cast<long long>(review.expiration_ms),
+        review.tx_id[0], review.tx_id[1], review.tx_id[2], review.tx_id[3],
+        review.tx_id[4], review.tx_id[5], review.tx_id[6], review.tx_id[7],
+        review.asset_registered ? "" : "\nASSET NOT REGISTERED", memo);
   } else if (token) {
     written = snprintf(
         details, sizeof(details),
-        "CONTRACT\n%s\nFEE LIMIT\n%llu.%06llu TRX\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x",
-        request.review.token_contract_text,
-        static_cast<unsigned long long>(request.review.fee_limit_sun / kTronSunPerTrx),
-        static_cast<unsigned long long>(request.review.fee_limit_sun % kTronSunPerTrx),
-        static_cast<long long>(request.review.expiration_ms),
-        request.review.tx_id[0], request.review.tx_id[1],
-        request.review.tx_id[2], request.review.tx_id[3],
-        request.review.tx_id[4], request.review.tx_id[5],
-        request.review.tx_id[6], request.review.tx_id[7]);
+        "CONTRACT\n%s\nMETHOD\n%s\nFEE LIMIT\n%llu.%06llu TRX\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x%s",
+        review.token_contract_text, method,
+        static_cast<unsigned long long>(review.fee_limit_sun / kTronSunPerTrx),
+        static_cast<unsigned long long>(review.fee_limit_sun % kTronSunPerTrx),
+        static_cast<long long>(review.expiration_ms),
+        review.tx_id[0], review.tx_id[1], review.tx_id[2], review.tx_id[3],
+        review.tx_id[4], review.tx_id[5], review.tx_id[6], review.tx_id[7], memo);
   } else {
     written = snprintf(
         details, sizeof(details),
-        "EXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x",
-        static_cast<long long>(request.review.expiration_ms),
-        request.review.tx_id[0], request.review.tx_id[1],
-        request.review.tx_id[2], request.review.tx_id[3],
-        request.review.tx_id[4], request.review.tx_id[5],
-        request.review.tx_id[6], request.review.tx_id[7]);
+        "EXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x%s",
+        static_cast<long long>(review.expiration_ms),
+        review.tx_id[0], review.tx_id[1], review.tx_id[2], review.tx_id[3],
+        review.tx_id[4], review.tx_id[5], review.tx_id[6], review.tx_id[7], memo);
   }
   if (written < 0 || static_cast<size_t>(written) >= sizeof(details)) return false;
-  output = { 0, request.review.amount_text, request.review.recipient_text,
-             token ? request.review.token_symbol : "NATIVE", details };
+  const char *ownership =
+      native ? "NATIVE"
+      : trc10 ? (review.asset_registered ? review.token_symbol : "UNREGISTERED")
+               : review.token_symbol;
+  output = { 0, review.amount_text, review.recipient_text, ownership, details };
   char fee[64] = {};
-  if (token) {
+  if (charges_fee_limit) {
     snprintf(fee, sizeof(fee), "%llu.%06llu TRX",
-             static_cast<unsigned long long>(request.review.fee_limit_sun / kTronSunPerTrx),
-             static_cast<unsigned long long>(request.review.fee_limit_sun % kTronSunPerTrx));
+             static_cast<unsigned long long>(review.fee_limit_sun / kTronSunPerTrx),
+             static_cast<unsigned long long>(review.fee_limit_sun % kTronSunPerTrx));
   }
-  show_review("TRON", request.review.fee_limit_sun, 0, token ? fee : nullptr,
-              &output, 1, nullptr,
-              nft
-                  ? "Offline NFT review. Only the canonical safeTransferFrom with an empty data tail is accepted. The contract is not registered: verify its address independently; metadata and ownership are not verified."
-                  : "Offline review. Expiration, ref block and energy/bandwidth state are checked by the phone. Token identity and decimals come from the registered contract.",
-              token ? "FEE LIMIT" : nullptr);
+  const char *note =
+      nft ? "Offline NFT review. Only the canonical safeTransferFrom with an empty data tail is accepted. The contract is not registered: verify its address independently; metadata and ownership are not verified."
+      : trc10 ? (review.asset_registered
+                     ? "Offline review. The TRC-10 id and precision are pinned to the on-chain issuance record in firmware; recipient and amount are re-derived from the signed bytes."
+                     : "Unregistered TRC-10 asset. The issuer chose this identifier and defines its precision, so the amount is the exact base-unit count the chain will move. Verify the asset id before approving.")
+              : "Offline review. Expiration, ref block and energy/bandwidth state are checked by the phone. Token identity and decimals come from the registered contract.";
+  show_review("TRON", charges_fee_limit ? review.fee_limit_sun : 0, 0,
+              charges_fee_limit ? fee : nullptr, &output, 1, nullptr, note,
+              charges_fee_limit ? "FEE LIMIT" : nullptr);
   return true;
 }
 
 bool show_cosmos_review(const CosmosTransaction &request) {
   const CosmosReview &review = request.review;
   WalletUiTransactionOutput output = {};
-  char details[224];
-  const int written = snprintf(
-      details, sizeof(details),
-      "CHAIN ID\n%s\nACCOUNT / SEQUENCE\n%llu / %llu\nGAS\n%llu",
-      review.chain_id, static_cast<unsigned long long>(review.account_number),
-      static_cast<unsigned long long>(review.sequence),
-      static_cast<unsigned long long>(review.gas_limit));
+  char details[384];
+  char memo[kCosmosMaxMemo + 16] = {};
+  if (review.has_memo) {
+    const int memo_written = snprintf(memo, sizeof(memo), "\nMEMO\n%s", review.memo);
+    if (memo_written < 0 || static_cast<size_t>(memo_written) >= sizeof(memo)) {
+      return false;
+    }
+  }
+  int written = 0;
+  if (review.denom_registered) {
+    written = snprintf(
+        details, sizeof(details),
+        "CHAIN ID\n%s\nACCOUNT / SEQUENCE\n%llu / %llu\nGAS\n%llu%s",
+        review.chain_id, static_cast<unsigned long long>(review.account_number),
+        static_cast<unsigned long long>(review.sequence),
+        static_cast<unsigned long long>(review.gas_limit), memo);
+  } else {
+    // A denom with no pinned precision is displayed verbatim next to an exact
+    // base-unit amount; inventing decimals there would misstate the transfer.
+    written = snprintf(
+        details, sizeof(details),
+        "CHAIN ID\n%s\nACCOUNT / SEQUENCE\n%llu / %llu\nGAS\n%llu\nDENOM\n%s\n"
+        "NO PINNED PRECISION: amount above is the exact base-unit count%s",
+        review.chain_id, static_cast<unsigned long long>(review.account_number),
+        static_cast<unsigned long long>(review.sequence),
+        static_cast<unsigned long long>(review.gas_limit), review.denom, memo);
+  }
   if (written < 0 || static_cast<size_t>(written) >= sizeof(details)) return false;
-  output = { review.amount, review.amount_text, review.to, "EXTERNAL", details };
+  if (review.message_count == 0 || review.message_count > kCosmosMaxMessages) {
+    return false;
+  }
+  // One display row per MsgSend: every recipient and its own amount. The
+  // chain/account/memo detail block hangs off the first row.
+  WalletUiTransactionOutput outputs[kCosmosMaxMessages] = {};
+  static_assert(kCosmosMaxMessages <= kWalletUiMaxTransactionOutputs,
+                "Every Cosmos message must fit the trusted review");
+  for (uint8_t index = 0; index < review.message_count; ++index) {
+    outputs[index] = { review.amounts[index], review.amount_texts[index],
+                       review.to[index],
+                       review.denom_registered ? review.symbol : "DENOM",
+                       index == 0 ? details : nullptr };
+  }
+  output = outputs[0];
   char total[192];
   const int total_written = snprintf(total, sizeof(total), "%s + %s",
                                      review.amount_text, review.fee_text);
@@ -562,8 +641,11 @@ bool show_cosmos_review(const CosmosTransaction &request) {
     return false;
   }
   show_review(review.chain == nullptr ? "COSMOS" : review.chain->symbol,
-              review.fee, 0, review.fee_text, &output, 1, total,
-              "Offline review. Chain id, account number and sequence are supplied by the phone and shown here; verify them before approving. Only one native-denom MsgSend is supported: no IBC, memo, authz or multiple messages.",
+              review.fee, 0, review.fee_text, outputs, review.message_count,
+              total,
+              review.denom_registered
+                  ? "Offline review. Chain id, account number and sequence are supplied by the phone and shown here; verify them before approving. Every MsgSend is listed with its own recipient and amount; the memo is committed in TxBody. IBC and authz messages are refused."
+                  : "Offline review of a denom without pinned metadata: each amount is the exact base-unit integer the chain will move. Verify the denom string before approving. IBC and authz messages are refused.",
               "FEE");
   return true;
 }
@@ -784,9 +866,10 @@ void show_kaspa_review(const KaspaTransaction &request) {
   show_review("KASPA", request.fee, 0, fee, outputs, count);
 }
 
-void show_zcash_review(const ZcashSigningRequest &request) {
+bool show_zcash_review(const ZcashSigningRequest &request) {
   WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
   char amounts[kWalletUiMaxTransactionOutputs][32] = {};
+  char input_addresses[kZcashMaxInputs][kAddressTextSize] = {};
   const size_t count = request.output_count > kWalletUiMaxTransactionOutputs
                            ? kWalletUiMaxTransactionOutputs
                            : request.output_count;
@@ -797,15 +880,83 @@ void show_zcash_review(const ZcashSigningRequest &request) {
     outputs[index] = { request.outputs[index].value, amounts[index],
                        request.outputs[index].address, "EXTERNAL" };
   }
+  // t3 spends must name the P2SH address whose redeem script is being spent.
+  // Silently hiding one would let a review show only destinations.
+  size_t shown = count;
+  bool has_p2sh_input = false;
+  for (size_t index = 0; index < request.input_count; ++index) {
+    const ZcashInput &input = request.inputs[index];
+    if (input.redeem_size == 0) continue;
+    if (shown >= kWalletUiMaxTransactionOutputs) return false;
+    if (address_zcash_transparent_from_script(
+            request.chain.p2pkh_version, request.chain.p2sh_version, input.script,
+            input.script_size, input_addresses[index],
+            sizeof(input_addresses[index])) != WalletError::Ok) {
+      return false;
+    }
+    has_p2sh_input = true;
+    outputs[shown++] = { input.value, nullptr, input_addresses[index],
+                         "P2SH INPUT" };
+  }
   char fee[64];
   snprintf(fee, sizeof(fee), "%llu.%08lu ZEC",
            static_cast<unsigned long long>(request.fee / kZcashZatsPerZec),
            static_cast<unsigned long>(request.fee % kZcashZatsPerZec));
-  show_review("ZCASH", request.fee, 0, fee, outputs, count);
+  show_review("ZCASH", request.fee, 0, fee, outputs, shown, nullptr,
+              has_p2sh_input
+                  ? "P2SH inputs list the t3 address whose redeem script is spent. The firmware re-hashes that script against the address before signing."
+                  : nullptr);
+  return true;
 }
 
-bool show_cryptonote_review(const CryptoNoteSigningState &request) {
-  static_assert(kCryptoNoteMaxSignOutputs <= kWalletUiMaxTransactionOutputs,
+// Dash review. Every row comes from bytes the device will actually sign: the
+// destination scripts are decoded back into addresses, and the input rows show
+// the prevout scripts whose key hashes the signer re-derives and compares.
+bool show_dash_review(const DashTransaction &request) {
+  static_assert(kDashMaxInputs + kDashMaxOutputs <= kWalletUiMaxTransactionOutputs,
+                "Every Dash row must fit the trusted review");
+  WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
+  char amounts[kWalletUiMaxTransactionOutputs][40] = {};
+  char input_details[kDashMaxInputs][128] = {};
+  if (request.output_count == 0 || request.output_count > kDashMaxOutputs ||
+      request.input_count == 0 || request.input_count > kDashMaxInputs) return false;
+  size_t shown = 0;
+  for (size_t index = 0; index < request.output_count; ++index) {
+    const DashOutput &output = request.outputs[index];
+    snprintf(amounts[shown], sizeof(amounts[shown]), "%llu.%08lu DASH",
+             static_cast<unsigned long long>(output.value / kDashDuffsPerDash),
+             static_cast<unsigned long>(output.value % kDashDuffsPerDash));
+    outputs[shown] = { output.value, amounts[shown], output.address, "TO" };
+    ++shown;
+  }
+  for (size_t index = 0; index < request.input_count; ++index) {
+    const DashInput &input = request.inputs[index];
+    snprintf(amounts[shown], sizeof(amounts[shown]), "%llu.%08lu DASH",
+             static_cast<unsigned long long>(input.value / kDashDuffsPerDash),
+             static_cast<unsigned long>(input.value % kDashDuffsPerDash));
+    snprintf(input_details[index], sizeof(input_details[index]),
+             "m/44'/5'/%lu'/%u/%lu\nSequence: %lu",
+             static_cast<unsigned long>(input.account), static_cast<unsigned>(input.change),
+             static_cast<unsigned long>(input.address_index),
+             static_cast<unsigned long>(input.sequence));
+    outputs[shown] = { input.value, amounts[shown], input.address, "VERIFIED INPUT",
+                       input_details[index] };
+    ++shown;
+  }
+  char fee[64];
+  snprintf(fee, sizeof(fee), "%llu.%08lu DASH",
+           static_cast<unsigned long long>(request.fee / kDashDuffsPerDash),
+           static_cast<unsigned long>(request.fee % kDashDuffsPerDash));
+  char note[256];
+  snprintf(note, sizeof(note),
+           "Version %lu / type 0. Lock time: %lu. Input amounts verified against funding transactions. Confirmations, unspent status and InstantSend locks require a node.",
+           static_cast<unsigned long>(request.version),
+           static_cast<unsigned long>(request.lock_time));
+  show_review("DASH", request.fee, 0, fee, outputs, shown, nullptr, note, "FEE");
+  return true;
+}
+
+bool show_cryptonote_review(const CryptoNoteSigningState &request) {  static_assert(kCryptoNoteMaxSignOutputs <= kWalletUiMaxTransactionOutputs,
                 "Every signed output must fit the trusted review");
   const char *network_id =
       request.network == CryptoNoteReviewNetwork::MasariMainnet ? "msr" : "xmr";
@@ -944,9 +1095,28 @@ WalletSigningError finish_review(uint32_t now_ms) {
   if (!nonzero) active.review_id[0] = 1;
   switch (active.kind) {
     case WalletSigningKind::Bitcoin: show_bitcoin_review(active.request.bitcoin); break;
-    case WalletSigningKind::Evm: show_evm_review(active.request.evm); break;
+      case WalletSigningKind::Evm:
+        if (!show_evm_review(active.request.evm)) {
+          wallet_signing_clear();
+          wallet_ui_set_status("Cannot display the complete access list. Review rejected.");
+          return WalletSigningError::InvalidArgument;
+        }
+        break;
     case WalletSigningKind::Kaspa: show_kaspa_review(active.request.kaspa); break;
-    case WalletSigningKind::Zcash: show_zcash_review(active.request.zcash); break;
+    case WalletSigningKind::Zcash:
+      if (!show_zcash_review(active.request.zcash)) {
+        wallet_signing_clear();
+        wallet_ui_set_status("Cannot display the complete transaction. Review rejected.");
+        return WalletSigningError::InvalidArgument;
+      }
+      break;
+    case WalletSigningKind::Dash:
+      if (!show_dash_review(active.request.dash)) {
+        wallet_signing_clear();
+        wallet_ui_set_status("Cannot display the complete transaction. Review rejected.");
+        return WalletSigningError::InvalidArgument;
+      }
+      break;
     case WalletSigningKind::CryptoNote:
       if (!show_cryptonote_review(active.request.cryptonote)) {
         wallet_signing_clear();
@@ -1147,6 +1317,50 @@ WalletSigningError wallet_signing_begin_zcash(const char *network_id,
   }
   active.kind = WalletSigningKind::Zcash;
   return finish_review(now_ms);
+}
+
+WalletSigningError wallet_signing_begin_dash(const char *network_id,
+                                             const uint8_t *payload,
+                                             size_t payload_size,
+                                             uint32_t now_ms) {
+  wallet_signing_clear();
+  if (payload == nullptr || payload_size < 4 ||
+      payload_size > HEXWALLET_MAX_PSBT_BYTES) {
+    return WalletSigningError::InvalidArgument;
+  }
+  // The old DASH payload trusts host-supplied input amounts. Never approve it.
+  if (memcmp(payload, "DAS2", 4) != 0) return WalletSigningError::Unsupported;
+  if (network_id == nullptr || network_id[0] == '\0') network_id = "dash";
+  const NetworkProfile *network = find_network_profile(network_id);
+  // Dash is only offered through this payload shape: a PSBT would carry
+  // witness fields Dash has no meaning for, and the Bitcoin adapter would then
+  // be reviewing a transaction it cannot describe.
+  if (network == nullptr || strcmp(network->id, "dash") != 0 ||
+      network->encoding != AddressEncoding::P2pkh ||
+      network->derivation_coin_type != kDashCoinType ||
+      !catalog_can_sign(network_id)) {
+    return WalletSigningError::Unsupported;
+  }
+  const DashChainParams chain = {network->id, network->utxo.p2pkh_version,
+                                 network->utxo.p2sh_version};
+  SensitiveValue<HdPrivateNode> master;
+  if (!load_master(&master.get())) return WalletSigningError::NoWallet;
+  wallet_ui_show_busy("Verifying DASH inputs...");
+  DashPrepareJob job{payload, payload_size, chain, &master.get(),
+                     &active.request.dash, DashError::CryptoFailure};
+  const WalletWorkerResult result = wallet_worker_execute(run_dash_prepare_job, &job,
+      HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
+  const DashError error = job.error;
+  secure_zero(&job, sizeof(job));
+  if (result != WalletWorkerResult::Completed || error != DashError::Ok) {
+    wallet_signing_clear();
+    if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
+    if (result != WalletWorkerResult::Completed) return WalletSigningError::Unsupported;
+    return map_dash_error(error);
+  }
+  active.kind = WalletSigningKind::Dash;
+  (void)now_ms;
+  return finish_review(millis());
 }
 
 WalletSigningError wallet_signing_begin_cryptonote(const char *network_id,
@@ -1497,7 +1711,7 @@ void wallet_signing_reject() {
   wallet_ui_set_status("Rejected. Nothing was signed.");
 }
 
-WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
+static WalletSigningError sign_approved_transaction(uint8_t *out, size_t *in_out_size) {
   if (!wallet_signing_active() || !active.approved || active.rejected || active.consumed) {
     wallet_signing_clear();
     return WalletSigningError::NotApproved;
@@ -1530,81 +1744,39 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
     wallet_signing_clear();
     return WalletSigningError::Expired;
   }
-  if (active.kind == WalletSigningKind::Stellar) {
-    uint8_t seed[kSeedSize] = {};
-    if (wallet_session_load_seed(seed) != WalletError::Ok) {
-      secure_zero(seed, sizeof(seed)); wallet_signing_clear(); return WalletSigningError::NoWallet;
+  if (active.kind == WalletSigningKind::Dash) {
+    SensitiveValue<HdPrivateNode> master;
+    if (!load_master(&master.get())) {
+      wallet_signing_clear();
+      return WalletSigningError::NoWallet;
     }
-    const size_t capacity = *in_out_size;
-    wallet_ui_show_busy("Signing XLM transaction...");
-    StellarSignJob job = {&active.request.stellar, seed, out, in_out_size, StellarError::CryptoFailure};
-    const WalletWorkerResult result = wallet_worker_execute(run_stellar_sign_job, &job,
+    wallet_ui_show_busy("Signing DASH transaction...");
+    DashSignJob job{&active.request.dash, &master.get(), out, in_out_size,
+                    DashError::CryptoFailure};
+    const WalletWorkerResult result = wallet_worker_execute(run_dash_sign_job, &job,
         HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
-    const StellarError error = job.error;
-    secure_zero(seed, sizeof(seed)); secure_zero(&job, sizeof(job)); wallet_signing_clear();
-    if (result != WalletWorkerResult::Completed || error != StellarError::Ok) {
-      secure_zero(out, capacity); *in_out_size = 0;
-    }
+    const DashError error = job.error;
+    secure_zero(&job, sizeof(job));
+    wallet_signing_clear();
     if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
-    if (result == WalletWorkerResult::Unavailable) return WalletSigningError::Unsupported;
-    return map_stellar_error(error);
+    if (result != WalletWorkerResult::Completed) return WalletSigningError::Unsupported;
+    return map_dash_error(error);
+  }
+  if (active.kind == WalletSigningKind::Stellar) {
+    return sign_seed_transaction(active.request.stellar, "Signing XLM transaction...",
+        stellar_sign_transaction, map_stellar_error, out, in_out_size);
   }
   if (active.kind == WalletSigningKind::Algorand) {
-    uint8_t seed[kSeedSize] = {};
-    if (wallet_session_load_seed(seed) != WalletError::Ok) {
-      secure_zero(seed, sizeof(seed)); wallet_signing_clear(); return WalletSigningError::NoWallet;
-    }
-    const size_t capacity = *in_out_size;
-    wallet_ui_show_busy("Signing ALGO transaction...");
-    AlgorandSignJob job = {&active.request.algorand, seed, out, in_out_size, AlgorandError::CryptoFailure};
-    const WalletWorkerResult result = wallet_worker_execute(run_algorand_sign_job, &job,
-        HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
-    const AlgorandError error = job.error;
-    secure_zero(seed, sizeof(seed)); secure_zero(&job, sizeof(job)); wallet_signing_clear();
-    if (result != WalletWorkerResult::Completed || error != AlgorandError::Ok) {
-      secure_zero(out, capacity); *in_out_size = 0;
-    }
-    if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
-    if (result == WalletWorkerResult::Unavailable) return WalletSigningError::Unsupported;
-    return map_algorand_error(error);
+    return sign_seed_transaction(active.request.algorand, "Signing ALGO transaction...",
+        algorand_sign_transaction, map_algorand_error, out, in_out_size);
   }
   if (active.kind == WalletSigningKind::Near) {
-    uint8_t seed[kSeedSize] = {};
-    if (wallet_session_load_seed(seed) != WalletError::Ok) {
-      secure_zero(seed, sizeof(seed)); wallet_signing_clear(); return WalletSigningError::NoWallet;
-    }
-    const size_t capacity = *in_out_size;
-    wallet_ui_show_busy("Signing NEAR transaction...");
-    NearSignJob job = {&active.request.near, seed, out, in_out_size, NearError::CryptoFailure};
-    const WalletWorkerResult result = wallet_worker_execute(run_near_sign_job, &job,
-        HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
-    const NearError error = job.error;
-    secure_zero(seed, sizeof(seed)); secure_zero(&job, sizeof(job)); wallet_signing_clear();
-    if (result != WalletWorkerResult::Completed || error != NearError::Ok) {
-      secure_zero(out, capacity); *in_out_size = 0;
-    }
-    if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
-    if (result == WalletWorkerResult::Unavailable) return WalletSigningError::Unsupported;
-    return map_near_error(error);
+    return sign_seed_transaction(active.request.near, "Signing NEAR transaction...",
+        near_sign_transaction, map_near_error, out, in_out_size);
   }
   if (active.kind == WalletSigningKind::Tezos) {
-    uint8_t seed[kSeedSize] = {};
-    if (wallet_session_load_seed(seed) != WalletError::Ok) {
-      secure_zero(seed, sizeof(seed)); wallet_signing_clear(); return WalletSigningError::NoWallet;
-    }
-    const size_t capacity = *in_out_size;
-    wallet_ui_show_busy("Signing XTZ transaction...");
-    TezosSignJob job = {&active.request.tezos, seed, out, in_out_size, TezosError::CryptoFailure};
-    const WalletWorkerResult result = wallet_worker_execute(run_tezos_sign_job, &job,
-        HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
-    const TezosError error = job.error;
-    secure_zero(seed, sizeof(seed)); secure_zero(&job, sizeof(job)); wallet_signing_clear();
-    if (result != WalletWorkerResult::Completed || error != TezosError::Ok) {
-      secure_zero(out, capacity); *in_out_size = 0;
-    }
-    if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
-    if (result == WalletWorkerResult::Unavailable) return WalletSigningError::Unsupported;
-    return map_tezos_error(error);
+    return sign_seed_transaction(active.request.tezos, "Signing XTZ transaction...",
+        tezos_sign_transaction, map_tezos_error, out, in_out_size);
   }
   if (active.kind == WalletSigningKind::Xrp) {
     const NetworkProfile *network = find_network_profile("xrp");
@@ -1669,23 +1841,8 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
     return map_chain_error(error);
   }
   if (active.kind == WalletSigningKind::Solana) {
-    uint8_t seed[kSeedSize] = {};
-    if (wallet_session_load_seed(seed) != WalletError::Ok) {
-      secure_zero(seed, sizeof(seed)); wallet_signing_clear(); return WalletSigningError::NoWallet;
-    }
-    const size_t capacity = *in_out_size;
-    wallet_ui_show_busy("Signing SOL transaction...");
-    SolanaSignJob job = {&active.request.solana, seed, out, in_out_size, SolanaError::CryptoFailure};
-    const WalletWorkerResult result = wallet_worker_execute(run_solana_sign_job, &job,
-        HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
-    const SolanaError error = job.error;
-    secure_zero(seed, sizeof(seed)); secure_zero(&job, sizeof(job)); wallet_signing_clear();
-    if (result != WalletWorkerResult::Completed || error != SolanaError::Ok) {
-      secure_zero(out, capacity); *in_out_size = 0;
-    }
-    if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
-    if (result == WalletWorkerResult::Unavailable) return WalletSigningError::Unsupported;
-    return map_solana_error(error);
+    return sign_seed_transaction(active.request.solana, "Signing SOL transaction...",
+        solana_sign_transaction, map_solana_error, out, in_out_size);
   }
   if (active.kind == WalletSigningKind::Tron) {
     const NetworkProfile *network = find_network_profile("trx");
@@ -1824,6 +1981,7 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
                                                   out, in_out_size));
       break;
     case WalletSigningKind::None:
+    case WalletSigningKind::Dash:
     case WalletSigningKind::CryptoNote:
     case WalletSigningKind::Solana:
     case WalletSigningKind::Tron:
@@ -1843,6 +2001,16 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
   return result;
 }
 
+WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size) {
+  SigningOutputGuard output(out, in_out_size);
+  if (!output.valid()) {
+    wallet_signing_clear();
+    return WalletSigningError::InvalidArgument;
+  }
+  const WalletSigningError result = sign_approved_transaction(out, in_out_size);
+  if (result != WalletSigningError::Ok) return result;
+  return output.commit() ? WalletSigningError::Ok : WalletSigningError::CryptoFailure;
+}
 bool wallet_signing_tick(uint32_t now_ms) {
   if (active.kind == WalletSigningKind::None) return false;
   if (deadline_reached(now_ms, active.expires_ms)) {
@@ -1890,6 +2058,8 @@ bool run_wallet_signing_self_test() {
                  WalletSigningError::InvalidArgument;
   ok = ok && wallet_signing_begin_zcash("zec", &empty, 0, 0) ==
                  WalletSigningError::InvalidArgument;
+  ok = ok && wallet_signing_begin_dash("dash", &empty, 0, 0) ==
+                 WalletSigningError::InvalidArgument;
   ok = ok && wallet_signing_begin_cryptonote("xmr", 0, &empty, 0, 0) ==
                  WalletSigningError::InvalidArgument;
   ok = ok && wallet_signing_begin_tron("trx", 0, &empty, 0, 0) ==
@@ -1919,7 +2089,11 @@ bool run_wallet_signing_self_test() {
   active.approved = true;
   ok = ok && wallet_signing_sign(nullptr, &output_size) ==
                  WalletSigningError::InvalidArgument && !wallet_signing_active();
+  output_size = sizeof(output);
+  memset(output, 0xa5, sizeof(output));
   ok = ok && wallet_signing_sign(output, &output_size) == WalletSigningError::NotApproved;
+  ok = ok && output_size == 0;
+  for (uint8_t byte : output) ok = ok && byte == 0;
   return ok;
 }
 

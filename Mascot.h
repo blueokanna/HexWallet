@@ -6,16 +6,18 @@
 
 namespace hexwallet {
 
-// The companion: a chibi whale-girl that lives on the home screen.
+// The companion: DeepSeek-chan, an original chibi whale-girl that lives on the
+// home screen. The monochrome maid/whale-tail sprites follow the supplied
+// character reference; source art and its conversion are kept under assets/.
 //
 // Personality first, rendering second. The engine decides *what she is doing*
-// (mood + pose + animation frame); WalletUi.cpp turns that into LVGL shapes. No
+// (mood + pose + animation frame); MaidSprite supplies the LVGL bitmap. No
 // LVGL dependency here, so the whole behaviour is testable on the host, and the
 // renderer can change without touching a single rule.
 //
 // Deliberate limits, because this runs on a wallet:
 //   * she never touches keys or the seed, and never changes a signing decision -
-//     she only reacts to decisions that already happened;
+//     approval and rejection have identical neutral reactions and no rewards;
 //   * she never refreshes the panel on her own schedule. Frames are event driven
 //     and rate limited; an e-paper update costs hundreds of milliseconds even in
 //     partial mode, and an animated pet must not slow a signing flow down;
@@ -35,6 +37,8 @@ enum class MascotMood : uint8_t {
 };
 
 constexpr uint8_t kMascotMoodCount = 9;
+// Short enough for the 128 px home layout; the docs call her DeepSeek-chan.
+constexpr const char *kMascotDisplayName = "DS-CHAN";
 
 const char *mascot_mood_name(MascotMood mood);
 
@@ -113,7 +117,10 @@ constexpr uint32_t kMascotHungryAfterMs = 30UL * 60UL * 1000UL;
 constexpr uint32_t kMascotStarvingAfterMs = 90UL * 60UL * 1000UL;
 constexpr uint32_t kMascotReactionMs = 20UL * 1000UL;
 constexpr uint32_t kMascotFrameMinMs = 30UL * 1000UL;
-constexpr uint32_t kMascotAnimationMs = 700UL;
+// A deliberate, low-frequency four-frame loop for monochrome e-paper. The UI
+// starts it only on a home screen with a verified partial-refresh backend.
+constexpr uint32_t kMascotAnimationMs = 2400UL;
+constexpr uint8_t kMascotAnimationFrames = 4;
 constexpr uint32_t kMascotActionCooldownMs = 2UL * 1000UL;
 
 // Storage hooks supplied by the platform (NVS on device, a fake in tests).

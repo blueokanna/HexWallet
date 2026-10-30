@@ -33,7 +33,7 @@ const CatalogSeed kCatalog[] = {
   { "ltc49", "LTC", "Litecoin Nested SegWit", 2, WalletCapabilityAddress, "ltc49", "P2SH-P2WPKH address and BIP143 signing" },
   { "ltc84", "LTC", "Litecoin Native SegWit", 2, WalletCapabilityAddress, "ltc84", "P2WPKH address and BIP143 signing" },
   { "doge", "DOGE", "Dogecoin", 3, WalletCapabilityAddress, "doge", "address only" },
-  { "dash", "DASH", "Dash", 5, WalletCapabilityAddress, "dash", "address only" },
+      { "dash", "DASH", "Dash", 5, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "dash", "P2PKH plain payments (type 0) through the Dash adapter; special transaction types refused; InstantSend lock state is node-side" },
   { "xlayer", "OKB", "X Layer", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "xlayer", "EIP-155/type-2 transfers; registered tokens only; additional L1 fees are not in the execution fee cap" },
   { "zksync", "ETH", "zkSync Era", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "zksync", "EIP-155/type-2 EOA transfers only; no type-113, paymasters or account abstraction" },
   { "eth", "ETH", "Ethereum", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "eth", "EVM address and token account support; EIP-155 signing" },
@@ -120,6 +120,9 @@ const CatalogSeed kCatalog[] = {
   { "vtc84", "VTC", "Vertcoin Native SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc84", "P2WPKH address and Bitcoin-sighash signing" },
   { "axe", "AXE", "Axe", 4242, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "axe", "P2PKH address and Bitcoin-sighash signing" },
   { "xmr", "XMR", "Monero", 128, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xmr", "RingCT type-6 review and CLSAG signing; fully offline, host supplies decoys" },
+  { "ryo", "RYO", "RyoCurrency", 382, WalletCapabilityAddress, "ryo", "CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled" },
+  { "zano", "ZANO", "Zano", 1018, WalletCapabilityAddress, "zano", "CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled" },
+  { "ae", "AE", "Aeternity", 457, WalletCapabilityAddress, "ae", "Ed25519 ak_ address at m/44'/457'/0'/0'/i'; receive/address verification only - native spend signing is not enabled" },
   { "trx", "TRX", "TRON", 195, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "trx", "native TRX and registered TRC-20 transfer signing; owner permission only, strict protobuf review" },
   { "xlm", "XLM", "Stellar", 148, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xlm", "SEP-0005; public-network XDR Payment/CreateAccount; G addresses and explicit memo review" },
   { "atom", "ATOM", "Cosmos Hub", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "atom", "Cosmos SDK native MsgSend; direct sign mode, strict protobuf review" },
@@ -167,7 +170,8 @@ WalletCatalogEntry resolved_entry(size_t index) {
                    : "P2PKH legacy sighash and BIP143 witness PSBT signing";
     }
   }
-  return { seed.id, seed.symbol, seed.name, seed.slip44, capabilities, network, status };
+  return { seed.id, network == nullptr ? seed.symbol : network->symbol,
+           seed.name, seed.slip44, capabilities, network, status };
 }
 
 bool equals_ignore_case(const char *left, const char *right) {
@@ -250,15 +254,27 @@ bool wallet_catalog_at_sorted(size_t position, WalletCatalogEntry *out) {
 }
 
 bool wallet_catalog_find(const char *id_or_symbol, WalletCatalogEntry *out) {
-  if (out == nullptr) return false;
+  if (out == nullptr || id_or_symbol == nullptr) return false;
+  // Stable IDs take precedence over shared native tickers: "eth" must never
+  // select zkSync merely because its ETH row occurs earlier in the table.
   for (size_t index = 0; index < wallet_catalog_count(); ++index) {
     const WalletCatalogEntry entry = resolved_entry(index);
-    if (equals_ignore_case(entry.id, id_or_symbol) || equals_ignore_case(entry.symbol, id_or_symbol)) {
+    if (equals_ignore_case(entry.id, id_or_symbol)) {
       *out = entry;
       return true;
     }
   }
-  return false;
+  bool found = false;
+  WalletCatalogEntry match = {};
+  for (size_t index = 0; index < wallet_catalog_count(); ++index) {
+    const WalletCatalogEntry entry = resolved_entry(index);
+    if (!equals_ignore_case(entry.symbol, id_or_symbol)) continue;
+    if (found) return false; // A shared ticker cannot identify a network.
+    match = entry;
+    found = true;
+  }
+  if (found) *out = match;
+  return found;
 }
 
 bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query) {
@@ -270,6 +286,9 @@ bool wallet_catalog_has(const WalletCatalogEntry &entry, WalletCapability capabi
 }
 
 bool run_catalog_self_tests() {
+  WalletCatalogEntry ethereum = {};
+  if (!wallet_catalog_find("ETH", &ethereum) || strcmp(ethereum.id, "eth") != 0)
+    return false;
   for (size_t index = 0; index < wallet_catalog_count(); ++index) {
     const WalletCatalogEntry entry = resolved_entry(index);
     if (entry.id == nullptr || entry.symbol == nullptr || entry.name == nullptr ||
@@ -296,12 +315,17 @@ bool run_catalog_self_tests() {
       // A CryptoNote signing claim is valid only when the firmware has a
       // review policy for that network. Masari has no enabled policy, so a
       // catalog entry that claimed its signing would fail here.
+      // Dash signs only through its own adapter, never through PSBT, so this
+      // claim is backed by the adapter rather than by a UTXO sighash policy.
+      const bool dash =
+          entry.network->encoding == AddressEncoding::P2pkh &&
+          strcmp(entry.network->id, "dash") == 0;
       const bool cryptonote =
           entry.network->encoding == AddressEncoding::CryptoNote &&
           cryptonote_review_policy(entry.network->id) != nullptr;
       ChainFamily family = ChainFamily::None;
       const bool chain = chain_family_for_network(entry.network->id, &family);
-      if (!evm && !utxo_policy && !kaspa && !cryptonote && !solana && !tron &&
+      if (!evm && !utxo_policy && !kaspa && !cryptonote && !solana && !tron && !dash &&
           !cosmos && !chain && entry.network->encoding != AddressEncoding::StellarStrKey &&
           strcmp(entry.network->id, "algo") != 0 && strcmp(entry.network->id, "near") != 0 &&
           strcmp(entry.network->id, "xtz") != 0 &&

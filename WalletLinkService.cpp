@@ -17,6 +17,7 @@
 #include "WalletNfcPort.h"
 #include "WalletSecurity.h"
 #include "WalletSession.h"
+#include "SensitiveValue.h"
 #include "WalletSigning.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
@@ -71,6 +72,10 @@ constexpr uint8_t kTxXrp = 13;
 // Shared envelope for the account-model adapters (VET, ICX, ...). The payload
 // starts with the adapter's own magic and is never treated as opaque bytes.
 constexpr uint8_t kTxChain = 14;
+// Dash plain payments. The payload is the compact review structure documented
+// in docs/chain-protocols.md; special transaction types are refused by the
+// adapter, not by the transport.
+constexpr uint8_t kTxDash = 15;
 
 Preferences preferences;
 WalletLinkDevice link;
@@ -221,11 +226,14 @@ bool derive_public_address(const char *coin, uint32_t account,
       entry.network->encoding == AddressEncoding::QrlXmss) {
     return false;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (wallet_session_load_master(&master) != WalletError::Ok) return false;
-  uint8_t seed[kSeedSize];
+  SensitiveValue<uint8_t[kSeedSize]> seed_storage;
+  auto &seed = seed_storage.get();
   const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
-  DerivedAddress derived;
+  SensitiveValue<DerivedAddress> derived_storage;
+  auto &derived = derived_storage.get();
   // Subaddress indices are only meaningful for CryptoNote; every other
   // encoding keeps the plain BIP32 derivation.
   const WalletError result =
@@ -365,6 +373,9 @@ bool handle_begin_sign(Reader &reader, Writer &writer, uint32_t now_ms) {
     case kTxZcash:
       error = wallet_signing_begin_zcash(coin_id, payload, payload_size,
                                         now_ms);
+      break;
+    case kTxDash:
+      error = wallet_signing_begin_dash(coin_id, payload, payload_size, now_ms);
       break;
     case kTxCryptoNote:
       error = wallet_signing_begin_cryptonote(coin_id, address_index, payload,

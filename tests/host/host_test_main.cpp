@@ -13,6 +13,7 @@
 #include "../../CryptoNoteMasari.h"
 #include "../../CryptoPrimitives.h"
 #include "../../BitcoinTransaction.h"
+#include "../../PeercoinSighash.h"
 #include "../../Blake2b.h"
 #include "../../Blake256.h"
 #include "../../KaspaTransaction.h"
@@ -28,7 +29,10 @@
 #include "../../EinkFrame.h"
 #include "../../XrpTransaction.h"
 #include "../../QrlXmss.h"
+#include "../../DashTransaction.h"
 #include "../../ZcashTransaction.h"
+#include "../../CoinIcons.h"
+#include "../../QrlOtsJournal.h"
 #include "../../WalletAltAddresses.h"
 #include "../../WalletCatalog.h"
 #include "../../WalletMiningCatalog.h"
@@ -74,7 +78,9 @@ int main() {
   const bool trust_anchor = hexwallet::run_trust_anchor_self_tests();
   const bool mascot = hexwallet::run_mascot_self_tests();
   const bool networks = hexwallet::run_network_profile_self_tests();
-  const bool sighash = hexwallet::run_bitcoin_sighash_self_tests();
+  const bool peercoin = hexwallet::run_peercoin_sighash_self_tests();
+  printf("peercoin-sighash=%s\n", peercoin ? "pass" : "FAIL");
+  const bool sighash = hexwallet::run_bitcoin_sighash_self_tests() && peercoin;
   const bool kaspa = hexwallet::run_kaspa_self_tests();
   const bool blake2b = hexwallet::run_blake2b_self_tests();
   const bool blake256 = hexwallet::run_blake256_self_tests();
@@ -90,6 +96,9 @@ int main() {
   const bool eink = hexwallet::run_eink_frame_self_tests();
   const bool xrp = hexwallet::run_xrp_self_tests();
   const bool zcash = hexwallet::run_zcash_sighash_self_tests();
+  const bool dash = hexwallet::run_dash_self_tests();
+  const bool coin_icons = hexwallet::run_coin_icon_self_tests();
+  const bool qrl_ots = hexwallet::run_qrl_ots_self_tests();
   const bool catalog = hexwallet::run_catalog_self_tests();
   const bool mining = hexwallet::run_mining_catalog_self_tests();
   const bool tokens = hexwallet::run_token_profile_self_tests();
@@ -145,11 +154,14 @@ int main() {
   printf("eink=%s\n", eink ? "pass" : "FAIL");
   printf("xrp=%s\n", xrp ? "pass" : "FAIL");
   printf("zcash=%s\n", zcash ? "pass" : "FAIL");
+  printf("dash=%s\n", dash ? "pass" : "FAIL");
+  printf("coin-icons=%s\n", coin_icons ? "pass" : "FAIL");
+  printf("qrl-ots=%s\n", qrl_ots ? "pass" : "FAIL");
   printf("catalog=%s\n", catalog ? "pass" : "FAIL");
   printf("mining-catalog=%s\n", mining ? "pass" : "FAIL");
   printf("tokens=%s\n", tokens ? "pass" : "FAIL");
   printf("link-crypto=%s\n", link_crypto ? "pass" : "FAIL");
   printf("wallet-link=%s\n", wallet_link ? "pass" : "FAIL");
   printf("nfc-apdu=%s\n", nfc_apdu ? "pass" : "FAIL");
-  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && catalog && mining && tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
+  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && catalog && mining && tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
 }

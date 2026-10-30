@@ -1,0 +1,33 @@
+# Coin icon manifest for tools/pack_coin_icons.ps1.
+#
+# First token: the file assets/icons/32/<token>.png.
+# Every following token: a review header string that resolves to this icon.
+# Aliases exist because the trusted display names some chains in full
+# ("ZCASH", "SOLANA", "TRON", ...) while the catalogue uses tickers. A key
+# that is not listed here renders no icon at all - guessing a logo for an
+# unknown ticker is exactly the kind of decoration this wallet must not do.
+#
+# Source artwork: https://github.com/spothq/cryptocurrency-icons (CC0 1.0).
+# Chains the upstream set has no artwork for (NEAR, TON, CKB, KAS, SUI, HIVE,
+# OSMO, TIA) deliberately have no entry and therefore no icon.
+
+btc BTC
+eth ETH
+ltc LTC
+doge DOGE
+dash DASH
+zec ZEC ZCASH
+xmr XMR
+bch BCH
+trx TRX TRON
+sol SOL SOLANA
+xrp XRP
+xtz XTZ TEZOS
+algo ALGO ALGORAND
+atom ATOM COSMOS
+vet VET VECHAIN
+icx ICX ICON
+dcr DCR DECRED
+ada ADA CARDANO
+dot DOT POLKADOT
+ksm KSM KUSAMA

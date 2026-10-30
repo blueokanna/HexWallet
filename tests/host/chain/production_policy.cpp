@@ -33,7 +33,6 @@ int main() {
   CHECK(wallet_session_load_seed(seed) == WalletError::CustodyUnavailable);
   CHECK(wallet_session_load_master(&master) == WalletError::CustodyUnavailable);
   CHECK(zero(seed, sizeof(seed)) && zero(&master, sizeof(master)));
-  CHECK(wallet_session_mnemonic_for_export() == nullptr);
 
   // Regression: an authenticated transport must not unlock MCU seed custody.
   const SecureElementBackend transport = {

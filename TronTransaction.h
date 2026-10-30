@@ -14,13 +14,24 @@ namespace hexwallet {
 //
 // Supported contract types are deliberately narrow:
 //   * TransferContract      - native TRX to a 21-byte account address
-//   * TriggerSmartContract  - TRC-20 transfer(address,uint256) against a
-//                             registered contract, call_value == 0
+//   * TransferAssetContract - TRC-10 transfer: chain asset id + 21-byte to
+//   * TriggerSmartContract  - TRC-20 transfer(address,uint256) or
+//                             transferFrom(address,address,uint256) with
+//                             from == owner, against a registered contract,
+//                             call_value == 0
 // NFT calldata can be structurally decoded, but there are no verified NFT
 // contract registrations. All TRC-721/1155 signing requests are refused.
-// Multi-contract transactions, memo/data fields, non-owner permissions,
-// call_token fields, zero amounts, ERC-20/721 ambiguous transferFrom, batch
-// transfers and contract calls with attached TRX are refused instead of guessed at.
+//
+// TRC-10 has no contract address: the chain keys the asset by the identifier in
+// `asset_name` (mainnet uses the numeric id, for example "1002000"). A
+// registered id renders with its verified abbr and precision. Any other
+// identifier is displayed byte-for-byte and the amount stays in exact base
+// units, because an issuer-defined precision cannot be verified offline.
+//
+// The memo field (`raw_data.data`) is displayed, bounded to printable ASCII.
+// Multi-contract transactions, non-owner permissions, call_token fields, zero
+// amounts, batch transfers and contract calls with attached TRX are refused
+// instead of guessed at.
 
 constexpr size_t kTronAddressSize = 21;
 constexpr size_t kTronTxIdSize = 32;
@@ -30,6 +41,15 @@ constexpr size_t kTronMaxRawData = 1024;
 constexpr size_t kTronAddressTextSize = 40;
 constexpr size_t kTronAmountTextSize = 96;
 constexpr size_t kTronSymbolSize = 16;
+// TRC-10 asset identifiers are capped at 32 bytes by the chain. Non-ASCII
+// identifiers are rendered as 0x-hex so the display never substitutes glyphs.
+constexpr size_t kTronAssetIdSize = 32;
+constexpr size_t kTronAssetIdTextSize = 2 * kTronAssetIdSize + 4;
+constexpr size_t kTronMethodSize = 24;
+// Memo text is shown in full or the request is refused; this is the bound the
+// trusted display can render without truncation.
+constexpr size_t kTronMemoSize = 64;
+constexpr size_t kTronMemoTextSize = kTronMemoSize + 1;
 constexpr uint8_t kTronTrxDecimals = 6;
 constexpr uint64_t kTronSunPerTrx = 1000000;
 // A TRC-20 transfer burns energy; fee_limit is the maximum TRX the chain may
@@ -44,6 +64,7 @@ enum class TronKind : uint8_t {
   Trc20 = 1,
   Trc721 = 2,
   Trc1155 = 3,
+  Trc10 = 4,
 };
 
 enum class TronError : uint8_t {
@@ -68,6 +89,18 @@ struct TronTransferReview {
   uint8_t amount[kTronWordSize];  // big-endian 256-bit word
   uint8_t token_id[kTronWordSize];  // ERC-721/1155 id; zero when unused
   bool has_token_id;
+  // TRC-10 identifier exactly as it appears in `asset_name`, plus its display
+  // form (ASCII verbatim, 0x-hex otherwise). `asset_registered` selects between
+  // verified precision and exact base-unit rendering.
+  uint8_t asset_id[kTronAssetIdSize];
+  uint8_t asset_id_size;
+  char asset_id_text[kTronAssetIdTextSize];
+  bool asset_registered;
+  // TRC-20 entry point, so transfer and transferFrom cannot be confused.
+  char method_text[kTronMethodSize];
+  // raw_data memo (field 10); present only when the reviewed bytes carry one.
+  char memo_text[kTronMemoTextSize];
+  bool has_memo;
   uint64_t fee_limit_sun;
   int64_t expiration_ms;
   int64_t timestamp_ms;

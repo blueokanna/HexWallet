@@ -2,8 +2,9 @@
 
 #include <string.h>
 #include "WalletConfig.h"
-#include "WalletCustody.h"
+#include "SensitiveValue.h"
 
+#if defined(HEXWALLET_HOST_TEST) && !HEXWALLET_REQUIRE_SECURE_CUSTODY
 namespace hexwallet {
 namespace {
 
@@ -17,13 +18,7 @@ bool wallet_session_is_loaded() {
   return loaded && wallet_session_custody_available();
 }
 
-bool wallet_session_custody_available() {
-#if HEXWALLET_REQUIRE_SECURE_CUSTODY
-  return secure_custody_backend_ready();
-#else
-  return true;
-#endif
-}
+bool wallet_session_custody_available() { return true; }
 
 WalletError wallet_session_generate() {
   wallet_session_clear();
@@ -53,7 +48,8 @@ WalletError wallet_session_load_master(HdPrivateNode *master) {
   secure_zero(master, sizeof(*master));
   if (!wallet_session_custody_available()) return WalletError::CustodyUnavailable;
   if (!loaded) return WalletError::InvalidArgument;
-  uint8_t seed[kSeedSize] = {};
+  SensitiveValue<uint8_t[kSeedSize]> seed_storage;
+  auto &seed = seed_storage.get();
   WalletError result = bip39_seed_from_english(mnemonic, "", seed);
   if (result == WalletError::Ok) result = hd_private_from_seed(seed, sizeof(seed), master);
   secure_zero(seed, sizeof(seed));
@@ -71,18 +67,31 @@ WalletError wallet_session_load_seed(uint8_t out_seed[kSeedSize]) {
   return result;
 }
 
-const char *wallet_session_mnemonic_for_export() {
-#if HEXWALLET_ENABLE_SECRET_EXPORT && !HEXWALLET_REQUIRE_SECURE_CUSTODY
-  return loaded ? mnemonic : nullptr;
-#else
-  // Enforce at the secret's owner, not only at individual CLI call sites.
-  return nullptr;
-#endif
-}
-
 void wallet_session_clear() {
   secure_zero(mnemonic, sizeof(mnemonic));
   loaded = false;
 }
 
 }
+
+#else
+namespace hexwallet {
+// Device sessions contain no plaintext mnemonic store or seed derivation.
+// A real SE handle backend must replace these refusals, not enable host code.
+bool wallet_session_is_loaded() { return false; }
+bool wallet_session_custody_available() { return false; }
+WalletError wallet_session_generate() { return WalletError::CustodyUnavailable; }
+WalletError wallet_session_import(const char *) { return WalletError::CustodyUnavailable; }
+WalletError wallet_session_load_master(HdPrivateNode *master) {
+  if (master == nullptr) return WalletError::InvalidArgument;
+  secure_zero(master, sizeof(*master));
+  return WalletError::CustodyUnavailable;
+}
+WalletError wallet_session_load_seed(uint8_t out_seed[kSeedSize]) {
+  if (out_seed == nullptr) return WalletError::InvalidArgument;
+  secure_zero(out_seed, kSeedSize);
+  return WalletError::CustodyUnavailable;
+}
+void wallet_session_clear() {}
+}
+#endif

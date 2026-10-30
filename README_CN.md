@@ -37,34 +37,39 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 生成和校验英文 BIP39 助记词。
 - 使用 PBKDF2-HMAC-SHA512 派生 BIP39 seed。
 - 使用 BIP32 派生私钥、公钥和扩展密钥。
-- 为 Bitcoin 系、54 个 EVM 网络、TRON、Cosmos（ATOM/OSMO/TIA）、Algorand、NEAR、Tezos、XRP、Stellar、Solana、Kaspa、Zcash、Monero、Cardano、Ergo、VeChain、ICON、Sui、Filecoin、TON、Decred、Nervos CKB、Hive 和 Internet Computer 生成地址；只有同时具备地址、审查与签名的链才会出现在钱包目录中。DOT/KSM、Chia、QRL 只登记地址，签名入口关闭。
+- 为 Bitcoin 系、54 个 EVM 网络、TRON、Cosmos（ATOM/OSMO/TIA）、Algorand、NEAR、Tezos、XRP、Stellar、Solana、Kaspa、Zcash、Monero、Cardano、Ergo、VeChain、ICON、Sui、Filecoin、TON、Decred、Nervos CKB、Hive、Internet Computer、Aeternity、RyoCurrency 和 Zano 生成地址；只有同时具备地址、审查与签名的链才会标记为可签名。DOT/KSM、Chia、QRL、Aeternity、RyoCurrency、Zano 只登记地址，签名入口关闭。
+- BEP-20（BSC）已登记 WBNB、CAKE、FDUSD、TUSD、LINK、DOT、ADA、XRP、DOGE、SHIB、UNI、AAVE、ATOM、XVS、BSW、ANKR、COMP、BETH、AVAX、PENDLE 等合约；所有 decimals/symbol 均通过 BSC RPC `eth_call` 核对，未登记合约仍拒绝盲签。
 - 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 目标只声明 secp256k1 + ECDSA + seed 封装能力（SCP03/applet 驱动尚未实现）；Kaspa Schnorr 和 Ed25519/BLS/XMSS 私钥保留在 MCU RAM。
 - 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
 - 审查并签名受限的 Bitcoin PSBT v0。
-- 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 输入、t1/t3 输出）：`zec inspect <ZEC4-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在启动自检中校验。
-- 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 合约。ERC-721 `safeTransferFrom`（`0x42842e0e`）和 ERC-1155 `safeTransferFrom`（`0xf242432a`）等唯一 selector 可在无合约注册表时审阅：设备显示合约地址、标准和明确的未登记警告，但无法离线验证合约身份或 NFT 元数据。ERC-20 必须登记 decimals/symbol；与 ERC-20 共享 selector 的 `transferFrom`、批量转移和 receiver hook 一律拒绝。TRON 的 TRC-721/1155 支持同一唯一 selector 子集，详见 [tron-signing.md](docs/chain-protocols.md) 与 [adapter-status.md](docs/chain-support.md)。
+- 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 与 t3 P2SH-P2PK 输入、t1/t3 输出）：`zec inspect <ZEC4|ZEC5-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。t3 花费要求 redeem script 恰好是单个压缩公钥加 `OP_CHECKSIG`，设备会把它当作 `scriptCode` 重新哈希并与地址比对，多签或其他 redeem 形式、屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在自检中校验。
+- 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 合约。ERC-721 `safeTransferFrom`（`0x42842e0e`）和 ERC-1155 `safeTransferFrom`（`0xf242432a`）等唯一 selector 可在无合约注册表时审阅：设备显示合约地址、标准和明确的未登记警告，但无法离线验证合约身份或 NFT 元数据。ERC-20 必须登记 decimals/symbol；与 ERC-20 共享 selector 的 `transferFrom`、批量转移和 receiver hook 一律拒绝。TRON 的 TRC-721/1155 只有解码器、没有合约注册表，请求一律拒绝，详见 [TRON 范围与证据](docs/chain-protocols.md) 与 [adapter-status.md](docs/chain-support.md)。
 
 - Monero type-6 审阅和 CLSAG 签名已接入；MSR 已移除。SOL 原生转账、SPL Token 与 Token-2022 `TransferChecked` 已接入设备批准流程；Token-2022 会显示扩展风险警告，要求额外 hook 账户的指令被拒绝，范围与独立向量见 [solana-signing.md](docs/chain-protocols.md)。
-- TRON 原生 TRX、已登记 TRC-20（当前为 Tether 官方合约 USDT）的 `transfer(address,uint256)`，以及唯一 selector 的 TRC-721/1155 `safeTransferFrom` 已接入 `BEGIN_SIGN kind=7`；设备只接受 owner 权限、无 memo、单合约交易，NFT 合约未登记时会显示明确警告，范围与独立向量见 [tron-signing.md](docs/chain-protocols.md)。
+- TRON 原生 TRX、TRC-10（`TransferAssetContract`；已登记 id 显示核验过的精度，未登记 id 显示精确 base unit 并标注未登记）、已登记 TRC-20（当前为 Tether 官方合约 USDT）的 `transfer` 与自转 `transferFrom`，以及 ≤64 字节可打印 memo 已接入 `BEGIN_SIGN kind=7`；设备只接受 owner 权限、单合约交易，TRC-721/1155 无注册表故一律拒绝，范围与向量来源见 [TRON 范围与证据](docs/chain-protocols.md)。
 - Stellar 的 SEP-0005 地址、主网 XDR Payment/CreateAccount、memo 和发行者审阅已接入 `BEGIN_SIGN kind=9`，返回完整签名 envelope；范围、独立 SDK 向量和离线限制见 [stellar-signing.md](docs/chain-protocols.md)。
-- Cosmos SDK 原生 `MsgSend`（ATOM/OSMO/TIA）已接入 `BEGIN_SIGN kind=8`：设备自行构建 `TxBody`/`AuthInfo`/`SignDoc`/`TxRaw`，只支持单消息、原生 denom、`SIGN_MODE_DIRECT`，不支持 IBC/memo/authz，范围见 [cosmos-signing.md](docs/chain-protocols.md)。
+- Cosmos SDK `MsgSend`（ATOM/OSMO/TIA）已接入 `BEGIN_SIGN kind=8`：设备自行构建 `TxBody`/`AuthInfo`/`SignDoc`/`TxRaw`，支持单笔 1..4 条 `MsgSend`、`SIGN_MODE_DIRECT`、可选 memo（写入 `TxBody.memo` 并进入摘要），以及原生或任意 denom；无固定精度的 denom 会原样显示并给出精确 base unit 金额。不支持 IBC 报文、authz 与 amino/JSON，范围与向量来源见 [Cosmos 范围与证据](docs/chain-protocols.md)。
 - Algorand 原生 `pay` 与 ASA `axfer`/opt-in 已接入 `BEGIN_SIGN kind=10`：设备只接受 canonical unsigned MessagePack，绑定主网 genesis、fee 和轮次窗口，显示 note/lease，返回 `{sig, txn}`；不支持 group、rekey、close、clawback、LogicSig 和应用调用，见 [algorand-signing.md](docs/chain-protocols.md)。
 - NEAR Borsh `TransactionV0` 原生 Transfer 已接入 `BEGIN_SIGN kind=11`：1–16 笔转账、128 位总额溢出拒绝、隐式账户 owner 绑定，返回 `tx || 0x00 || sig`；不支持 FunctionCall、访问密钥、委托或命名账户所有权，见 [near-signing.md](docs/chain-protocols.md)。
 - 离线 TOTP（RFC 6238，SHA-1/256/512）已实现并通过 RFC 6238/2202/4648 向量；认证后的 CLI 用 `totp time <unix>` 锚定时钟，`totp <base32>` 生成验证码，密钥不落盘、不回显。时钟与硬件 RTC 的边界见 [totp.md](docs/totp.md)。
 - Tezos（XTZ）manager operation 已接入 `BEGIN_SIGN kind=12`：可选 Ed25519 reveal、1–16 笔 tz1–tz4 原生转账、BLAKE2b-256(0x03 || forged) 摘要与 Ed25519 签名；不支持 KT1、Michelson、委托或 FA token，见 [tezos-signing.md](docs/chain-protocols.md)。
 - XRP 原生 Payment 已接入 `BEGIN_SIGN kind=13`：设备从 50 字节紧凑结构构建规范 XRPL 二进制，使用 SHA-512Half 与 secp256k1 DER 签名；classic r-address 使用 Ripple base58 + hash160。不支持 issued currency、path、memo、partial payment 或多签名，见 [xrp-signing.md](docs/chain-protocols.md)。
 
-以下能力明确不可用，也不会出现在钱包目录中：
+以下能力明确不可用，或仍受严格协议边界限制，也不会被伪装成完整支持：
 
-- 向 XMR 子地址发送或找零：子地址输入可以消费，但目的地址的交易公钥绑定与接收扫描向量尚未完成，这类输出会被拒绝。
-- Chia、QRL 与 DOT/KSM 的交易签名：Chia 需要常数时间 BLS 标量路径，QRL 没有一次性签名预留，Substrate 需要可信 runtime metadata。
+- XMR 子地址输出只开放严格验证的形式：单一子地址目的地使用 `R=rD`，混合/多目的地使用 payload v3 的 additional transaction-key 绑定；设备会逐项核对 `tx_extra`、输出索引、金额密文、view tag 和 commitment。未绑定、畸形或 MSR 子地址输出仍拒绝。
+- Chia、QRL、DOT/KSM、Aeternity、RyoCurrency 与 Zano 的交易签名：Chia 需要常数时间 BLS 标量路径，QRL 没有一次性签名预留，Substrate 需要可信 runtime metadata；Aeternity/Ryo/Zano 只完成了地址编码与向量验证，没有可审计的交易格式、费用策略和签名路径。
+- Beam、Grin、MimbleWimbleCoin、Epic Cash：交互式 Mimblewimble 链没有静态 UTXO 地址，花费需要多轮 slate/transaction 交换；base58 字符串是 slatepack/BBS 端点，不是普通钱包地址，因此不登记。
+- Super Zero（SERO）：64/96 字节身份是 superzk 公钥包，不是单密钥地址；本仓库没有经过审计的编码与签名路径。
+- Swap（XWP）、Evolution（EVOX）、VeriBlock（VBK）：当前 SLIP-0044 注册表没有对应 coin type；复用 Bitcoin 或其它链的 coin type 会让同一份密钥材料跨域复用。上游 coin type 与向量验证完成前不进入目录。
 - Qubic：身份是 FourQ 曲线点经 KangarooTwelve 得到，不提供 Ed25519/SHA3 替代实现；网络 profile 与编码器已删除，不会返回“看起来合理”的地址。
 - FLUX：2026-10-23 的 MiningPoolStats 快照将其归入 GRAVEYARD，按项目规则不得进入生产目录；ZIP-243 引擎仍由 ZEC 使用。
-- TRON TRC-10、`transferFrom`（与 TRC-20 共享 selector）、NFT 批量转移、非空 NFT 回调数据、memo/data 字段、多合约交易和非 owner 权限。
-- Zcash shielded、JoinSplit、v3/v5，以及 t3 P2SH 花费。
+- TRON NFT 批量转移、非空 NFT 回调数据、多合约交易、非 owner 权限、非可打印或超过 64 字节的 memo，以及扣第三方余额的 `transferFrom`。TRC-10 转账、自转 `transferFrom` 与可打印 memo 已可审阅并签名。
+- Dash 签名走专用适配器而不是 PSBT：普通 Dash 交易的序列化是 `nVersion`（类型在高 16 位）、`vin`、`vout`、`nLockTime`，**没有** `extraPayload`，摘要就是 Bitcoin legacy 算法套在这串字节上。这两个结论都用两笔真实主网交易钉死——它们各自的链上签名能对本固件算出的摘要验证通过。仅支持 type-0 的 P2PKH 支付；带 `extraPayload` 的特殊交易一律拒绝。InstantSend 不增加任何字节（它是 quorum 对输入的锁），设备只负责签出正确交易，锁状态由手机确认。
+- Zcash shielded、JoinSplit、v3/v5，以及 redeem script 不是单公钥 `CHECKSIG` 的 t3 P2SH 花费（P2SH-P2PK 已可签）。
 - Peercoin 交易签名：PPC v<3 交易在版本号后序列化 `nTime`，Bitcoin legacy 签名器会构造无效交易；在独立的 Peercoin sighash 模块和向量完成前，PPC 只作为内部地址原语，不进入钱包目录。
 - Kaspa v1 计算预算/covenant 交易；v0 的 `kaspa inspect` / `kaspa sign` 已实现。
-- 任意 EVM calldata、合约创建、未知 Token、非标准 typed transaction、非空 access list。
+- 任意 EVM calldata、合约创建、未知 Token、非标准 typed transaction。Type-2 的非空 access list 已支持，长度、审阅与向量见 [access list 策略](docs/evm-access-lists.md)。
 - 默认配置下的助记词、seed、私钥和 xprv 导出。
 
 严格规则：只有同时具备地址、审查、签名、官方/独立向量和失败路径的链才会进入 `WalletCatalog`。仅地址 profile 只作为内部测试数据存在，不是钱包。
@@ -539,9 +544,11 @@ coin show xmr
 ```text
 token list
 token list eth
+token list bsc
 token list matic
 token show eth-usdc
-token show matic-usdc
+token show bsc-cake
+token show bsc-fdusd
 ```
 
 `asset` 是已登记的合约地址，`decimals` 是精度。Token 合约地址不是账户收款地址，使用前必须独立核对网络和合约。
@@ -556,6 +563,9 @@ wallet address btc49 0
 wallet address btc44 0
 wallet address eth 0
 wallet address bsc 0
+wallet address ae 0
+wallet address ryo 0
+wallet address zano 0
 wallet address zec 0
 wallet address kas 0
 ```
@@ -573,7 +583,7 @@ wallet address eth 1
 wallet address btc 1
 ```
 
-钱包目录只暴露具备真实路径的条目：DOT/KSM 与 Chia（XCH）只登记地址、不声明签名；QRL 与 Peercoin 仅作为内部 profile 存在，不出现在 `coin list` / `wallet address` 中。仅地址 profile 不表示该链可发送。
+钱包目录只暴露具备真实路径的条目：DOT/KSM、Chia（XCH）、Aeternity（AE）、RyoCurrency（RYO）与 Zano（ZANO）只登记地址、不声明签名；QRL 与 Peercoin 仅作为内部 profile 存在，不出现在 `coin list` / `wallet address` 中。仅地址 profile 不表示该链可发送，尤其不要向只能生成地址、不能签名的链转入资产。
 
 当前账户和 change 固定为 `0`，一般路径为：
 
@@ -605,7 +615,7 @@ ERC-20 Token 使用所属 EVM 网络的同一个账户地址，不要把 Token �
 
 - 已认证并加载钱包。
 - 输入是十六进制 PSBT v0。
-- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、Dash、DigiByte、Bitcoin Gold、Ravencoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、e-Gulden、LBRY、MazaCoin、Myriad、NewYorkCoin、Auroracoin、Bitcore、CPUchain、DigitalCoin、Einsteinium、Feathercoin、GoByte、Monacoin、Ritocoin、VIVO，以及各自的 SegWit profile）。生成器只接受带 `sighash_source`、且上游 `chainparams.cpp` 与 `script/interpreter.cpp` 已完成来源核对的 `legacy` 行；fork-id 和 `nTime` sighash 链不会套用 Bitcoin legacy 签名。共享的 legacy/BIP143 算法由 Bitcoin 向量覆盖，但策略行不代表已经在对应主网广播验证。
+- 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、DigiByte、Bitcoin Gold、Ravencoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、e-Gulden、LBRY、MazaCoin、Myriad、NewYorkCoin、Auroracoin、Bitcore、CPUchain、DigitalCoin、Einsteinium、Feathercoin、GoByte、Monacoin、Ritocoin、VIVO，以及各自的 SegWit profile）。生成器只接受带 `sighash_source`、且上游 `chainparams.cpp` 与 `script/interpreter.cpp` 已完成来源核对的 `legacy` 行；fork-id 和 `nTime` sighash 链不会套用 Bitcoin legacy 签名。共享的 legacy/BIP143 算法由 Bitcoin 向量覆盖，但策略行不代表已经在对应主网广播验证。
 - 输入属于该网络支持的 BIP44 P2PKH、BIP49 P2SH-P2WPKH 或 BIP84 P2WPKH 地址。
 - legacy 输入必须带 `non_witness_utxo`，其 txid 会与 outpoint 校验。这是 BIP-174 的强制要求；缺少它，恶意 PSBT 可以伪造被花费金额，从而污染手续费审查。
 - 交易满足金额、费率、输入输出和 sighash 限制（Bitcoin 系为 `SIGHASH_ALL`，BCH/eCash/BSV 为 `SIGHASH_FORKID`）。
@@ -647,13 +657,13 @@ ERR trusted-display-required-for-signing
 
 ## Zcash 透明交易审查和签名
 
-`zec inspect <payload-hex>` 使用 `magic "ZEC4", u32 branch_id, u32 unsigned_transaction_size, unsigned_v4_transaction, u8 input_count, {u64 value, u8 script_len + scriptPubKey, u32 account, u8 change, u32 address_index}*`。交易必须是透明-only v4，且所有 scriptSig 为空；任何 valueBalance、shielded spend/output 或 JoinSplit 都会返回 `unsupported`，不会降级成“看起来像透明交易”的签名。该 payload 应由手机或电脑按协议构建，并与独立实现核对摘要。
+`zec inspect <payload-hex>` 使用 `magic "ZEC4"|"ZEC5", u32 branch_id, u32 unsigned_transaction_size, unsigned_v4_transaction, u8 input_count, {u64 value, u8 script_len + scriptPubKey, u32 account, u8 change, u32 address_index, [u8 redeem_len + redeem script]}*`；`ZEC5` 追加的 redeem 记录用于花费 t3 P2SH-P2PK prevout，`ZEC4` 只能表达 P2PKH 输入。交易必须是透明-only v4，且所有 scriptSig 为空；任何 valueBalance、shielded spend/output 或 JoinSplit 都会返回 `unsupported`，不会降级成“看起来像透明交易”的签名。该 payload 应由手机或电脑按协议构建，并与独立实现核对摘要。
 
-审查界面显示分支 ID、输入/输出总额、手续费、估计 vbytes、expiry height、lock time 和每个 t1/t3 输出地址。`zec sign <code>` 会从设备种子重新推导 `m/44'/133'/account'/change/index`，校验 prevout 的 P2PKH 哈希，再用 ZIP-243 摘要生成 ECDSA DER 签名并输出完整 v4 交易和 `txid`。签名只使用 `SIGHASH_ALL`；分支 ID 固定在 `WalletNetworks` 的主网 NU6.2 策略 `0x5437f330`，升级网络时必须发布新固件并补充官方向量，不能由主机任意指定。
+审查界面显示分支 ID、输入/输出总额、手续费、估计 vbytes、expiry height、lock time 和每个 t1/t3 输出地址。`zec sign <code>` 会从设备种子重新推导 `m/44'/133'/account'/change/index`，校验 prevout 的 P2PKH 哈希（t3 输入则校验 redeem script 的 HASH160 与地址一致、且 redeem 里就是本机公钥），再用需要签名的 scriptCode（P2PKH 为 prevout 脚本，P2SH 为 redeem script）生成 ZIP-243 摘要、ECDSA DER 签名并输出完整 v4 交易和 `txid`。签名只使用 `SIGHASH_ALL`；分支 ID 固定在 `WalletNetworks` 的主网 NU6.2 策略 `0x5437f330`，升级网络时必须发布新固件并补充官方向量，不能由主机任意指定。
 
 ## EVM 交易审查和签名
 
-当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 的 `safeTransferFrom` 唯一 selector 在空回调数据时可在没有 NFT 合约注册记录的情况下审阅，设备显示合约地址、标准与未登记警告，但无法离线验证合约身份或元数据；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。53 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 保持 legacy-only。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、非空 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
+当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 的 `safeTransferFrom` 唯一 selector 在空回调数据时可在没有 NFT 合约注册记录的情况下审阅，设备显示合约地址、标准与未登记警告，但无法离线验证合约身份或元数据；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。53 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 保持 legacy-only。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、超出容量限制的 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
 
 审查 unsigned RLP：
 
@@ -821,7 +831,10 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `WalletUi` | 可信显示器的交易审查界面 |
 | `WalletCustody` | MCU/SE 托管策略 |
 | `BitcoinTransaction` | PSBT v0 解析（witness/non-witness UTXO）、审查、legacy/BIP143/fork-id sighash、最终序列化 |
-| `ZcashTransaction` | v4 透明交易、ZIP-243、t1 签名、t1/t3 输出 |
+| `ZcashTransaction` | v4 透明交易、ZIP-243、t1 P2PKH 与 t3 P2SH-P2PK 签名、t1/t3 输出 |
+| `DashTransaction` | type-0 普通支付；legacy 摘要用真实主网签名钉死；P2PKH/P2SH 输出 |
+| `CoinIcons` | 审阅页 32×32 I1 币种图徽，CC0 源图打包，固件内无解码器 |
+| `QrlOtsJournal` | XMSS 一次性索引的持久化预留：双槽冗余、回读证明、半写跳过、状态未知即拒签 |
 | `CryptoNoteRingCt` | Monero hash-to-scalar、key derivation、一次性公钥、key image、view tag、CLSAG 签名/验证；key 层官方向量固定 |
 | `CryptoNoteOutputScan` | 用 view secret 在设备内判定输出归属，不导出查看密钥 |
 | `CryptoNoteTransaction` | RCT type-6 严格解析/逐字节重写 + 承诺平衡校验 + CLSAG 签名接入（`cryptonote_sign_input`） |

@@ -10,10 +10,14 @@
 
 namespace hexwallet {
 
-// Zcash Overwinter/Sapling v4 transparent transactions. Only t1 P2PKH inputs
-// are signed; shielded components are parsed to reject them explicitly. The
-// host supplies prevout values/scripts in the review payload, and the device
-// re-derives every key before signing.
+// Zcash Overwinter/Sapling v4 transparent transactions. Signed inputs are
+// t1 P2PKH and t3 P2SH whose redeem script is the canonical
+// `<compressed pubkey> OP_CHECKSIG` form holding this wallet's key; shielded
+// components are parsed to reject them explicitly. The host supplies prevout
+// values/scripts (and the redeem script for P2SH) in the review payload, and
+// the device re-derives every key and re-hashes the redeem script before
+// signing. P2SH multisig and every other redeem form are refused: a single
+// device cannot produce the other signatures, and it cannot verify them.
 
 constexpr size_t kZcashMaxInputs = 8;
 constexpr size_t kZcashMaxOutputs = 16;
@@ -21,8 +25,11 @@ constexpr size_t kZcashMaxScriptSize = 34;
 constexpr size_t kZcashMaxPathDepth = 10;
 constexpr size_t kZcashMaxDerSignatureSize = 72;
 constexpr size_t kZcashMaxSignatureSize = kZcashMaxDerSignatureSize + 1;
+// `<0x21> <33-byte compressed pubkey> OP_CHECKSIG`
+constexpr size_t kZcashMaxRedeemScriptSize = 1 + 33 + 1;
+// push(signature) + push(redeem script or pubkey)
 constexpr size_t kZcashMaxScriptSigSize =
-    1 + kZcashMaxSignatureSize + 1 + 33;
+    1 + kZcashMaxSignatureSize + 1 + kZcashMaxRedeemScriptSize;
 constexpr size_t kZcashMaxTransactionSize = 4096;
 constexpr uint64_t kZcashZatsPerZec = 100000000ULL;
 constexpr uint64_t kZcashMaxZats = 21000000ULL * kZcashZatsPerZec;
@@ -61,11 +68,18 @@ struct ZcashInput {
   uint32_t previous_index;
   uint32_t sequence;
   uint64_t value;
-  // Previous output scriptPubKey (transparent P2PKH only).
+  // Previous output scriptPubKey: P2PKH (t1) or P2SH (t3).
   uint8_t script[kZcashMaxScriptSize];
   uint8_t script_size;
+  // P2SH only: the redeem script, which must be exactly
+  // `<0x21> <33-byte compressed pubkey> OP_CHECKSIG` and must HASH160 to
+  // script[2..21]. Zcash commits the redeem script as the ZIP-243 scriptCode.
+  // Empty for P2PKH prevouts.
+  uint8_t redeem[kZcashMaxRedeemScriptSize];
+  uint8_t redeem_size;
   // m/44'/coin'/account'/change/index. The signer re-derives the key and
-  // refuses the transaction unless HASH160(pubkey) equals script[3..22].
+  // refuses the transaction unless HASH160(pubkey) equals script[3..22] (P2PKH)
+  // or the redeem script carries that same pubkey (P2SH).
   uint32_t account;
   uint8_t change;
   uint32_t address_index;
@@ -97,14 +111,17 @@ struct ZcashSigningRequest {
 };
 
 // Review payload layout (all integers little-endian):
-//   magic "ZEC4" (4 bytes)
+//   magic "ZEC4" or "ZEC5" (4 bytes)
 //   u32 branch_id
 //   u32 unsigned_transaction_size
 //   unsigned v4 transaction bytes (every scriptSig must be empty)
 //   u8 input_count (must equal the transaction's vin count)
 //   input_count * { u64 value, u8 script_size + scriptPubKey,
-//                   u32 account, u8 change, u32 address_index }
-// The payload must end exactly after the last input record.
+//                   u32 account, u8 change, u32 address_index
+//                   [, u8 redeem_size + redeem script] }
+// The bracketed redeem field exists only under "ZEC5" and must be zero for
+// P2PKH inputs; "ZEC4" cannot carry a P2SH prevout. The payload must end
+// exactly after the last input record.
 ZcashError zcash_parse_review_payload(const uint8_t *data, size_t size,
                                       const ZcashChainParams &chain,
                                       ZcashSigningRequest *out);
@@ -127,6 +144,13 @@ ZcashError zcash_zip243_sighash_v4(const uint8_t *transaction,
                                    int32_t input_index, uint32_t hash_type,
                                    uint64_t amount, uint32_t branch_id,
                                    uint8_t out_digest[kSha256Size]);
+
+// True when `redeem` is exactly `<0x21> <33-byte compressed pubkey>
+// OP_CHECKSIG` and HASH160(redeem) equals the hash committed by the P2SH
+// prevout script. Pure function over public data: no key material and no curve
+// work, so the rule is pinned by host tests as well as by the device signer.
+bool zcash_p2sh_redeem_commits(const uint8_t *script, size_t script_size,
+                               const uint8_t *redeem, size_t redeem_size);
 
 const char *zcash_error_text(ZcashError error);
 void clear_zcash_request(ZcashSigningRequest *request);

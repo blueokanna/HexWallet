@@ -59,12 +59,16 @@ namespace hexwallet
 
   constexpr size_t kReviewSealSize = 32;
   constexpr size_t kReviewSealNonceSize = 8;
+  constexpr size_t kReviewSealMaxLines = 80;
+  constexpr size_t kReviewSealMaxLineBytes = 4096;
+  constexpr size_t kReviewSealMaxTextBytes = 32768;
 
   struct ReviewSeal
   {
     uint8_t nonce[kReviewSealNonceSize];
     uint8_t digest[kReviewSealSize];
     uint32_t expires_ms;
+    bool built;
     bool displayed;
     bool consumed;
   };

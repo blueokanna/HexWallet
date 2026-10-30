@@ -143,6 +143,17 @@
 #define HEXWALLET_MAX_ZCASH_FEE_RATE 10000ULL
 #endif
 
+// Dash: 0.01 DASH absolute ceiling and 500 duffs/vbyte. Dash relay fees are
+// 1 duff/byte, so the rate cap only stops a host from presenting an absurd
+// fee as an ordinary one; it is not a recommendation.
+#ifndef HEXWALLET_MAX_DASH_FEE_DUFFS
+#define HEXWALLET_MAX_DASH_FEE_DUFFS 1000000ULL
+#endif
+
+#ifndef HEXWALLET_MAX_DASH_FEE_RATE
+#define HEXWALLET_MAX_DASH_FEE_RATE 500ULL
+#endif
+
 #ifndef HEXWALLET_USB_DATA_DEFAULT
 #define HEXWALLET_USB_DATA_DEFAULT 0
 #endif
@@ -160,15 +171,21 @@
 #endif
 
 #ifndef HEXWALLET_REQUIRE_SECURE_CUSTODY
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
-#define HEXWALLET_REQUIRE_SECURE_CUSTODY 1
-#else
+#if defined(HEXWALLET_HOST_TEST)
 #define HEXWALLET_REQUIRE_SECURE_CUSTODY 0
+#else
+#define HEXWALLET_REQUIRE_SECURE_CUSTODY 1
 #endif
 #endif
 
-#if HEXWALLET_REQUIRE_SECURE_CUSTODY && HEXWALLET_ENABLE_SECRET_EXPORT
-#error "Secure custody cannot be combined with plaintext secret export."
+#if HEXWALLET_ENABLE_SECRET_EXPORT
+#error "Secret export is not supported by this wallet."
+#endif
+#if !defined(HEXWALLET_HOST_TEST) && !HEXWALLET_REQUIRE_SECURE_CUSTODY
+#error "Device builds require secure custody; software sessions are host-test only."
+#endif
+#if defined(HEXWALLET_HOST_TEST) && defined(ARDUINO)
+#error "Host-test security exemptions must never be compiled into device firmware."
 #endif
 
 #ifndef HEXWALLET_REQUIRE_VERIFIED_BOOT

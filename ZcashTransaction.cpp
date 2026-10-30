@@ -27,6 +27,9 @@ namespace hexwallet
     constexpr size_t kP2pkhScriptSize = 25;
     constexpr size_t kP2shScriptSize = 23;
     constexpr uint8_t kZcashPayloadMagic[4] = {'Z', 'E', 'C', '4'};
+    // ZEC5 appends `u8 redeem_size + redeem script` to every input record so a
+    // t3 P2SH prevout can be spent. ZEC4 stays valid for P2PKH-only requests.
+    constexpr uint8_t kZcashPayloadMagicRedeem[4] = {'Z', 'E', 'C', '5'};
 
     struct Cursor
     {
@@ -222,6 +225,21 @@ namespace hexwallet
       return script != nullptr && script_size == kP2pkhScriptSize &&
              script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
              script[23] == 0x88 && script[24] == 0xac;
+    }
+
+    bool p2sh_script(const uint8_t *script, size_t script_size)
+    {
+      return script != nullptr && script_size == kP2shScriptSize &&
+             script[0] == 0xa9 && script[1] == 0x14 && script[22] == 0x87;
+    }
+
+    // The only redeem form this device can prove it owns and can satisfy:
+    // a single compressed public key followed by OP_CHECKSIG.
+    bool p2pk_redeem_script(const uint8_t *script, size_t script_size)
+    {
+      return script != nullptr && script_size == kZcashMaxRedeemScriptSize &&
+             script[0] == kCompressedPublicKeySize && script[34] == 0xac &&
+             (script[1] == 0x02 || script[1] == 0x03);
     }
 
     ZcashError parse_v4_transaction(const uint8_t *data, size_t size, TxView *view,
@@ -658,13 +676,19 @@ namespace hexwallet
         }
         else
         {
+          // P2SH scriptSig pushes the signature and then the redeem script;
+          // P2PKH pushes the signature and the public key.
+          const bool redeem_input = input.redeem_size != 0;
+          const size_t pushed_size =
+              redeem_input ? input.redeem_size : kCompressedPublicKeySize;
+          const uint8_t *pushed = redeem_input ? input.redeem : public_keys[index];
           const size_t script_size =
-              1 + signature_sizes[index] + 1 + kCompressedPublicKeySize;
+              1 + signature_sizes[index] + 1 + pushed_size;
           ok = write_compact_size(&writer, script_size) &&
                write_compact_size(&writer, signature_sizes[index]) &&
                write_bytes(&writer, signatures[index], signature_sizes[index]) &&
-               write_compact_size(&writer, kCompressedPublicKeySize) &&
-               write_bytes(&writer, public_keys[index], kCompressedPublicKeySize);
+               write_compact_size(&writer, pushed_size) &&
+               write_bytes(&writer, pushed, pushed_size);
         }
         ok = ok && write_u32(&writer, input.sequence);
       }
@@ -717,9 +741,23 @@ namespace hexwallet
       const bool public_ok =
           public_key_from_private(current.private_key, out_public) == WalletError::Ok &&
           crypto_hash160(out_public, kCompressedPublicKeySize, hash);
-      const bool script_ok = public_ok &&
-                             crypto_constant_time_equal(
-                                 hash, input.script + 3, kRipemd160Size);
+      bool script_ok = false;
+      if (public_ok && p2pkh_script(input.script, input.script_size))
+      {
+        script_ok = crypto_constant_time_equal(hash, input.script + 3,
+                                              kRipemd160Size);
+      }
+      else if (public_ok && p2sh_script(input.script, input.script_size))
+      {
+        // The redeem script must carry this wallet's own key and must be the
+        // script the t3 address commits to; otherwise the device would be
+        // signing for a script it cannot legitimately satisfy.
+        script_ok =
+            zcash_p2sh_redeem_commits(input.script, input.script_size,
+                                      input.redeem, input.redeem_size) &&
+            crypto_constant_time_equal(input.redeem + 1, out_public,
+                                       kCompressedPublicKeySize);
+      }
       memcpy(out_private, current.private_key, kPrivateKeySize);
       secure_zero(&current, sizeof(current));
       secure_zero(hash, sizeof(hash));
@@ -728,10 +766,19 @@ namespace hexwallet
 
     uint32_t estimated_vbytes(const ZcashSigningRequest &request)
     {
-      // version+group, vin count, inputs, vout count, outputs, lock, expiry,
-      // valueBalance and the three zero component counts.
+      // version+group, vin count, vout count, lock, expiry, valueBalance and
+      // the three zero component counts.
       uint64_t size = 29;
-      size += static_cast<uint64_t>(request.input_count) * 149;
+      for (size_t index = 0; index < request.input_count; ++index)
+      {
+        // prevout + scriptSig length + push(sig) + push(pubkey|redeem) +
+        // sequence. The worst-case DER signature is what the fee policy must
+        // reserve, so a t3 input is costed with its real redeem size.
+        const size_t pushed = request.inputs[index].redeem_size != 0
+                                  ? request.inputs[index].redeem_size
+                                  : kCompressedPublicKeySize;
+        size += 36 + 1 + (1 + kZcashMaxSignatureSize) + 1 + pushed + 4;
+      }
       size += static_cast<uint64_t>(request.output_count) * 34;
       return size > UINT32_MAX ? 0 : static_cast<uint32_t>(size);
     }
@@ -986,6 +1033,23 @@ namespace hexwallet
     return hashed ? ZcashError::Ok : ZcashError::CryptoFailure;
   }
 
+  bool zcash_p2sh_redeem_commits(const uint8_t *script, size_t script_size,
+                                 const uint8_t *redeem, size_t redeem_size)
+  {
+    if (!p2sh_script(script, script_size) ||
+        !p2pk_redeem_script(redeem, redeem_size))
+    {
+      return false;
+    }
+    uint8_t hash[kRipemd160Size];
+    if (!crypto_hash160(redeem, redeem_size, hash))
+      return false;
+    const bool matches =
+        crypto_constant_time_equal(hash, script + 2, kRipemd160Size);
+    secure_zero(hash, sizeof(hash));
+    return matches;
+  }
+
   ZcashError zcash_parse_review_payload(const uint8_t *data, size_t size,
                                         const ZcashChainParams &chain,
                                         ZcashSigningRequest *out)
@@ -1007,7 +1071,14 @@ namespace hexwallet
     uint32_t branch_id;
     uint32_t transaction_size;
     if (!read_bytes(&cursor, sizeof(kZcashPayloadMagic), &magic) ||
-        magic == nullptr ||
+        magic == nullptr)
+    {
+      return ZcashError::NonCanonical;
+    }
+    const bool has_redeem_field =
+        memcmp(magic, kZcashPayloadMagicRedeem,
+               sizeof(kZcashPayloadMagicRedeem)) == 0;
+    if (!has_redeem_field &&
         memcmp(magic, kZcashPayloadMagic, sizeof(kZcashPayloadMagic)) != 0)
     {
       return ZcashError::NonCanonical;
@@ -1071,14 +1142,16 @@ namespace hexwallet
       }
       if (value > policy->max_zats)
         return ZcashError::InvalidAmount;
-      if (*script_size != kP2pkhScriptSize)
+      if (*script_size > kZcashMaxScriptSize)
         return ZcashError::Unsupported;
       const uint8_t *script;
       if (!read_bytes(&cursor, *script_size, &script))
       {
         return ZcashError::Truncated;
       }
-      if (!p2pkh_script(script, *script_size))
+      const bool prevout_is_p2pkh = p2pkh_script(script, *script_size);
+      const bool prevout_is_p2sh = p2sh_script(script, *script_size);
+      if (!prevout_is_p2pkh && !prevout_is_p2sh)
         return ZcashError::Unsupported;
       uint32_t account;
       uint32_t address_index;
@@ -1087,6 +1160,42 @@ namespace hexwallet
           !read_u32(&cursor, &address_index))
       {
         return ZcashError::Truncated;
+      }
+      if (has_redeem_field)
+      {
+        const uint8_t *redeem_size;
+        if (!read_bytes(&cursor, 1, &redeem_size))
+          return ZcashError::Truncated;
+        if (*redeem_size > kZcashMaxRedeemScriptSize)
+          return ZcashError::Unsupported;
+        if (*redeem_size != 0)
+        {
+          const uint8_t *redeem;
+          if (!read_bytes(&cursor, *redeem_size, &redeem))
+            return ZcashError::Truncated;
+          memcpy(input.redeem, redeem, *redeem_size);
+          input.redeem_size = *redeem_size;
+        }
+      }
+      if (prevout_is_p2pkh && input.redeem_size != 0)
+        return ZcashError::NonCanonical;
+      if (prevout_is_p2sh)
+      {
+        // A t3 prevout needs the redeem script that the address commits to.
+        // Without it the device could neither hash the correct scriptCode nor
+        // build a spendable scriptSig.
+        if (input.redeem_size == 0)
+          return ZcashError::Unsupported;
+        if (!zcash_p2sh_redeem_commits(script, *script_size, input.redeem,
+                                       input.redeem_size))
+        {
+          // A canonical single-key redeem script that does not match the
+          // address is a wrong-wallet request; any other form is unsupported
+          // rather than something to guess at.
+          return p2pk_redeem_script(input.redeem, input.redeem_size)
+                     ? ZcashError::InvalidArgument
+                     : ZcashError::Unsupported;
+        }
       }
       if (account >= kHardenedOffset || *change > 1 ||
           address_index >= kHardenedOffset)
@@ -1209,9 +1318,12 @@ namespace hexwallet
     for (size_t index = 0; index < request.input_count; ++index)
     {
       const ZcashInput &input = request.inputs[index];
+      const bool p2pkh = p2pkh_script(input.script, input.script_size);
+      const bool p2sh = p2sh_script(input.script, input.script_size);
       if (input.value > zcash_policy->max_zats ||
-          input.script_size != kP2pkhScriptSize ||
-          !p2pkh_script(input.script, input.script_size) ||
+          (!p2pkh && !p2sh) ||
+          (p2pkh && input.redeem_size != 0) ||
+          (p2sh && !p2pk_redeem_script(input.redeem, input.redeem_size)) ||
           !add_u64(input_total, input.value, &input_total))
       {
         return ZcashError::WrongWallet;
@@ -1263,12 +1375,20 @@ namespace hexwallet
         secure_zero(unsigned_transaction, sizeof(unsigned_transaction));
         return ZcashError::WrongWallet;
       }
+      // P2SH spends commit the redeem script as scriptCode; P2PKH commits the
+      // prevout script itself.
+      const uint8_t *script_code = request.inputs[index].script;
+      size_t script_code_size = request.inputs[index].script_size;
+      if (request.inputs[index].redeem_size != 0)
+      {
+        script_code = request.inputs[index].redeem;
+        script_code_size = request.inputs[index].redeem_size;
+      }
       uint8_t digest[kSha256Size];
       result = zcash_zip243_sighash_v4(
-          unsigned_transaction, unsigned_size, request.inputs[index].script,
-          request.inputs[index].script_size, static_cast<int32_t>(index),
-          kSighashAll, request.inputs[index].value, request.chain.branch_id,
-          digest);
+          unsigned_transaction, unsigned_size, script_code, script_code_size,
+          static_cast<int32_t>(index), kSighashAll,
+          request.inputs[index].value, request.chain.branch_id, digest);
       size_t der_size = sizeof(signatures[index]) - 1;
       if (result == ZcashError::Ok)
       {
@@ -1437,6 +1557,31 @@ namespace hexwallet
                  write_compact_size(&unsigned_writer, 0) &&
                  write_compact_size(&unsigned_writer, 0) &&
                  write_compact_size(&unsigned_writer, 0);
+    // No official ZIP-243 vector covers P2SH, so this digest was produced by a
+    // separate Python BLAKE2b implementation of ZIP-243 that first reproduced
+    // the official transparent vector above byte for byte. It pins the t3 rule:
+    // the scriptCode is the redeem script, not the previous scriptPubKey.
+    static const uint8_t kP2shScriptCode[kZcashMaxRedeemScriptSize] = {
+        0x21, 0x02, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+        0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
+        0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+        0x1f, 0x20, 0xac};
+    static const uint8_t kP2shDigest[kSha256Size] = {
+        0xaa, 0xbf, 0x33, 0xb8, 0x7a, 0xce, 0xeb, 0xc6,
+        0x59, 0xf8, 0xb3, 0x2a, 0x5d, 0xcc, 0xa5, 0x6a,
+        0xf5, 0x78, 0xc8, 0xfe, 0x71, 0xae, 0xa0, 0x21,
+        0x93, 0xd3, 0x73, 0xd2, 0xd4, 0x36, 0x62, 0xe6};
+    uint8_t p2sh_digest[kSha256Size] = {};
+    passed = passed && built &&
+             zcash_zip243_sighash_v4(unsigned_transaction,
+                                     unsigned_writer.position, kP2shScriptCode,
+                                     sizeof(kP2shScriptCode), 0, kSighashAll,
+                                     50000000, chain.branch_id,
+                                     p2sh_digest) == ZcashError::Ok &&
+             crypto_constant_time_equal(p2sh_digest, kP2shDigest,
+                                        sizeof(kP2shDigest));
+    secure_zero(p2sh_digest, sizeof(p2sh_digest));
     static uint8_t payload[4096];
     Writer payload_writer = {payload, sizeof(payload), 0};
     built = built &&
@@ -1464,6 +1609,137 @@ namespace hexwallet
              parsed.fee == 245 && parsed.estimated_vbytes == 246 &&
              parsed.outputs[0].address[0] == 't' &&
              parsed.outputs[1].address[0] == 't';
+    // ZEC5 t3 prevout. The redeem script travels in the request and must hash
+    // to the scriptPubKey; the fee budget grows by the larger scriptSig.
+    static uint8_t p2sh_script_pubkey[kP2shScriptSize] = {0xa9, 0x14};
+    uint8_t redeem_hash[kRipemd160Size] = {};
+    bool redeem_ready =
+        crypto_hash160(kP2shScriptCode, sizeof(kP2shScriptCode), redeem_hash);
+    p2sh_script_pubkey[22] = 0x87;
+    memcpy(p2sh_script_pubkey + 2, redeem_hash, sizeof(redeem_hash));
+    const auto build_redeem_payload =
+        [&](const uint8_t magic[4], const uint8_t *script, size_t script_size,
+            const uint8_t *redeem, size_t redeem_size, size_t *out_size)
+    {
+      Writer writer = {scratch, sizeof(scratch), 0};
+      const uint8_t size_byte = static_cast<uint8_t>(redeem_size);
+      const bool ok =
+          write_bytes(&writer, magic, 4) &&
+          write_u32(&writer, chain.branch_id) &&
+          write_u32(&writer, static_cast<uint32_t>(unsigned_writer.position)) &&
+          write_bytes(&writer, unsigned_transaction, unsigned_writer.position) &&
+          write_compact_size(&writer, 1) &&
+          write_u64(&writer, 50000000) &&
+          write_compact_size(&writer, script_size) &&
+          write_bytes(&writer, script, script_size) &&
+          write_u32(&writer, 0) &&
+          write_bytes(&writer, "\0", 1) &&
+          write_u32(&writer, 0) &&
+          write_bytes(&writer, &size_byte, 1) &&
+          write_bytes(&writer, redeem, redeem_size);
+      *out_size = writer.position;
+      return ok;
+    };
+    size_t redeem_payload_size = 0;
+    ZcashSigningRequest p2sh_parsed;
+    ZcashSigningRequest rejected;
+    passed = passed && redeem_ready &&
+             build_redeem_payload(kZcashPayloadMagicRedeem, p2sh_script_pubkey,
+                                  sizeof(p2sh_script_pubkey), kP2shScriptCode,
+                                  sizeof(kP2shScriptCode),
+                                  &redeem_payload_size) &&
+             zcash_parse_review_payload(scratch, redeem_payload_size, chain,
+                                        &p2sh_parsed) == ZcashError::Ok &&
+             p2sh_parsed.inputs[0].redeem_size == kZcashMaxRedeemScriptSize &&
+             p2sh_parsed.estimated_vbytes == 248;
+    clear_zcash_request(&p2sh_parsed);
+    // ZEC4 cannot express a t3 prevout: signing it without the redeem script
+    // would commit the wrong scriptCode.
+    size_t probe_size = 0;
+    passed = passed && redeem_ready &&
+             build_redeem_payload(kZcashPayloadMagic, p2sh_script_pubkey,
+                                  sizeof(p2sh_script_pubkey), nullptr, 0,
+                                  &probe_size) &&
+             zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
+                 ZcashError::Unsupported;
+    // A canonical redeem script for a different key cannot match the address.
+    uint8_t wrong_redeem[kZcashMaxRedeemScriptSize];
+    memcpy(wrong_redeem, kP2shScriptCode, sizeof(wrong_redeem));
+    wrong_redeem[5] ^= 0x01;
+    passed = passed && redeem_ready &&
+             build_redeem_payload(kZcashPayloadMagicRedeem, p2sh_script_pubkey,
+                                  sizeof(p2sh_script_pubkey), wrong_redeem,
+                                  sizeof(wrong_redeem), &probe_size) &&
+             zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
+                 ZcashError::InvalidArgument;
+    secure_zero(wrong_redeem, sizeof(wrong_redeem));
+    // Anything that is not single-key CHECKSIG is refused, not guessed at.
+    uint8_t multisig_redeem[kZcashMaxRedeemScriptSize] = {0x51, 0x21};
+    passed = passed && redeem_ready &&
+             build_redeem_payload(kZcashPayloadMagicRedeem, p2sh_script_pubkey,
+                                  sizeof(p2sh_script_pubkey), multisig_redeem,
+                                  sizeof(multisig_redeem), &probe_size) &&
+             zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
+                 ZcashError::Unsupported;
+    secure_zero(multisig_redeem, sizeof(multisig_redeem));
+    // A P2PKH prevout must not smuggle a redeem script in.
+    passed = passed && redeem_ready &&
+             build_redeem_payload(kZcashPayloadMagicRedeem, kScriptCode,
+                                  sizeof(kScriptCode), kP2shScriptCode,
+                                  sizeof(kP2shScriptCode), &probe_size) &&
+             zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
+                 ZcashError::NonCanonical;
+    secure_zero(redeem_hash, sizeof(redeem_hash));
+    secure_zero(p2sh_script_pubkey, sizeof(p2sh_script_pubkey));
+    // Redeem/address binding over synthetic key material: pure hashing, so the
+    // rule is pinned on every build even though key derivation is device-only.
+    {
+      uint8_t synthetic_pubkey[kCompressedPublicKeySize] = {0x02};
+      for (size_t index = 1; index < kCompressedPublicKeySize; ++index)
+        synthetic_pubkey[index] = static_cast<uint8_t>(index);
+      uint8_t synthetic_redeem[kZcashMaxRedeemScriptSize] = {0x21};
+      memcpy(synthetic_redeem + 1, synthetic_pubkey, sizeof(synthetic_pubkey));
+      synthetic_redeem[kZcashMaxRedeemScriptSize - 1] = 0xac;
+      uint8_t synthetic_hash[kRipemd160Size] = {};
+      uint8_t synthetic_script[kP2shScriptSize] = {0xa9, 0x14};
+      synthetic_script[22] = 0x87;
+      const bool hashed = crypto_hash160(synthetic_redeem,
+                                         sizeof(synthetic_redeem),
+                                         synthetic_hash);
+      memcpy(synthetic_script + 2, synthetic_hash, sizeof(synthetic_hash));
+      passed = passed && hashed &&
+               zcash_p2sh_redeem_commits(synthetic_script,
+                                         sizeof(synthetic_script),
+                                         synthetic_redeem,
+                                         sizeof(synthetic_redeem));
+      // The same address with a different key must not pass.
+      synthetic_redeem[5] ^= 0x01;
+      passed = passed && !zcash_p2sh_redeem_commits(synthetic_script,
+                                                    sizeof(synthetic_script),
+                                                    synthetic_redeem,
+                                                    sizeof(synthetic_redeem));
+      synthetic_redeem[5] ^= 0x01;
+      // A multisig-shaped or truncated script is not a single-key redeem.
+      uint8_t multisig_like[kZcashMaxRedeemScriptSize] = {0x51, 0x21};
+      passed = passed && !zcash_p2sh_redeem_commits(synthetic_script,
+                                                    sizeof(synthetic_script),
+                                                    multisig_like,
+                                                    sizeof(multisig_like));
+      passed = passed && !zcash_p2sh_redeem_commits(synthetic_script,
+                                                    sizeof(synthetic_script),
+                                                    synthetic_redeem,
+                                                    sizeof(synthetic_redeem) - 1);
+      // A P2PKH prevout never uses a redeem script.
+      passed = passed && !zcash_p2sh_redeem_commits(kScriptCode,
+                                                    sizeof(kScriptCode),
+                                                    synthetic_redeem,
+                                                    sizeof(synthetic_redeem));
+      secure_zero(synthetic_redeem, sizeof(synthetic_redeem));
+      secure_zero(synthetic_pubkey, sizeof(synthetic_pubkey));
+      secure_zero(synthetic_hash, sizeof(synthetic_hash));
+      secure_zero(synthetic_script, sizeof(synthetic_script));
+      secure_zero(multisig_like, sizeof(multisig_like));
+    }
     // The published signed transaction must be refused by the signing parser
     // because a review payload may never carry an existing scriptSig.
     Writer signed_writer = {scratch, sizeof(scratch), 0};
@@ -1691,6 +1967,114 @@ namespace hexwallet
           secure_zero(digest, sizeof(digest));
         }
       }
+    }
+    // t3 P2SH spend of the same key: the redeem script is the scriptCode, and
+    // the scriptSig must push the signature followed by that redeem script.
+    if (passed)
+    {
+      ZcashSigningRequest p2sh = request;
+      uint8_t redeem[kZcashMaxRedeemScriptSize] = {0x21};
+      memcpy(redeem + 1, public_key, kCompressedPublicKeySize);
+      redeem[kZcashMaxRedeemScriptSize - 1] = 0xac;
+      uint8_t redeem_hash[kRipemd160Size] = {};
+      bool p2sh_ok = crypto_hash160(redeem, sizeof(redeem), redeem_hash);
+      if (p2sh_ok)
+      {
+        uint8_t *script = p2sh.inputs[0].script;
+        script[0] = 0xa9;
+        script[1] = 0x14;
+        memcpy(script + 2, redeem_hash, sizeof(redeem_hash));
+        script[22] = 0x87;
+        p2sh.inputs[0].script_size = static_cast<uint8_t>(kP2shScriptSize);
+        memcpy(p2sh.inputs[0].redeem, redeem, sizeof(redeem));
+        p2sh.inputs[0].redeem_size =
+            static_cast<uint8_t>(kZcashMaxRedeemScriptSize);
+        p2sh.estimated_vbytes = estimated_vbytes(p2sh);
+        size_t p2sh_size = sizeof(signed_transaction);
+        p2sh_ok = zcash_sign_request(p2sh, master, signed_transaction,
+                                     &p2sh_size) == ZcashError::Ok &&
+                  p2sh_size > 0;
+        TxView view = {};
+        if (p2sh_ok)
+        {
+          p2sh_ok = parse_v4_transaction(signed_transaction, p2sh_size, &view,
+                                         true) == ZcashError::Ok &&
+                    view.input_count == 1 &&
+                    view.inputs[0].script_sig_size > 36;
+        }
+        if (p2sh_ok)
+        {
+          const uint8_t *script_sig = view.inputs[0].script_sig;
+          const size_t script_sig_size = view.inputs[0].script_sig_size;
+          p2sh_ok = script_sig[0] >= 0x40 && script_sig[0] <= 0x49 &&
+                    1 + script_sig[0] + 1 + kZcashMaxRedeemScriptSize ==
+                        script_sig_size &&
+                    script_sig[1 + script_sig[0]] == kZcashMaxRedeemScriptSize;
+          if (p2sh_ok)
+          {
+            const uint8_t *der = script_sig + 1;
+            const size_t der_size = script_sig[0] - 1;
+            const uint8_t *pushed = script_sig + 2 + script_sig[0];
+            uint8_t digest[kSha256Size];
+            p2sh_ok =
+                crypto_constant_time_equal(pushed, redeem, sizeof(redeem)) &&
+                zcash_zip243_sighash_v4(signed_transaction, p2sh_size, redeem,
+                                        sizeof(redeem), 0, kSighashAll,
+                                        p2sh.inputs[0].value,
+                                        p2sh.chain.branch_id,
+                                        digest) == ZcashError::Ok &&
+                verify_digest(public_key, digest, der, der_size);
+            secure_zero(digest, sizeof(digest));
+          }
+        }
+      }
+      passed = p2sh_ok;
+      secure_zero(redeem, sizeof(redeem));
+      secure_zero(redeem_hash, sizeof(redeem_hash));
+      clear_zcash_request(&p2sh);
+    }
+    // A t3 prevout without a redeem script, or with a redeem script that does
+    // not hash to the address, must never be signed.
+    if (passed)
+    {
+      ZcashSigningRequest no_redeem = request;
+      uint8_t redeem[kZcashMaxRedeemScriptSize] = {0x21};
+      memcpy(redeem + 1, public_key, kCompressedPublicKeySize);
+      redeem[kZcashMaxRedeemScriptSize - 1] = 0xac;
+      uint8_t redeem_hash[kRipemd160Size] = {};
+      bool rejected = crypto_hash160(redeem, sizeof(redeem), redeem_hash);
+      if (rejected)
+      {
+        uint8_t *script = no_redeem.inputs[0].script;
+        script[0] = 0xa9;
+        script[1] = 0x14;
+        memcpy(script + 2, redeem_hash, sizeof(redeem_hash));
+        script[22] = 0x87;
+        no_redeem.inputs[0].script_size = static_cast<uint8_t>(kP2shScriptSize);
+        no_redeem.estimated_vbytes = estimated_vbytes(no_redeem);
+        size_t probe_size = sizeof(signed_transaction);
+        rejected =
+            zcash_sign_request(no_redeem, master, signed_transaction,
+                               &probe_size) == ZcashError::WrongWallet;
+      }
+      if (rejected)
+      {
+        ZcashSigningRequest wrong_hash = no_redeem;
+        memcpy(wrong_hash.inputs[0].redeem, redeem, sizeof(redeem));
+        wrong_hash.inputs[0].redeem_size =
+            static_cast<uint8_t>(kZcashMaxRedeemScriptSize);
+        wrong_hash.inputs[0].script[5] ^= 0x01;
+        wrong_hash.estimated_vbytes = estimated_vbytes(wrong_hash);
+        size_t probe_size = sizeof(signed_transaction);
+        rejected =
+            zcash_sign_request(wrong_hash, master, signed_transaction,
+                               &probe_size) == ZcashError::WrongWallet;
+        clear_zcash_request(&wrong_hash);
+      }
+      passed = rejected;
+      secure_zero(redeem, sizeof(redeem));
+      secure_zero(redeem_hash, sizeof(redeem_hash));
+      clear_zcash_request(&no_redeem);
     }
     // Wrong-wallet and fee-policy failure paths.
     if (passed)

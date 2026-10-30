@@ -1,4 +1,5 @@
 #include "BitcoinTransaction.h"
+#include "PeercoinSighash.h"
 
 #include "WalletAltAddresses.h"
 
@@ -575,7 +576,8 @@ bool valid_digest_request(const BitcoinSigningRequest &request, size_t input_ind
 }
 
 TransactionError bip143_digest(const BitcoinSigningRequest &request, size_t input_index,
-                               uint32_t sighash_type, uint8_t out[kSha256Size]) {
+                               uint32_t sighash_type, uint8_t out[kSha256Size],
+                               const uint32_t *transaction_time = nullptr) {
   if (!valid_digest_request(request, input_index, sighash_type, out)) return TransactionError::InvalidArgument;
   uint8_t prevouts[kBitcoinMaxInputs * 36];
   uint8_t sequences[kBitcoinMaxInputs * 4];
@@ -594,11 +596,13 @@ TransactionError bip143_digest(const BitcoinSigningRequest &request, size_t inpu
   const BitcoinInput &input = request.inputs[input_index];
   uint8_t key_hash[kRipemd160Size];
   if (!crypto_hash160(input.public_key, sizeof(input.public_key), key_hash)) return TransactionError::CryptoFailure;
-  uint8_t preimage[182];
+  uint8_t preimage[186];
   Writer writer = { preimage, sizeof(preimage), 0 };
   const uint8_t script_prefix[] = { 0x19, 0x76, 0xa9, 0x14 };
   const uint8_t script_suffix[] = { 0x88, 0xac };
-  const bool serialized = write_u32(&writer, request.version) && write_bytes(&writer, hash_prevouts, sizeof(hash_prevouts)) && write_bytes(&writer, hash_sequences, sizeof(hash_sequences)) && write_bytes(&writer, input.previous_txid, sizeof(input.previous_txid)) && write_u32(&writer, input.previous_index) && write_bytes(&writer, script_prefix, sizeof(script_prefix)) && write_bytes(&writer, key_hash, sizeof(key_hash)) && write_bytes(&writer, script_suffix, sizeof(script_suffix)) && write_u64(&writer, input.value) && write_u32(&writer, input.sequence) && write_bytes(&writer, hash_outputs, sizeof(hash_outputs)) && write_u32(&writer, request.lock_time) && write_u32(&writer, sighash_type);
+  const bool serialized = write_u32(&writer, request.version) &&
+      (transaction_time == nullptr || write_u32(&writer, *transaction_time)) &&
+      write_bytes(&writer, hash_prevouts, sizeof(hash_prevouts)) && write_bytes(&writer, hash_sequences, sizeof(hash_sequences)) && write_bytes(&writer, input.previous_txid, sizeof(input.previous_txid)) && write_u32(&writer, input.previous_index) && write_bytes(&writer, script_prefix, sizeof(script_prefix)) && write_bytes(&writer, key_hash, sizeof(key_hash)) && write_bytes(&writer, script_suffix, sizeof(script_suffix)) && write_u64(&writer, input.value) && write_u32(&writer, input.sequence) && write_bytes(&writer, hash_outputs, sizeof(hash_outputs)) && write_u32(&writer, request.lock_time) && write_u32(&writer, sighash_type);
   const bool hashed = serialized && crypto_double_sha256(preimage, writer.position, out);
   secure_zero(prevouts, sizeof(prevouts));
   secure_zero(sequences, sizeof(sequences));
@@ -615,15 +619,16 @@ TransactionError bip143_digest(const BitcoinSigningRequest &request, size_t inpu
 // the one being signed, which carries its scriptCode; SIGHASH_ALL appends the
 // 4-byte hash type and the preimage is double-SHA256'd.
 TransactionError legacy_digest(const BitcoinSigningRequest &request, size_t input_index,
-                               uint32_t sighash_type, uint8_t out[kSha256Size]) {
+                               uint32_t sighash_type, uint8_t out[kSha256Size],
+                               const uint32_t *transaction_time = nullptr) {
   if (!valid_digest_request(request, input_index, sighash_type, out)) return TransactionError::InvalidArgument;
   // FORKID applies BIP143 serialization even to a non-witness P2PKH input.
   // Treating it as Bitcoin's legacy serialization produces invalid signatures.
   if ((sighash_type & 0x40U) != 0) {
-    return bip143_digest(request, input_index, sighash_type, out);
+    return bip143_digest(request, input_index, sighash_type, out, transaction_time);
   }
   constexpr size_t kPreimageMax =
-      4 + 1 + kBitcoinMaxInputs * (32 + 4 + 1 + kLegacyP2pkhScriptSize + 4) + 1 +
+      4 + 4 + 1 + kBitcoinMaxInputs * (32 + 4 + 1 + kLegacyP2pkhScriptSize + 4) + 1 +
       kBitcoinMaxOutputs * (8 + 1 + kBitcoinMaxScriptSize) + 4 + 4;
   uint8_t preimage[kPreimageMax];
   Writer writer = { preimage, sizeof(preimage), 0 };
@@ -632,7 +637,9 @@ TransactionError legacy_digest(const BitcoinSigningRequest &request, size_t inpu
   if (!crypto_hash160(input.public_key, sizeof(input.public_key), key_hash)) {
     return TransactionError::CryptoFailure;
   }
-  bool ok = write_u32(&writer, request.version) && write_compact_size(&writer, request.input_count);
+  bool ok = write_u32(&writer, request.version) &&
+      (transaction_time == nullptr || write_u32(&writer, *transaction_time)) &&
+      write_compact_size(&writer, request.input_count);
   for (size_t index = 0; ok && index < request.input_count; ++index) {
     ok = write_bytes(&writer, request.inputs[index].previous_txid, 32) &&
          write_u32(&writer, request.inputs[index].previous_index);
@@ -968,6 +975,77 @@ TransactionError bitcoin_sighash_bip143(const BitcoinSigningRequest &request,
 
 uint32_t bitcoin_estimated_vbytes(const BitcoinSigningRequest &request) {
   return estimated_vbytes(request);
+}
+
+TransactionError peercoin_sighash_all(const BitcoinSigningRequest &request,
+                                      uint32_t transaction_time,
+                                      size_t input_index, bool witness_v0,
+                                      uint8_t out[kSha256Size]) {
+  if (out != nullptr) secure_zero(out, kSha256Size);
+  if (request.version < 1 || request.version > 3 ||
+      (request.version == 3 && transaction_time != 0) ||
+      !valid_digest_request(request, input_index, kSighashAll, out))
+    return TransactionError::InvalidArgument;
+  const BitcoinSpendType spend = request.inputs[input_index].spend_type;
+  if ((!witness_v0 && spend != BitcoinSpendType::LegacyP2pkh) ||
+      (witness_v0 && spend != BitcoinSpendType::NativeP2wpkh &&
+       spend != BitcoinSpendType::NestedP2shP2wpkh))
+    return TransactionError::Unsupported;
+  const uint32_t *time = request.version < 3 ? &transaction_time : nullptr;
+  return witness_v0 ? bip143_digest(request, input_index, kSighashAll, out, time)
+                    : legacy_digest(request, input_index, kSighashAll, out, time);
+}
+
+bool run_peercoin_sighash_self_tests() {
+#include "src/generated/PeercoinSighashVectors.inc"
+  BitcoinSigningRequest request = {};
+  request.input_count = 2;
+  request.output_count = 2;
+  request.lock_time = 12345;
+  // Public key is secp256k1's generator (scalar 1), a public test fixture.
+  const uint8_t pub[33] = {0x02,0x79,0xbe,0x66,0x7e,0xf9,0xdc,0xbb,0xac,0x55,0xa0,
+      0x62,0x95,0xce,0x87,0x0b,0x07,0x02,0x9b,0xfc,0xdb,0x2d,0xce,0x28,0xd9,0x59,
+      0xf2,0x81,0x5b,0x16,0xf8,0x17,0x98};
+  for (size_t i = 0; i < 2; ++i) {
+    BitcoinInput &input = request.inputs[i];
+    for (size_t j = 0; j < 32; ++j) input.previous_txid[j] = static_cast<uint8_t>(j + 32 * i);
+    input.previous_index = static_cast<uint32_t>(i);
+    input.sequence = 0xfffffffdU - static_cast<uint32_t>(i);
+    input.value = 2000000 + i * 1000000;
+    memcpy(input.public_key, pub, sizeof(pub));
+    request.outputs[i].value = 1000000 + i * 2000000;
+    request.outputs[i].script_size = 25;
+    uint8_t *script = request.outputs[i].script;
+    script[0] = 0x76; script[1] = 0xa9; script[2] = 0x14;
+    memset(script + 3, static_cast<int>(0x11 + i), 20);
+    script[23] = 0x88; script[24] = 0xac;
+  }
+  uint8_t digest[32] = {}, changed[32] = {};
+  bool ok = true;
+  for (uint32_t version = 1; version <= 3; ++version) {
+    request.version = version;
+    const uint32_t time = version < 3 ? 1700000000U : 0;
+    for (unsigned witness = 0; witness < 2; ++witness) {
+      for (size_t index = 0; index < 2; ++index) {
+        request.inputs[index].spend_type = witness ? BitcoinSpendType::NativeP2wpkh
+                                                   : BitcoinSpendType::LegacyP2pkh;
+        ok = ok && peercoin_sighash_all(request, time, index, witness != 0, digest) == TransactionError::Ok &&
+            crypto_constant_time_equal(digest, kPeercoinDigests[version - 1][witness][index], 32);
+        if (version < 3) {
+          ok = ok && peercoin_sighash_all(request, time + 1, index, witness != 0, changed) == TransactionError::Ok &&
+              !crypto_constant_time_equal(digest, changed, 32);
+        }
+      }
+    }
+  }
+  memset(digest, 0xa5, sizeof(digest));
+  ok = ok && peercoin_sighash_all(request, 1, 0, true, digest) == TransactionError::InvalidArgument;
+  for (uint8_t byte : digest) ok = ok && byte == 0;
+  ok = ok && peercoin_sighash_all(request, 0, 2, true, digest) == TransactionError::InvalidArgument;
+  request.version = 4;
+  ok = ok && peercoin_sighash_all(request, 0, 0, true, digest) == TransactionError::InvalidArgument;
+  clear_bitcoin_request(&request);
+  return ok;
 }
 
 // Digest-only vectors: no ECDSA, so this runs on the host as well as on the

@@ -1,6 +1,7 @@
 #include "WalletNetworks.h"
 #include <string.h>
 
+#include "CryptoNoteAddress.h"
 #include "WalletAltAddresses.h"
 
 namespace hexwallet
@@ -15,6 +16,10 @@ namespace hexwallet
     constexpr UtxoAddressProfile kUtxoRavencoin = {0x3c, 0x7a, nullptr, false};
     constexpr UtxoAddressProfile kUtxoVertcoin = {0x47, 0x05, "vtc", false};
     constexpr UtxoAddressProfile kUtxoAxe = {0x8c, 0x13, "axe", false};
+
+    // CryptoNote prefixes are varints, not one-byte version fields. The
+    // 64-bit profiles live in CryptoNoteAddress.h so the address encoder and
+    // the network table cannot drift apart.
 
 #if defined(HEXWALLET_HOST_TEST)
     struct ForkAddressVector
@@ -55,9 +60,9 @@ namespace hexwallet
       {"etc", "ETC", "Ethereum Classic", 61, 61, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 61, 0, 0, nullptr},
       {"cro", "CRO", "Cronos", 394, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 25, 0, 0, nullptr},
       {"kava", "KAVA", "Kava EVM", 459, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 2222, 0, 0, nullptr},
-      {"opt", "OPT", "Optimism", 614, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 10, 0, 0, nullptr},
+      {"opt", "ETH", "Optimism", 614, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 10, 0, 0, nullptr},
       {"xdai", "XDAI", "Gnosis Chain", 700, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 100, 0, 0, nullptr},
-      {"matic", "MATIC", "Polygon", 966, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 137, 0, 0, nullptr},
+      {"matic", "POL", "Polygon", 966, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 137, 0, 0, nullptr},
       {"ftm", "FTM", "Fantom", 1007, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 250, 0, 0, nullptr},
       {"core", "CORE", "Core", 1116, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1116, 0, 0, nullptr},
       // Conflux eSpace mainnet chain id 1030 (doc.confluxnetwork.org/docs/espace/network-endpoints).
@@ -65,10 +70,10 @@ namespace hexwallet
       {"cfx", "CFX", "Conflux eSpace", 503, 503, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1030, 0, 0, nullptr},
       {"glmr", "GLMR", "Moonbeam", 1284, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1284, 0, 0, nullptr},
       {"movr", "MOVR", "Moonriver", 1285, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1285, 0, 0, nullptr},
-      {"base", "BASE", "Base", 8453, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 8453, 0, 0, nullptr},
-      {"arb1", "ARB1", "Arbitrum One", 9001, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 42161, 0, 0, nullptr},
-      {"avaxc", "AVAXC", "Avalanche C-Chain", 9005, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 43114, 0, 0, nullptr},
-      {"bsc", "BSC", "Binance Smart Chain", 9006, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 56, 0, 0, nullptr},
+      {"base", "ETH", "Base", 8453, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 8453, 0, 0, nullptr},
+      {"arb1", "ETH", "Arbitrum One", 9001, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 42161, 0, 0, nullptr},
+      {"avaxc", "AVAX", "Avalanche C-Chain", 9005, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 43114, 0, 0, nullptr},
+      {"bsc", "BNB", "Binance Smart Chain", 9006, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 56, 0, 0, nullptr},
       {"celo", "CELO", "Celo", 52752, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 42220, 0, 0, nullptr},
       {"rsk", "RBTC", "Rootstock", 137, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 30, 0, 0, nullptr},
       {"linea", "ETH", "Linea", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 59144, 0, 0, nullptr},
@@ -118,6 +123,15 @@ namespace hexwallet
       {"trx", "TRX", "TRON", 195, 195, 44, DerivationStyle::Bip44, AddressEncoding::Tron, {0, 0, nullptr, false}, 0x41, 0, 0, 0, nullptr},
       {"xlm", "XLM", "Stellar", 148, 148, 44, DerivationStyle::StellarSep5, AddressEncoding::StellarStrKey, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xmr", "XMR", "Monero", 128, 128, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 18, 0, 0, 0, nullptr, 19, 42, false},
+      // RyoCurrency (SLIP-0044 382) and Zano (SLIP-0044 1018) use the same
+      // two-key CryptoNote address body as Monero, but their prefixes are
+      // multi-byte varints and therefore live in the 64-bit profile below.
+      {"ryo", "RYO", "RyoCurrency", 382, 382, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, false, 0, &kRyoMainnet},
+      {"zano", "ZANO", "Zano", 1018, 1018, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, false, 0, &kZanoMainnet},
+      // Aeternity uses SLIP-0010 Ed25519 (all hardened) and the ak_ account
+      // encoding. The address body is the 32-byte public key plus a SHA-256d
+      // checksum; see aeserialization/src/aeser_api_encoder.erl.
+      {"ae", "AE", "Aeternity", 457, 457, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Aeternity, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       // --- New multi-coin support (SLIP-0044) --------------------------------
       {"kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
@@ -185,7 +199,14 @@ namespace hexwallet
       {"ltc49", SighashFamily::Bitcoin, 0},
       {"ltc84", SighashFamily::Bitcoin, 0},
       {"doge", SighashFamily::Bitcoin, 0},
-      {"dash", SighashFamily::Bitcoin, 0},
+      // DASH is deliberately absent. Dash serializes its header as
+      // version+type (nType in the high 16 bits) followed by nLockTime *before*
+      // vin, and appends extraPayload for version >= 3. The Bitcoin PSBT
+      // serializer writes version, vin, vout, locktime and has no extraPayload,
+      // so the bytes - and therefore the sighash - would be wrong. InstantSend
+      // adds nothing to the transaction itself (it is a quorum lock on the
+      // inputs), so a correct Dash adapter needs that header/sighash work and
+      // its own vectors before the catalog may advertise signing.
       {"dgb", SighashFamily::Bitcoin, 0},
       {"dgb49", SighashFamily::Bitcoin, 0},
       {"dgb84", SighashFamily::Bitcoin, 0},
@@ -261,6 +282,14 @@ namespace hexwallet
            network.encoding == AddressEncoding::Tron;
   }
 
+  bool network_supports_eip2930(const NetworkProfile &network)
+  {
+    // Explicit admission: EVM compatibility alone does not establish support
+    // for every EIP-2718 envelope on every network.
+    return network.encoding == AddressEncoding::Evm && network.id != nullptr &&
+           strcmp(network.id, "eth") == 0 && network.evm_chain_id == 1;
+  }
+
   bool network_supports_eip1559(const NetworkProfile &network)
   {
     if (network.encoding != AddressEncoding::Evm)
@@ -316,13 +345,22 @@ namespace hexwallet
       {
         return false;
       }
-      if (network.encoding == AddressEncoding::CryptoNote && network.account_version == 0)
-        return false;
-      if (network.encoding == AddressEncoding::CryptoNote &&
-          ((network.cryptonote_integrated_prefix == 0) !=
-           (network.cryptonote_subaddress_prefix == 0)))
+      if (network.encoding == AddressEncoding::CryptoNote)
       {
-        return false;
+        if (network.cryptonote_profile != nullptr)
+        {
+          if (network.cryptonote_profile->standard_address_prefix == 0 ||
+              network.cryptonote_profile->integrated_address_prefix == 0)
+            return false;
+        }
+        else
+        {
+          if (network.account_version == 0)
+            return false;
+          if ((network.cryptonote_integrated_prefix == 0) !=
+              (network.cryptonote_subaddress_prefix == 0))
+            return false;
+        }
       }
       if (network.encoding == AddressEncoding::QrlXmss && !network.explicit_only_derivation)
         return false;

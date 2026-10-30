@@ -246,15 +246,97 @@ whose signing digest is
 As with DCR, `capacity` for the input is supplied by the phone; the device
 cannot prove it from the out point.
 
+### Dash (DASH)：普通支付、InstantSend 与实测过的字节
+
+DASH 现在是 **SIGN**（普通 type-0 支付），走的是专用适配器而不是 PSBT。这条路径的每一个
+格式结论都来自链上真实交易，而不是文档转述：
+
+- 抓取主网区块 2563353 / 2563352 的原始交易后逐字节解析确认，Dash 普通交易的序列化就是
+  `int32 nVersion`（`nType` 在**高 16 位**，普通支付恒为 0）→ `vin` → `vout` →
+  `uint32 nLockTime`，**之后没有 `extraPayload` 字段**。v3 与 v2 两种版本都在主网同时存在，
+  解析器两者都收，签名器统一产出 v3。
+- `extraPayload` 只出现在 `nType != 0` 的特殊交易（ProRegTx/ProUp*、CbTx、quorum commitment、
+  asset lock/unlock）里。这类交易设备无法解码其负载，也就无法诚实地显示收付双方，因此**一律
+  拒绝**（`DashError::Unsupported`），而不是"签个前缀"。
+- 摘要算法是 Bitcoin 的 legacy 算法套在上述序列化上：复制交易、把待签输入的 scriptSig 换成
+  该输入的 P2PKH scriptCode、其余置空、追加 4 字节哈希类型、双 SHA-256。仓库里 pin 了两笔
+  真实主网交易的摘要（`b8d9df9a…`、`c647adb1…`），它们各自与链上签名验证通过，这就是
+  "不造假"的证据；`run_dash_self_tests()` 每次构建都会重新校验这两笔（以及 4 组拒绝路径）。
+
+设备侧的签名请求是一段紧凑审阅结构（magic `DASH`）：
+
+```
+u8[4] "DASH" | u32 lock_time | u8 input_count
+input_count × { u8[32] prev_txid, u32 prev_index, u32 sequence, u64 value,
+                u8 script_size + P2PKH scriptPubKey,
+                u32 account, u8 change, u32 address_index }
+u8 output_count
+output_count × { u64 value, u8 script_size + scriptPubKey }
+```
+
+每个输入的 prevout 脚本必须是 25 字节的规范 P2PKH；设备按 `m/44'/5'/account'/change/index`
+重新派生密钥、比对 HASH160 后才签名，因此主机无法让设备"为一个自己并不拥有的脚本"签名。
+输出只接受 P2PKH/P2SH，地址由脚本反解得出，屏幕上看到的就是被签的字节。手续费上限
+`HEXWALLET_MAX_DASH_FEE_DUFFS`（0.01 DASH）与 `HEXWALLET_MAX_DASH_FEE_RATE`（500 duffs/vB）。
+
+InstantSend 仍然**不改变交易字节**：它是主网 quorum 对输入达成的锁（islock），由节点广播。
+所以"支持 InstantSend"的真实含义只有两条：
+
+1. 设备产出字节完全正确的 Dash 交易——这一条现在由主网摘要向量保证；
+2. 这笔能否被即时锁（输入成熟度、quorum 可用性）是**手机/节点侧**的判断，设备不持有链上状态，
+   屏幕上的审阅文案明确写出这一点，绝不伪造锁状态。
+
+仍然不支持、并且不会假装支持：特殊交易类型、混币（PrivateSend）流程、`nLockTime` 之外的时间锁语义、
+P2SH 多签花费（设备只持有一把钥匙）。
+
 ### Zcash (ZEC)
 
 The Zcash v4 transparent ZIP-243 engine runs with the mainnet NU6.2 branch id
 `0x5437f330`, SLIP-0044 coin type `133`, and t1/t3 base58 prefixes
 `0x1cb8`/`0x1cbd`. The phone-link kind is `4` with `coin_id=zec`; the payload is
-the `ZEC4` review structure built by `tools/build_zcash_review_payload.py`. The
-device prints ZCASH on the review screen and returns the complete signed v4
-transaction. Shielded components and non-v4 transaction versions are rejected,
-and the transparent supply cap is 21,000,000 ZEC.
+the `ZEC4`/`ZEC5` review structure documented below, built by the phone or by any
+host that reproduces this layout. The device prints ZCASH on the review screen
+and returns the complete signed v4 transaction. Shielded components and non-v4
+transaction versions are rejected, and the transparent supply cap is 21,000,000
+ZEC.
+
+Signed inputs are t1 P2PKH and t3 P2SH whose redeem script is exactly
+`<0x21> <33-byte compressed pubkey> OP_CHECKSIG` holding this wallet's key. For a
+t3 input, ZIP-243 commits the **redeem script** as `scriptCode`, the scriptSig is
+`push(sig + hashtype) push(redeem)`, and the fee budget is reserved with the
+bigger scriptSig (151 vbytes per input instead of 149). The device re-hashes the
+redeem script against the prevout hash and re-derives the key, so a t3 address
+can only be spent by the key its script commits to. Every P2SH input is also
+rendered as `P2SH INPUT <t3 address>` on the trusted display; a review that
+cannot show all of them is refused rather than signed partially blind.
+
+Refused: P2SH multisig or any other redeem form, a t3 prevout without its redeem
+script (`ZEC4` cannot express one), a canonical redeem script belonging to
+another key, duplicate out points, an existing scriptSig, shielded spends and
+outputs, JoinSplits, and v3/v5 transactions.
+
+Payload layout (little-endian; `ZEC5` appends the bracketed redeem record):
+
+```
+magic "ZEC4" | "ZEC5"
+u32  branch_id
+u32  unsigned_transaction_size
+u8[] unsigned v4 transaction (every scriptSig must be empty)
+u8   input_count
+input_count * { u64 value, u8 script_size + scriptPubKey,
+                u32 account, u8 change, u32 address_index
+                [, u8 redeem_size + redeem script] }
+```
+
+Evidence: `run_zcash_sighash_self_tests()` pins official ZIP-243 vector 3, the
+published `zcash-test-vectors` rows, and a P2SH `scriptCode` digest produced by a
+separate Python BLAKE2b implementation of ZIP-243 that first reproduces the
+official vector byte for byte. The redeem/address binding rule is additionally
+pinned on the host with synthetic key material. The full signer also runs on the
+host with real BIP32/ECDSA through `chain_probe zcash-sign-selftest`
+(`tests/host/build_chain_native.ps1`): it signs a t3 spend, re-parses it, checks
+the scriptSig is exactly `push(sig) push(redeem)` and verifies the DER signature
+against the redeem `scriptCode`.
 
 Flux used to share this engine with the Flux branch id `0x76b809bb`. It was
 withdrawn on 2026-10-28: the MiningPoolStats snapshot of 2026-10-23 lists FLUX
@@ -361,13 +443,40 @@ that. The P4 default requires secure custody and rejects sessions until an actua
 authenticated key-handle/sealed-state implementation replaces the software APIs.
 See [security-review-2026-10-28.md](security.md).
 
-### QRL — legacy XMSS addresses, no signing
+### QRL — legacy XMSS addresses, and what the reservation layer now guarantees
 
 `tests/reference/generate_qrl_vectors.cjs` compares legacy SHAKE256 XMSS public
 keys and addresses against qrllib 1.3.2 for public test seeds and heights 4/6.
-`qrl_ots_next_high_water` is only a numerical rule. There is no durable,
-rollback-resistant reservation backend and no production signer. Never treat
-an NVS counter or a host-supplied index as sufficient protection against WOTS reuse.
+
+An XMSS leaf may be used once. Signing it twice publishes two signatures over one
+WOTS+ key and the account is gone — no recovery, no rotation, and the network
+cannot reject the second signature in time. The device therefore refuses to sign
+anything it cannot prove is unreserved, and `QrlOtsJournal` is that proof:
+
+- **Two redundant slots, same record.** A reservation writes
+  `magic "QOT1" | account tag | index | sequence | CRC-32` to *both* slots,
+  reads both back byte for byte, re-derives the mark from storage, and only
+  then returns the index. Redundancy is what makes one corrupt slot harmless:
+  whichever record survives proves the same mark, so the counter cannot regress.
+- **Torn write skips a leaf, never reuses one.** If slot 0 commits and slot 1
+  fails, the caller is told `StorageFailure` and receives no index, but the
+  committed copy has already moved the mark. One of 1024 signatures is wasted;
+  nothing is reused.
+- **Unknown means refuse.** Both slots unreadable or corrupt ⇒
+  `QrlOtsError::Unknown` and no index. Re-initialising is a one-way door that
+  refuses whenever any valid record exists, of any account, so a live counter
+  cannot be reset by the initialiser.
+- **Account binding.** Records carry a 16-byte tag; a journal that belongs to
+  another account returns `WrongAccount` instead of adopting or resetting it.
+
+Still missing, and stated plainly because the reservation alone is not a signer:
+the WOTS+ signature itself and the BDS traversal state that lets the device
+produce the next authentication path without rebuilding the whole tree per
+signature. QRL stays ADDRESS until those land with qrllib-pinned signature
+vectors. The residual risk the journal cannot close is also documented in the
+header: a blank journal is indistinguishable from a wiped one, so the custody
+layer must treat "account exists in the secure element, journal blank" as a
+recovery event rather than initialising it.
 
 The original `HexWallet/QRL/v1` mapping is preserved at tree index zero. Original
 builds ignored all indices; recovering one of those paths requires tree zero.
@@ -376,6 +485,62 @@ wallet-specific BIP39-seed mapping does not promise QRL mnemonic compatibility.
 Account/change values other than zero are rejected. Failure and cancellation
 clear public outputs and wipe expanded secret workspaces. No P4 runtime or
 physical side-channel timing claim follows from the host tests.
+
+### Aeternity, RyoCurrency and Zano — address profiles only
+
+These three rows exist to answer a narrow question honestly: "can the device
+derive the correct receive address for this chain?" They do not claim review or
+signing, and the catalog marks them `ADDRESS` only.
+
+| Chain | Path | Encoder | Pinned evidence |
+|---|---|---|---|
+| Aeternity (AE) | SLIP-0010 `m/44'/457'/0'/0'/i'` | `ak_` + base58(ed25519 pubkey \|\| SHA-256d(pubkey)[0..3]) | `aeserialization/src/aeser_api_encoder.erl` (`base58_check/1` hashes the payload twice with SHA-256); the 32-byte-key + 4-byte-checksum vector is in `run_alt_address_self_tests()` |
+| RyoCurrency (RYO) | BIP44 `m/44'/382'/0'/0/i` | CryptoNote two-key body with the 3-byte varint prefix `0x2ce192` | `ryo-currency/ryo-currency/src/cryptonote_config.h` (`RYO_LONG_ADDRESS_BASE58_PREFIX`); the encoder reproduces the official Monero/Masari vectors, and the Ryo vector is pinned in `run_cryptonote_self_tests()` |
+| Zano (ZANO) | BIP44 `m/44'/1018'/0'/0/i` | CryptoNote two-key body with prefix `0xc5` | `hyle-team/zano/tests/unit_tests/base58.cpp` vector `ZxDqHy6WnyYY...` is reproduced byte-for-byte by `cryptonote_address_from_public_keys()` |
+
+Ryo and Zano use the same `CryptoNoteAddressProfile` structure as Monero, but
+their prefixes are stored as 64-bit values in the network table because a
+single-byte or 16-bit field would truncate the varint. Zano publishes no
+standard subaddress prefix; `derive_cryptonote_subaddress()` returns
+`InvalidArgument` instead of emitting a guessed prefix.
+
+Why the other names from the mining-pool screenshot are not in the catalog:
+
+- **Beam / Grin / MimbleWimbleCoin / Epic Cash** have no static UTXO address.
+  Their base58 strings are slatepack/BBS endpoints, and a spend is an
+  interactive multi-round exchange. Showing one as a normal wallet address
+  would be a category error, and a hardware signer needs the whole slate state
+  machine.
+- **Super Zero (SERO)** uses 64/96-byte superzk public-key bundles. There is no
+  single-key encoder in this tree, and a plausible-looking base58 string would
+  not be spendable by the derived key.
+- **Swap (XWP), Evolution (EVOX), VeriBlock (VBK)** have no SLIP-0044 coin type
+  in the current registry. Reusing another chain's coin type would derive the
+  same private key material in two domains. They stay out until an upstream
+  coin type and independent address vectors exist.
+- **Veil (VEIL)** is already present as a source-verified Bitcoin-family fork
+  (`fork_utxo_veil`), not as a new privacy-chain adapter. Its Zerocoin/ring
+  privacy transactions remain unsupported; only transparent P2PKH is signed.
+
+No address from these profiles is labeled as signable. A signing request for
+them is rejected by the signing dispatcher; it is never converted into a
+locally invented transaction.
+
+What a future signing port must add, in order, is not a new address encoder:
+
+1. **Ryo / Zano**: their RingCT transaction versions, ring/key-image rules,
+   fee policy and a set of independently generated signed-transaction vectors.
+   Reusing Monero's RCT type-6 parser would produce a plausible but invalid
+   transaction.
+2. **Beam / Grin / MWC / Epic**: the complete slate/BBS exchange state machine,
+   kernel and bulletproof construction, and a receiver-side scan path. An
+   address string without this is only an endpoint hint.
+3. **VeriBlock**: the PoP publication fields and the exact X.509/SHA-256 address
+   derivation, plus a signed transaction vector. A Bitcoin PSBT path is not a
+   substitute.
+4. **Swap / Evolution / SERO**: an upstream SLIP-0044 (or equivalent) coin type
+   and a reviewed address/transaction format. Without a coin type the same seed
+   would derive keys shared with another chain.
 
 ### Additional transfer adapters
 
@@ -510,23 +675,49 @@ them; this document does not claim a remote CI run has occurred.
 | osmo | `osmo` | `osmosis-` | `uosmo` | 6 |
 | tia | `celestia` | `celestia` | `utia` | 6 |
 
-每条交易恰好一条 `MsgSend`，只发送链的原生 denom。`SIGN_MODE_DIRECT`，单签名者，
-无 tip、无 feegrant、无 authz、无 memo、无 IBC、无多消息。`chain-id` 由手机提供但必须匹配
-网络前缀，并且完整显示在屏幕上；账户号与 sequence 也显示，批准前必须核对。
+每条交易 1..4 条 `MsgSend`（v3 payload）。`SIGN_MODE_DIRECT`，单签名者，无 tip、无 feegrant、
+无 authz、无 IBC 报文。denom 默认是链的原生 denom；v2 payload 可以指定其他 denom（含
+`ibc/<64 hex>` 形式的凭证 denom），但只有链自身的 denom 有固定精度。`chain-id` 由手机
+提供但必须匹配网络前缀，并且完整显示在屏幕上；账户号与 sequence 也显示，批准前必须核对。
+
+denom 显示策略：
+
+- 原生 denom（`uatom`/`uosmo`/`utia`）→ 使用固定 symbol 与 6 位精度；
+- 其他 denom → 屏幕上原样显示 denom 字符串，金额显示为**精确 base unit 整数**并标注
+  `NO PINNED PRECISION`。离线设备无法验证发行方精度，任何小数点都是编造。
+- 手续费永远使用链的原生 denom。
+
+memo（v2）会完整显示在审阅页，并写入 `TxBody.memo`（field 2），因此进入 `SignDoc` 摘要；
+1..64 字节可打印 ASCII，超长或不可打印一律拒绝。
 
 ### 审阅 payload（大端）
 
 ```
-u8   version = 1
+u8   version = 1, 2 或 3
 u8   chain_id_len;  chain_id bytes        (1..32, [A-Za-z0-9._-])
 u64  account_number
 u64  sequence
+-- v1 / v2：单条消息 --
 u64  amount            (base units, > 0)
 u64  fee               (base units, <= 10 000 000)
 u64  gas_limit         (1..2 000 000)
 u8   to_len;        to bytes              (小写 bech32, 20 字节 payload)
-u8   memo_len = 0
+if version == 2:
+  u8  denom_len;   denom bytes            (1..68, [A-Za-z0-9/._:-])
+  u8  memo_len;    memo bytes             (0..64, 可打印 ASCII)
+else:                                     (v1 无法提交 memo，非零即拒绝)
+  u8  memo_len = 0
+-- v3：多消息（1..4 条），费用与 denom 对整笔生效 --
+u64  fee
+u64  gas_limit
+u8   denom_len;   denom bytes
+u8   memo_len;    memo bytes
+u8   message_count                     (1..4)
+message_count * { u64 amount, u8 to_len; to bytes }
 ```
+
+v3 的每条消息都有自己的收款地址与金额，设备逐条显示为独立行，汇总行显示总额；
+存在任何一条零金额、自转账、非法 bech32 或行数超限的请求都整体拒绝，绝不"只显示前几条"。
 
 接收地址必须是正确 HRP、BECH32（非 bech32m）校验和、20 字节 payload，且重新编码后
 与原串完全一致；大小写混合或非规范填充会被拒绝。`to` 不能等于本机地址。本机地址必须
@@ -537,7 +728,7 @@ u8   memo_len = 0
 设备不解析手机提供的交易结构，而是自己构建并签名：
 
 - `MsgSend{from_address, to_address, Coin{denom, amount}}`
-- `TxBody{messages=[Any("/cosmos.bank.v1beta1.MsgSend", msg)]}`
+- `TxBody{messages=[Any("/cosmos.bank.v1beta1.MsgSend", msg)], memo?}`
 - `AuthInfo{signer_infos=[{public_key=Any("/cosmos.crypto.secp256k1.PubKey", key),
   mode_info={single:{mode=SIGN_MODE_DIRECT}}, sequence}],
   fee={amount=[Coin{denom, fee}], gas_limit}}`
@@ -550,16 +741,25 @@ u8   memo_len = 0
 
 ### 证据
 
-`tools/generate_cosmos_vectors.py` 用纯 Python 实现 protobuf、bech32、BIP32、RFC 6979 与
-secp256k1，生成 `tests/fixtures/cosmos-vectors.json` 与 `src/generated/CosmosVectorsTest.inc`；
-每条签名先由 OpenSSL（`cryptography`）验签。`tests/test_cosmos.py` 驱动真实
-`cosmos_probe.exe` 比较 C++ 实际构建的 `body`/`auth_info`/`SignDoc` 摘要与三组独立向量，
-并覆盖 12 组拒绝 payload、所有采样截断、外部 owner、外部公钥。设备启动自检使用同一组
-私钥/向量，在真实 mbedtls 上签名并逐字节比较完整 `TxRaw`。生成器支持 `--check`。
+`src/generated/CosmosVectorsTest.inc` 是入库的固定向量表，三组 v1 向量来自外部 Python/OpenSSL
+生成器（`body`/`auth_info`/`SignDoc` 摘要/签名/`TxRaw` 全部固定）。新增的 v2 向量由本次独立的
+Python protobuf + RFC 6979 实现在**先逐字节复现 v1 三组固定值**之后生成，因此生成器本身已被
+既有独立向量校验。
 
-未实现：IBC、多消息、memo、authz/feegrant、非原生 denom、EIP-191/JSON 签名模式、
-Ledger 兼容的 amino 模式、链上账户号/sequence 查询与广播。屏幕按键、SE050 托管和主网
-节点验收仍需独立证据。
+`tests/host/cosmos_probe.cpp` 输出 C++ 实际构建的 `body`/`auth_info`/`SignDoc` 摘要，供与独立实现
+比对；拒绝侧覆盖版本、chain-id 前缀、HRP、校验和、大小写、自转账、零金额、手续费与 gas 上限、
+v1 携带 memo、v2 缺 denom、非法 denom 字符、不可打印 memo、超长 memo、尾随字节以及所有采样截断。
+
+`run_cosmos_signature_self_test()` 需要真实 secp256k1，因此由 `chain_probe cosmos-sign-selftest`
+（`tests/host/build_chain_native.ps1`，链接固件密码学）与设备执行：逐条签名并与固定 `TxRaw`
+逐字节比较，同时验证错误私钥必须拒绝。
+
+多消息向量（v3）同样由上述独立实现生成：两笔 `MsgSend` 在一笔 body 内，`TxBody.messages`
+重复字段、汇总金额、逐行文案与 `TxRaw` 全部固定，并由 `chain_probe cosmos-sign-selftest`
+在真实曲线下逐字节复验。
+
+未实现：IBC 报文与超时消息、authz/feegrant、EIP-191/JSON 与 amino 签名模式、
+链上账户号/sequence 查询与广播。屏幕按键、SE050 托管和主网节点验收仍需独立证据。
 
 ## NEAR 签名边界
 
@@ -861,7 +1061,7 @@ node tests/reference/generate_chain_vectors.mjs --sui-filecoin --check
 - 启动自检比较 SDK 生成的 signed operation（`tezos=pass`）；
 - 未执行主网 injection、baker 费市场验收或整机按键验收。
 
-## TRON 原生转账、TRC-20 与 NFT 签名
+## TRON 原生转账、TRC-10、TRC-20 与 NFT 签名
 
 *Merged from docs/tron-signing.md.*
 
@@ -877,26 +1077,39 @@ Transaction，也不是 JSON。设备返回 65 字节 `r || s || v`（`v = 27 + 
 ### 支持范围
 
 - 原生 TRX：`TransferContract`，金额为 1..2^63-1 sun。
-- TRC-20：`TriggerSmartContract`，仅接受 `transfer(address,uint256)`（selector
-  `a9059cbb`）且 `call_value == 0`、`call_token_value == 0`、`token_id == 0`。
+- TRC-10：`TransferAssetContract`，字段为 `asset_name(1)`、`owner_address(2)`、
+  `to_address(3)`、`amount(4)`。主网在该字段里放的是链上分配的数字 id（例如
+  `1002000` = BTT），节点按这些**字节**解析资产，因此设备原样显示标识符：
+  ASCII 直接显示，非 ASCII 以 `0x` 十六进制逐字节显示，绝不用近似字形代替。
+  - 已登记 id 使用 `WalletTokens.cpp` 中的 abbr 与精度（BTT `1002000`/6、
+    JST `1003000`/6、SEED `1000001`/0，全部由 `wallet/getassetissuebyid` 的发行记录
+    回读核对）。
+  - 未登记 id 仍然可以签名，但金额按**精确 base unit 整数**显示，并显示
+    `ASSET NOT REGISTERED`：发行方自定精度无法离线验证，任何小数点都等于编造。
+  - `TransferAssetContract` 不消耗 `fee_limit`，因此出现非零 `fee_limit` 即拒绝。
+- TRC-20：`TriggerSmartContract`，接受 `transfer(address,uint256)`（selector
+  `a9059cbb`）与 `transferFrom(address,address,uint256)`（selector `0x23b872dd`，
+  calldata 恰好 100 字节），且 `call_value == 0`、`call_token_value == 0`、
+  `token_id == 0`。`transferFrom` 的 `from` 必须等于本机 owner：与 ERC-721
+  `transferFrom` 共享 selector，未登记合约会在随后的注册表检查中被拒绝；同时设备不
+  会为“扣第三方余额”的授权调用签名。设备显示 `METHOD` 行区分两种入口。
 - TRC-20 合约必须已在 `WalletTokens.cpp` 注册（当前为 Tether 官方公布的
   `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` / USDT，6 位小数）。未注册合约直接拒绝，
   因为离线设备无法可信地获得 symbol 与 decimals。
-- TRC-721：仅接受 `safeTransferFrom(address,address,uint256)`（`0x42842e0e`），
-  calldata 恰好 100 字节，calldata 中的 `from` 必须等于本机 owner。
-- TRC-1155：仅接受 `safeTransferFrom(address,address,uint256,uint256,bytes)`
-  （`0xf242432a`）且 `bytes` 尾为空（offset `0xa0`、length `0`），金额非零。
-- NFT 合约不要求注册：selector 唯一，设备显示合约地址、`TRC-721`/`TRC-1155`、token id
-  和明确的“UNREGISTERED”警告；合约身份、元数据和所有权无法离线验证。
-- 与 TRC-20 共享 selector `0x23b872dd` 的 `transferFrom`、批量转移、
-  `safeTransferFrom` 非空回调数据以及任何其他 selector 一律拒绝。
+- TRC-721/1155：`safeTransferFrom`（`0x42842e0e` / `0xf242432a`）的结构化解码器已实现，
+  但**当前没有任何 NFT 合约注册记录**，因此所有 TRC-721/1155 请求都以
+  `unknown-token` 拒绝。离线设备无法验证合约身份、升级状态和元数据，未经注册就放行等于
+  盲签；登记表落地前，这条路径上的显示代码只是待用代码，不构成支持声明。
+- 批量转移与任何其他 selector 一律拒绝。
 - `owner_permission` 只接受 0（缺省）。`permission_id != 0`、`auths`、`provider`、
   `ContractName` 一律拒绝。
-- 原生转账的 `fee_limit` 必须缺省或 0；TRC-20 的 `fee_limit` 必须在
+- `raw_data.data`（memo）会完整显示在可信屏幕上：仅接受 1..64 字节可打印 ASCII，
+  重复字段、超长或不可打印内容一律拒绝（签名未显示的内容等于盲签）。
+- 原生/TRC-10 转账的 `fee_limit` 必须缺省或 0；TRC-20/NFT 的 `fee_limit` 必须在
   (0, 100 TRX] 内。上限见 `kTronMaxFeeLimitSun`。
 - `expiration` 与 `timestamp` 都必须存在，且 `0 < expiration - timestamp <= 24h`。
 - 金额为 256 位大端字，按注册精度完整格式化；零金额、自转账、全零黑洞地址、非 `0x41`
-  前缀地址、截断、多余字节、重复字段、非最短 varint、未知字段（包括 memo/`data`）全部拒绝。
+  前缀地址、截断、多余字节、重复字段、非最短 varint、未知字段全部拒绝。
 
 ### 协议字节
 
@@ -905,15 +1118,16 @@ Transaction，也不是 JSON。设备返回 65 字节 `r || s || v`（`v = 27 + 
 | 字段 | 含义 | 约束 |
 | --- | --- | --- |
 | 1 | `ref_block_bytes` | 长度 2 |
-| 3 | `ref_block_num` | 可缺省，仅接受 varint |
 | 4 | `ref_block_hash` | 长度 8 |
 | 8 | `expiration` | int64 毫秒 |
+| 10 | `data`（memo） | 1..64 字节可打印 ASCII |
 | 11 | `contract` | 恰好 1 条 |
 | 14 | `timestamp` | int64 毫秒 |
 | 18 | `fee_limit` | int64 sun |
 
 `contract.parameter.type_url` 必须与 `contract.type` 严格对应：
 `TransferContract` → `type.googleapis.com/protocol.TransferContract`，
+`TransferAssetContract` → `type.googleapis.com/protocol.TransferAssetContract`，
 `TriggerSmartContract` → `type.googleapis.com/protocol.TriggerSmartContract`。
 
 签名对象是 `SHA-256(raw_data)`；设备在签名前会重新计算并与审阅时保存的 txID 做常量时间
@@ -921,24 +1135,32 @@ Transaction，也不是 JSON。设备返回 65 字节 `r || s || v`（`v = 27 + 
 
 ### 可信显示
 
-屏幕显示收款地址（Base58Check）、金额（原生 `TRX`、注册代币符号与精度，或
-`TRC-721`/`TRC-1155` 的 token id 与数量）、合约地址、`FEE LIMIT`、过期时间（毫秒）与
-txID 前 8 字节。NFT 审阅额外显示未登记警告。备注写明：过期时间、ref block、带宽/能量
-状态由手机侧校验；离线设备不声称知道链上实际手续费。
+屏幕显示收款地址（Base58Check）、金额（原生 `TRX`、注册代币符号与精度，或 TRC-10 的精确
+base unit）、TRC-20 的 `METHOD`、TRC-10 的 `TRC-10 ASSET ID` 与 `PRECISION`、合约地址、
+`FEE LIMIT`、`MEMO`（若存在）、过期时间（毫秒）与 txID 前 8 字节。未登记 TRC-10 资产额外
+显示 `ASSET NOT REGISTERED`。备注写明：过期时间、ref block、带宽/能量状态由手机侧校验；
+离线设备不声称知道链上实际手续费。
 
 ### 证据与局限
 
-`tools/generate_tron_vectors.py` 用纯 Python 实现 protobuf 编码、BIP32、RFC 6979 与
-secp256k1，生成 `tests/fixtures/tron-vectors.json` 与
-`src/generated/TronVectorsTest.inc`；每条签名都由 OpenSSL（`cryptography`）独立验签后
-才写入。`tests/test_tron.py` 驱动真实 C++ `tron_probe.exe` 覆盖：完整字段、4 组合格向量
-（TRX、TRC-20、TRC-721、TRC-1155）、19 组拒绝向量、
-按位置的截断、外部 owner 地址；设备启动自检在真实 mbedtls 上对同一组向量比较**完整 65
-字节签名**。生成器可用 `--check` 验证仓库内产物未过期。
+`src/generated/TronVectorsTest.inc` 是**入库的固定向量表**，每条都注明来源：
 
-未实现、也不得宣传为已支持：TRC-10、TRC-721/1155、多合约交易、memo/`data`、多签与自定义
-权限、能量/带宽估算、事件日志解析、广播与节点验收。整机触屏按键、SE050 托管与主网广播仍
-需独立证据。
+- `chain`：`raw_data_hex`、txid 与签名由 TRON 主网 `wallet/gettransactionbyid` 回读，
+  自检会用 `sha256(raw_data)` 重新推导 txid 后才使用；
+- `derived`：把主网 `raw_data` 逐字段改写并重算 txid，用于覆盖主网流量少见的形态
+  （自转 `transferFrom`、memo、未登记 TRC-10 标识符）；没有可复现签名的条目
+  `signature_hex` 为 `nullptr`，只证明解析、txid 绑定与显示金额。
+
+启动自检覆盖：TRX、TRC-20 `transfer`、TRC-20 `transferFrom`、TRC-10（BTT 两个真实交易
+＋未登记 id）、带 memo 的原生转账；拒绝侧覆盖零金额、`fee_limit` 出现在 TRC-10、
+不可打印 memo、超长/重复 TRC-10 标识符、第三方扣款 `transferFrom`、未登记合约、
+非法 selector、多合约、截断与多余字节。真实 mbedtls 上启动自检会对本机 owner 的向量比较
+**完整 65 字节签名**；主网向量还额外验证 r||s 与 recovery 字节（主网同时存在
+`0/1` 与 `27/28` 两种写法）。
+
+未实现、也不得宣传为已支持：多合约交易、`auths`/多签与自定义权限、批量 NFT 转移、
+`transferFrom` 扣第三方余额、能量/带宽估算、事件日志解析、广播与节点验收。整机触屏按键、
+SE050 托管与主网广播仍需独立证据。
 
 ## XRP Payment 签名边界
 
@@ -1122,6 +1344,7 @@ Conflux eSpace 1030、Moonbeam 1284、Moonriver 1285、Rootstock 30、Celo 42220
 | USDT | Ethereum / BSC / Arbitrum | 见表内注释 | 6 / 18 / 6 | Tether 官方 supported-protocols 表；BSC 为 Binance-Peg |
 | USDC | Ethereum / Base / Arbitrum / Optimism / Polygon / Avalanche | 见表内注释 | 6 | Circle USDC contract table（含 Polygon `USDC.e`） |
 | DAI / BTCB / ETH | BSC / Polygon / Arbitrum | 见表内注释 | 18 | 2026-10-24 公开 RPC `symbol()`/`decimals()` 复核 |
+| WBNB / CAKE / FDUSD / TUSD / LINK / DOT / ADA / XRP / DOGE / SHIB / UNI / AAVE / ATOM / XVS / BSW / ANKR / COMP / BETH / AVAX / PENDLE | BSC | `WalletTokens.cpp` 的 `bsc-*` 行 | 18（DOGE 8） | 2026-10-28 对 `https://bsc-dataseed.binance.org` 逐合约 `eth_call(symbol, decimals)`；CAKE 的链上 symbol 为 `Cake` |
 
 `USDT0` 行（`xlayer` / `monad` / `plasma` / `bera` / `opt`）按部署地址登记；本文件**未**独立
 核实其发行方公告，因此在正式资金路径启用前必须由部署方公告或链上合约再次确认。未确认前
@@ -1163,9 +1386,9 @@ signed.
 
 | # | Check | What it stops |
 | --- | --- | --- |
-| 1 | `version == 2`, `rct.type == 6`, counts match the payload | shape confusion, downgrade to a simpler RCT type |
-| 2 | One leading `tx_extra` public key equals `tx_secret·G`; duplicate, additional and unknown keys rejected | inconsistent transaction keys that prevent the recipient from scanning outputs |
-| 3 | For each output: one-time key, 8-byte amount ciphertext, view tag recomputed from `(tx_secret, recipient keys, index)` | showing one recipient/index while paying another |
+| 1 | `version == 2 or 3`, `rct.type == 6`, counts match the payload | shape confusion, downgrade to a simpler RCT type |
+| 2 | One leading `tx_extra` public key equals `tx_secret·G` (or `tx_secret·D` for the one-output subaddress form); the optional additional-key vector is canonical, length-bound and checked against supplied secrets | inconsistent transaction keys that prevent the recipient from scanning outputs |
+| 3 | For each output: one-time key, 8-byte amount ciphertext, view tag recomputed from the selected primary/additional transaction secret, recipient keys and index | showing one recipient/index while paying another |
 | 4 | For each output: commitment recomputed from the **stated amount** and the derived mask, then compared to the wire commitment | displaying an amount the transaction does not commit to |
 | 5 | Change outputs must derive from this wallet's own spend and view keys | claiming somebody else's output as change to hide fee inflation |
 | 6 | Every Bulletproofs+ proof block verified over its own 16-output window | out-of-range outputs, which is how hidden inflation happens |
@@ -1176,7 +1399,7 @@ signed.
 | 11 | CLSAG auxiliary key image `D = z·Hp(P)/8` recomputed and compared to the wire | a host choosing the `D` field that is not covered by the signing hash |
 | 12 | Ring offsets in the host request must equal the serialized transaction and be strictly monotonic | reordering the ring or supplying a duplicate output |
 | 13 | No repeated ring member inside one input; no repeated key image across inputs | a malformed ring that would make the CLSAG equation degenerate, or spending the same output twice |
-| 14 | Destinations and change use standard addresses; subaddress output types and nonzero output indices are rejected | signing a subaddress output without its matching transaction public key |
+| 14 | Standard outputs and owned change use the primary transaction key; subaddress destinations use the single-destination `rD` form or the output-index-bound additional key | signing a subaddress output without its matching transaction public key |
 
 Check 4 is the one that makes the display trustworthy: the amount shown is an
 input to a Pedersen commitment that must match a byte on the wire. The phone
@@ -1241,12 +1464,28 @@ instead of `b`, and the same substitution is applied per input, so one
 transaction can mix standard and subaddress coins. `(0, 0)` means the standard
 address and keeps the original path.
 
-The payload carries `(major, minor)` per input. Output indices must be zero:
-subaddress destinations and change are rejected until `rD` / additional
-transaction public keys are bound and independently tested with recipient
-scanning. Checking ownership of `(D, C)` alone does not establish that the
-recipient can discover the output. This restriction applies to XMR and MSR.
-Payload version 1 omits these indices and retains standard-address behavior.
+The payload carries `(major, minor)` per input. XMR output support follows
+Monero's construction rules:
+
+- a transaction with exactly one external subaddress destination may use the
+  primary secret as `R = rD` and payload version 2;
+- a mixed or multi-destination transaction uses payload version 3, with one
+  additional secret per output and a canonical `tx_extra` additional-public-key
+  vector of the same length;
+- for output `i`, a subaddress destination must select additional key `i+1`;
+  standard destinations and all change outputs select the primary key (`0`);
+- the device verifies `s_i*C_i` for subaddress destinations and `s_i*G` for
+  standard destinations, then recomputes the one-time key, amount ciphertext,
+  view tag and commitment with the selected derivation;
+- external subaddress records carry the spend/view public keys but no claimed
+  `(major, minor)` index. Only change may carry indices, and those indices are
+  re-derived from the wallet keys before the change label is shown.
+
+MSR remains standard-address-only because its legacy RCT path has no Monero
+additional-key construction. Payload version 1 omits subaddress fields and
+retains standard-address behavior. Checking ownership of `(D, C)` alone is
+not sufficient; the transaction-key binding and output-scanning derivation
+must agree as well.
 
 ### Fee ceiling
 
@@ -1378,10 +1617,10 @@ view_public     = a·spend_public        (Monero 的 C = a·D)
 ```
 
 - 每个输入携带自己的 `(major, minor)`，设备用该子地址的 spend secret 派生一次性私钥并签名；`(0,0)` 就是标准地址，路径不变。
-- 当前仅允许向标准地址发送和找零。子地址发送需要绑定 `R = rD` 或每输出的附加交易公钥；原来的公钥所有权检查没有覆盖这一点，现已拒绝这类请求，避免签出收款方无法扫描的输出。
+- XMR 单一子地址目的地使用已绑定的 `R = rD`；混合/多目的地使用 payload v3 的每输出 additional transaction public key。设备按输出索引验证秘密、公钥、one-time key、金额密文、view tag 和 commitment，避免签出收款方无法扫描的输出。
 - `cryptonote_subaddress_keys()` 的输出与地址编码器 `cryptonote_subaddress_public_keys()` 在同一自检里交叉验证，并对齐 Monero 固定的子地址地址向量 `8AGiXjGVUbB7…`(0,1) 与 `8AGDdrcnAd7R…`(1,0)。
 - 自检还证明：用标准 spend secret 无法对子地址输出签出有效 CLSAG（`cryptonote_clsag_sign` 内部要求 `p·G == dest`），只有 `b + m` 可以。
-- Masari 的子地址输入采用相同的密钥派生；子地址发送和子地址找零同样关闭，等待独立的交易公钥与接收扫描回归。
+- Masari 的子地址输入采用相同的密钥派生；子地址发送和子地址找零仍关闭，因为 legacy 路径没有 XMR additional-key 语义。
 
 ### Monero（XMR）
 
@@ -1452,12 +1691,12 @@ Bulletproofs+ 验证需要约 7 KiB 栈，接近 Arduino 主循环任务的 8 Ki
 
 - **诱饵真实性**：设备能证明 ring 内部一致、包含本机输出、offsets 与交易一致，但无法证明诱饵真的在链上。离线签名器没有链访问；手机只被信任“提供活跃诱饵”，永远不被信任金额、手续费或目的地址。设备额外强制：同一 ring 内成员不得重复、不同输入的 key image 不得重复。
 - **Masari type 3**：验证器已实现且默认关闭；用 `tools/fetch_masari_bulletproof_vector.py` 取到主网向量并通过自检后才可启用。
-- **子地址目的地址/找零**：XMR/MSR 均拒绝；子地址输入消费与目的地址构造是不同路径。
+- **子地址目的地址/找零**：XMR 的 `R=rD` 单目的地和 payload v3 additional-key 目的地会验证；MSR 仍拒绝。XMR 找零仍必须是设备重新派生并核对的本钱包地址；子地址输入消费与目的地址构造是不同路径。
 - **主网接收验收**：本地审查/签名回归不等于全节点会接收；广播后仍需手机侧节点验收。
 
 ### 自测
 
-- `run_cryptonote_review_self_tests()`：13 类篡改拒绝。
+- `run_cryptonote_review_self_tests()`：额外公钥字段、交易公钥和输出绑定的篡改拒绝。
 - `run_cryptonote_signing_self_tests()`：完整请求 -> 审阅 -> 逐输入 CLSAG -> 序列化 -> 验证，另含子地址消费路径（与固定的 Monero 子地址向量交叉验证）。
 - `run_masari_self_tests()`：MLSAG 签名/验证、legacy ECDH 解码、真实 TX2 Borromean、type-2 端到端审阅/签名，以及 type 3 的 fail-closed 门禁（有向量时必须通过并拒绝篡改）。
 - 主机 `tests/host/build.ps1` 与设备 `device_compile_check.ps1` / `p4_runtime_compile_check.ps1` 都必须通过。
@@ -1527,4 +1766,3 @@ Keccak(Keccak(prefix) || Keccak(RCT base) || Keccak(RCT prunable))
 CLSAG 的签名消息与交易 ID 不同：它使用前缀哈希、RCT base 哈希以及不带长度前缀的 BP+ 字段哈希。不可用完整交易 ID 替代签名消息。
 
 这条历史交易提供真实数据兼容性证据，不等于新构建交易已被节点接收。新交易广播及节点验收只能在手机/电脑完成；设备保持离线。仍需独立主网环成员数据验证 CLSAG，并完成新的有效花费交易的节点验收。
-

@@ -8,6 +8,7 @@
 #include "CryptoNoteSigning.h"
 #include "EvmTransaction.h"
 #include "CosmosTransaction.h"
+#include "DashTransaction.h"
 #include "KaspaTransaction.h"
 #include "TronTransaction.h"
 #include "WalletUi.h"
@@ -38,6 +39,7 @@ enum class WalletSigningKind : uint8_t {
   Tezos,
   Xrp,
   Chain,
+  Dash,
 };
 
 enum class WalletSigningError : uint8_t {
@@ -74,6 +76,7 @@ struct WalletSigningSession {
     EvmSigningRequest evm;
     KaspaTransaction kaspa;
     ZcashSigningRequest zcash;
+    DashTransaction dash;
     CryptoNoteSigningState cryptonote;
     SolanaTransaction solana;
     TronTransaction tron;
@@ -106,6 +109,8 @@ WalletSigningError wallet_signing_begin_zcash(const char *network_id,
                                               const uint8_t *payload,
                                               size_t payload_size,
                                               uint32_t now_ms);
+WalletSigningError wallet_signing_begin_dash(const char *network_id,
+    const uint8_t *payload, size_t payload_size, uint32_t now_ms);
 // CryptoNote (Monero type-6 RingCT). The payload carries the serialized
 // transaction plus the host's ring data; every amount, fee, destination and
 // key image is re-derived and verified on device before the review is shown.

@@ -8,6 +8,7 @@
 
 namespace hexwallet
 {
+  struct CryptoNoteAddressProfile;
 
   // Address serialization family. Every branch in `derive_address` and in the
   // catalog capability logic keys off this enum; a network profile may only be
@@ -24,6 +25,7 @@ namespace hexwallet
     ZcashTransparent,        // 2-byte-version base58check t1/t3 (ZEC)
     CashAddr,                // CashAddr base32 with poly-mod checksum (BCH, XEC)
     Ed25519Base58,           // ed25519 pubkey base58 (SOL)
+    Aeternity,               // "ak_" + base58(ed25519 pubkey || sha256d(pubkey)[0..3]) (AE)
     Ed25519Base32,           // ed25519 pubkey + sha512/256 checksum, base32 no-pad (ALGO)
     Ed25519Blake2bBase58,    // tz1: base58check blake2b-160(ed25519 pubkey) (XTZ)
     Ed25519Blake2b224Bech32, // addr1: bech32 blake2b-224(payment) + blake2b-224(stake) (ADA)
@@ -87,6 +89,10 @@ namespace hexwallet
     uint16_t cryptonote_subaddress_prefix;
     bool explicit_only_derivation;
     uint32_t ton_wallet_id;
+    // Optional 64-bit CryptoNote profile. Monero/Masari keep their prefixes in
+    // the legacy fields above; Ryo, Zano and similar chains carry three-byte
+    // varint prefixes here because they do not fit in a uint16_t.
+    const CryptoNoteAddressProfile *cryptonote_profile;
   };
 
   extern const NetworkProfile kNetworkProfiles[];
@@ -127,6 +133,7 @@ namespace hexwallet
   const NetworkProfile *find_network_profile(const char *id);
   bool network_supports_token_accounts(const NetworkProfile &network);
   bool network_supports_eip1559(const NetworkProfile &network);
+  bool network_supports_eip2930(const NetworkProfile &network);
   bool run_network_profile_self_tests();
 
 } // namespace hexwallet

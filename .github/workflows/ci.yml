@@ -109,6 +109,14 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: EVM access-list independent vectors and fail-closed policy regressions
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File tests/host/evm_access_list_check.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -ExecutionPolicy Bypass -File tests/host/policy_check_test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Device-target compile check (xtensa g++)
         shell: pwsh
         run: |
@@ -122,6 +130,21 @@ jobs:
         shell: pwsh
         run: |
           powershell -ExecutionPolicy Bypass -File tests/host/p4_runtime_compile_check.ps1
+
+      - name: Checkout pinned NXP transport headers
+        uses: actions/checkout@v4
+        with:
+          repository: NXP/plug-and-trust
+          ref: 7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2
+          path: HexWallet/build/nxp-plug-and-trust
+
+      - name: SE051 transport fault tests and P4 compilation
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File tests/host/se051_port_check.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -ExecutionPolicy Bypass -File tests/host/se051_port_check.ps1 -Device
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Clone LVGL 9.5.0 (for the board port compile check)
         shell: pwsh

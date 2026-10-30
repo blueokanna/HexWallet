@@ -7,62 +7,31 @@ namespace hexwallet {
 bool wallet_transport_allows(WalletTransport transport,
                              WalletTransportOperation operation,
                              const WalletTransportState &state) {
-  switch (transport) {
-    case WalletTransport::Wifi:
-      return operation == WalletTransportOperation::PublicPrice || operation == WalletTransportOperation::PublicBlockHeight;
-    case WalletTransport::BluetoothLowEnergy:
-      switch (operation) {
-        case WalletTransportOperation::PublicCatalog:
-        case WalletTransportOperation::PublicPrice:
-        case WalletTransportOperation::PublicBlockHeight:
-          return true;
-        case WalletTransportOperation::SigningRequest:
-        case WalletTransportOperation::ApprovalResponse:
-          return state.authenticated && state.paired && state.trusted_display;
-        case WalletTransportOperation::SecretExport:
-          return false;
-      }
-      return false;
-    case WalletTransport::SerialUsb:
-      switch (operation) {
-        case WalletTransportOperation::PublicCatalog:
-        case WalletTransportOperation::PublicPrice:
-        case WalletTransportOperation::PublicBlockHeight:
-          return true;
-        case WalletTransportOperation::SigningRequest:
-        case WalletTransportOperation::ApprovalResponse:
-          return state.authenticated && (state.trusted_display || HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION != 0);
-        case WalletTransportOperation::SecretExport:
-          return state.authenticated && HEXWALLET_ENABLE_SECRET_EXPORT != 0;
-      }
-      return false;
-    case WalletTransport::Nfc:
-      switch (operation) {
-        case WalletTransportOperation::PublicCatalog:
-        case WalletTransportOperation::PublicPrice:
-        case WalletTransportOperation::PublicBlockHeight:
-          return true;
-        case WalletTransportOperation::SigningRequest:
-        case WalletTransportOperation::ApprovalResponse:
-          // The link layer authenticates the paired phone and the user must
-          // press APPROVE on the trusted display; without a display there is
-          // no trustworthy review, so NFC signing fails closed.
-          return state.authenticated && state.paired && state.trusted_display;
-        case WalletTransportOperation::SecretExport:
-          return false;
-      }
+  if (transport == WalletTransport::Wifi) return false;
+  const bool serial = transport == WalletTransport::SerialUsb;
+  const bool paired_link = transport == WalletTransport::Nfc ||
+                           transport == WalletTransport::BluetoothLowEnergy;
+  if (!serial && !paired_link) return false;
+  switch (operation) {
+    case WalletTransportOperation::PublicCatalog:
+    case WalletTransportOperation::PublicPrice:
+    case WalletTransportOperation::PublicBlockHeight:
+      return true;
+    case WalletTransportOperation::SigningRequest:
+    case WalletTransportOperation::ApprovalResponse:
+      return state.authenticated && state.trusted_display && (serial || state.paired);
+    case WalletTransportOperation::SecretExport:
       return false;
   }
   return false;
 }
-
 bool run_transport_policy_self_test() {
   const WalletTransportState trusted = { true, true, true };
   const WalletTransportState unpaired = { true, false, true };
   const WalletTransportState unauthenticated = { false, true, true };
-  return wallet_transport_allows(WalletTransport::Wifi,
+  return !wallet_transport_allows(WalletTransport::Wifi,
                                  WalletTransportOperation::PublicPrice, trusted)
-         && wallet_transport_allows(WalletTransport::Wifi,
+         && !wallet_transport_allows(WalletTransport::Wifi,
                                     WalletTransportOperation::PublicBlockHeight, trusted)
          && !wallet_transport_allows(WalletTransport::Wifi,
                                      WalletTransportOperation::SigningRequest, trusted)

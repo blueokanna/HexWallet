@@ -1,6 +1,7 @@
 #include "EvmTransaction.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include "WalletConfig.h"
@@ -9,6 +10,7 @@
 namespace hexwallet {
 namespace {
 
+constexpr uint8_t kEip2930Type = 0x01;
 constexpr uint8_t kEip1559Type = 0x02;
 constexpr uint8_t kErc20TransferSelector[4] = {0xa9, 0x05, 0x9c, 0xbb};
 constexpr uint64_t kMinimumTransferGas = 21000;
@@ -104,6 +106,37 @@ EvmTransactionError read_integer(const RlpItem &item, uint8_t *out, size_t out_s
   return EvmTransactionError::Ok;
 }
 
+EvmTransactionError validate_access_list(const RlpItem &list, uint8_t *addresses,
+                                         uint8_t *keys) {
+  *addresses = 0;
+  *keys = 0;
+  if (!list.list) return EvmTransactionError::NonCanonical;
+  if (list.size > kEvmMaxAccessListBytes) return EvmTransactionError::Unsupported;
+  Cursor rows{list.data, list.size, 0};
+  while (rows.position < rows.size) {
+    RlpItem row{}, address{}, slots{};
+    EvmTransactionError error = read_rlp_item(&rows, &row);
+    if (error != EvmTransactionError::Ok) return error;
+    if (!row.list) return EvmTransactionError::NonCanonical;
+    Cursor fields{row.data, row.size, 0};
+    error = read_rlp_item(&fields, &address);
+    if (error == EvmTransactionError::Ok) error = read_rlp_item(&fields, &slots);
+    if (error != EvmTransactionError::Ok) return error;
+    if (fields.position != fields.size || address.list || address.size != 20 || !slots.list)
+      return EvmTransactionError::NonCanonical;
+    if (++*addresses > kEvmMaxAccessListAddresses) return EvmTransactionError::Unsupported;
+    Cursor storage{slots.data, slots.size, 0};
+    while (storage.position < storage.size) {
+      RlpItem key{};
+      error = read_rlp_item(&storage, &key);
+      if (error != EvmTransactionError::Ok) return error;
+      if (key.list || key.size != 32) return EvmTransactionError::NonCanonical;
+      if (++*keys > kEvmMaxAccessListKeys) return EvmTransactionError::Unsupported;
+    }
+  }
+  return EvmTransactionError::Ok;
+}
+
 EvmTransactionError read_u64(const RlpItem &item, uint64_t *out) {
   uint8_t bytes[8];
   const EvmTransactionError error = read_integer(item, bytes, sizeof(bytes));
@@ -158,9 +191,9 @@ bool write_rlp_uint256(Writer *writer, const uint8_t value[kEvmUint256Size]) {
 }
 
 bool wrap_rlp_list(const uint8_t *payload, size_t payload_size,
-                   bool typed, uint8_t *out, size_t capacity, size_t *out_size) {
+                   uint8_t type, uint8_t *out, size_t capacity, size_t *out_size) {
   Writer writer = {out, capacity, 0};
-  if (typed && !write_byte(&writer, kEip1559Type)) return false;
+  if (type != 0 && !write_byte(&writer, type)) return false;
   if (!write_rlp_prefix(&writer, payload_size, true) ||
       !write_bytes(&writer, payload, payload_size)) return false;
   *out_size = writer.position;
@@ -174,17 +207,21 @@ bool serialize_transaction(const EvmSigningRequest &request,
   Writer writer = {payload, sizeof(payload), 0};
   const bool contract_call = request.has_call || request.token != nullptr;
   const uint8_t *native_value = contract_call ? request.native_value : request.amount;
+  const bool dynamic_fee = request.type == EvmTransactionType::Eip1559;
+  const bool typed = dynamic_fee || request.type == EvmTransactionType::Eip2930;
+  if (!typed && request.type != EvmTransactionType::LegacyEip155) return false;
   bool ok;
-  if (request.type == EvmTransactionType::Eip1559) {
+  if (typed) {
     ok = write_rlp_u64(&writer, request.network->evm_chain_id) &&
          write_rlp_u64(&writer, request.nonce) &&
-         write_rlp_u64(&writer, request.max_priority_fee) &&
+         (!dynamic_fee || write_rlp_u64(&writer, request.max_priority_fee)) &&
          write_rlp_u64(&writer, request.gas_price_or_max_fee) &&
          write_rlp_u64(&writer, request.gas_limit) &&
          write_rlp_bytes(&writer, request.contract, sizeof(request.contract)) &&
          write_rlp_uint256(&writer, native_value) &&
          write_rlp_bytes(&writer, request.data, request.data_size) &&
-         write_byte(&writer, 0xc0);
+         write_rlp_prefix(&writer, request.access_list_size, true) &&
+         write_bytes(&writer, request.access_list, request.access_list_size);
     if (ok && signature != nullptr) {
       ok = write_rlp_u64(&writer, signature->y_parity) &&
            write_rlp_uint256(&writer, signature->r) &&
@@ -209,7 +246,7 @@ bool serialize_transaction(const EvmSigningRequest &request,
   }
   size_t serialized_size = 0;
   if (ok) ok = wrap_rlp_list(payload, writer.position,
-                             request.type == EvmTransactionType::Eip1559,
+                             dynamic_fee ? kEip1559Type : (typed ? kEip2930Type : 0),
                              out, capacity, &serialized_size);
   if (ok) *out_size = serialized_size;
   secure_zero(payload, sizeof(payload));
@@ -391,13 +428,18 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   parsed.network = &network;
   parsed.address_index = address_index;
   Cursor cursor = {transaction, transaction_size, 0};
-  if (transaction[0] == kEip1559Type) {
-    parsed.type = EvmTransactionType::Eip1559;
+  if (transaction[0] == kEip1559Type || transaction[0] == kEip2930Type) {
+    parsed.type = transaction[0] == kEip1559Type ? EvmTransactionType::Eip1559
+                                              : EvmTransactionType::Eip2930;
     cursor.position = 1;
-    if (!network_supports_eip1559(network)) {
+    if (parsed.type == EvmTransactionType::Eip1559
+            ? !network_supports_eip1559(network)
+            : !network_supports_eip2930(network)) {
       return EvmTransactionError::Unsupported;
     }
   } else {
+    // Reserved typed envelopes must never be interpreted as legacy RLP.
+    if (transaction[0] < 0xc0) return EvmTransactionError::Unsupported;
     parsed.type = EvmTransactionType::LegacyEip155;
   }
   RlpItem outer;
@@ -405,9 +447,10 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   if (error != EvmTransactionError::Ok) return error;
   if (!outer.list || cursor.position != cursor.size) return EvmTransactionError::NonCanonical;
   Cursor fields_cursor = {outer.data, outer.size, 0};
-  RlpItem fields[9];
-  for (RlpItem &field : fields) {
-    error = read_rlp_item(&fields_cursor, &field);
+  RlpItem fields[9]{};
+  const size_t field_count = parsed.type == EvmTransactionType::Eip2930 ? 8 : 9;
+  for (size_t i = 0; i < field_count; ++i) {
+    error = read_rlp_item(&fields_cursor, &fields[i]);
     if (error != EvmTransactionError::Ok) return error;
   }
   if (fields_cursor.position != fields_cursor.size) return EvmTransactionError::Unsupported;
@@ -417,15 +460,25 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   const RlpItem *to = nullptr;
   const RlpItem *value = nullptr;
   const RlpItem *data = nullptr;
-  if (parsed.type == EvmTransactionType::Eip1559) {
+  if (parsed.type != EvmTransactionType::LegacyEip155) {
+    const bool dynamic_fee = parsed.type == EvmTransactionType::Eip1559;
+    const size_t fee_index = dynamic_fee ? 3 : 2;
     error = read_u64(fields[0], &chain_id);
     if (error == EvmTransactionError::Ok) error = read_u64(fields[1], &parsed.nonce);
-    if (error == EvmTransactionError::Ok) error = read_u64(fields[2], &parsed.max_priority_fee);
-    if (error == EvmTransactionError::Ok) error = read_u64(fields[3], &parsed.gas_price_or_max_fee);
-    if (error == EvmTransactionError::Ok) error = read_u64(fields[4], &parsed.gas_limit);
+    if (error == EvmTransactionError::Ok && dynamic_fee)
+      error = read_u64(fields[2], &parsed.max_priority_fee);
+    if (error == EvmTransactionError::Ok)
+      error = read_u64(fields[fee_index], &parsed.gas_price_or_max_fee);
+    if (error == EvmTransactionError::Ok)
+      error = read_u64(fields[fee_index + 1], &parsed.gas_limit);
     if (error != EvmTransactionError::Ok) return error;
-    if (!fields[8].list || fields[8].size != 0) return EvmTransactionError::Unsupported;
-    to = &fields[5]; value = &fields[6]; data = &fields[7];
+    const RlpItem &access_list = fields[fee_index + 5];
+    error = validate_access_list(access_list, &parsed.access_list_addresses,
+                                 &parsed.access_list_keys);
+    if (error != EvmTransactionError::Ok) return error;
+    parsed.access_list_size = static_cast<uint16_t>(access_list.size);
+    if (access_list.size != 0) memcpy(parsed.access_list, access_list.data, access_list.size);
+    to = &fields[fee_index + 2]; value = &fields[fee_index + 3]; data = &fields[fee_index + 4];
     if (parsed.max_priority_fee > parsed.gas_price_or_max_fee) return EvmTransactionError::FeePolicy;
   } else {
     error = read_u64(fields[0], &parsed.nonce);
@@ -444,7 +497,10 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   }
   error = read_integer(*value, native_value, sizeof(native_value));
   if (error != EvmTransactionError::Ok) return error;
-  if (parsed.gas_limit < kMinimumTransferGas || parsed.gas_limit > kMaximumTransferGas ||
+  uint64_t intrinsic_gas = kMinimumTransferGas +
+      2400ULL * parsed.access_list_addresses + 1900ULL * parsed.access_list_keys;
+  for (size_t i = 0; i < data->size; ++i) intrinsic_gas += data->data[i] == 0 ? 4 : 16;
+  if (parsed.gas_limit < intrinsic_gas || parsed.gas_limit > kMaximumTransferGas ||
       parsed.gas_price_or_max_fee == 0 ||
       parsed.gas_limit > HEXWALLET_MAX_EVM_FEE_WEI / parsed.gas_price_or_max_fee) {
     secure_zero(native_value, sizeof(native_value));
@@ -649,6 +705,36 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
 
 namespace {
 
+template <typename T, size_t N>
+bool same_array(const T (&left)[N], const T (&right)[N]) {
+  // Fixed bounds also reject unterminated, corrupted review strings without
+  // reading past the request. All parsed fields start with zero-filled tails.
+  return memcmp(left, right, sizeof(left)) == 0;
+}
+
+bool same_decoded_call(const DecodedTokenCalldata &a, const DecodedTokenCalldata &b) {
+  return a.standard == b.standard && a.function == b.function && a.selector == b.selector &&
+      a.amount_fits_u64 == b.amount_fits_u64 && a.amount_u64 == b.amount_u64 &&
+      a.has_token_id == b.has_token_id && a.has_destination_token_id == b.has_destination_token_id &&
+      a.has_value == b.has_value && a.has_min_amount == b.has_min_amount &&
+      a.approval_for_all == b.approval_for_all && a.batch_count == b.batch_count &&
+      a.has_bytes_tail == b.has_bytes_tail && a.bytes_tail_size == b.bytes_tail_size &&
+      a.has_second_bytes_tail == b.has_second_bytes_tail &&
+      a.second_bytes_tail_size == b.second_bytes_tail_size &&
+      a.remote_chain_id == b.remote_chain_id && a.remote_eid == b.remote_eid &&
+      a.remote_address_size == b.remote_address_size && a.has_nested_call == b.has_nested_call &&
+      a.nested_data_size == b.nested_data_size && a.nested_has_token_id == b.nested_has_token_id &&
+      same_array(a.recipient, b.recipient) && same_array(a.secondary, b.secondary) &&
+      same_array(a.tertiary, b.tertiary) && same_array(a.payment_address, b.payment_address) &&
+      same_array(a.amount, b.amount) && same_array(a.token_id, b.token_id) &&
+      same_array(a.destination_token_id, b.destination_token_id) && same_array(a.value, b.value) &&
+      same_array(a.min_amount, b.min_amount) && same_array(a.batch_ids, b.batch_ids) &&
+      same_array(a.batch_amounts, b.batch_amounts) && same_array(a.remote_address, b.remote_address) &&
+      same_array(a.fee_native, b.fee_native) && same_array(a.fee_lz_token, b.fee_lz_token) &&
+      same_array(a.nested_target, b.nested_target) && same_array(a.nested_value, b.nested_value) &&
+      same_array(a.nested_selector, b.nested_selector) && same_array(a.nested_token_id, b.nested_token_id);
+}
+
 // The two hashes bind the exact unsigned bytes, but a second parse must also
 // agree with everything the trusted display showed. Comparing the reviewed
 // fields explicitly catches a future parser that derives different display
@@ -667,8 +753,12 @@ bool evm_same_review(const EvmSigningRequest &reviewed,
          reviewed.has_native_value == request.has_native_value &&
          reviewed.has_call == request.has_call &&
          reviewed.data_size == request.data_size &&
-         reviewed.call.standard == request.call.standard &&
-         reviewed.call.function == request.call.function &&
+         reviewed.access_list_size == request.access_list_size &&
+         reviewed.access_list_addresses == request.access_list_addresses &&
+         reviewed.access_list_keys == request.access_list_keys &&
+         crypto_constant_time_equal(reviewed.access_list, request.access_list,
+                                    reviewed.access_list_size) &&
+         same_decoded_call(reviewed.call, request.call) &&
          crypto_constant_time_equal(reviewed.contract, request.contract,
                                     kEvmAddressSize) &&
          crypto_constant_time_equal(reviewed.recipient, request.recipient,
@@ -679,15 +769,15 @@ bool evm_same_review(const EvmSigningRequest &reviewed,
                                     request.native_value, kEvmUint256Size) &&
          crypto_constant_time_equal(reviewed.data, request.data,
                                     reviewed.data_size) &&
-         strcmp(reviewed.from_address, request.from_address) == 0 &&
-         strcmp(reviewed.recipient_address, request.recipient_address) == 0 &&
-         strcmp(reviewed.amount_text, request.amount_text) == 0 &&
-         strcmp(reviewed.token_id_text, request.token_id_text) == 0 &&
-         strcmp(reviewed.value_text, request.value_text) == 0 &&
-         strcmp(reviewed.min_amount_text, request.min_amount_text) == 0 &&
-         strcmp(reviewed.native_value_text, request.native_value_text) == 0 &&
-         strcmp(reviewed.remote_address_text, request.remote_address_text) == 0 &&
-         strcmp(reviewed.maximum_fee_text, request.maximum_fee_text) == 0;
+         same_array(reviewed.from_address, request.from_address) &&
+         same_array(reviewed.recipient_address, request.recipient_address) &&
+         same_array(reviewed.amount_text, request.amount_text) &&
+         same_array(reviewed.token_id_text, request.token_id_text) &&
+         same_array(reviewed.value_text, request.value_text) &&
+         same_array(reviewed.min_amount_text, request.min_amount_text) &&
+         same_array(reviewed.native_value_text, request.native_value_text) &&
+         same_array(reviewed.remote_address_text, request.remote_address_text) &&
+         same_array(reviewed.maximum_fee_text, request.maximum_fee_text);
 }
 
 }  // namespace
@@ -766,6 +856,120 @@ void clear_evm_request(EvmSigningRequest *request) {
   if (request != nullptr) secure_zero(request, sizeof(*request));
 }
 
+bool evm_access_list_details(const EvmSigningRequest &request, char *out, size_t size) {
+  if (out == nullptr || size == 0) return false;
+  out[0] = '\0';
+  uint8_t addresses = 0, keys = 0;
+  const RlpItem list{request.access_list, request.access_list_size, true};
+  if (validate_access_list(list, &addresses, &keys) != EvmTransactionError::Ok ||
+      addresses != request.access_list_addresses || keys != request.access_list_keys)
+    return false;
+  if (addresses == 0) return true;
+  Writer writer{reinterpret_cast<uint8_t *>(out), size - 1, 0};
+  const char heading[] = "ACCESS LIST (gas scheduling)\n";
+  bool ok = write_bytes(&writer, reinterpret_cast<const uint8_t *>(heading), sizeof(heading) - 1);
+  const auto append_hex = [&writer](const uint8_t *bytes, size_t length) {
+    static const char hex[] = "0123456789abcdef";
+    if (!write_byte(&writer, '0') || !write_byte(&writer, 'x')) return false;
+    for (size_t i = 0; i < length; ++i) {
+      if (!write_byte(&writer, hex[bytes[i] >> 4]) ||
+          !write_byte(&writer, hex[bytes[i] & 15])) return false;
+    }
+    return write_byte(&writer, '\n');
+  };
+  Cursor rows{list.data, list.size, 0};
+  while (ok && rows.position < rows.size) {
+    RlpItem row{}, address{}, slots{};
+    ok = read_rlp_item(&rows, &row) == EvmTransactionError::Ok;
+    Cursor fields{row.data, row.size, 0};
+    ok = ok && read_rlp_item(&fields, &address) == EvmTransactionError::Ok &&
+         read_rlp_item(&fields, &slots) == EvmTransactionError::Ok;
+    if (!ok) break;
+    ok = append_hex(address.data, address.size);
+    Cursor storage{slots.data, slots.size, 0};
+    while (ok && storage.position < storage.size) {
+      RlpItem key{};
+      ok = read_rlp_item(&storage, &key) == EvmTransactionError::Ok &&
+           write_byte(&writer, ' ') && write_byte(&writer, ' ') && append_hex(key.data, key.size);
+    }
+  }
+  if (!ok) { secure_zero(out, size); return false; }
+  out[writer.position] = '\0';
+  return true;
+}
+
+const char *evm_transaction_type_text(EvmTransactionType type) {
+  switch (type) {
+    case EvmTransactionType::LegacyEip155: return "EIP-155";
+    case EvmTransactionType::Eip2930: return "EIP-2930";
+    case EvmTransactionType::Eip1559: return "EIP-1559";
+  }
+  return "UNSUPPORTED";
+}
+
+bool evm_review_details(const EvmSigningRequest &request, char *out, size_t size) {
+  if (out == nullptr || size == 0) return false;
+  secure_zero(out, size);
+  if (request.network == nullptr ||
+      memchr(request.from_address, '\0', sizeof(request.from_address)) == nullptr ||
+      memchr(request.native_value_text, '\0', sizeof(request.native_value_text)) == nullptr ||
+      memchr(request.value_text, '\0', sizeof(request.value_text)) == nullptr ||
+      memchr(request.min_amount_text, '\0', sizeof(request.min_amount_text)) == nullptr)
+    return false;
+  size_t used = 0;
+  bool ok = true;
+  const auto append = [&](const char *format, ...) {
+    if (!ok) return;
+    va_list args;
+    va_start(args, format);
+    const int written = vsnprintf(out + used, size - used, format, args);
+    va_end(args);
+    if (written < 0 || static_cast<size_t>(written) >= size - used) { ok = false; return; }
+    used += static_cast<size_t>(written);
+  };
+  append("%s\nCHAIN ID %lu\nFROM\n%s\nNONCE %llu\nGAS LIMIT %llu\n%s %llu WEI\n",
+      evm_transaction_type_text(request.type),
+      static_cast<unsigned long>(request.network->evm_chain_id), request.from_address,
+      static_cast<unsigned long long>(request.nonce),
+      static_cast<unsigned long long>(request.gas_limit),
+      request.type == EvmTransactionType::Eip1559 ? "MAX GAS PRICE" : "GAS PRICE",
+      static_cast<unsigned long long>(request.gas_price_or_max_fee));
+  if (request.type == EvmTransactionType::Eip1559)
+    append("MAX PRIORITY %llu WEI\n", static_cast<unsigned long long>(request.max_priority_fee));
+  if (request.has_call) {
+    char address[kTokenAddressTextSize];
+    address_text(request.contract, address);
+    append("CONTRACT\n%s\nCALL\n%s.%s\n", address,
+        evm_token_standard_name(request.call.standard), token_function_name(request.call.function));
+    const auto address_field = [&](const char *label, const uint8_t *bytes) {
+      if (!is_zero(bytes, kEvmAddressSize)) {
+        address_text(bytes, address);
+        append("%s\n%s\n", label, address);
+      }
+    };
+    address_field("SOURCE / OWNER", request.call.secondary);
+    address_field("REFUND ADDRESS", request.call.tertiary);
+    address_field("FEE PAYMENT ADDRESS", request.call.payment_address);
+    if (request.has_native_value) append("NATIVE CALL VALUE %s\n", request.native_value_text);
+    if (request.call.has_value) append("CALL VALUE %s\n", request.value_text);
+    if (request.call.has_min_amount) append("MINIMUM BASE UNITS %s\n", request.min_amount_text);
+    if (request.call.remote_eid != 0)
+      append("DESTINATION EID %lu\n", static_cast<unsigned long>(request.call.remote_eid));
+    if (request.call.remote_chain_id != 0) append("REMOTE CHAIN %u\n", request.call.remote_chain_id);
+    if (request.call.has_nested_call) {
+      address_field("NESTED TARGET", request.call.nested_target);
+      append("NESTED SELECTOR 0x%02x%02x%02x%02x\nNESTED DATA BYTES %u\n",
+          request.call.nested_selector[0], request.call.nested_selector[1],
+          request.call.nested_selector[2], request.call.nested_selector[3], request.call.nested_data_size);
+    }
+  }
+  if (!ok || !evm_access_list_details(request, out + used, size - used)) {
+    secure_zero(out, size);
+    return false;
+  }
+  return true;
+}
+
 bool run_evm_transaction_self_test() {
   static const char kUnsignedHex[] =
       "ec098504a817c800825208943535353535353535353535353535353535353535"
@@ -840,6 +1044,27 @@ bool run_evm_transaction_self_test() {
           EvmTransactionError::Ok && parsed.type == EvmTransactionType::Eip1559 &&
       parsed.max_priority_fee == 1000000000ULL && parsed.amount[kEvmUint256Size - 1] == 1;
   clear_evm_request(&parsed);
+
+  // Independent ethers 6.15.0 envelope/hash vector (full signature fixtures
+  // also run through the native chain probe). Type 1 omits the priority fee
+  // field, and its signed digest includes the 0x01 envelope byte.
+  static const char kTypeOneUnsignedHex[] =
+      "01e20101847735940082fde89435353535353535353535353535353535353535350180c0";
+  static const char kTypeOneDigestHex[] =
+      "ca4083b58c1f3fc38ae7001862fb98f2aef42f88c483f7382de0e3fb7abfa5ff";
+  type_two.type = EvmTransactionType::Eip2930;
+  type_two.gas_limit = 65000;
+  passed = passed &&
+      decode_hex_string(kTypeOneUnsignedHex, expected_signed, sizeof(expected_signed), &expected_signed_size) &&
+      decode_hex_string(kTypeOneDigestHex, expected_digest, sizeof(expected_digest), &digest_size) &&
+      serialize_transaction(type_two, nullptr, actual, sizeof(actual), &actual_size) &&
+      actual_size == expected_signed_size && memcmp(actual, expected_signed, actual_size) == 0 &&
+      evm_parse_transaction(actual, actual_size, *ethereum, master, 0, &parsed) ==
+          EvmTransactionError::Ok && parsed.type == EvmTransactionType::Eip2930 &&
+      parsed.max_priority_fee == 0 && same_array(parsed.signing_hash, expected_digest);
+  clear_evm_request(&parsed);
+  type_two.type = EvmTransactionType::Eip1559;
+  type_two.gas_limit = 21000;
 
   const TokenProfile *usdc = find_token_profile("eth-usdc");
   EvmSigningRequest token_transfer = type_two;

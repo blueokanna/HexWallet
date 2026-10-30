@@ -125,7 +125,39 @@ foreach ($file in $firmware) {
 }
 
 # ---------------------------------------------------------------------------
-# 5. Production policy binary
+# 5. Secret material never reaches an output path
+# ---------------------------------------------------------------------------
+# The seed phrase is the asset. These checks keep that property structural
+# rather than a habit: the export switch must stay off, and no firmware source
+# may print a mnemonic, private key, chain code or raw entropy.
+$config = Read-Text "WalletConfig.h"
+if ($config -notmatch '(?m)^#define HEXWALLET_ENABLE_SECRET_EXPORT 0\s*$') {
+  Fail "HEXWALLET_ENABLE_SECRET_EXPORT must default to 0 in WalletConfig.h"
+}
+$secretPrint = [regex]'(Serial\.print|printf|puts)\s*\([^;]*\b(mnemonic|private_key|chain_code|seed_words|master_seed|entropy)\b'
+foreach ($file in $firmware) {
+  if ($file.Extension -notin @('.c', '.cpp', '.h', '.hpp', '.ino')) { continue }
+  $lines = [System.IO.File]::ReadAllLines($file.FullName)
+  for ($index = 0; $index -lt $lines.Length; ++$index) {
+    if ($secretPrint.IsMatch($lines[$index])) {
+      Fail "secret-bearing value printed: $($file.Name):$($index + 1)"
+    }
+  }
+}
+# Host mnemonic import and secret export must stay behind the disabled switch.
+$cli = Read-Text "WalletCli.cpp"
+foreach ($guard in @('ERR host-mnemonic-import-disabled', 'ERR secret-export-disabled')) {
+  if ($cli.IndexOf($guard, [System.StringComparison]::Ordinal) -lt 0) {
+    Fail "WalletCli.cpp must keep the '$guard' refusal"
+  }
+}
+# Turning the switch on must stay a compile error, not a runtime flag.
+if ($config -notmatch '(?s)#if HEXWALLET_ENABLE_SECRET_EXPORT\s*\r?\n\s*#error "Secret export is not supported by this wallet\."') {
+  Fail "WalletConfig.h must keep the compile-time refusal of secret export"
+}
+
+# ---------------------------------------------------------------------------
+# 6. Production policy binary
 # ---------------------------------------------------------------------------
 $policyPath = Join-Path $root $ProductionPolicy
 if ($RegistryOnly) {

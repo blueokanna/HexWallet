@@ -635,6 +635,27 @@ namespace hexwallet
     static const char kExpectedMasariAddress[] =
         "5jz8fjwSe3wJ8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmJ7suhUXwdrD"
         "J8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmCWb1XQW";
+    // RyoCurrency long address. Prefix 0x2ce192 is a three-byte varint; the
+    // address body is the ordinary spend||view CryptoNote pair.
+    static const char kExpectedRyoAddress[] =
+        "RYoLsf1ZfL1J8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmJ8QgRi53VSoD7Th5"
+        "uvYfnv515NzRee8GfQrgiaX2hgd4c5HWHiUwLbD";
+    // Zano's own unit-test vector (tests/unit_tests/base58.cpp). The key bytes
+    // are the 64-byte account address body; the 0x00 flag byte in the test
+    // blob selects the classic 2-key address and is not serialized.
+    static const uint8_t kZanoSpendKey[kCryptoNotePublicKeySize] = {
+        0xf7, 0x24, 0xbc, 0x5c, 0x6c, 0xfb, 0xb9, 0xd9, 0x76, 0x02, 0xc3,
+        0x00, 0x42, 0x3a, 0x2f, 0x28, 0x64, 0x18, 0x74, 0x51, 0x3a, 0x03,
+        0x57, 0x78, 0xa0, 0xc1, 0x77, 0x8d, 0x83, 0x32, 0x01, 0xe9,
+    };
+    static const uint8_t kZanoViewKey[kCryptoNotePublicKeySize] = {
+        0x22, 0x09, 0x39, 0x68, 0x9e, 0xdf, 0x1a, 0xbd, 0x5b, 0xc1, 0xd0,
+        0x31, 0xf7, 0x3e, 0xcd, 0x6c, 0x99, 0x3a, 0xdd, 0x66, 0xd6, 0x80,
+        0x88, 0x70, 0x45, 0x6a, 0xfe, 0xb8, 0xe7, 0xee, 0xb6, 0x8d,
+    };
+    static const char kExpectedZanoAddress[] =
+        "ZxDqHy6WnyYY5yQcdApjMb8tVPik5BC3LFdaevfbGq7X1KY5vdsWmUi5UQgse"
+        "2GBZFbMsb47TFqBmPpdFHDDwDxR2ZuZ6zX4W";
     static const char kExpectedSeedAddress[] =
         "42z7XSCSbPzfRbbKcALdcZev4QXGGuoLh2x36LhaxLSxJ8BhY7tm4LPc4ZvLo1tmZvA1BtagEN9HkhLzmddcK2PxNj5aDL5";
     static const char kExpectedIntegrated[] =
@@ -660,6 +681,19 @@ namespace hexwallet
              cryptonote_standard_address(kMasariMainnet, kBasePoint, kBasePoint, address,
                                          sizeof(address)) == WalletError::Ok &&
              strcmp(address, kExpectedMasariAddress) == 0;
+    passed = passed &&
+             cryptonote_address_from_public_keys(kRyoMainnet.standard_address_prefix,
+                                                 kBasePoint,
+                                                 kExpectedThreeTimesBasePoint,
+                                                 address, sizeof(address)) ==
+                 WalletError::Ok &&
+             strcmp(address, kExpectedRyoAddress) == 0;
+    passed = passed &&
+             cryptonote_address_from_public_keys(kZanoMainnet.standard_address_prefix,
+                                                 kZanoSpendKey, kZanoViewKey,
+                                                 address, sizeof(address)) ==
+                 WalletError::Ok &&
+             strcmp(address, kExpectedZanoAddress) == 0;
 
     uint8_t derived_spend[kCryptoNoteScalarSize];
     passed = passed &&

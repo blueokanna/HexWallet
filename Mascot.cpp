@@ -9,14 +9,14 @@ struct MascotRuntime {
   bool store_bound;
   MascotPersisted data;
   uint32_t last_event_ms;
+  uint32_t last_reaction_ms;
   uint32_t last_feed_ms;
-  uint32_t last_reject_ms;
-  uint32_t last_levelup_ms;
   uint32_t last_action_ms;
   uint32_t last_frame_ms;
   uint32_t last_anim_ms;
   MascotMood reaction;
-  bool celebrated;  // excited already fired for this level
+  bool action_taken;
+  bool frame_taken;
   bool frame_pending;
 };
 
@@ -38,25 +38,18 @@ void bump_points(uint16_t points) {
   runtime.data.bond_points = total > 0xFFFFU ? 0xFFFFU : static_cast<uint16_t>(total);
 }
 
-void drop_points(uint16_t points) {
-  runtime.data.bond_points =
-      runtime.data.bond_points > points
-          ? static_cast<uint16_t>(runtime.data.bond_points - points)
-          : 0;
-}
-
 void set_reaction(MascotMood mood, uint32_t now_ms) {
   if (runtime.reaction != mood) {
     runtime.reaction = mood;
     runtime.frame_pending = true;
   }
   runtime.last_event_ms = now_ms;
+  runtime.last_reaction_ms = now_ms;
 }
 
 bool cooldown_elapsed(uint32_t now_ms) {
-  if (runtime.last_action_ms == 0) return true;
-  return static_cast<int32_t>(now_ms - runtime.last_action_ms) >=
-         static_cast<int32_t>(kMascotActionCooldownMs);
+  return !runtime.action_taken ||
+         now_ms - runtime.last_action_ms >= kMascotActionCooldownMs;
 }
 
 uint8_t level_of(uint16_t points) {
@@ -84,7 +77,7 @@ uint8_t energy_percent(uint8_t hunger, uint32_t now_ms) {
 }
 
 bool within(uint32_t now_ms, uint32_t since_ms, uint32_t window_ms) {
-  return static_cast<int32_t>(now_ms - since_ms) < static_cast<int32_t>(window_ms);
+  return now_ms - since_ms < window_ms;
 }
 
 MascotMood derive_mood(const MascotInputs &inputs, uint8_t hunger, uint32_t now_ms) {
@@ -93,16 +86,15 @@ MascotMood derive_mood(const MascotInputs &inputs, uint8_t hunger, uint32_t now_
   // because the user must see that the device is busy.
   if (inputs.working) return MascotMood::Working;
   if (runtime.reaction == MascotMood::Eating &&
-      within(now_ms, runtime.last_event_ms, kMascotReactionMs * 3)) {
+      within(now_ms, runtime.last_reaction_ms, kMascotReactionMs * 3)) {
     return MascotMood::Eating;
   }
   if (hunger >= 70) return MascotMood::Angry;
-  if (static_cast<int32_t>(now_ms - runtime.last_event_ms) >=
-      static_cast<int32_t>(kMascotSleepAfterMs)) {
+  if (now_ms - runtime.last_event_ms >= kMascotSleepAfterMs) {
     return MascotMood::Sleep;
   }
   if (runtime.reaction != MascotMood::Calm &&
-      within(now_ms, runtime.last_event_ms, kMascotReactionMs)) {
+      within(now_ms, runtime.last_reaction_ms, kMascotReactionMs)) {
     return runtime.reaction;
   }
   return MascotMood::Calm;
@@ -119,8 +111,8 @@ MascotReminder derive_reminder(const MascotInputs &inputs, uint8_t hunger) {
 }
 
 bool mood_animates(MascotMood mood) {
-  // Every mood has two frames, but a running or sleeping pet must not repaint
-  // the panel for nothing.
+  // Active wallet work suppresses decorative motion. Other poses combine the
+  // original artwork with bounded monochrome effects in MaidSprite.
   return mood != MascotMood::Working;
 }
 
@@ -148,7 +140,7 @@ MascotPose mascot_pose(MascotMood mood, uint8_t frame) {
   const bool second = (frame & 1U) != 0;
   switch (mood) {
     case MascotMood::Calm:
-      pose.eyes = second ? 1 : 0;
+      pose.eyes = (frame % kMascotAnimationFrames) == 3 ? 1 : 0;
       pose.mouth = 0;
       pose.blush = true;
       pose.tail_high = second;
@@ -240,38 +232,27 @@ bool mascot_load() {
 }
 
 void mascot_note_approval(uint32_t now_ms) {
-  const uint8_t before = level_of(runtime.data.bond_points);
-  ++runtime.data.approvals;
-  bump_points(5);
-  if (level_of(runtime.data.bond_points) > before) {
-    mascot_note_level_up(now_ms);
-  } else {
-    set_reaction(MascotMood::Happy, now_ms);
-  }
+  if (runtime.data.approvals != UINT16_MAX) ++runtime.data.approvals;
+  // Transaction decisions never earn affection or change the pet's level.
+  set_reaction(MascotMood::Calm, now_ms);
   mascot_save();
 }
 
 void mascot_note_rejection(uint32_t now_ms) {
-  ++runtime.data.rejections;
-  drop_points(2);
-  const bool repeated = runtime.last_reject_ms != 0 &&
-                        within(now_ms, runtime.last_reject_ms, 2UL * 60UL * 1000UL);
-  runtime.last_reject_ms = now_ms;
-  // One rejection is a warning; two in a row is a sulk. It is still only a
-  // face - the reject itself is the wallet's decision, not hers.
-  set_reaction(repeated ? MascotMood::Angry : MascotMood::Alert, now_ms);
+  if (runtime.data.rejections != UINT16_MAX) ++runtime.data.rejections;
+  set_reaction(MascotMood::Calm, now_ms);
   mascot_save();
 }
 
 void mascot_note_level_up(uint32_t now_ms) {
-  runtime.last_levelup_ms = now_ms;
   set_reaction(MascotMood::Excited, now_ms);
 }
 
 bool mascot_pet(uint32_t now_ms) {
   if (!cooldown_elapsed(now_ms)) return false;
   runtime.last_action_ms = now_ms;
-  ++runtime.data.pets;
+  runtime.action_taken = true;
+  if (runtime.data.pets != UINT16_MAX) ++runtime.data.pets;
   bump_points(1);
   set_reaction(MascotMood::Shy, now_ms);
   mascot_save();
@@ -281,8 +262,9 @@ bool mascot_pet(uint32_t now_ms) {
 bool mascot_feed(uint32_t now_ms) {
   if (!cooldown_elapsed(now_ms)) return false;
   runtime.last_action_ms = now_ms;
+  runtime.action_taken = true;
   runtime.last_feed_ms = now_ms;
-  ++runtime.data.feeds;
+  if (runtime.data.feeds != UINT16_MAX) ++runtime.data.feeds;
   bump_points(2);
   set_reaction(MascotMood::Eating, now_ms);
   mascot_save();
@@ -297,7 +279,8 @@ bool mascot_play(uint32_t now_ms) {
     return false;
   }
   runtime.last_action_ms = now_ms;
-  ++runtime.data.plays;
+  runtime.action_taken = true;
+  if (runtime.data.plays != UINT16_MAX) ++runtime.data.plays;
   bump_points(3);
   set_reaction(MascotMood::Excited, now_ms);
   mascot_save();
@@ -315,7 +298,7 @@ MascotSnapshot mascot_snapshot(const MascotInputs &inputs, uint32_t now_ms) {
   snapshot.energy = energy_percent(hunger, now_ms);
   snapshot.animating = mood_animates(snapshot.mood);
   snapshot.frame = snapshot.animating
-                       ? static_cast<uint8_t>((now_ms / kMascotAnimationMs) & 1U)
+                       ? static_cast<uint8_t>((now_ms / kMascotAnimationMs) % kMascotAnimationFrames)
                        : 0;
   snapshot.pose = mascot_pose(snapshot.mood, snapshot.frame);
 
@@ -334,20 +317,19 @@ MascotSnapshot mascot_snapshot(const MascotInputs &inputs, uint32_t now_ms) {
 
 bool mascot_take_frame_request(uint32_t now_ms) {
   if (!runtime.frame_pending) return false;
-  if (runtime.last_frame_ms != 0 &&
-      static_cast<int32_t>(now_ms - runtime.last_frame_ms) <
-          static_cast<int32_t>(kMascotFrameMinMs)) {
+  if (runtime.frame_taken && now_ms - runtime.last_frame_ms < kMascotFrameMinMs) {
     return false;
   }
   runtime.last_frame_ms = now_ms;
+  runtime.frame_taken = true;
   runtime.frame_pending = false;
   return true;
 }
 
 bool mascot_take_animation_tick(uint32_t now_ms) {
-  if (runtime.frame_pending) return false;
-  if (static_cast<int32_t>(now_ms - runtime.last_anim_ms) <
-      static_cast<int32_t>(kMascotAnimationMs)) {
+  // Mood notifications and animation cadence are independent. A pending mood
+  // change must not permanently block animation when no caller consumes it.
+  if (now_ms - runtime.last_anim_ms < kMascotAnimationMs) {
     return false;
   }
   runtime.last_anim_ms = now_ms;
@@ -396,41 +378,24 @@ bool run_mascot_self_tests() {
   passed = snapshot.hunger == 0 && passed;
   // Calm blinks: the pose follows the animation frame, so assert the pairing
   // rather than a fixed value.
-  passed = snapshot.pose.eyes == (snapshot.frame != 0 ? 1 : 0) && passed;
+  passed = snapshot.pose.eyes == (snapshot.frame == 3 ? 1 : 0) && passed;
   passed = snapshot.pose.blush && passed;
   passed = snapshot.reminder == MascotReminder::None && passed;
 
-  // Approval raises bond, shows Happy, and one point set does not skip a level.
-  mascot_note_approval(2000);
-  snapshot = mascot_snapshot(inputs, 2000);
-  passed = snapshot.mood == MascotMood::Happy && passed;
-  passed = snapshot.pose.eyes == 2 && passed;
-  passed = snapshot.pose.sparkle && passed;
-  passed = snapshot.bond == 5 && passed;
-  passed = mascot_snapshot(inputs, 2000 + kMascotReactionMs + 1).mood == MascotMood::Calm && passed;
-
-  // Five approvals cross the level boundary and celebrate exactly once.
-  mascot_reset();
-  for (int index = 0; index < 4; ++index) mascot_note_approval(1000 + index);
-  passed = mascot_snapshot(inputs, 4000).mood == MascotMood::Happy && passed;
-  mascot_note_approval(4001);
-  snapshot = mascot_snapshot(inputs, 4001);
-  passed = snapshot.level == 2 && passed;
-  passed = snapshot.mood == MascotMood::Excited && passed;
-  passed = snapshot.bond == 0 && passed;
-
-  // Rejection: Alert first, Angry when it repeats inside the window.
-  mascot_reset();
-  mascot_note_rejection(1000);
-  passed = mascot_snapshot(inputs, 1000).mood == MascotMood::Alert && passed;
-  passed = mascot_snapshot(inputs, 1000).pose.sweat && passed;
-  mascot_note_rejection(2000);
-  snapshot = mascot_snapshot(inputs, 2000);
-  passed = snapshot.mood == MascotMood::Angry && passed;
-  passed = snapshot.pose.eyes == 3 && passed;
-  passed = snapshot.pose.anger_mark && passed;
-  passed = snapshot.bond == 0 && passed;
-
+  // Signing and rejecting are equally neutral, including repeated decisions.
+  passed = mascot_pet(1000) && passed;
+  const uint16_t initial_bond = mascot_snapshot(inputs, 1000).bond;
+  for (uint32_t index = 0; index < 8; ++index) {
+    mascot_note_approval(2000 + index);
+    snapshot = mascot_snapshot(inputs, 2000 + index);
+    passed = snapshot.mood == MascotMood::Calm && passed;
+    passed = snapshot.bond == initial_bond && snapshot.level == 1 && passed;
+    mascot_note_rejection(3000 + index);
+    snapshot = mascot_snapshot(inputs, 3000 + index);
+    passed = snapshot.mood == MascotMood::Calm && passed;
+    passed = snapshot.bond == initial_bond && snapshot.level == 1 && passed;
+  }
+  passed = snapshot.stats.approvals == 8 && snapshot.stats.rejections == 8 && passed;
   // Feeding plays the eating animation, then hunger is gone.
   mascot_reset();
   passed = mascot_feed(1000) && passed;
@@ -489,6 +454,22 @@ bool run_mascot_self_tests() {
   passed = !mascot_feed(1000 + kMascotActionCooldownMs - 1) && passed;
   passed = mascot_feed(1000 + kMascotActionCooldownMs) && passed;
 
+  // Zero is a valid timestamp, not an unset sentinel. Cooldown and reaction
+  // expiry must also survive the 32-bit millis() wrap.
+  mascot_reset();
+  passed = mascot_pet(0) && !mascot_pet(1) && passed;
+  mascot_reset();
+  passed = mascot_feed(UINT32_MAX - 999) && passed;
+  passed = !mascot_feed(999) && mascot_feed(1000) && passed;
+  mascot_reset();
+  passed = mascot_pet(1000) && passed;
+  mascot_note_activity(1000 + kMascotReactionMs);
+  passed = mascot_snapshot(inputs, 1000 + kMascotReactionMs).mood == MascotMood::Calm && passed;
+  // Animation still advances when nobody consumes a mood notification.
+  mascot_reset();
+  passed = mascot_take_animation_tick(kMascotAnimationMs) && passed;
+  passed = !mascot_take_animation_tick(kMascotAnimationMs + 1) && passed;
+
   mascot_reset();
   FakeStore fake = {};
   const MascotStore store = {&fake, fake_load, fake_save};
@@ -501,6 +482,14 @@ bool run_mascot_self_tests() {
   mascot_reset();
   passed = mascot_load() && passed;
   passed = mascot_snapshot(inputs, 2000).stats.approvals == 1 && passed;
+  fake.value.pets = UINT16_MAX;
+  fake.value.feeds = UINT16_MAX;
+  fake.value.plays = UINT16_MAX;
+  passed = mascot_load() && passed;
+  passed = mascot_pet(4000) && mascot_feed(6000) && mascot_play(8000) && passed;
+  snapshot = mascot_snapshot(inputs, 8000);
+  passed = snapshot.stats.pets == UINT16_MAX && snapshot.stats.feeds == UINT16_MAX &&
+           snapshot.stats.plays == UINT16_MAX && passed;
   fake.value.magic = 0xDEADBEEFUL;
   mascot_reset();
   passed = !mascot_load() && passed;

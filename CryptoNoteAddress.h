@@ -23,6 +23,14 @@ constexpr CryptoNoteAddressProfile kMoneroMainnet = { 18, 19, 42 };
 // Masari mainnet prefixes, from masari-project/masari src/cryptonote_config.h:
 // standard 28, integrated 29, subaddress 52.
 constexpr CryptoNoteAddressProfile kMasariMainnet = { 28, 29, 52 };
+// RyoCurrency mainnet: cryptonote_config.h RYO_LONG_* prefixes. These are
+// three-byte varints; the standard 2-key body is byte-identical to Monero's.
+constexpr CryptoNoteAddressProfile kRyoMainnet = { 0x2ce192, 0x2de192, 0x2fe192 };
+// Zano mainnet: currency_config.h uses 0xc5 for the normal address and
+// 0x3678 for the classic integrated address. No standard subaddress prefix is
+// published, so 0 makes cryptonote_subaddress_address() refuse instead of
+// emitting an address with a guessed prefix.
+constexpr CryptoNoteAddressProfile kZanoMainnet = { 0xc5, 0x3678, 0 };
 
 WalletError cryptonote_private_keys_from_seed(
   const uint8_t seed[kCryptoNoteScalarSize],

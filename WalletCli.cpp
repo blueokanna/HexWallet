@@ -16,6 +16,7 @@
 #include "KaspaTransaction.h"
 #include "ZcashTransaction.h"
 #include "Totp.h"
+#include "WalletAltAddresses.h"
 #include "WalletBoardPort.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
@@ -25,6 +26,8 @@
 #include "WalletMiningCatalog.h"
 #include "WalletSecurity.h"
 #include "WalletSession.h"
+#include "SensitiveValue.h"
+#include "SensitiveLineBuffer.h"
 #include "WalletTokens.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
@@ -59,8 +62,8 @@ uint32_t retry_after = 0;
 uint8_t salt[kSaltSize];
 uint8_t verifier[kVerifierSize];
 uint8_t challenge[kChallengeSize];
-char line_buffer[kLineSize];
-size_t line_used = 0;
+SensitiveLineBuffer<kLineSize> command_line;
+uint32_t command_last_byte_ms = 0;
 BitcoinSigningRequest pending_transaction;
 EvmSigningRequest pending_evm_transaction;
 KaspaTransaction pending_kaspa_transaction;
@@ -166,6 +169,8 @@ void clear_pending_transaction() {
 void clear_wallet() {
   clear_pending_transaction();
   wallet_session_clear();
+  command_line.clear();
+  secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
 }
 
 void record_failure() {
@@ -227,15 +232,11 @@ uint32_t parse_index(const char *text, bool *ok) {
 void show_help() {
   Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD] [offset] | mining show <symbol> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
-  Serial.println("OK wallet: wallet generate | wallet import <mnemonic> | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
+  Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
   Serial.println("OK totp: totp time | totp time <unix> | totp <base32> [digits] [period] [sha1|sha256|sha512] | totp clear");
   Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
   Serial.println("OK link: link status | link pair confirm | link pair reject");
-#if HEXWALLET_ENABLE_SECRET_EXPORT
-  Serial.println("OK sensitive: wallet secret [index] | selftest");
-#else
-  Serial.println("OK sensitive: secret export disabled | selftest");
-#endif
+  Serial.println("OK security: secret export and host mnemonic import unavailable | selftest");
 }
 
 void show_status() {
@@ -616,8 +617,9 @@ bool qrl_progress_hook(uint32_t completed, uint32_t total, void *context) {
 
 void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
                    const uint8_t *seed, uint32_t address_index,
-                   bool include_private, bool show_on_device = false) {
-  DerivedAddress derived;
+                   bool show_on_device = false) {
+  SensitiveValue<DerivedAddress> derived_storage;
+  auto &derived = derived_storage.get();
   const WalletError result =
     network.encoding == AddressEncoding::QrlXmss
       ? derive_address_ex(master, seed, network, 0, 0, address_index,
@@ -643,46 +645,20 @@ void print_derived(const NetworkProfile &network, const HdPrivateNode &master,
   Serial.print(derived.path);
   Serial.print(" address=");
   Serial.print(derived.address);
-  if (include_private) {
-    Serial.print(" private=");
-    print_hex(derived.private_key, sizeof(derived.private_key));
-  }
   Serial.println();
   clear_derived_address(&derived);
 }
 
-void show_addresses(uint32_t address_index, const NetworkProfile *only_network, bool include_secrets) {
-  HdPrivateNode master;
+void show_addresses(uint32_t address_index, const NetworkProfile *only_network) {
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) return;
-  uint8_t seed[kSeedSize];
+  SensitiveValue<uint8_t[kSeedSize]> seed_storage;
+  auto &seed = seed_storage.get();
   const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
-  if (include_secrets) {
-    const char *mnemonic = wallet_session_mnemonic_for_export();
-    char extended[kExtendedKeyTextSize];
-    size_t extended_size = sizeof(extended);
-    Serial.println("BEGIN SENSITIVE");
-    Serial.print("mnemonic=");
-    Serial.println(mnemonic == nullptr ? "" : mnemonic);
-    if (have_seed) {
-      Serial.print("seed=");
-      print_hex(seed, sizeof(seed));
-      Serial.println();
-    }
-    Serial.print("master-private=");
-    print_hex(master.private_key, sizeof(master.private_key));
-    Serial.println();
-    Serial.print("master-chain-code=");
-    print_hex(master.chain_code, sizeof(master.chain_code));
-    Serial.println();
-    if (hd_serialize_private(&master, ExtendedKeyFormat::Xprv, extended, &extended_size) == WalletError::Ok) {
-      Serial.print("master-xprv=");
-      Serial.println(extended);
-    }
-    secure_zero(extended, sizeof(extended));
-  }
   if (only_network != nullptr) {
     print_derived(*only_network, master, have_seed ? seed : nullptr,
-                  address_index, include_secrets, !include_secrets);
+                  address_index, true);
   } else {
     for (size_t index = 0; index < kNetworkProfileCount; ++index) {
       const NetworkProfile &network = kNetworkProfiles[index];
@@ -691,10 +667,10 @@ void show_addresses(uint32_t address_index, const NetworkProfile *only_network, 
       if (!wallet_catalog_find(network.id, &entry) ||
           !wallet_catalog_has(entry, WalletCapabilityAddress)) continue;
       print_derived(network, master, have_seed ? seed : nullptr,
-                    address_index, include_secrets);
+                    address_index);
     }
   }
-  if (include_secrets) Serial.println("END SENSITIVE");
+
   secure_zero(seed, sizeof(seed));
   secure_zero(&master, sizeof(master));
 }
@@ -726,7 +702,7 @@ void handle_wallet_address(char *arguments) {
   if (entry.network->encoding == AddressEncoding::QrlXmss) {
     Serial.println("INFO qrl-xmss height=10; key generation is CPU-heavy and may take minutes");
   }
-  show_addresses(index, entry.network, false);
+  show_addresses(index, entry.network);
 }
 
 void handle_wallet_token(char *arguments) {
@@ -758,11 +734,14 @@ void handle_wallet_token(char *arguments) {
     Serial.println("ERR token-network-unsupported");
     return;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) return;
-  uint8_t seed[kSeedSize];
+  SensitiveValue<uint8_t[kSeedSize]> seed_storage;
+  auto &seed = seed_storage.get();
   const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
-  DerivedAddress derived;
+  SensitiveValue<DerivedAddress> derived_storage;
+  auto &derived = derived_storage.get();
   const WalletError result =
     derive_address(master, have_seed ? seed : nullptr, *network, 0, 0, index, &derived);
   secure_zero(&master, sizeof(master));
@@ -855,10 +834,8 @@ void handle_wallet(char *command) {
   }
   constexpr char kImportPrefix[] = "wallet import ";
   if (strncmp(command, kImportPrefix, sizeof(kImportPrefix) - 1) == 0) {
-    const WalletError result = wallet_session_import(command + sizeof(kImportPrefix) - 1);
-    Serial.print(result == WalletError::Ok ? "OK wallet-imported-in-volatile-memory" : "ERR import ");
-    if (result != WalletError::Ok) Serial.print(error_text(result));
-    Serial.println();
+    secure_zero(command, strlen(command));
+    Serial.println("ERR host-mnemonic-import-disabled");
     return;
   }
   constexpr char kAddressPrefix[] = "wallet address ";
@@ -879,13 +856,12 @@ void handle_wallet(char *command) {
   const bool secret = strncmp(command, "wallet secret", 13) == 0;
   const bool addresses = strncmp(command, "wallet addresses", 16) == 0;
   if (secret || addresses) {
-#if !HEXWALLET_ENABLE_SECRET_EXPORT
+
     if (secret) {
-      Serial.println("ERR secret-export-disabled-at-build-time");
+      Serial.println("ERR secret-export-disabled");
       return;
     }
-#endif
-    const size_t prefix_size = secret ? 13 : 16;
+    const size_t prefix_size = 16;
     const char *argument = command + prefix_size;
     if (*argument == ' ') ++argument;
     else if (*argument != '\0') {
@@ -898,7 +874,7 @@ void handle_wallet(char *command) {
       Serial.println("ERR invalid-index");
       return;
     }
-    show_addresses(index, nullptr, secret);
+    show_addresses(index, nullptr);
     return;
   }
   Serial.println("ERR invalid-wallet-command");
@@ -975,7 +951,8 @@ void inspect_transaction(char *arguments) {
       network->id,
       network->encoding == AddressEncoding::CashAddr ? network->alt_hrp : nullptr,
       network->utxo, policy->family, policy->fork_id};
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) return;
   static uint8_t psbt[HEXWALLET_MAX_PSBT_BYTES];
   size_t psbt_size;
@@ -1063,7 +1040,8 @@ void sign_transaction(const char *approval_text) {
     Serial.println("ERR confirmation-mismatch; review-cleared");
     return;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) {
     clear_pending_transaction();
     return;
@@ -1133,7 +1111,8 @@ void inspect_evm_transaction(char *arguments) {
     Serial.println("ERR invalid-evm-transaction-hex");
     return;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) {
     secure_zero(transaction, sizeof(transaction));
     return;
@@ -1166,7 +1145,7 @@ void inspect_evm_transaction(char *arguments) {
   Serial.print("network=");
   Serial.print(network->id);
   Serial.print(" type=");
-  Serial.println(pending_evm_transaction.type == EvmTransactionType::Eip1559 ? "EIP-1559" : "EIP-155");
+  Serial.println(evm_transaction_type_text(pending_evm_transaction.type));
   Serial.print("from=");
   Serial.println(pending_evm_transaction.from_address);
   bool recipient_is_zero = true;
@@ -1266,6 +1245,13 @@ void inspect_evm_transaction(char *arguments) {
   char display_amount[256];
   char display_fee[112];
   char output_label[96];
+  char access_details[kEvmReviewTextSize];
+  if (!evm_review_details(pending_evm_transaction, access_details, sizeof(access_details))) {
+    clear_pending_transaction();
+    Serial.println("ERR incomplete-evm-review");
+    return;
+  }
+  if (access_details[0] != '\0') Serial.println(access_details);
   if (pending_evm_transaction.call.has_token_id) {
     snprintf(display_amount, sizeof(display_amount), "%s %s #%s",
              pending_evm_transaction.amount_text, asset,
@@ -1286,7 +1272,7 @@ void inspect_evm_transaction(char *arguments) {
   WalletUiTransactionReview review = {};
   review.network = network->name;
   review.output_count = 1;
-  review.outputs[0] = { 0, display_amount, review_recipient, output_label };
+  review.outputs[0] = { 0, display_amount, review_recipient, output_label, access_details };
   review.fee_text = display_fee;
   review.approval_code = approval;
   wallet_ui_show_transaction(review);
@@ -1328,7 +1314,8 @@ void sign_evm_transaction(const char *approval_text) {
     Serial.println("ERR confirmation-mismatch; review-cleared");
     return;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) {
     clear_pending_transaction();
     return;
@@ -1498,7 +1485,8 @@ void sign_kaspa_transaction(const char *approval_text) {
     Serial.println("ERR confirmation-mismatch; review-cleared");
     return;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) {
     clear_pending_transaction();
     return;
@@ -1615,6 +1603,30 @@ void inspect_zcash_transaction(char *arguments) {
   Serial.println(static_cast<unsigned long>(pending_zcash_transaction.expiry_height));
   Serial.print("lock-time=");
   Serial.println(static_cast<unsigned long>(pending_zcash_transaction.lock_time));
+  // t3 spends must name the P2SH address whose redeem script is being spent.
+  for (size_t index = 0; index < pending_zcash_transaction.input_count; ++index) {
+    const ZcashInput &input = pending_zcash_transaction.inputs[index];
+    if (input.redeem_size == 0) continue;
+    char p2sh_address[kAddressTextSize] = {};
+    if (address_zcash_transparent_from_script(
+            pending_zcash_transaction.chain.p2pkh_version,
+            pending_zcash_transaction.chain.p2sh_version, input.script,
+            input.script_size, p2sh_address, sizeof(p2sh_address)) !=
+        WalletError::Ok) {
+      Serial.println("ERR p2sh-address; review-cleared");
+      clear_pending_transaction();
+      return;
+    }
+    Serial.print("p2sh-input=");
+    Serial.print(static_cast<unsigned long>(index));
+    Serial.print(" zats=");
+    Serial.print(static_cast<unsigned long long>(input.value));
+    Serial.print(" address=");
+    Serial.print(p2sh_address);
+    Serial.print(" redeem-size=");
+    Serial.println(static_cast<unsigned long>(input.redeem_size));
+    secure_zero(p2sh_address, sizeof(p2sh_address));
+  }
   for (size_t index = 0; index < pending_zcash_transaction.output_count; ++index) {
     const ZcashOutput &output = pending_zcash_transaction.outputs[index];
     Serial.print("output=");
@@ -1640,6 +1652,7 @@ void inspect_zcash_transaction(char *arguments) {
     Serial.println(" expires-ms=120000");
   }
   char amount_texts[kWalletUiMaxTransactionOutputs][32];
+  char p2sh_addresses[kZcashMaxInputs][kAddressTextSize] = {};
   char display_fee[64];
   format_zec(pending_zcash_transaction.fee, display_fee, sizeof(display_fee));
   strncat(display_fee, " ZEC", sizeof(display_fee) - strlen(display_fee) - 1);
@@ -1648,19 +1661,58 @@ void inspect_zcash_transaction(char *arguments) {
   review.fee = pending_zcash_transaction.fee;
   review.fee_text = display_fee;
   review.approval_code = approval;
-  review.output_count = pending_zcash_transaction.output_count;
-  for (size_t index = 0; index < pending_zcash_transaction.output_count; ++index) {
+  size_t shown = 0;
+  bool display_ok =
+      pending_zcash_transaction.output_count <= kWalletUiMaxTransactionOutputs;
+  for (size_t index = 0; display_ok &&
+                         index < pending_zcash_transaction.output_count;
+       ++index) {
     format_zec(pending_zcash_transaction.outputs[index].value,
                amount_texts[index], sizeof(amount_texts[index]));
     strncat(amount_texts[index], " ZEC",
             sizeof(amount_texts[index]) - strlen(amount_texts[index]) - 1);
-    review.outputs[index] = {
+    review.outputs[shown++] = {
       pending_zcash_transaction.outputs[index].value, amount_texts[index],
       pending_zcash_transaction.outputs[index].address, "EXTERNAL"
     };
   }
+  bool has_p2sh_input = false;
+  for (size_t index = 0; display_ok &&
+                         index < pending_zcash_transaction.input_count;
+       ++index) {
+    const ZcashInput &input = pending_zcash_transaction.inputs[index];
+    if (input.redeem_size == 0) continue;
+    if (shown >= kWalletUiMaxTransactionOutputs) {
+      display_ok = false;
+      break;
+    }
+    display_ok = address_zcash_transparent_from_script(
+                     pending_zcash_transaction.chain.p2pkh_version,
+                     pending_zcash_transaction.chain.p2sh_version, input.script,
+                     input.script_size, p2sh_addresses[index],
+                     sizeof(p2sh_addresses[index])) == WalletError::Ok;
+    if (display_ok) {
+      has_p2sh_input = true;
+      review.outputs[shown++] = { input.value, nullptr, p2sh_addresses[index],
+                                  "P2SH INPUT" };
+    }
+  }
+  if (!display_ok) {
+    Serial.println("ERR review-does-not-fit-trusted-display; review-cleared");
+    clear_pending_transaction();
+    secure_zero(amount_texts, sizeof(amount_texts));
+    secure_zero(p2sh_addresses, sizeof(p2sh_addresses));
+    secure_zero(display_fee, sizeof(display_fee));
+    secure_zero(approval, sizeof(approval));
+    return;
+  }
+  review.output_count = shown;
+  review.note = has_p2sh_input
+                    ? "P2SH inputs list the t3 address whose redeem script is spent. The firmware re-hashes that script against the address before signing."
+                    : nullptr;
   wallet_ui_show_transaction(review);
   secure_zero(amount_texts, sizeof(amount_texts));
+  secure_zero(p2sh_addresses, sizeof(p2sh_addresses));
   secure_zero(display_fee, sizeof(display_fee));
   secure_zero(approval, sizeof(approval));
 }
@@ -1699,7 +1751,8 @@ void sign_zcash_transaction(const char *approval_text) {
     Serial.println("ERR confirmation-mismatch; review-cleared");
     return;
   }
-  HdPrivateNode master;
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
   if (!load_master(&master)) {
     clear_pending_transaction();
     return;
@@ -2111,6 +2164,7 @@ void wallet_usb_data_service() {
 bool service_usb_apdu() {
   if (!usb_apdu_mode && Serial.available() > 0 &&
       Serial.peek() == kUsbApduMagic0) {
+    command_line.clear();
     usb_apdu_mode = true;
     usb_apdu_used = 0;
     usb_apdu_expected = 0;
@@ -2125,6 +2179,7 @@ bool service_usb_apdu() {
     usb_apdu_used = 0;
     usb_apdu_expected = 0;
     usb_apdu_mode = false;
+    secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
     return true;
   }
   if (usb_apdu_expected == 0 && usb_apdu_used >= 4) {
@@ -2133,6 +2188,7 @@ bool service_usb_apdu() {
     if (length > kUsbApduMax) {
       usb_apdu_used = 0;
       usb_apdu_mode = false;
+    secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
       return true;
     }
     usb_apdu_expected = 4 + length;
@@ -2155,6 +2211,7 @@ bool service_usb_apdu() {
     usb_apdu_used = 0;
     usb_apdu_expected = 0;
     usb_apdu_mode = false;
+    secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
     return true;
   }
   return true;
@@ -2176,23 +2233,22 @@ void wallet_cli_service() {
     return;
   }
   if (service_usb_apdu()) return;
+  if (command_line.has_content() && millis() - command_last_byte_ms >= 10000UL) {
+    command_line.discard();
+    Serial.println("ERR command-timeout");
+  }
   while (Serial.available() > 0) {
-    const char value = static_cast<char>(Serial.read());
-    if (value == '\r') continue;
-    if (value == '\n') {
-      line_buffer[line_used] = '\0';
-      handle_line(line_buffer);
-      secure_zero(line_buffer, sizeof(line_buffer));
-      line_used = 0;
-    } else if ((value == '\b' || value == 0x7f) && line_used != 0) {
-      --line_used;
-    } else if (value >= 0x20 && value <= 0x7e) {
-      if (line_used + 1 < sizeof(line_buffer)) line_buffer[line_used++] = value;
-      else {
-        secure_zero(line_buffer, sizeof(line_buffer));
-        line_used = 0;
-        Serial.println("ERR line-too-long");
+    command_last_byte_ms = millis();
+    const LineReadResult result = command_line.feed(static_cast<uint8_t>(Serial.read()));
+    if (result == LineReadResult::Ready) {
+      handle_line(command_line.data());
+      command_line.clear();
+      if (!usb_data_enabled) {
+        while (Serial.available() > 0) Serial.read();
+        break;
       }
+    } else if (result == LineReadResult::Rejected) {
+      Serial.println("ERR invalid-or-oversized-line");
     }
   }
 #endif

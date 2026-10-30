@@ -1,6 +1,48 @@
 # HexWallet - validation
 
+## 2026-10-29：access list、安全托管边界与显示修正
+
+- `evm_access_list_check.ps1`：201 项检查通过。六组有效交易与 ethers 6.15.0
+  的完整签名和摘要一致，另含完整审阅文本、结构错误、截断、变造与输出清零检查。
+  具体协议边界见 [EVM access list](evm-access-lists.md)。
+- `build.ps1`：退出码 0，含密码核心、链解析、托管、宠物行为和 QR 自检。
+  该套测试使用 host crypto shim；原生 Mbed TLS 的 chain-selftest 和 EVM 独立向量另行通过。
+- P4 核心编译、真实 P4 Arduino 签名编排编译，以及六种板型的真实 LVGL 9.5
+  头文件编译通过。编译成功不代表已经完成固件整包链接、真实显示或烧录测试。
+- `policy_check.ps1`：143 个 graveyard 身份、五张注册表检查通过，名单日期仍为
+  2026-10-23。递归扫描漏检和缺少生产策略二进制时错误放行的回归检查通过。
+- NXP 固定版本的 Arduino Wire 端口已通过故障注入单测和 P4 编译；这不包括
+  实际 SCP03 配钥、applet 会话或非导出钱包密钥托管。详见 [SE051 状态](se051-integration.md)。
+
+单色 QR 和宠物缓冲都为调色板保留八字节，像素跟随实际 stride。宠物素材由
+`pack_maid_sprite.ps1` 转为八张 64×64 位图，确认和拒绝交易均不影响亲密度。
+新增加的 Node 脚本只用于复现独立 ethers 向量，正常测试与固件都不依赖 Node。
+
 > **Tooling note (2026-10-28).** The Python/Node oracle harness (	ests/*.py, 	ests/reference/*, 	ools/*.py) was removed at the owner's request: this repository now needs exactly two toolchains, Arduino/xtensa for the device and MSVC or clang plus PowerShell for the host. Every vector those harnesses produced is still pinned in `src/generated/*.inc` and executed by `tests/host/host_test.exe`, so the checks still run on every build. The prose below records the original independent-SDK comparisons; bring the SDKs back if you need to regenerate a fixture.
+
+## 2026-10-28 地址扩展与 BEP-20 验证
+
+本轮只增加**可证明**的能力，没有把“看起来像地址”的字符串塞进目录。
+
+| 检查 | 结果 | 说明 |
+| --- | --- | --- |
+| `tests/host/build.ps1` | 退出码 0 | 新增 `aeternity`、`ryo`、`zano` 地址向量与 20 个 BEP-20 profile 全部通过 |
+| `tests/host/device_compile_check.ps1 -Target esp32p4` | 退出码 0 | 32 位 P4 编译，`NetworkProfile` 新增 64 位 CryptoNote profile 指针未破坏布局 |
+| `tests/host/build_clang_ubsan.ps1` | 退出码 0 | 补上 CameraPort/TrustAnchor/Mascot 三个源文件后，UBSan 链接与全部自检通过 |
+| `tests/host/build_chain_native.ps1` | 退出码 0 | 链接真实 BIP32/ECDSA，执行 `chain_probe zcash-sign-selftest`：ZEC t1 P2PKH 与 t3 P2SH-P2PK 的完整签名、scriptSig 结构与 DER 验签；并执行 `chain_probe dash-sign-selftest`：Dash 先用两笔真实主网交易的摘要锚定序列化与 legacy sighash，再用 RFC 6979 生成的向量逐字节比对设备产出的签名交易，并从 scriptSig 反解 DER 与公钥做曲线验签 |
+| `tests/host/build_chain_native.ps1` | 退出码 0 | `chain_probe cosmos-sign-selftest`：逐条签名 Cosmos v1/v2 固定向量并与 `TxRaw` 逐字节比较，同时验证错误私钥被拒绝 |
+| `tests/host/policy_check.ps1` | 退出码 0 | 新增“助记词/私钥不得进入任何输出路径”的静态门禁与 `HEXWALLET_ENABLE_SECRET_EXPORT` 编译期拒绝检查 |
+| `tests/host/board_port_compile_check.ps1` | 退出码 0 | 真实 LVGL 9.5 下 `WalletUi.cpp` / `WalletBoardPort.cpp` 全板卡编译 |
+| `tests/host/p4_runtime_compile_check.ps1` | 退出码 0 | `WalletCli` / `WalletSigning` / `WalletLinkService` / `.ino` 使用真实 P4 头文件编译 |
+| BSC RPC `eth_call(symbol, decimals)` | 20/20 匹配 | WBNB、CAKE、FDUSD、TUSD、LINK、DOT、ADA、XRP、DOGE、SHIB、UNI、AAVE、ATOM、XVS、BSW、ANKR、COMP、BETH、AVAX、PENDLE；CAKE 链上 symbol 为 `Cake` |
+
+证据边界：
+
+- **Aeternity**：`ak_` 地址 = `base58(ed25519_pubkey || SHA-256d(pubkey)[0..3])`，来源是 `aeserialization/src/aeser_api_encoder.erl`；固定 Ed25519 公钥向量在 `run_alt_address_self_tests()`。
+- **RyoCurrency**：CryptoNote long address 的 3 字节 varint 前缀 `0x2ce192` 已用官方 `cryptonote_config.h` 和 dev-fund 地址逐字节复核；`RYoL...` 向量在 `run_cryptonote_self_tests()`。
+- **Zano**：直接复现 `hyle-team/zano/tests/unit_tests/base58.cpp` 的 `ZxDqHy6...` 向量；`0xc5` 前缀和双密钥 body 一致。
+- 这三条链**没有**交易审阅/签名路径，目录能力只有 `ADDRESS`。不要把地址可用当成收付可用。
+- Beam / Grin / MimbleWimbleCoin / Epic Cash 没有静态链上地址；SERO 是 superzk 公钥包；Swap / Evolution / VeriBlock 没有 SLIP-0044 coin type。原因与拒绝策略见 [chain-protocols.md](chain-protocols.md#aeternity-ryocurrency-和-zano--address-profiles-only)。
 
 ## 2026-10-23 验证记录
 
@@ -26,8 +68,8 @@
 - XMR/MSR 签名也在 worker 执行。worker 不可用时拒绝请求，不在主循环的小栈上重试。
 - 新的签名请求先使旧批准失效；拒绝时清除请求内容。无效参数会清除 CryptoNote 签名状态。
 - 无法生成完整目的地址时不显示批准按钮；签名输出数量不能超过显示容量。
-- 审阅检查完整 `extra`，拒绝重复交易公钥、附加公钥、未知字段、重复 nonce、截断字段和非法填充。
-- 当前标准地址输出使用 `R = rG`。XMR/MSR 子地址目的地址和子地址找零尚未完成 `rD` / 附加交易公钥绑定与独立接收扫描测试，因此拒绝这些输出。子地址输入消费保留。
+- 审阅检查完整 `extra`，拒绝重复交易公钥、重复附加公钥向量、未知字段、重复 nonce、截断字段和非法填充；XMR payload v3 会继续逐项验证 additional public key 与秘密、公钥和输出索引的绑定。
+- XMR 标准输出和找零使用 `R = rG`；单一子地址目的地使用已绑定的 `R = rD`，混合/多目的地使用 payload v3 的逐输出 additional transaction-key 绑定。设备核对 `tx_extra` 公钥、输出索引、金额密文、view tag 和 commitment；MSR 子地址输出仍拒绝。子地址输入消费保留。
 
 ### 尚未完成
 
@@ -205,4 +247,3 @@ ADA、DOT、FIL、CHIA、DCR、FIRO、FLUX 等交易适配器尚未补齐。当�
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
 ```
-

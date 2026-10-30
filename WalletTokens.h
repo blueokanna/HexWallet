@@ -11,6 +11,7 @@ namespace hexwallet {
 
 enum class TokenStandard : uint8_t {
   Erc20,
+  Bep20,
   Erc721,
   Erc1155,
   Erc4626,
@@ -20,6 +21,7 @@ enum class TokenStandard : uint8_t {
   LayerZeroOft,
   LayerZeroOnft,
   Trc20,
+  Trc10,
 };
 
 enum TokenCapability : uint8_t {

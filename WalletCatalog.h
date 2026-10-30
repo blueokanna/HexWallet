@@ -29,6 +29,8 @@ struct WalletCatalogEntry {
 size_t wallet_catalog_count();
 bool wallet_catalog_at(size_t index, WalletCatalogEntry *out);
 bool wallet_catalog_at_sorted(size_t position, WalletCatalogEntry *out);
+// IDs win over tickers. A ticker shared by several networks is ambiguous and
+// fails; callers should pass the stable network ID from wallet_catalog_at().
 bool wallet_catalog_find(const char *id_or_symbol, WalletCatalogEntry *out);
 bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query);
 bool wallet_catalog_has(const WalletCatalogEntry &entry, WalletCapability capability);

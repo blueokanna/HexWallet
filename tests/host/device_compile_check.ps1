@@ -1,4 +1,4 @@
-﻿# Device-side compile smoke check.
+# Device-side compile smoke check.
 #
 # Compiles every firmware C++ source (excluding the Arduino-sketch-only files)
 # with the selected Xtensa or P4 RISC-V toolchain from Arduino core 3.3.10,
@@ -65,9 +65,9 @@ $sources = @(
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
   "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
-  "WalletSecurity.cpp",
+  "WalletSecurity.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",
-  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "TronTransaction.cpp", "CosmosTransaction.cpp", "StellarTransaction.cpp", "AlgorandTransaction.cpp", "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletSigning.cpp", "NearTransaction.cpp", "TezosTransaction.cpp", "XrpTransaction.cpp", "Totp.cpp", "EinkFrame.cpp"
+  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp", "TronTransaction.cpp", "CosmosTransaction.cpp", "StellarTransaction.cpp", "AlgorandTransaction.cpp", "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletSigning.cpp", "NearTransaction.cpp", "TezosTransaction.cpp", "XrpTransaction.cpp", "Totp.cpp", "EinkFrame.cpp"
 )
 
 $objDir = Join-Path $PSScriptRoot "obj-device/$Target"

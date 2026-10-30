@@ -67,6 +67,8 @@ namespace hexwallet
   namespace
   {
     constexpr uint8_t kExtraTagPublicKey = 0x01;
+    constexpr uint8_t kExtraTagNonce = 0x02;
+    constexpr uint8_t kExtraTagAdditionalPublicKeys = 0x04;
     constexpr size_t kOutputsPerProof = 16;
 
     bool log2_ceil(size_t count, size_t *out)
@@ -98,17 +100,19 @@ namespace hexwallet
     return cryptonote_review_extra_public_key(tx.extra, tx.extra_size, out);
   }
 
-  bool cryptonote_review_extra_public_key(const uint8_t *extra, size_t size,
-                                          uint8_t out[kCryptoNoteKeySize])
+  bool cryptonote_review_extra_public_keys(
+      const uint8_t *extra, size_t size, CryptoNoteTxExtraPublicKeys *out)
   {
     if (out == nullptr)
       return false;
-    memset(out, 0, kCryptoNoteKeySize);
+    memset(out, 0, sizeof(*out));
     if (extra == nullptr || size < 1 + kCryptoNoteKeySize ||
         extra[0] != kExtraTagPublicKey)
       return false;
+    memcpy(out->primary, extra + 1, kCryptoNoteKeySize);
     size_t offset = 1 + kCryptoNoteKeySize;
     bool nonce_seen = false;
+    bool additional_seen = false;
     while (offset < size)
     {
       const uint8_t tag = extra[offset++];
@@ -121,15 +125,48 @@ namespace hexwallet
             return false;
         break;
       }
-      if (tag != 2 || nonce_seen || offset == size)
-        return false;
-      nonce_seen = true;
-      const size_t length = extra[offset++];
-      if (length > size - offset)
-        return false;
-      offset += length;
+      if (tag == kExtraTagNonce)
+      {
+        if (nonce_seen || offset == size)
+          return false;
+        nonce_seen = true;
+        const size_t length = extra[offset++];
+        if (length > size - offset)
+          return false;
+        offset += length;
+        continue;
+      }
+      if (tag == kExtraTagAdditionalPublicKeys)
+      {
+        if (additional_seen || offset == size)
+          return false;
+        additional_seen = true;
+        const uint8_t count = extra[offset++];
+        if (count == 0 || count > kCryptoNoteMaxTxOutputs ||
+            count >= 0x80 || count > (size - offset) / kCryptoNoteKeySize)
+          return false;
+        const size_t bytes = static_cast<size_t>(count) * kCryptoNoteKeySize;
+        memcpy(out->additional, extra + offset, bytes);
+        out->additional_count = count;
+        offset += bytes;
+        continue;
+      }
+      return false;
     }
-    memcpy(out, extra + 1, kCryptoNoteKeySize);
+    return offset == size;
+  }
+
+  bool cryptonote_review_extra_public_key(const uint8_t *extra, size_t size,
+                                          uint8_t out[kCryptoNoteKeySize])
+  {
+    if (out == nullptr)
+      return false;
+    memset(out, 0, kCryptoNoteKeySize);
+    CryptoNoteTxExtraPublicKeys parsed = {};
+    if (!cryptonote_review_extra_public_keys(extra, size, &parsed))
+      return false;
+    memcpy(out, parsed.primary, kCryptoNoteKeySize);
+    secure_zero(&parsed, sizeof(parsed));
     return true;
   }
 
@@ -140,6 +177,8 @@ namespace hexwallet
         const uint8_t view_secret[kCryptoNoteKeySize],
         const uint8_t spend_secret[kCryptoNoteKeySize],
         const uint8_t tx_secret[kCryptoNoteKeySize],
+        const uint8_t additional_tx_secrets[][kCryptoNoteKeySize],
+        size_t additional_tx_key_count,
         const CryptoNoteReviewInput *inputs, size_t input_count,
         const CryptoNoteReviewOutput *outputs, size_t output_count,
         CryptoNoteReviewResult *result)
@@ -147,6 +186,9 @@ namespace hexwallet
       REVIEW_STAGE(5);
       if (view_secret == nullptr || spend_secret == nullptr || tx_secret == nullptr ||
           inputs == nullptr || outputs == nullptr || result == nullptr)
+        return CryptoNoteTxError::InvalidArgument;
+      if (additional_tx_key_count > kCryptoNoteMaxTxOutputs ||
+          (additional_tx_key_count != 0 && additional_tx_secrets == nullptr))
         return CryptoNoteTxError::InvalidArgument;
       REVIEW_STAGE(6);
       if (input_count == 0 || input_count > kCryptoNoteMaxTxInputs)
@@ -172,29 +214,72 @@ namespace hexwallet
       REVIEW_STAGE(9);
       if (tx.rct.ring_size != policy->ring_size)
         return CryptoNoteTxError::InvalidArgument;
-      // The current output derivation uses a single R = rG. Subaddress
-      // destinations require R = rD / per-output additional transaction keys;
-      // ownership checks alone cannot make such an output discoverable.
-      for (size_t index = 0; index < output_count; ++index)
-        if (outputs[index].address_type != 0 || outputs[index].subaddress_major != 0 ||
-            outputs[index].subaddress_minor != 0)
-          return CryptoNoteTxError::Unsupported;
-
       memset(result, 0, sizeof(*result));
       REVIEW_STAGE(10);
 
       // ---- the supplied tx secret must actually be this transaction's key ----
       uint8_t tx_public[kCryptoNoteKeySize];
       uint8_t derived_public[kCryptoNoteKeySize];
+      CryptoNoteTxExtraPublicKeys extra_keys = {};
       REVIEW_STAGE(11);
-      if (!cryptonote_tx_extra_public_key(tx, tx_public))
+      if (!cryptonote_review_extra_public_keys(tx.extra, tx.extra_size,
+                                               &extra_keys))
         return CryptoNoteTxError::InvalidArgument;
+      memcpy(tx_public, extra_keys.primary, kCryptoNoteKeySize);
+      if (extra_keys.additional_count != additional_tx_key_count ||
+          (additional_tx_key_count != 0 &&
+           additional_tx_key_count != output_count))
+        return CryptoNoteTxError::InvalidArgument;
+      if (additional_tx_key_count != 0)
+      {
+        for (size_t index = 0; index < additional_tx_key_count; ++index)
+        {
+          const CryptoNoteReviewOutput &declared = outputs[index];
+          const uint8_t *secret = additional_tx_secrets[index];
+          uint8_t validation_derivation[kCryptoNoteKeySize];
+          if (!cryptonote_generate_key_derivation(declared.view_public, secret,
+                                                  validation_derivation))
+          {
+            secure_zero(&extra_keys, sizeof(extra_keys));
+            secure_zero(validation_derivation, sizeof(validation_derivation));
+            return CryptoNoteTxError::InvalidArgument;
+          }
+          const bool valid = declared.address_type == 1
+              ? ed25519_point_mul_compressed(declared.spend_public, secret,
+                                             derived_public)
+              : cryptonote_scalar_to_point(secret, derived_public);
+          secure_zero(validation_derivation, sizeof(validation_derivation));
+          if (!valid ||
+              !equals(derived_public, extra_keys.additional[index]))
+          {
+            secure_zero(&extra_keys, sizeof(extra_keys));
+            secure_zero(derived_public, sizeof(derived_public));
+            return CryptoNoteTxError::InvalidArgument;
+          }
+        }
+      }
       if (!cryptonote_scalar_to_point(tx_secret, derived_public))
+      {
+        secure_zero(&extra_keys, sizeof(extra_keys));
         return CryptoNoteTxError::CryptoFailure;
+      }
       const bool tx_key_matches = equals(tx_public, derived_public);
+      bool single_subaddress_tx_key = false;
+      if (!tx_key_matches && additional_tx_key_count == 0 &&
+          output_count == 1 && !outputs[0].change &&
+          outputs[0].address_type == 1 && outputs[0].tx_key_index == 0)
+      {
+        single_subaddress_tx_key =
+            ed25519_point_mul_compressed(outputs[0].spend_public, tx_secret,
+                                         derived_public) &&
+            equals(tx_public, derived_public);
+      }
       secure_zero(derived_public, sizeof(derived_public));
-      if (!tx_key_matches)
+      if (!tx_key_matches && !single_subaddress_tx_key)
+      {
+        secure_zero(&extra_keys, sizeof(extra_keys));
         return CryptoNoteTxError::InvalidArgument;
+      }
       REVIEW_STAGE(12);
 
       uint8_t our_spend_public[kCryptoNoteKeySize];
@@ -203,9 +288,6 @@ namespace hexwallet
           !cryptonote_scalar_to_point(view_secret, our_view_public))
         return CryptoNoteTxError::CryptoFailure;
 
-      // Change may go to the standard address or to one of our own
-      // subaddresses. The host names the subaddress; the device re-derives the
-      // key pair and compares, so a foreign key can never be labelled change.
       auto owned_change = [&](const CryptoNoteReviewOutput &declared)
       {
         if (declared.subaddress_major == 0 && declared.subaddress_minor == 0)
@@ -243,15 +325,53 @@ namespace hexwallet
       {
         const CryptoNoteReviewOutput &declared = outputs[index];
         const CryptoNoteTxOutput &on_wire = tx.outputs[index];
+        if (declared.address_type > 1 ||
+            (declared.change && declared.tx_key_index != 0) ||
+            (declared.address_type == 0 && declared.tx_key_index != 0) ||
+            (!declared.change && declared.address_type == 0 &&
+             (declared.subaddress_major != 0 ||
+              declared.subaddress_minor != 0)) ||
+            (!declared.change && declared.address_type == 1 &&
+             (declared.subaddress_major != 0 ||
+              declared.subaddress_minor != 0)))
+        {
+          secure_zero(&extra_keys, sizeof(extra_keys));
+          return CryptoNoteTxError::InvalidArgument;
+        }
+        if (!declared.change && declared.address_type == 1)
+        {
+          if (additional_tx_key_count == 0)
+          {
+            if (!single_subaddress_tx_key)
+            {
+              secure_zero(&extra_keys, sizeof(extra_keys));
+              return CryptoNoteTxError::InvalidArgument;
+            }
+          }
+          else if (declared.tx_key_index != index + 1)
+          {
+            secure_zero(&extra_keys, sizeof(extra_keys));
+            return CryptoNoteTxError::InvalidArgument;
+          }
+        }
         if (UINT64_MAX - output_total < declared.amount)
+        {
+          secure_zero(&extra_keys, sizeof(extra_keys));
           return CryptoNoteTxError::InvalidAmount;
+        }
 
         if (declared.change)
         {
           if (!owned_change(declared))
+          {
+            secure_zero(&extra_keys, sizeof(extra_keys));
             return CryptoNoteTxError::InvalidArgument;
+          }
           if (UINT64_MAX - change_total < declared.amount)
+          {
+            secure_zero(&extra_keys, sizeof(extra_keys));
             return CryptoNoteTxError::InvalidAmount;
+          }
           change_total += declared.amount;
         }
 
@@ -261,11 +381,23 @@ namespace hexwallet
         uint8_t expected_commitment[kCryptoNoteKeySize];
         uint8_t expected_amount[8];
         uint8_t expected_view_tag = 0;
+        const uint8_t *output_tx_secret = tx_secret;
+        if (declared.tx_key_index != 0)
+        {
+          const size_t additional_index =
+              static_cast<size_t>(declared.tx_key_index - 1);
+          if (additional_index >= additional_tx_key_count)
+          {
+            secure_zero(&extra_keys, sizeof(extra_keys));
+            return CryptoNoteTxError::InvalidArgument;
+          }
+          output_tx_secret = additional_tx_secrets[additional_index];
+        }
 
         // encode emits both the 8-byte ciphertext and the commitment it committed
         // to, which is exactly the pair the wire carries.
         const bool step_ok =
-            cryptonote_generate_key_derivation(declared.view_public, tx_secret, derivation) &&
+            cryptonote_generate_key_derivation(declared.view_public, output_tx_secret, derivation) &&
             cryptonote_derivation_to_scalar(derivation, index, amount_key) &&
             cryptonote_derive_public_key(derivation, index, declared.spend_public, expected_public) &&
             ringct_encode_amount(RingCtAmountEncoding::Compact, amount_key, declared.amount,
@@ -276,6 +408,7 @@ namespace hexwallet
         {
           secure_zero(derivation, sizeof(derivation));
           secure_zero(amount_key, sizeof(amount_key));
+          secure_zero(&extra_keys, sizeof(extra_keys));
           return CryptoNoteTxError::CryptoFailure;
         }
 
@@ -288,7 +421,10 @@ namespace hexwallet
         secure_zero(derivation, sizeof(derivation));
         secure_zero(amount_key, sizeof(amount_key));
         if (!matches)
+        {
+          secure_zero(&extra_keys, sizeof(extra_keys));
           return CryptoNoteTxError::InvalidAmount;
+        }
         REVIEW_STAGE(14 + static_cast<int>(index));
         output_total += declared.amount;
       }
@@ -534,6 +670,7 @@ namespace hexwallet
       result->summary.output_count = static_cast<uint8_t>(output_count);
       result->summary.input_count = static_cast<uint8_t>(input_count);
       result->summary.decoys_host_supplied = true;
+      secure_zero(&extra_keys, sizeof(extra_keys));
       return CryptoNoteTxError::Ok;
     }
   } // namespace
@@ -546,11 +683,30 @@ namespace hexwallet
       const CryptoNoteReviewOutput *outputs, size_t output_count,
       CryptoNoteReviewResult *result)
   {
+    return cryptonote_review_transaction_with_additional_keys(
+        tx, view_secret, spend_secret, tx_secret, nullptr, 0, inputs,
+        input_count, outputs, output_count, result);
+  }
+
+  CryptoNoteTxError cryptonote_review_transaction_with_additional_keys(
+      const CryptoNoteTransaction &tx,
+      const uint8_t view_secret[kCryptoNoteKeySize],
+      const uint8_t spend_secret[kCryptoNoteKeySize],
+      const uint8_t tx_secret[kCryptoNoteKeySize],
+      const uint8_t additional_tx_secrets[][kCryptoNoteKeySize],
+      size_t additional_tx_key_count,
+      const CryptoNoteReviewInput *inputs, size_t input_count,
+      const CryptoNoteReviewOutput *outputs, size_t output_count,
+      CryptoNoteReviewResult *result)
+  {
     if (result == nullptr)
       return CryptoNoteTxError::InvalidArgument;
     secure_zero(result, sizeof(*result));
     const CryptoNoteTxError error = review_impl(tx, view_secret, spend_secret,
-                                                tx_secret, inputs, input_count, outputs, output_count, result);
+                                                tx_secret, additional_tx_secrets,
+                                                additional_tx_key_count, inputs,
+                                                input_count, outputs, output_count,
+                                                result);
     if (error != CryptoNoteTxError::Ok)
       secure_zero(result, sizeof(*result));
     return error;
@@ -568,6 +724,7 @@ namespace hexwallet
     constexpr uint64_t kSendAmount = 400000000000ULL;
     constexpr uint64_t kChangeAmount = 400000000000ULL;
     constexpr uint64_t kFee = 100000000000ULL;
+    constexpr uint64_t kSingleOutputAmount = 800000000000ULL;
 
     struct Fixture
     {
@@ -581,6 +738,19 @@ namespace hexwallet
 
     static Fixture g_fixture;
     static uint8_t g_pseudo_masks[kCryptoNoteMaxTxInputs * kCryptoNoteKeySize];
+
+    struct SingleFixture
+    {
+      CryptoNoteTransaction tx;
+      CryptoNoteReviewInput input;
+      CryptoNoteReviewOutput output;
+      uint8_t ring[kCryptoNoteMaxRingSize * sizeof(CryptoNoteRingMember)];
+      uint64_t offsets[kCryptoNoteMaxRingSize];
+      uint8_t tx_secret[kCryptoNoteKeySize];
+      uint8_t pseudo_mask[kCryptoNoteKeySize];
+    };
+
+    static SingleFixture g_single_fixture;
 
     bool build_fixture()
     {
@@ -692,11 +862,194 @@ namespace hexwallet
       return true;
     }
 
+    bool build_single_fixture()
+    {
+      if (!build_fixture())
+        return false;
+
+      SingleFixture &f = g_single_fixture;
+      memset(&f, 0, sizeof(f));
+      memcpy(f.ring, g_fixture.ring, sizeof(f.ring));
+      memcpy(f.offsets, g_fixture.offsets, sizeof(f.offsets));
+      memcpy(f.tx_secret, g_fixture.tx_secret, sizeof(f.tx_secret));
+
+      uint8_t our_spend_public[kCryptoNoteKeySize];
+      uint8_t our_view_public[kCryptoNoteKeySize];
+      uint8_t recipient_spend_public[kCryptoNoteKeySize];
+      uint8_t recipient_view_public[kCryptoNoteKeySize];
+      if (!cryptonote_scalar_to_point(kSpendSecret, our_spend_public) ||
+          !cryptonote_scalar_to_point(kViewSecret, our_view_public) ||
+          !cryptonote_scalar_to_point(kRecipientSpendSecret,
+                                      recipient_spend_public) ||
+          !cryptonote_scalar_to_point(kRecipientViewSecret,
+                                      recipient_view_public))
+        return false;
+
+      uint8_t original_tx_public[kCryptoNoteKeySize];
+      uint8_t derivation[kCryptoNoteKeySize];
+      uint8_t amount_key[kCryptoNoteKeySize];
+      uint8_t input_mask[kCryptoNoteKeySize];
+      uint8_t one_time_secret[kCryptoNoteKeySize];
+      if (!cryptonote_scalar_to_point(kSenderTxSecret, original_tx_public) ||
+          !cryptonote_generate_key_derivation(our_view_public,
+                                              kSenderTxSecret, derivation) ||
+          !cryptonote_derivation_to_scalar(derivation, 0, amount_key) ||
+          !ringct_commitment_mask(amount_key, input_mask) ||
+          !cryptonote_derive_secret_key(derivation, 0, kSpendSecret,
+                                        one_time_secret))
+        return false;
+
+      CryptoNoteSpendInput spend = {};
+      spend.amount = kInputAmount;
+      spend.real_index = 2;
+      spend.ring_size = 16;
+      memcpy(spend.mask, input_mask, kCryptoNoteKeySize);
+      const CryptoNoteRingMember *single_ring =
+          reinterpret_cast<const CryptoNoteRingMember *>(f.ring);
+      memcpy(spend.commitment, single_ring[2].mask, kCryptoNoteKeySize);
+      memcpy(spend.spend_secret, one_time_secret, kCryptoNoteKeySize);
+      memcpy(spend.ring, f.ring, sizeof(f.ring));
+      memcpy(spend.key_offsets, f.offsets, sizeof(f.offsets));
+
+      CryptoNoteSpendOutput built = {};
+      memcpy(built.spend_public, recipient_spend_public,
+             kCryptoNoteKeySize);
+      memcpy(built.view_public, recipient_view_public, kCryptoNoteKeySize);
+      built.amount = kSingleOutputAmount;
+
+      uint8_t entropy[kCryptoNoteKeySize];
+      if (!cryptonote_hash_to_scalar(
+              reinterpret_cast<const uint8_t *>("review-fixture"), 14,
+              entropy))
+        return false;
+      const CryptoNoteBpPlusProof proof =
+#include "src/generated/MoneroReviewSingleProofTest.inc"
+          ;
+      if (cryptonote_build_spend_transaction(
+              &spend, 1, &built, 1, kFee, entropy, &f.tx, &proof, 1,
+              f.pseudo_mask) != CryptoNoteTxError::Ok)
+        return false;
+
+      uint8_t subaddress_tx_public[kCryptoNoteKeySize];
+      if (!ed25519_point_mul_compressed(recipient_spend_public, f.tx_secret,
+                                        subaddress_tx_public) ||
+          f.tx.extra_size < 1 + kCryptoNoteKeySize ||
+          f.tx.extra[0] != 0x01)
+        return false;
+      memcpy(f.tx.extra + 1, subaddress_tx_public, kCryptoNoteKeySize);
+
+      f.input.amount = kInputAmount;
+      f.input.real_index = 2;
+      f.input.ring_size = 16;
+      memcpy(f.input.original_tx_public, original_tx_public,
+             kCryptoNoteKeySize);
+      f.input.output_index = 0;
+      f.input.ring = reinterpret_cast<CryptoNoteRingMember *>(f.ring);
+      f.input.key_offsets = f.offsets;
+      memcpy(f.input.pseudo_out_mask, f.pseudo_mask, kCryptoNoteKeySize);
+
+      memcpy(f.output.spend_public, recipient_spend_public,
+             kCryptoNoteKeySize);
+      memcpy(f.output.view_public, recipient_view_public, kCryptoNoteKeySize);
+      f.output.amount = kSingleOutputAmount;
+      f.output.address_type = 1;
+
+      secure_zero(our_spend_public, sizeof(our_spend_public));
+      secure_zero(our_view_public, sizeof(our_view_public));
+      secure_zero(recipient_spend_public, sizeof(recipient_spend_public));
+      secure_zero(recipient_view_public, sizeof(recipient_view_public));
+      secure_zero(original_tx_public, sizeof(original_tx_public));
+      secure_zero(derivation, sizeof(derivation));
+      secure_zero(amount_key, sizeof(amount_key));
+      secure_zero(input_mask, sizeof(input_mask));
+      secure_zero(one_time_secret, sizeof(one_time_secret));
+      secure_zero(entropy, sizeof(entropy));
+      secure_zero(subaddress_tx_public, sizeof(subaddress_tx_public));
+      secure_zero(&spend, sizeof(spend));
+      return true;
+    }
+
     CryptoNoteTxError review_fixture(CryptoNoteReviewResult *result)
     {
       Fixture &f = g_fixture;
       return cryptonote_review_transaction(f.tx, kViewSecret, kSpendSecret, f.tx_secret,
                                            &f.input, 1, f.outputs, 2, result);
+    }
+
+    CryptoNoteTxError review_single_fixture(CryptoNoteReviewResult *result)
+    {
+      SingleFixture &f = g_single_fixture;
+      return cryptonote_review_transaction(f.tx, kViewSecret, kSpendSecret,
+                                           f.tx_secret, &f.input, 1,
+                                           &f.output, 1, result);
+    }
+
+    bool build_mixed_fixture(
+        CryptoNoteTransaction *tx, CryptoNoteReviewOutput outputs[2],
+        uint8_t additional_secrets[2][kCryptoNoteKeySize])
+    {
+      if (tx == nullptr || outputs == nullptr || additional_secrets == nullptr)
+        return false;
+      Fixture &f = g_fixture;
+      *tx = f.tx;
+      memcpy(outputs, f.outputs, sizeof(f.outputs));
+      memcpy(additional_secrets[0], f.tx_secret, kCryptoNoteKeySize);
+      memcpy(additional_secrets[1], f.tx_secret, kCryptoNoteKeySize);
+
+      uint8_t recipient_spend_public[kCryptoNoteKeySize];
+      uint8_t additional_subaddress_public[kCryptoNoteKeySize];
+      uint8_t additional_standard_public[kCryptoNoteKeySize];
+      const bool keys_ok =
+          cryptonote_scalar_to_point(kRecipientSpendSecret,
+                                     recipient_spend_public) &&
+          ed25519_point_mul_compressed(recipient_spend_public, f.tx_secret,
+                                       additional_subaddress_public) &&
+          cryptonote_scalar_to_point(f.tx_secret, additional_standard_public);
+      if (!keys_ok ||
+          tx->extra_size > sizeof(tx->extra) ||
+          sizeof(tx->extra) - tx->extra_size <
+              2 + 2 * kCryptoNoteKeySize)
+        return false;
+
+      const size_t extra_offset = tx->extra_size;
+      tx->extra[tx->extra_size++] = kExtraTagAdditionalPublicKeys;
+      tx->extra[tx->extra_size++] = 2;
+      memcpy(tx->extra + tx->extra_size, additional_subaddress_public,
+             kCryptoNoteKeySize);
+      tx->extra_size += kCryptoNoteKeySize;
+      memcpy(tx->extra + tx->extra_size, additional_standard_public,
+             kCryptoNoteKeySize);
+      tx->extra_size += kCryptoNoteKeySize;
+
+      outputs[0].address_type = 1;
+      outputs[0].tx_key_index = 1;
+      outputs[1].address_type = 0;
+      outputs[1].tx_key_index = 0;
+
+      secure_zero(recipient_spend_public, sizeof(recipient_spend_public));
+      secure_zero(additional_subaddress_public,
+                  sizeof(additional_subaddress_public));
+      secure_zero(additional_standard_public,
+                  sizeof(additional_standard_public));
+      return tx->extra_size == extra_offset + 2 + 2 * kCryptoNoteKeySize;
+    }
+
+    CryptoNoteTxError review_mixed_fixture(CryptoNoteReviewResult *result)
+    {
+      CryptoNoteTransaction tx = {};
+      CryptoNoteReviewOutput outputs[2] = {};
+      uint8_t additional_secrets[2][kCryptoNoteKeySize] = {};
+      if (!build_mixed_fixture(&tx, outputs, additional_secrets))
+        return CryptoNoteTxError::CryptoFailure;
+      const CryptoNoteTxError error =
+          cryptonote_review_transaction_with_additional_keys(
+              tx, kViewSecret, kSpendSecret, g_fixture.tx_secret,
+              additional_secrets, 2, &g_fixture.input, 1, outputs, 2,
+              result);
+      secure_zero(&tx, sizeof(tx));
+      secure_zero(outputs, sizeof(outputs));
+      secure_zero(additional_secrets, sizeof(additional_secrets));
+      return error;
     }
   } // namespace
 
@@ -711,6 +1064,7 @@ namespace hexwallet
     {
       uint8_t extra[300] = {1, 1};
       uint8_t key[kCryptoNoteKeySize];
+      CryptoNoteTxExtraPublicKeys parsed = {};
       if (!cryptonote_review_extra_public_key(extra, 33, key) || key[0] != 1)
         return false;
       extra[33] = 1;
@@ -719,12 +1073,21 @@ namespace hexwallet
       for (uint8_t value : key)
         if (value != 0)
           return false;
-      extra[33] = 4; // unsupported additional transaction public keys
-      if (cryptonote_review_extra_public_key(extra, 34, key))
+      extra[33] = 4;
+      extra[34] = 1;
+      memset(extra + 35, 2, kCryptoNoteKeySize);
+      if (!cryptonote_review_extra_public_keys(extra, 67, &parsed) ||
+          parsed.additional_count != 1 || parsed.additional[0][0] != 2 ||
+          !cryptonote_review_extra_public_key(extra, 67, key) ||
+          key[0] != 1)
+        return false;
+      extra[34] = 0; // zero-length additional vector
+      if (cryptonote_review_extra_public_keys(extra, 67, &parsed))
+        return false;
+      extra[34] = 1;
+      if (cryptonote_review_extra_public_keys(extra, 66, &parsed))
         return false;
       extra[33] = 2;
-      if (cryptonote_review_extra_public_key(extra, 34, key))
-        return false;
       extra[34] = 16;
       if (cryptonote_review_extra_public_key(extra, 50, key) ||
           !cryptonote_review_extra_public_key(extra, 51, key))
@@ -755,10 +1118,7 @@ namespace hexwallet
     // ---- the honest transaction must be accepted -------------------------
     REVIEW_STAGE(1);
     if (!build_fixture())
-    {
-      g_review_error = 100;
       return false;
-    }
     REVIEW_STAGE(3);
     g_review_error = static_cast<int>(review_fixture(&result));
     if (g_review_error != 0)
@@ -773,6 +1133,56 @@ namespace hexwallet
       return false;
     if (result.summary.input_count != 1 || result.summary.output_count != 2)
       return false;
+
+    // An independently generated one-output proof must accept the
+    // single-subaddress R = rD transaction-key form.
+    if (!build_single_fixture() ||
+        review_single_fixture(&result) != CryptoNoteTxError::Ok ||
+        result.summary.total_input != kInputAmount ||
+        result.summary.total_output != kSingleOutputAmount ||
+        result.summary.change != 0 ||
+        result.summary.fee != kFee ||
+        result.summary.input_count != 1 ||
+        result.summary.output_count != 1)
+      return false;
+    {
+      uint8_t saved[kCryptoNoteKeySize];
+      memcpy(saved, g_single_fixture.tx.extra + 1, kCryptoNoteKeySize);
+      memcpy(g_single_fixture.tx.extra + 1,
+             g_fixture.tx.extra + 1, kCryptoNoteKeySize);
+      if (review_single_fixture(&result) != CryptoNoteTxError::InvalidArgument)
+        return false;
+      memcpy(g_single_fixture.tx.extra + 1, saved, kCryptoNoteKeySize);
+    }
+
+    // A mixed standard/subaddress transaction must bind each output to its
+    // output-indexed additional transaction key.
+    if (review_mixed_fixture(&result) != CryptoNoteTxError::Ok)
+      return false;
+    {
+      CryptoNoteTransaction mixed_tx = {};
+      CryptoNoteReviewOutput mixed_outputs[2] = {};
+      uint8_t additional_secrets[2][kCryptoNoteKeySize] = {};
+      if (!build_mixed_fixture(&mixed_tx, mixed_outputs, additional_secrets))
+        return false;
+      mixed_outputs[0].tx_key_index = 2;
+      if (cryptonote_review_transaction_with_additional_keys(
+              mixed_tx, kViewSecret, kSpendSecret, g_fixture.tx_secret,
+              additional_secrets, 2, &g_fixture.input, 1, mixed_outputs, 2,
+              &result) != CryptoNoteTxError::InvalidArgument)
+        return false;
+      mixed_outputs[0].tx_key_index = 1;
+      additional_secrets[0][0] ^= 0x01;
+      if (cryptonote_review_transaction_with_additional_keys(
+              mixed_tx, kViewSecret, kSpendSecret, g_fixture.tx_secret,
+              additional_secrets, 2, &g_fixture.input, 1, mixed_outputs, 2,
+              &result) != CryptoNoteTxError::InvalidArgument)
+        return false;
+      secure_zero(&mixed_tx, sizeof(mixed_tx));
+      secure_zero(mixed_outputs, sizeof(mixed_outputs));
+      secure_zero(additional_secrets, sizeof(additional_secrets));
+    }
+
     {
       uint8_t derivation[kCryptoNoteKeySize];
       uint8_t one_time_secret[kCryptoNoteKeySize];
@@ -794,11 +1204,11 @@ namespace hexwallet
     Fixture &f = g_fixture;
 
     f.outputs[0].address_type = 1;
-    if (review_fixture(&result) != CryptoNoteTxError::Unsupported)
+    if (review_fixture(&result) != CryptoNoteTxError::InvalidArgument)
       return false;
     f.outputs[0].address_type = 0;
     f.outputs[1].subaddress_minor = 1;
-    if (review_fixture(&result) != CryptoNoteTxError::Unsupported)
+    if (review_fixture(&result) != CryptoNoteTxError::InvalidArgument)
       return false;
     f.outputs[1].subaddress_minor = 0;
 

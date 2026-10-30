@@ -47,12 +47,18 @@ namespace hexwallet
   struct CryptoNoteReviewOutput
   {
     bool change;
-    uint8_t address_type; // 0 standard; subaddress sends require additional key binding
+    uint8_t address_type; // 0 standard; 1 subaddress
+    // 0 selects the primary transaction secret. A nonzero value is one-based
+    // and selects the corresponding additional transaction secret. Monero
+    // binds additional key i to output i, so the review layer checks that
+    // relationship against tx_extra as well as against the output keys.
+    uint8_t tx_key_index;
     uint8_t spend_public[kCryptoNoteKeySize];
     uint8_t view_public[kCryptoNoteKeySize];
     uint64_t amount;
     uint8_t mask[kCryptoNoteKeySize];
-    // Claimed subaddress of a change output; ignored for external outputs.
+    // Claimed subaddress of a change output. External subaddresses carry
+    // their public keys directly and leave these indices at zero.
     uint32_t subaddress_major;
     uint32_t subaddress_minor;
   };
@@ -83,11 +89,37 @@ namespace hexwallet
       const CryptoNoteReviewOutput *outputs, size_t output_count,
       CryptoNoteReviewResult *result);
 
+  // Monero destinations that mix standard addresses and subaddresses use one
+  // additional transaction secret per output. The secrets are supplied by the
+  // host only as transaction-construction witnesses; the device verifies their
+  // public keys, tx_extra placement and output derivations before review.
+  CryptoNoteTxError cryptonote_review_transaction_with_additional_keys(
+      const CryptoNoteTransaction &tx,
+      const uint8_t view_secret[kCryptoNoteKeySize],
+      const uint8_t spend_secret[kCryptoNoteKeySize],
+      const uint8_t tx_secret[kCryptoNoteKeySize],
+      const uint8_t additional_tx_secrets[][kCryptoNoteKeySize],
+      size_t additional_tx_key_count,
+      const CryptoNoteReviewInput *inputs, size_t input_count,
+      const CryptoNoteReviewOutput *outputs, size_t output_count,
+      CryptoNoteReviewResult *result);
+
   bool cryptonote_tx_extra_public_key(const CryptoNoteTransaction &tx,
                                       uint8_t out[kCryptoNoteKeySize]);
 
-  // Restricted signing schema: one leading public key, at most one nonce,
-  // optional trailing zero padding. Reject duplicate/unknown/additional keys.
+  struct CryptoNoteTxExtraPublicKeys
+  {
+    uint8_t primary[kCryptoNoteKeySize];
+    uint8_t additional_count;
+    uint8_t additional[kCryptoNoteMaxTxOutputs][kCryptoNoteKeySize];
+  };
+
+  // Restricted signing schema: one primary public key, at most one nonce,
+  // optional additional public-key vector, and optional trailing zero padding.
+  // Unknown, duplicate, non-canonical or truncated fields are rejected.
+  bool cryptonote_review_extra_public_keys(
+      const uint8_t *extra, size_t size, CryptoNoteTxExtraPublicKeys *out);
+
   bool cryptonote_review_extra_public_key(const uint8_t *extra, size_t size,
                                           uint8_t out[kCryptoNoteKeySize]);
 

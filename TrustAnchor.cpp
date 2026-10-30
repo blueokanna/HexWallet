@@ -1,6 +1,7 @@
 #include "TrustAnchor.h"
 
 #include <string.h>
+#include <mbedtls/md.h>
 
 #include "CryptoPrimitives.h"
 #include "WalletConfig.h"
@@ -129,7 +130,8 @@ namespace hexwallet
     // so it is never promoted to Verified.
     if (!state.flash_encryption_known)
       return TrustLevel::Unknown;
-    if (state.secure_boot_enabled && state.flash_encryption_enabled)
+    if (state.secure_boot_enabled && !state.secure_boot_from_config &&
+        state.flash_encryption_enabled)
     {
       return TrustLevel::Verified;
     }
@@ -152,46 +154,55 @@ namespace hexwallet
                          const char *const *lines, size_t line_count,
                          uint32_t now_ms, uint32_t window_ms)
   {
-    if (seal == nullptr || nonce == nullptr || lines == nullptr || line_count == 0 ||
-        line_count > 64)
-    {
-      return false;
-    }
+    if (seal == nullptr) return false;
+    // Copy first: nonce may refer to seal->nonce when a review is rebuilt.
+    uint8_t nonce_copy[kReviewSealNonceSize] = {};
+    if (nonce != nullptr) memcpy(nonce_copy, nonce, sizeof(nonce_copy));
     memset(seal, 0, sizeof(*seal));
-    memcpy(seal->nonce, nonce, kReviewSealNonceSize);
+    seal->consumed = true; // Every failure revokes any previous authorization.
+    if (nonce == nullptr || lines == nullptr || line_count == 0 ||
+        line_count > kReviewSealMaxLines || window_ms > INT32_MAX) return false;
 
-    // Build a canonical byte stream: nonce, line count, then every line as
-    // u32 length + bytes. Length prefixes are what make the encoding unambiguous.
-    uint8_t stream[1024];
-    size_t used = 0;
-    if (used + kReviewSealNonceSize > sizeof(stream))
-      return false;
-    memcpy(stream + used, nonce, kReviewSealNonceSize);
-    used += kReviewSealNonceSize;
-    const uint32_t count = static_cast<uint32_t>(line_count);
-    stream[used++] = static_cast<uint8_t>(count >> 24);
-    stream[used++] = static_cast<uint8_t>(count >> 16);
-    stream[used++] = static_cast<uint8_t>(count >> 8);
-    stream[used++] = static_cast<uint8_t>(count);
+    // Preserve the canonical encoding without a large stack buffer: nonce,
+    // big-endian u32 count, then u32 length + exact bytes for each label.
+    mbedtls_md_context_t context;
+    mbedtls_md_init(&context);
+    struct Cleanup {
+      mbedtls_md_context_t *context;
+      ~Cleanup() { mbedtls_md_free(context); }
+    } cleanup{&context};
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (info == nullptr || mbedtls_md_setup(&context, info, 0) != 0 ||
+        mbedtls_md_starts(&context) != 0 ||
+        mbedtls_md_update(&context, nonce_copy, sizeof(nonce_copy)) != 0) return false;
+    auto length_prefix = [&context](size_t length) {
+      const uint8_t bytes[4] = {static_cast<uint8_t>(length >> 24),
+          static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 8),
+          static_cast<uint8_t>(length)};
+      return mbedtls_md_update(&context, bytes, sizeof(bytes)) == 0;
+    };
+    if (!length_prefix(line_count)) return false;
+    size_t text_bytes = 0;
     for (size_t index = 0; index < line_count; ++index)
     {
       if (lines[index] == nullptr)
         return false;
-      const size_t length = strlen(lines[index]);
-      if (length > 0xFFU || used + 4 + length > sizeof(stream))
+      size_t length = 0;
+      while (length <= kReviewSealMaxLineBytes && lines[index][length] != '\0') ++length;
+      if (length > kReviewSealMaxLineBytes ||
+          length > kReviewSealMaxTextBytes - text_bytes) return false;
+      text_bytes += length;
+      if (!length_prefix(length) ||
+          mbedtls_md_update(&context, reinterpret_cast<const uint8_t *>(lines[index]), length) != 0)
         return false;
-      stream[used++] = static_cast<uint8_t>(length >> 24);
-      stream[used++] = static_cast<uint8_t>(length >> 16);
-      stream[used++] = static_cast<uint8_t>(length >> 8);
-      stream[used++] = static_cast<uint8_t>(length);
-      memcpy(stream + used, lines[index], length);
-      used += length;
     }
-    const bool hashed = crypto_sha256(stream, used, seal->digest);
-    secure_zero(stream, used);
-    if (!hashed)
+    if (mbedtls_md_finish(&context, seal->digest) != 0) {
+      secure_zero(seal->digest, sizeof(seal->digest));
       return false;
+    }
+    memcpy(seal->nonce, nonce_copy, sizeof(nonce_copy));
     seal->expires_ms = now_ms + window_ms;
+    seal->built = true;
     seal->displayed = false;
     seal->consumed = false;
     return true;
@@ -200,6 +211,7 @@ namespace hexwallet
   bool review_seal_matches(const ReviewSeal &seal, const char *const *lines,
                            size_t line_count)
   {
+    if (!seal.built) return false;
     ReviewSeal rebuilt = {};
     if (!review_seal_build(&rebuilt, seal.nonce, lines, line_count, 0, 0))
     {
@@ -210,7 +222,7 @@ namespace hexwallet
 
   void review_seal_mark_displayed(ReviewSeal *seal)
   {
-    if (seal == nullptr || seal->consumed)
+    if (seal == nullptr || !seal->built || seal->consumed)
       return;
     seal->displayed = true;
   }
@@ -218,7 +230,7 @@ namespace hexwallet
   bool review_seal_authorize(ReviewSeal *seal, const char *const *lines,
                              size_t line_count, uint32_t now_ms)
   {
-    if (seal == nullptr || !seal->displayed || seal->consumed)
+    if (seal == nullptr || !seal->built || !seal->displayed || seal->consumed)
       return false;
     // Signed compare, not `now_ms < expires_ms`: the two are unsigned and a wrap
     // must not turn into an eternal authorization.
@@ -239,7 +251,7 @@ namespace hexwallet
   }
 
   bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now_ms) {
-  if (seal == nullptr || !seal->displayed || seal->consumed) return false;
+  if (seal == nullptr || !seal->built || !seal->displayed || seal->consumed) return false;
   if (static_cast<int32_t>(now_ms - seal->expires_ms) >= 0) {
     seal->consumed = true;
     return false;
@@ -276,6 +288,8 @@ void review_seal_code(const ReviewSeal &seal, char out[9])
     passed = trust_level(state) == TrustLevel::Encrypted && passed;
     state.secure_boot_enabled = true;
     passed = trust_level(state) == TrustLevel::Verified && passed;
+    state.secure_boot_from_config = true;
+    passed = trust_level(state) == TrustLevel::Encrypted && passed;
 
     // Seals: deterministic, order-sensitive, and not fooled by moved characters.
     static const uint8_t kNonce[kReviewSealNonceSize] = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -347,6 +361,41 @@ void review_seal_code(const ReviewSeal &seal, char out[9])
     passed = !review_seal_build(&seal, kNonce, lines_a, 0, 0, 0) && passed;
     const char *null_line[] = {"BTC", nullptr};
     passed = !review_seal_build(&seal, kNonce, null_line, 2, 0, 0) && passed;
+    review_seal_mark_displayed(&seal);
+    passed = !seal.built && !seal.displayed && seal.consumed && passed;
+    passed = !review_seal_authorize_rendered(&seal, UINT32_MAX) && passed;
+
+    // Full EVM access-list labels exceed the former 255-byte/1 KiB limits.
+    // Exercise the last byte, truncation rejection, line count and total cap.
+    static char large[kReviewSealMaxLineBytes + 2];
+    memset(large, 'A', sizeof(large));
+    large[kReviewSealMaxLineBytes] = '\0';
+    const char *long_lines[] = {"ETH", large};
+    passed = review_seal_build(&seal, kNonce, long_lines, 2, UINT32_MAX - 49, 100) && passed;
+    passed = review_seal_matches(seal, long_lines, 2) && passed;
+    large[kReviewSealMaxLineBytes - 1] = 'B';
+    passed = !review_seal_matches(seal, long_lines, 2) && passed;
+    large[kReviewSealMaxLineBytes - 1] = 'A';
+    review_seal_mark_displayed(&seal);
+    passed = review_seal_authorize(&seal, long_lines, 2, 20) && passed;
+    large[kReviewSealMaxLineBytes] = 'A';
+    large[kReviewSealMaxLineBytes + 1] = '\0';
+    passed = !review_seal_build(&seal, kNonce, long_lines, 2, 0, 100) && passed;
+    large[kReviewSealMaxLineBytes] = '\0';
+    const char *many[kReviewSealMaxLines + 1];
+    for (const char *&line : many) line = "";
+    passed = review_seal_build(&seal, kNonce, many, kReviewSealMaxLines, 0, 100) && passed;
+    passed = !review_seal_build(&seal, kNonce, many, kReviewSealMaxLines + 1, 0, 100) && passed;
+    for (size_t i = 0; i < 9; ++i) many[i] = large;
+    passed = review_seal_build(&seal, kNonce, many, 8, 0, 100) && passed;
+    passed = !review_seal_build(&seal, kNonce, many, 9, 0, 100) && passed;
+    passed = !review_seal_build(&seal, kNonce, lines_a, 3, 0, 0x80000000U) && passed;
+    // A failed rebuild must revoke a previously displayed seal, even when
+    // validation fails before hashing begins.
+    passed = review_seal_build(&seal, kNonce, lines_a, 3, 0, 100) && passed;
+    review_seal_mark_displayed(&seal);
+    passed = !review_seal_build(&seal, nullptr, lines_a, 3, 0, 100) && passed;
+    passed = !review_seal_authorize(&seal, lines_a, 3, 1) && passed;
     return passed;
   }
 

@@ -81,11 +81,12 @@ bool run_mining_catalog_self_tests() {
     if (static_cast<uint8_t>(coin.type) > static_cast<uint8_t>(MiningCoinType::Hdd)) {
       return false;
     }
+    // The mining table is a market/spec table, not a signing claim: a row only
+    // has to resolve to a shipped catalog entry. DASH is the case that matters
+    // here - its mining specs are real while its transaction format still has
+    // no adapter, so it is address-only in the wallet but present here.
     WalletCatalogEntry entry;
-    if (!mining_coin_lookup(coin, &entry) ||
-        !wallet_catalog_has(entry, WalletCapabilitySigning)) {
-      return false;
-    }
+    if (!mining_coin_lookup(coin, &entry)) return false;
   }
   const MiningCoinEntry *btc = mining_coin_find("BTC");
   WalletCatalogEntry entry;

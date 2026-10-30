@@ -1,4 +1,4 @@
-﻿# Diagnostic build: compiles the host self-test suite with clang-cl + UBSan to
+# Diagnostic build: compiles the host self-test suite with clang-cl + UBSan to
 # surface any undefined behavior in the crypto code that MSVC's /O2 tolerates
 # but other optimizers expose. NOT part of CI; run manually:
 #   powershell -ExecutionPolicy Bypass -File tests/host/build_clang_ubsan.ps1
@@ -49,9 +49,9 @@ $cppSources = @(
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletTokens.cpp",
-  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "QrlXmss.cpp", "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
-  "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp",
-  "BitcoinTransaction.cpp",
+  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "QrlXmss.cpp", "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp",
+  "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp",
+  "BitcoinTransaction.cpp", "MaidSprite.cpp",
   "host_security.cpp", "host_test_main.cpp"
 )
 $cppObjs = @()

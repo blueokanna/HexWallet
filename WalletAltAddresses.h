@@ -42,6 +42,11 @@ WalletError address_cashaddr_from_script(const char *prefix, const uint8_t *scri
 WalletError address_solana(const uint8_t public_key[32], char *out,
                            size_t *in_out_size);
 
+// Aeternity: "ak_" + base58(ed25519_pubkey || sha256d(pubkey)[0..3]).
+// The checksum covers the 32-byte key only; no version byte is present.
+WalletError address_aeternity(const uint8_t public_key[32], char *out,
+                              size_t out_size);
+
 // Algorand: base32(ed25519 pubkey || last-4-bytes of sha512/256(pubkey)).
 WalletError address_algorand(const uint8_t public_key[32], char *out,
                              size_t out_size);

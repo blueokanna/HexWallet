@@ -223,6 +223,38 @@ namespace hexwallet
     return ok ? WalletError::Ok : WalletError::BufferTooSmall;
   }
 
+  WalletError address_aeternity(const uint8_t public_key[32], char *out,
+                                size_t out_size)
+  {
+    constexpr size_t kChecksumSize = 4;
+    constexpr char kPrefix[] = "ak_";
+    constexpr size_t kPrefixSize = sizeof(kPrefix) - 1;
+    if (public_key == nullptr || out == nullptr)
+    {
+      return WalletError::InvalidArgument;
+    }
+    if (out_size <= kPrefixSize + 1)
+    {
+      return WalletError::BufferTooSmall;
+    }
+    uint8_t payload[32 + kChecksumSize];
+    uint8_t digest[kSha256Size];
+    if (!crypto_double_sha256(public_key, 32, digest))
+    {
+      secure_zero(digest, sizeof(digest));
+      return WalletError::CryptoFailure;
+    }
+    memcpy(payload, public_key, 32);
+    memcpy(payload + 32, digest, kChecksumSize);
+    memcpy(out, kPrefix, kPrefixSize);
+    size_t encoded_size = out_size - kPrefixSize;
+    const bool ok = b58enc(out + kPrefixSize, &encoded_size, payload,
+                           sizeof(payload));
+    secure_zero(payload, sizeof(payload));
+    secure_zero(digest, sizeof(digest));
+    return ok ? WalletError::Ok : WalletError::BufferTooSmall;
+  }
+
   WalletError address_algorand(const uint8_t public_key[32], char *out,
                                size_t out_size)
   {
@@ -853,6 +885,7 @@ namespace hexwallet
     bool passed = true;
 
     passed = selftest_report("solana", address_solana(kEdPk, address, &address_size) == WalletError::Ok && strcmp(address, "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9") == 0) && passed;
+    passed = selftest_report("aeternity", address_aeternity(kEdPk, address, sizeof(address)) == WalletError::Ok && strcmp(address, "ak_241gerYcVAvfk7Vc6gFuqBje5CfVJxT1fgzkym5cq2qtfxfKgD") == 0) && passed;
     address_size = sizeof(address);
     passed = selftest_report("tezos", address_tezos_tz1(kEdPk, address, &address_size) == WalletError::Ok && strcmp(address, "tz1c8PEDNfj6UxoQM2XCyfTHM5KbGGgoqDrH") == 0) && passed;
     address_size = sizeof(address);

@@ -119,6 +119,16 @@ int main(int argc, char **argv) {
   if (transaction.review.has_token_id) {
     printf("token_id=%s\n", transaction.review.token_id_text);
   }
+  if (transaction.review.kind == TronKind::Trc10) {
+    printf("asset_id=%s\n", transaction.review.asset_id_text);
+    printf("asset_registered=%u\n", transaction.review.asset_registered ? 1U : 0U);
+  }
+  if (transaction.review.method_text[0] != '\0') {
+    printf("method=%s\n", transaction.review.method_text);
+  }
+  if (transaction.review.has_memo) {
+    printf("memo=%s\n", transaction.review.memo_text);
+  }
   print_hex("txid", transaction.review.tx_id, sizeof(transaction.review.tx_id));
   return 0;
 }

@@ -29,6 +29,16 @@ try {
 
   & 'build/chain-native/Release/chain_probe.exe' chain-selftest
   if ($LASTEXITCODE -ne 0) { throw 'chain_probe self-test failed' }
+  # Real BIP32/ECDSA is linked here, so this runs the device-only Zcash signer
+  # (t1 P2PKH and t3 P2SH-P2PK) instead of the stubbed host harness.
+  & 'build/chain-native/Release/chain_probe.exe' zcash-sign-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'zcash sign self-test failed' }
+  & 'build/chain-native/Release/chain_probe.exe' cosmos-sign-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'cosmos sign self-test failed' }
+  & 'build/chain-native/Release/chain_probe.exe' dash-sign-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'dash sign self-test failed' }
+  & 'build/chain-native/Release/chain_probe.exe' evm-sign-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'evm sign self-test failed' }
 
   & 'build/chain-native/Release/production_policy.exe'
   if ($LASTEXITCODE -ne 0) { throw 'production_policy failed' }

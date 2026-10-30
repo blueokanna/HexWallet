@@ -28,6 +28,12 @@ static_assert(kAddressTextSize >= kCryptoNoteStandardAddressSize,
 
 namespace {
 
+CryptoNoteAddressProfile cryptonote_profile_for(const NetworkProfile &network) {
+  if (network.cryptonote_profile != nullptr) return *network.cryptonote_profile;
+  return {network.account_version, network.cryptonote_integrated_prefix,
+          network.cryptonote_subaddress_prefix};
+}
+
 // Build the display derivation path for a network style.
 bool build_path_text(const NetworkProfile &network, uint32_t account,
                      uint32_t change, uint32_t address_index, char *path,
@@ -216,6 +222,10 @@ WalletError derive_ed25519_address(const NetworkProfile &network,
         result = address_solana(public_key, out->address, &size);
         break;
       }
+    case AddressEncoding::Aeternity:
+      result = address_aeternity(public_key, out->address,
+                                 sizeof(out->address));
+      break;
     case AddressEncoding::Ed25519Base32:
       result = address_algorand(public_key, out->address, sizeof(out->address));
       break;
@@ -325,7 +335,7 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
   }
 
   // Ed25519 networks use SLIP-0010 from the seed.
-  if (network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::StellarStrKey || network.encoding == AddressEncoding::NearImplicit || network.encoding == AddressEncoding::Ss58Ed25519 || network.encoding == AddressEncoding::TonAddress || network.encoding == AddressEncoding::SuiEd25519 || network.encoding == AddressEncoding::HederaKeyAlias || network.encoding == AddressEncoding::IcpPrincipal || network.encoding == AddressEncoding::SiaV2 || network.encoding == AddressEncoding::Nem || network.encoding == AddressEncoding::IcpLedgerAccount) {
+  if (network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Aeternity || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::StellarStrKey || network.encoding == AddressEncoding::NearImplicit || network.encoding == AddressEncoding::Ss58Ed25519 || network.encoding == AddressEncoding::TonAddress || network.encoding == AddressEncoding::SuiEd25519 || network.encoding == AddressEncoding::HederaKeyAlias || network.encoding == AddressEncoding::IcpPrincipal || network.encoding == AddressEncoding::SiaV2 || network.encoding == AddressEncoding::Nem || network.encoding == AddressEncoding::IcpLedgerAccount) {
     if (seed == nullptr) {
       clear_derived_address(out);
       return WalletError::InvalidArgument;
@@ -346,11 +356,7 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
   memcpy(out->private_key, child.private_key, kPrivateKeySize);
 
   if (network.encoding == AddressEncoding::CryptoNote) {
-    const CryptoNoteAddressProfile profile = {
-      network.account_version,
-      network.cryptonote_integrated_prefix,
-      network.cryptonote_subaddress_prefix,
-    };
+    const CryptoNoteAddressProfile profile = cryptonote_profile_for(network);
     result = cryptonote_address_from_seed_at(profile, child.private_key, account,
                                              address_index, out->address,
                                              sizeof(out->address),
@@ -530,11 +536,11 @@ WalletError derive_cryptonote_subaddress(const HdPrivateNode &master,
     return result;
   }
 
-  const CryptoNoteAddressProfile profile = {
-    network.account_version,
-    network.cryptonote_integrated_prefix,
-    network.cryptonote_subaddress_prefix,
-  };
+  const CryptoNoteAddressProfile profile = cryptonote_profile_for(network);
+  if (profile.subaddress_prefix == 0) {
+    clear_derived_address(out);
+    return WalletError::InvalidArgument;
+  }
   uint8_t sub_secret[kCryptoNoteKeySize];
   uint8_t sub_public[kCryptoNoteKeySize];
   uint8_t sub_view[kCryptoNoteKeySize];
@@ -695,6 +701,38 @@ bool run_address_self_tests() {
     clear_derived_address(&zero);
     clear_derived_address(&sub);
     clear_derived_address(&again);
+    secure_zero(&master, sizeof(master));
+    secure_zero(seed, sizeof(seed));
+    passed = passed && ok;
+  }
+
+  // New address-only profiles must derive a well-formed address from the same
+  // seed path machinery; this is the bridge between the table and the encoder.
+  {
+    uint8_t seed[kSeedSize];
+    for (size_t index = 0; index < sizeof(seed); ++index)
+      seed[index] = static_cast<uint8_t>(index * 5 + 11);
+    HdPrivateNode master = {};
+    DerivedAddress derived = {};
+    const NetworkProfile *aeternity = find_network_profile("ae");
+    const NetworkProfile *ryo = find_network_profile("ryo");
+    const NetworkProfile *zano = find_network_profile("zano");
+    bool ok = aeternity != nullptr && ryo != nullptr && zano != nullptr &&
+              hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok;
+    ok = ok && derive_address(master, seed, *aeternity, 0, 0, 0, &derived) ==
+                   WalletError::Ok &&
+         strncmp(derived.address, "ak_", 3) == 0;
+    ok = ok && derive_address(master, seed, *ryo, 0, 0, 0, &derived) ==
+                   WalletError::Ok &&
+         strncmp(derived.address, "RYoL", 4) == 0;
+    ok = ok && derive_address(master, seed, *zano, 0, 0, 0, &derived) ==
+                   WalletError::Ok &&
+         strncmp(derived.address, "Zx", 2) == 0;
+    // Zano publishes no standard subaddress prefix. Refuse, do not guess.
+    ok = ok && derive_cryptonote_subaddress(master, *zano, 0, 0, 0, 0, 1,
+                                            &derived) ==
+                   WalletError::InvalidArgument;
+    clear_derived_address(&derived);
     secure_zero(&master, sizeof(master));
     secure_zero(seed, sizeof(seed));
     passed = passed && ok;

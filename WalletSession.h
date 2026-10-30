@@ -15,7 +15,6 @@ WalletError wallet_session_generate();
 WalletError wallet_session_import(const char *mnemonic);
 WalletError wallet_session_load_master(HdPrivateNode *master);
 WalletError wallet_session_load_seed(uint8_t out_seed[kSeedSize]);
-const char *wallet_session_mnemonic_for_export();
 void wallet_session_clear();
 
 }

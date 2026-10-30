@@ -17,7 +17,7 @@ set(WALLET_SOURCES
   ChainCommon.cpp ChainTransaction.cpp VeChainTransaction.cpp IconTransaction.cpp
   PolkadotTransaction.cpp SuiTransaction.cpp FilecoinTransaction.cpp TonTransaction.cpp TonCell.cpp
   DecredTransaction.cpp CkbTransaction.cpp ZcashTransaction.cpp CardanoDerivation.cpp CardanoTransaction.cpp HiveTransaction.cpp HederaTransaction.cpp SiaTransaction.cpp NemTransaction.cpp IcpTransaction.cpp ErgoTransaction.cpp Clvm.cpp ChiaTransaction.cpp BlsG2.cpp EvmTransaction.cpp TokenCalldata.cpp
-  CosmosTransaction.cpp StellarTransaction.cpp AlgorandTransaction.cpp
+  CosmosTransaction.cpp StellarTransaction.cpp AlgorandTransaction.cpp DashTransaction.cpp
   NearTransaction.cpp TezosTransaction.cpp QrlXmss.cpp WalletCustody.cpp SecureElementPort.cpp RandomSource.cpp EinkPanel.cpp QrCode.cpp
   CryptoNoteAddress.cpp CryptoNoteRingCt.cpp CryptoNoteAmounts.cpp CryptoNoteSpend.cpp
   CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp)
