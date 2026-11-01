@@ -76,15 +76,26 @@ are not admitted.
 Vector: `iconsdk`/`coincurve`, private key 1, hash
 `a1fb011a254cc10d250dbaf9a2a3fd04761dcd6a76f0402a21e8493bdae3d016`.
 
-### Polkadot / Kusama (DOT / KSM) — historical codec only
+### Polkadot / Kusama (DOT / KSM)
 
-Production admission is disabled. The codec below hardcodes pallet/call indices
-and accepts host runtime versions without authenticating runtime metadata or the
-complete signed extension set. Historical vectors do not establish current
-relay-chain or Asset Hub compatibility. It is reachable only with BOTH
-`HEXWALLET_HOST_TEST` and `HEXWALLET_LEGACY_SUBSTRATE_TEST_ONLY`.
+Production admission is enabled **only** for the `DOT2` layout, and only for the runtime pair pinned in
+`PolkadotTransaction.cpp` (`kPolkadotRuntime = {2005002, 26}`, `kKusamaRuntime = {2005001, 26}`) with the
+genesis hash pinned per network. The signed-extension set is therefore fixed by construction:
 
-Payload `DOT1` (130 bytes, big-endian amount; other integers little-endian):
+```
+call || era || nonce || tip || spec_version || transaction_version ||
+genesis_hash || era_block_hash || 0x00        (CheckMetadataHash mode 0 = disabled)
+```
+
+`CheckMetadataHash` is carried as an explicit *disabled* mode byte. That byte is part of the signature, so a
+transaction cannot be replayed as if it had been produced with metadata binding; what the device cannot do is
+prove that the metadata it displays matches the chain's current one, which is exactly what mode 0 says. A
+payload whose `spec_version`/`transaction_version` differs from the pinned pair is refused with
+`RuntimeMismatch` before any key is touched.
+
+Payload `DOT2` (156 bytes; amount and tip big-endian, other integers little-endian). `DOT1` (130 bytes, no
+metadata-hash byte, immortal era only) is reachable only in host-test builds and exists for the historical
+vectors.
 
 | Offset | Field |
 | --- | --- |
@@ -469,14 +480,14 @@ anything it cannot prove is unreserved, and `QrlOtsJournal` is that proof:
 - **Account binding.** Records carry a 16-byte tag; a journal that belongs to
   another account returns `WrongAccount` instead of adopting or resetting it.
 
-Still missing, and stated plainly because the reservation alone is not a signer:
-the WOTS+ signature itself and the BDS traversal state that lets the device
-produce the next authentication path without rebuilding the whole tree per
-signature. QRL stays ADDRESS until those land with qrllib-pinned signature
-vectors. The residual risk the journal cannot close is also documented in the
-header: a blank journal is indistinguishable from a wiped one, so the custody
-layer must treat "account exists in the secure element, journal blank" as a
-recovery event rather than initialising it.
+The signer that consumes the reservation lives in `QrlXmss.cpp`: WOTS+ chains,
+the authentication path and `R = PRF(idx, sk_prf)` are all rebuilt on the
+device, and `tests/host/qrl_oracle_check.ps1` compares `xmss_Signmsg` output
+byte for byte at heights 4/6/10 and indices 0/1/last. The residual risk the
+journal cannot close is also documented in the header: a blank journal is
+indistinguishable from a wiped one, so the custody layer must treat "account
+exists in the secure element, journal blank" as a recovery event rather than
+initialising it.
 
 The original `HexWallet/QRL/v1` mapping is preserved at tree index zero. Original
 builds ignored all indices; recovering one of those paths requires tree zero.
@@ -1292,9 +1303,38 @@ same QRL address. The index is now folded into the domain separator
 that index 0 and index 1 give different seeds **and** different addresses.
 
 This changes every QRL address derived by this firmware; the previous values were
-index-independent and had to be replaced. QRL signing remains unimplemented for
-the reasons listed in the QRL section of `chain-signing.md`: no durable
-anti-rollback ledger, no BDS state, no independent signature vector.
+index-independent and had to be replaced. The anti-rollback ledger
+(`QrlOtsJournal` + `QrlOtsStore`), the BDS state and the qrllib signature vectors
+have since landed, so v1 signing is admitted.
+
+### QRL v2: ML-DSA-87 accounts and the Zond envelope
+
+`qrl2` is a separate profile because the account model is different, not a
+renamed v1:
+
+- **Key schedule.** BIP32 `m/44'/238'/account'/change/index` (account hardened,
+  change and index soft). The child private key is the 32-byte FIPS 204 seed;
+  no XMSS tree, no one-time state, no journal.
+- **Address.** `SHAKE256(01 00 00 ‖ pk, 64)`, printed as `Q` + 128 hex digits.
+  The letter case is chosen by a second SHAKE256 block over the lowercase hex
+  body (EIP-55 style, `Q` excluded), so a single substituted character breaks
+  the checksum. Two independent vectors are pinned in
+  `run_qrl_v2_self_tests()`.
+- **Transaction.** Only type `0x02` is parsed: eleven RLP items, canonical
+  integer encodings, no trailing bytes. `chain_id` must be 1, `descriptor` must
+  be `01 00 00`, `extra_params` must be empty, `to` is 64 bytes or empty, and
+  `fee_cap >= tip_cap`. The digest is `keccak256` over the exact preimage that
+  was displayed; the signature is hedged ML-DSA-87 over
+  `00 08 "ZOND" 01 01 00 00 ‖ digest` and the output is `signature ‖ public_key`.
+- **Why the device re-derives.** `qrl_v2_sign_payload()` rebuilds the account
+  from the BIP32 child and refuses to sign when it differs from the review's
+  sender, so a host cannot get a signature for an account the screen never
+  showed.
+
+ML-DSA-87 itself is in `MlDsa87.cpp` (FIPS 204, no external library). The
+ACVP keyGen/sigGen vectors in `tests/fixtures/MlDsa87Acvp.inc` are checked byte
+for byte, and verification is exercised against a public key rebuilt from the
+signing key.
 
 ## EVM 网络与代币证据表
 
@@ -1355,6 +1395,60 @@ Conflux eSpace 1030、Moonbeam 1284、Moonriver 1285、Rootstock 30、Celo 42220
 Starknet 使用 Cairo VM 与 Cairo 交易；Aptos、Sui、TON、NEAR 也不是 EVM。它们需要独立的
 交易序列化、签名与审阅适配器，不能通过增加 chain id 来“支持”。同理，TRON 使用 protobuf
 与 65 字节 recoverable 签名，已经由 `TronTransaction.cpp` 单独实现。
+
+Starknet 现在走自己的曲线与摘要：`StarknetCrypto.cpp` 实现 Stark 曲线、Pedersen/Poseidon、
+Stark ECDSA、SNIP-5 地址与 Cairo v3 交易哈希，`StarknetTransaction.cpp` 只准入 `deploy_account`
+与「账户 `execute` + 1–4 笔 ERC-20 `transfer`」。账户地址不是从路径直接得到的：它是由 class hash、
+salt 与构造参数决定的 SNIP-5 合约地址，设备在每笔交易里重算并与本机 Stark 公钥绑定，
+所以屏上的地址与签名摘要里的 sender 永远一致。范围与拒绝项见 [chain-gates.md](chain-gates.md)。
+
+#### Starknet v3 载荷（`SNV3`）
+
+字节序一律大端，felt 右对齐 32 字节。`kind` 只有两种：
+
+| 偏移 | 宽度 | 字段 |
+| --- | --- | --- |
+| 0 | 4 | `"SNV3"` |
+| 4 | 1 | `kind`：0 = invoke，1 = deploy_account |
+| 5 | 1 | `nonce_da_mode`（0 = L1，1 = L2，其它拒绝） |
+| 6 | 1 | `fee_da_mode`（同上） |
+| 7 | 1 | 构造参数个数，必须是 1（单公钥账户） |
+| 8 | 32 | class hash |
+| 40 | 32 | salt |
+| 72 | 32 | 构造参数 `ctor[0]`，必须等于本机 Stark 公钥 |
+| 104 | 8 | nonce |
+| 112 | 8 | tip |
+| 120 | 8 | `l1_gas.max_amount` |
+| 128 | 16 | `l1_gas.max_price` |
+| 144 | 8 | `l2_gas.max_amount` |
+| 152 | 16 | `l2_gas.max_price` |
+| 168 | 8 | `l1_data_gas.max_amount` |
+| 176 | 16 | `l1_data_gas.max_price` |
+| 192 | 32 | `entry_point`，invoke 专用：`keccak256("execute") & (2^250-1)` |
+| 224 | 2 | calldata felt 个数，invoke 专用：`2 + 9N` |
+| 226 | — | calldata，invoke 专用 |
+
+`deploy_account` 的载荷到 192 字节结束，calldata 就是构造参数本身（这里只有 `ctor[0]`）。
+
+invoke 的 calldata 是账户 `execute` 的编译结果，N 笔转账：
+
+```text
+[N,
+ token_0, transfer_selector, 3, recipient_0, amount_low_0, amount_high_0,
+ ...
+ token_N-1, transfer_selector, 3, recipient_N-1, amount_low_N-1, amount_high_N-1,
+ 3N, recipient_0, amount_low_0, amount_high_0, ..., recipient_N-1, ...]
+```
+
+N 取 1..4。设备重算 2+9N 与长度是否吻合、每笔 span 是否为 3、行内数组与尾部 span 是否逐 felt 相同；
+任何一条不成立就拒绝，因为账户实际执行的是尾部 span，而屏上如果显示行内副本就成了两套字节。
+五笔以上不是"截断显示"，而是直接 `unsupported`：审阅页放不下的批量不该被签名。
+
+费用上限为 `tip + Σ max_amount×max_price`，以 STRK 18 位精确显示；
+`l1_gas`/`l2_gas` 的 amount 与 price 必须非零，`l1_data_gas` 允许为 0（0.13.4 之前的客户端就是这么发的）。
+签名输出是 `r ‖ s`（各 32 字节），链 ID 固定 `SN_MAIN`。
+ERC-20 金额默认按 base unit 原文显示，只有设备上登记过该代币合约时才换算并标注未核验
+（见 `WalletCustomTokens`）。
 
 ## 
 

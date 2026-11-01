@@ -1,4 +1,4 @@
-#include "PolkadotTransaction.h"
+﻿#include "PolkadotTransaction.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +25,27 @@ const uint8_t kKusamaGenesis[32] = {
     0xe6, 0x1f, 0x87, 0x0f, 0x17, 0xb4, 0x18, 0x01, 0x19, 0x7a, 0x14, 0x9c,
     0xa9, 0x36, 0x54, 0x49, 0x9e, 0xa3, 0xda, 0xfe};
 
+// Runtime versions whose signed-extension list this codec was built against.
+//
+// The signature covers spec_version and transaction_version, so a forged value
+// cannot redirect funds; what it can do is make the device build the payload
+// for the wrong extension set (an extension added or removed in a newer
+// runtime) and produce a signature the chain rejects, or - worse - one that
+// omits an additional signed field the runtime expects to see. Pinning the pair
+// turns that into a refusal that names the reason instead of a mystery failure.
+//
+// Source: these are the values `state_getRuntimeVersion` returned on
+// 2005002 (Polkadot) and 2005001 (Kusama) with transaction_version 26. A
+// runtime upgrade therefore requires a firmware release; that is the intended
+// trade for a device that cannot parse metadata on the fly.
+struct PinnedRuntime {
+  uint32_t spec_version;
+  uint32_t transaction_version;
+};
+constexpr PinnedRuntime kPolkadotRuntime = {2005002u, 26u};
+constexpr PinnedRuntime kKusamaRuntime = {2005001u, 26u};
+
+
 struct PolkadotRequest {
   uint8_t network;
   uint8_t call;
@@ -38,14 +59,9 @@ struct PolkadotRequest {
   uint64_t era_block;
   uint8_t genesis[32];
   uint8_t block_hash[32];
-  // Polkadot/Kusama signed extensions end with `CheckMetadataHash`, whose
-  // `AdditionalSigned` is `Option<[u8;32]>`. Disabled mode adds one 0x00 byte.
   bool metadata_hash_implicit;
 };
 
-// SCALE Era encoding. Immortal is the single byte 0x00. Mortal packs
-// (period.trailing_zeros() - 1) | (phase / quantize_factor) << 4 into a
-// little-endian u16, matching substrate's `impl Encode for Era`.
 size_t encode_era(uint32_t period, uint64_t block, uint8_t out[2]) {
   if (period == 0) {
     out[0] = 0x00;
@@ -241,6 +257,22 @@ ChainError parse_payload(ChainFamily family, const uint8_t *payload,
   if (request->spec_version == 0 || request->transaction_version == 0) {
     return ChainError::Malformed;
   }
+  if (v2) {
+    // The signed-extension list only matches the runtime this firmware was
+    // verified against. DOT1 (the historical layout without CheckMetadataHash)
+    // stays reachable only from the host vector build.
+    const PinnedRuntime &runtime =
+        request->network == kKusamaNetwork ? kKusamaRuntime : kPolkadotRuntime;
+    if (request->spec_version != runtime.spec_version ||
+        request->transaction_version != runtime.transaction_version) {
+      return ChainError::RuntimeMismatch;
+    }
+  }
+#if !defined(HEXWALLET_HOST_TEST)
+  else {
+    return ChainError::Unsupported;
+  }
+#endif
   uint8_t zero[32] = {};
   if (chain_constant_time_equal(request->recipient, zero, 32)) {
     return ChainError::InvalidAmount;
@@ -515,6 +547,10 @@ bool run_polkadot_self_tests() {
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
       0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
       0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
+  ChainReview review;
+  uint8_t digest[32] = {};
+  bool ok = true;
+#if defined(HEXWALLET_HOST_TEST)
   static const uint8_t kPayload[kPolkadotPayloadSize] = {
       'D', 'O', 'T', '1', 0x00, 0x03,
       0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
@@ -535,12 +571,13 @@ bool run_polkadot_self_tests() {
       0xfb, 0x8e, 0x20, 0x31, 0x3b, 0x2c, 0x1e, 0xb4,
       0x92, 0x19, 0xda, 0x7a, 0x70, 0xce, 0x90, 0xc3};
 #include "src/generated/PolkadotVectorsTest.inc"
-  ChainReview review;
-  uint8_t digest[32] = {};
+  // The DOT1 layout has no CheckMetadataHash byte and therefore cannot match the
+  // pinned runtime, so its vectors only run in the host build that compiles the
+  // legacy layout in.
   const ChainError review_error = polkadot_review_payload(
       ChainFamily::Polkadot, kPayload, sizeof(kPayload),
       "15kypVvwBLVS1eFtT9tb2ZS2HLXLbsy5iZaddcFzRrm5izi", &review, digest);
-  bool ok = review_error == ChainError::Ok &&
+  ok = ok && review_error == ChainError::Ok &&
             chain_constant_time_equal(digest, kExpectedDigest, 32) &&
             !strcmp(review.recipient,
                     "1PNtGSJ2VC7gGhEPqTbtj9mBEUcwM3SDL71WSqtRzSVxDkG") &&
@@ -564,6 +601,7 @@ bool run_polkadot_self_tests() {
       ChainFamily::Polkadot, wrong_network, sizeof(wrong_network),
       "15kypVvwBLVS1eFtT9tb2ZS2HLXLbsy5iZaddcFzRrm5izi", &review, digest);
   ok = ok && wrong_error == ChainError::WrongNetwork;
+#endif
 
   // DOT2: mortal era (period 64 at block 12345678) plus the trailing
   // CheckMetadataHash implicit byte. Digest reproduced independently with
@@ -577,7 +615,7 @@ bool run_polkadot_self_tests() {
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x01, 0x1f, 0x71, 0xfb, 0x04, 0xcb,
       0x07, 0x00, 0x00, 0x00,
-      0xc8, 0x55, 0x0f, 0x00,
+      0x0a, 0x98, 0x1e, 0x00,
       0x1a, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -592,9 +630,9 @@ bool run_polkadot_self_tests() {
       0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
       0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22};
   static const uint8_t kExpectedDigestV2[32] = {
-      0x0b, 0xa4, 0x99, 0x8c, 0x53, 0x80, 0xac, 0x1b, 0x14, 0xe6, 0xf5,
-      0x27, 0x71, 0x72, 0x97, 0xc4, 0x58, 0x2d, 0x97, 0x65, 0xab, 0x19,
-      0xc6, 0x3e, 0x9f, 0x53, 0xcd, 0x9f, 0x3a, 0x9b, 0xc7, 0x4f};
+      0x83, 0x86, 0xe5, 0x33, 0x57, 0x31, 0xe7, 0xb8, 0xdc, 0x2b, 0x1c,
+      0xf1, 0x9d, 0x2b, 0x5d, 0xe3, 0x4c, 0x00, 0x39, 0xc5, 0xc5, 0xdc,
+      0x6f, 0x5b, 0x0c, 0x5e, 0x86, 0x7c, 0x47, 0x15, 0x97, 0x3b};
   ChainReview review_v2;
   uint8_t digest_v2[32] = {};
   const ChainError review_v2_error = polkadot_review_payload(
@@ -603,7 +641,7 @@ bool run_polkadot_self_tests() {
   ok = ok && review_v2_error == ChainError::Ok &&
        chain_constant_time_equal(digest_v2, kExpectedDigestV2, 32) &&
        !strcmp(review_v2.extra,
-               "CALL transferKeepAlive\nNONCE 7\nSPEC VERSION 1005000\n"
+               "CALL transferKeepAlive\nNONCE 7\nSPEC VERSION 2005002\n"
                "TX VERSION 26\nERA MORTAL 64\nBLOCK 12345678\n"
                "EXT CHECKMETADATAHASH DISABLED");
 #if defined(HEXWALLET_HOST_TEST)
@@ -633,6 +671,19 @@ bool run_polkadot_self_tests() {
       ChainFamily::Polkadot, bad_era, sizeof(bad_era),
       "15kypVvwBLVS1eFtT9tb2ZS2HLXLbsy5iZaddcFzRrm5izi", &review, digest);
   ok = ok && bad_era_error == ChainError::Malformed;
+
+  // A runtime this firmware was not verified against must be refused rather
+  // than signed with the wrong signed-extension list.
+  uint8_t stale_runtime[sizeof(kPayloadV2)] = {};
+  memcpy(stale_runtime, kPayloadV2, sizeof(kPayloadV2));
+  stale_runtime[4 + 1 + 1 + 32 + 16 + 4] = 0xc8;
+  stale_runtime[4 + 1 + 1 + 32 + 16 + 5] = 0x55;
+  stale_runtime[4 + 1 + 1 + 32 + 16 + 6] = 0x0f;
+  stale_runtime[4 + 1 + 1 + 32 + 16 + 7] = 0x00;
+  const ChainError stale_error = polkadot_review_payload(
+      ChainFamily::Polkadot, stale_runtime, sizeof(stale_runtime),
+      "15kypVvwBLVS1eFtT9tb2ZS2HLXLbsy5iZaddcFzRrm5izi", &review, digest);
+  ok = ok && stale_error == ChainError::RuntimeMismatch;
 
   return ok;
 }

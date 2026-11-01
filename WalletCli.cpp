@@ -18,8 +18,10 @@
 #include "Totp.h"
 #include "WalletAltAddresses.h"
 #include "WalletBoardPort.h"
+#include "ChainCommon.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
+#include "WalletCustomTokens.h"
 #include "WalletCustody.h"
 #include "WalletEngine.h"
 #include "WalletLinkService.h"
@@ -233,6 +235,7 @@ void show_help() {
   Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD] [offset] | mining show <symbol> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
+  Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
   Serial.println("OK totp: totp time | totp time <unix> | totp <base32> [digits] [period] [sha1|sha256|sha512] | totp clear");
   Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
   Serial.println("OK link: link status | link pair confirm | link pair reject");
@@ -596,10 +599,154 @@ void show_token(const char *id) {
   Serial.println("\"");
 }
 
+bool split_arguments(char *text, char *parts[], size_t count) {
+  size_t found = 0;
+  char *cursor = text;
+  while (found < count) {
+    while (*cursor == ' ') ++cursor;
+    if (*cursor == '\0') break;
+    parts[found++] = cursor;
+    while (*cursor != '\0' && *cursor != ' ') ++cursor;
+    if (*cursor == ' ') *cursor++ = '\0';
+  }
+  return found == count;
+}
+
+const char *custom_standard_text(CustomTokenStandard standard) {
+  switch (standard) {
+    case CustomTokenStandard::EvmErc20: return "erc20";
+    case CustomTokenStandard::TronTrc20: return "trc20";
+    case CustomTokenStandard::SolanaSpl: return "spl";
+    case CustomTokenStandard::StellarAsset: return "stellar-asset";
+    case CustomTokenStandard::StarknetErc20: return "starknet-erc20";
+  }
+  return "unknown";
+}
+
+void show_custom_tokens(const char *network_filter) {
+  const size_t count = custom_token_count();
+  for (size_t index = 0; index < count; ++index) {
+    CustomTokenRecord record;
+    if (!custom_token_at(index, &record)) continue;
+    if (network_filter != nullptr && *network_filter != '\0' &&
+        strcmp(record.network_id, network_filter) != 0) continue;
+    Serial.print("token=custom-");
+    Serial.print(index);
+    Serial.print(" network=");
+    Serial.print(record.network_id);
+    Serial.print(" symbol=");
+    Serial.print(record.symbol);
+    Serial.print(" name=\"");
+    Serial.print(record.name);
+    Serial.print("\" standard=");
+    Serial.print(custom_standard_text(record.standard));
+    Serial.print(" decimals=");
+    Serial.print(record.decimals);
+    Serial.print(" identifier=");
+    for (size_t byte = 0; byte < record.identifier_size; ++byte) {
+      char hex[3];
+      snprintf(hex, sizeof(hex), "%02x", record.identifier[byte]);
+      Serial.print(hex);
+    }
+    if (record.standard == CustomTokenStandard::StellarAsset) {
+      Serial.print(" issuer=");
+      for (size_t byte = 0; byte < record.issuer_size; ++byte) {
+        char hex[3];
+        snprintf(hex, sizeof(hex), "%02x", record.issuer[byte]);
+        Serial.print(hex);
+      }
+      Serial.print(" code=");
+      Serial.print(record.code);
+    }
+    Serial.println(" status=\"user-declared; not verified\"");
+  }
+  Serial.print("OK custom=");
+  Serial.println(count);
+}
+
+void report_custom_result(CustomTokenError error) {
+  if (error == CustomTokenError::Ok) Serial.println("OK");
+  else {
+    Serial.print("ERR custom-");
+    Serial.println(custom_token_error_text(error));
+  }
+}
+
+void custom_token_add_command(char *arguments) {
+  char *parts[5];
+  uint8_t identifier[kCustomTokenIdentifierSize];
+  size_t identifier_size = 0;
+  if (!split_arguments(arguments, parts, 5) ||
+      !chain_parse_hex(parts[1], identifier, sizeof(identifier), &identifier_size)) {
+    Serial.println("ERR usage-token-custom-add");
+    return;
+  }
+  const unsigned long decimals = strtoul(parts[4], nullptr, 10);
+  if (decimals > kCustomTokenMaxDecimals) {
+    Serial.println("ERR invalid-decimals");
+    return;
+  }
+  report_custom_result(custom_token_add(parts[0], identifier, identifier_size,
+                                        parts[2], parts[3],
+                                        static_cast<uint8_t>(decimals)));
+}
+
+void custom_token_add_stellar_command(char *arguments) {
+  char *parts[5];
+  uint8_t issuer[kCustomTokenIssuerSize];
+  size_t issuer_size = 0;
+  if (!split_arguments(arguments, parts, 5) ||
+      !chain_parse_hex(parts[0], issuer, sizeof(issuer), &issuer_size) ||
+      issuer_size != sizeof(issuer)) {
+    Serial.println("ERR usage-token-custom-add-stellar");
+    return;
+  }
+  const unsigned long decimals = strtoul(parts[4], nullptr, 10);
+  if (decimals > kCustomTokenMaxDecimals) {
+    Serial.println("ERR invalid-decimals");
+    return;
+  }
+  report_custom_result(custom_token_add_stellar("xlm", issuer, parts[1],
+                                                parts[2], parts[3],
+                                                static_cast<uint8_t>(decimals)));
+}
+
+void custom_token_remove_command(char *arguments) {
+  char *parts[2];
+  uint8_t identifier[kCustomTokenIdentifierSize];
+  size_t identifier_size = 0;
+  if (!split_arguments(arguments, parts, 2) ||
+      !chain_parse_hex(parts[1], identifier, sizeof(identifier), &identifier_size)) {
+    Serial.println("ERR usage-token-custom-remove");
+    return;
+  }
+  report_custom_result(
+      custom_token_remove(parts[0], identifier, identifier_size));
+}
+
+void custom_token_remove_stellar_command(char *arguments) {
+  char *parts[2];
+  uint8_t issuer[kCustomTokenIssuerSize];
+  size_t issuer_size = 0;
+  if (!split_arguments(arguments, parts, 2) ||
+      !chain_parse_hex(parts[0], issuer, sizeof(issuer), &issuer_size) ||
+      issuer_size != sizeof(issuer)) {
+    Serial.println("ERR usage-token-custom-remove-stellar");
+    return;
+  }
+  report_custom_result(custom_token_remove_stellar("xlm", issuer, parts[1]));
+}
+
 void handle_token(char *command) {
   if (strcmp(command, "token list") == 0) show_tokens("");
   else if (strncmp(command, "token list ", 11) == 0 && command[11] != '\0') show_tokens(command + 11);
   else if (strncmp(command, "token show ", 11) == 0 && command[11] != '\0') show_token(command + 11);
+  else if (strcmp(command, "token custom-list") == 0) show_custom_tokens("");
+  else if (strncmp(command, "token custom-list ", 18) == 0 && command[18] != '\0') show_custom_tokens(command + 18);
+  else if (strncmp(command, "token custom-add-stellar ", 25) == 0 && command[25] != '\0') custom_token_add_stellar_command(command + 25);
+  else if (strncmp(command, "token custom-add ", 17) == 0 && command[17] != '\0') custom_token_add_command(command + 17);
+  else if (strncmp(command, "token custom-remove-stellar ", 28) == 0 && command[28] != '\0') custom_token_remove_stellar_command(command + 28);
+  else if (strncmp(command, "token custom-remove ", 20) == 0 && command[20] != '\0') custom_token_remove_command(command + 20);
   else Serial.println("ERR invalid-token-command");
 }
 
@@ -782,9 +929,11 @@ const char *key_scheme_text(KeyScheme scheme) {
     case KeyScheme::CryptoNoteEdwards: return "cryptonote-edwards";
     case KeyScheme::Bls12381G1: return "bls12-381-g1";
     case KeyScheme::XmssShake256: return "xmss-shake256";
+    case KeyScheme::MlDsa87: return "ml-dsa-87";
     case KeyScheme::CardanoEd25519Bip32: return "cardano-ed25519-bip32";
     case KeyScheme::ErgoSchnorr: return "ergo-sigma-schnorr";
     case KeyScheme::NemKeccakEd25519: return "nem-keccak-ed25519";
+    case KeyScheme::StarkEcdsa: return "stark-ecdsa";
     case KeyScheme::Unsupported: return "unsupported";
   }
   return "unknown";
@@ -1118,7 +1267,7 @@ void inspect_evm_transaction(char *arguments) {
     return;
   }
   clear_pending_transaction();
-  const EvmTransactionError error = evm_parse_transaction(
+  const EvmTransactionError error = evm_parse_for_review(
     transaction, transaction_size, *network, master, address_index, &pending_evm_transaction);
   secure_zero(&master, sizeof(master));
   secure_zero(transaction, sizeof(transaction));
@@ -1260,7 +1409,9 @@ void inspect_evm_transaction(char *arguments) {
     snprintf(display_amount, sizeof(display_amount), "%s %s",
              pending_evm_transaction.amount_text, asset);
   }
-  if (contract_call) {
+  if (pending_evm_transaction.opaque) {
+    snprintf(output_label, sizeof(output_label), "%s", evm_operation_text(pending_evm_transaction));
+  } else if (contract_call) {
     snprintf(output_label, sizeof(output_label), "%s %s",
              evm_token_standard_name(pending_evm_transaction.call.standard),
              token_function_name(pending_evm_transaction.call.function));
@@ -1275,6 +1426,8 @@ void inspect_evm_transaction(char *arguments) {
   review.outputs[0] = { 0, display_amount, review_recipient, output_label, access_details };
   review.fee_text = display_fee;
   review.approval_code = approval;
+  if (pending_evm_transaction.opaque)
+    review.note = "UNDECODED CODE. The amount is native call value only. Code may move other assets or grant permissions. Verify the target and full data before approving.";
   wallet_ui_show_transaction(review);
   secure_zero(display_amount, sizeof(display_amount));
   secure_zero(display_fee, sizeof(display_fee));

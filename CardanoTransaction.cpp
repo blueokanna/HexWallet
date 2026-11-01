@@ -149,9 +149,11 @@ ChainError cardano_review_payload(const uint8_t *body, size_t size,
   Parsed p{};
   ChainError error = parse(body, size, sender, &p);
   if (error != ChainError::Ok) return error;
-  strcpy(review->symbol, "ADA");
-  strcpy(review->sender, sender);
-  strcpy(review->recipient, p.recipient);
+  memcpy(review->symbol, "ADA", 4);
+  if (!chain_copy_text(review->sender, sizeof(review->sender), sender) ||
+      !chain_copy_text(review->recipient, sizeof(review->recipient), p.recipient)) {
+    return ChainError::InvalidArgument;
+  }
   char change[64] = {};
   if (!chain_format_units(p.amount, 6, "ADA", review->amount, sizeof(review->amount)) ||
       !chain_format_units(p.fee, 6, "ADA", review->fee, sizeof(review->fee)) ||

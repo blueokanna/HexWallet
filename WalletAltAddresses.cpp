@@ -445,7 +445,8 @@ namespace hexwallet
   {
     if (public_key == nullptr || out == nullptr || public_key[0] != 0x04)
       return WalletError::InvalidArgument;
-    if (out_size < 42) return WalletError::BufferTooSmall;
+    if (out_size < 42)
+      return WalletError::BufferTooSmall;
     uint8_t hash[20];
     if (!crypto_blake2b(public_key, kUncompressedPublicKeySize, hash, sizeof(hash)))
     {
@@ -458,7 +459,8 @@ namespace hexwallet
     memcpy(checked, hash, sizeof(hash));
     if (!crypto_blake2b(payload, sizeof(payload), checked + 20, 4))
       return WalletError::CryptoFailure;
-    out[0] = 'f'; out[1] = '1';
+    out[0] = 'f';
+    out[1] = '1';
     const bool ok = base32_encode(checked, sizeof(checked), out + 2, out_size - 2, true, false);
     secure_zero(payload, sizeof(payload));
     secure_zero(hash, sizeof(hash));
@@ -680,11 +682,13 @@ namespace hexwallet
     static const uint8_t kPersonal[16] = {
         'c', 'k', 'b', '-', 'd', 'e', 'f', 'a',
         'u', 'l', 't', '-', 'h', 'a', 's', 'h'};
-    if (!blake2b_init_personal(&state, sizeof(hash), kPersonal)) {
+    if (!blake2b_init_personal(&state, sizeof(hash), kPersonal))
+    {
       return WalletError::CryptoFailure;
     }
     blake2b_update(&state, public_key, kCompressedPublicKeySize);
-    if (!blake2b_final(&state, hash)) {
+    if (!blake2b_final(&state, hash))
+    {
       return WalletError::CryptoFailure;
     }
     const WalletError result = address_ckb_from_args(hash, out, out_size);
@@ -726,10 +730,11 @@ namespace hexwallet
     uint8_t principal[29];
     // Self-authenticating principals commit to SubjectPublicKeyInfo DER,
     // including the algorithm identifier, not the bare 32-byte Ed25519 key.
-    uint8_t der[44] = {0x30,0x2a,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x03,0x21,0};
+    uint8_t der[44] = {0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0};
     memcpy(der + 12, public_key, 32);
-    if (!crypto_sha224_local(der, sizeof(der), principal)) return WalletError::CryptoFailure;
-    principal[28] = 0x02;  // self-authenticating tag, trailing byte
+    if (!crypto_sha224_local(der, sizeof(der), principal))
+      return WalletError::CryptoFailure;
+    principal[28] = 0x02; // self-authenticating tag, trailing byte
     uint32_t crc = 0xffffffffUL;
     for (size_t i = 0; i < sizeof(principal); ++i)
     {
@@ -754,7 +759,8 @@ namespace hexwallet
     const size_t length = strlen(raw);
     for (size_t i = 0; i < length; ++i)
     {
-      if (i != 0 && i % 5 == 0) out[written++] = '-';
+      if (i != 0 && i % 5 == 0)
+        out[written++] = '-';
       out[written++] = raw[i];
     }
     out[written] = '\0';
@@ -804,12 +810,70 @@ namespace hexwallet
     };
     static const uint8_t kPkOneUncompressed[kUncompressedPublicKeySize] = {
         0x04,
-        0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62,
-        0x95, 0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce,
-        0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98,
-        0x48, 0x3a, 0xda, 0x77, 0x26, 0xa3, 0xc4, 0x65, 0x5d, 0xa4, 0xfb,
-        0xfc, 0x0e, 0x11, 0x08, 0xa8, 0xfd, 0x17, 0xb4, 0x48, 0xa6, 0x85,
-        0x54, 0x19, 0x9c, 0x47, 0xd0, 0x8f, 0xfb, 0x10, 0xd4, 0xb8,
+        0x79,
+        0xbe,
+        0x66,
+        0x7e,
+        0xf9,
+        0xdc,
+        0xbb,
+        0xac,
+        0x55,
+        0xa0,
+        0x62,
+        0x95,
+        0xce,
+        0x87,
+        0x0b,
+        0x07,
+        0x02,
+        0x9b,
+        0xfc,
+        0xdb,
+        0x2d,
+        0xce,
+        0x28,
+        0xd9,
+        0x59,
+        0xf2,
+        0x81,
+        0x5b,
+        0x16,
+        0xf8,
+        0x17,
+        0x98,
+        0x48,
+        0x3a,
+        0xda,
+        0x77,
+        0x26,
+        0xa3,
+        0xc4,
+        0x65,
+        0x5d,
+        0xa4,
+        0xfb,
+        0xfc,
+        0x0e,
+        0x11,
+        0x08,
+        0xa8,
+        0xfd,
+        0x17,
+        0xb4,
+        0x48,
+        0xa6,
+        0x85,
+        0x54,
+        0x19,
+        0x9c,
+        0x47,
+        0xd0,
+        0x8f,
+        0xfb,
+        0x10,
+        0xd4,
+        0xb8,
     };
     // ed25519 seed = 32 x 0x01 -> public key.
     static const uint8_t kEdSeed[32] = {

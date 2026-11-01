@@ -1,6 +1,6 @@
 #include "ChiaTransaction.h"
 
-#include <mbedtls/bignum.h>
+#include "BlsBackend.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -152,17 +152,7 @@ bool synthetic_offset(const uint8_t public_key[48], const uint8_t hidden[32],
   memcpy(preimage + 48, hidden, 32);
   uint8_t digest[32];
   if (!crypto_sha256(preimage, sizeof(preimage), digest)) return false;
-  static const char kOrder[] =
-      "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001";
-  mbedtls_mpi order, value;
-  mbedtls_mpi_init(&order);
-  mbedtls_mpi_init(&value);
-  bool ok = mbedtls_mpi_read_string(&order, 16, kOrder) == 0 &&
-            mbedtls_mpi_read_binary(&value, digest, 32) == 0 &&
-            mbedtls_mpi_mod_mpi(&value, &value, &order) == 0 &&
-            mbedtls_mpi_write_binary(&value, out, 32) == 0;
-  mbedtls_mpi_free(&order);
-  mbedtls_mpi_free(&value);
+  const bool ok = bls_scalar_reduce(digest, sizeof(digest), out);
   secure_zero(digest, sizeof(digest));
   return ok;
 }
@@ -171,24 +161,7 @@ bool synthetic_offset(const uint8_t public_key[48], const uint8_t hidden[32],
 bool synthetic_secret_key(const uint8_t secret_key[32], const uint8_t offset[32],
                           uint8_t out[32])
 {
-  static const char kOrder[] =
-      "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001";
-  mbedtls_mpi order, secret, delta, sum;
-  mbedtls_mpi_init(&order);
-  mbedtls_mpi_init(&secret);
-  mbedtls_mpi_init(&delta);
-  mbedtls_mpi_init(&sum);
-  bool ok = mbedtls_mpi_read_string(&order, 16, kOrder) == 0 &&
-            mbedtls_mpi_read_binary(&secret, secret_key, 32) == 0 &&
-            mbedtls_mpi_read_binary(&delta, offset, 32) == 0 &&
-            mbedtls_mpi_add_mpi(&sum, &secret, &delta) == 0 &&
-            mbedtls_mpi_mod_mpi(&sum, &sum, &order) == 0 &&
-            mbedtls_mpi_write_binary(&sum, out, 32) == 0;
-  mbedtls_mpi_free(&order);
-  mbedtls_mpi_free(&secret);
-  mbedtls_mpi_free(&delta);
-  mbedtls_mpi_free(&sum);
-  return ok;
+  return bls_secret_add(secret_key, offset, out);
 }
 
 // Minimal big-endian CLVM integer encoding (no leading zero bytes, empty for 0).

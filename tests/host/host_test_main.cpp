@@ -17,6 +17,9 @@
 #include "../../Blake2b.h"
 #include "../../Blake256.h"
 #include "../../KaspaTransaction.h"
+#include "../../MlDsa87.h"
+#include "../../SolanaTransaction.h"
+#include "../../StarknetCrypto.h"
 #include "../../TokenCalldata.h"
 #include "../../TronTransaction.h"
 #include "../../CosmosTransaction.h"
@@ -49,6 +52,7 @@
 #include "../../WalletNfcApdu.h"
 #include "../../WalletNetworks.h"
 #include "../../WalletTokens.h"
+#include "../../WalletCustomTokens.h"
 
 int main() {
   const bool output_scan = hexwallet::run_cryptonote_output_scan_self_tests();
@@ -99,9 +103,13 @@ int main() {
   const bool dash = hexwallet::run_dash_self_tests();
   const bool coin_icons = hexwallet::run_coin_icon_self_tests();
   const bool qrl_ots = hexwallet::run_qrl_ots_self_tests();
+  const bool ml_dsa = hexwallet::run_ml_dsa_87_self_tests();
+  const bool solana = hexwallet::run_solana_self_tests();
+  const bool starknet = hexwallet::run_starknet_crypto_self_tests();
   const bool catalog = hexwallet::run_catalog_self_tests();
   const bool mining = hexwallet::run_mining_catalog_self_tests();
   const bool tokens = hexwallet::run_token_profile_self_tests();
+  const bool custom_tokens = hexwallet::run_custom_token_self_tests();
   const bool link_crypto = hexwallet::run_link_crypto_self_test();
   const bool wallet_link = hexwallet::run_wallet_link_self_test();
   const bool nfc_apdu = hexwallet::run_wallet_nfc_apdu_self_test();
@@ -157,11 +165,15 @@ int main() {
   printf("dash=%s\n", dash ? "pass" : "FAIL");
   printf("coin-icons=%s\n", coin_icons ? "pass" : "FAIL");
   printf("qrl-ots=%s\n", qrl_ots ? "pass" : "FAIL");
+  printf("ml-dsa-87=%s\n", ml_dsa ? "pass" : "FAIL");
+  printf("solana=%s\n", solana ? "pass" : "FAIL");
+  printf("starknet-crypto=%s\n", starknet ? "pass" : "FAIL");
   printf("catalog=%s\n", catalog ? "pass" : "FAIL");
   printf("mining-catalog=%s\n", mining ? "pass" : "FAIL");
   printf("tokens=%s\n", tokens ? "pass" : "FAIL");
+  printf("custom-tokens=%s\n", custom_tokens ? "pass" : "FAIL");
   printf("link-crypto=%s\n", link_crypto ? "pass" : "FAIL");
   printf("wallet-link=%s\n", wallet_link ? "pass" : "FAIL");
   printf("nfc-apdu=%s\n", nfc_apdu ? "pass" : "FAIL");
-  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && catalog && mining && tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
+  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && ml_dsa && solana && starknet && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
 }

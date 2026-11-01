@@ -75,14 +75,12 @@ namespace hexwallet
       return !is_zero_scalar(out);
     }
 
-    // Monero: m = Hs("SubAddr" || a || major || minor) with Keccak-256 and
-    // sc_reduce32 (device_default.cpp get_subaddress_secret_key).
     bool subaddress_scalar(uint8_t out[kCryptoNoteScalarSize],
                            const uint8_t view_secret[kCryptoNoteScalarSize],
                            uint32_t account, uint32_t minor)
     {
       uint8_t data[8 + kCryptoNoteScalarSize + 2 * sizeof(uint32_t)];
-      memcpy(data, "SubAddr", 8); // includes the NUL terminator
+      memcpy(data, "SubAddr", 8);
       memcpy(data + 8, view_secret, kCryptoNoteScalarSize);
       for (size_t offset = 0; offset < 4; ++offset)
       {
@@ -644,14 +642,72 @@ namespace hexwallet
     // are the 64-byte account address body; the 0x00 flag byte in the test
     // blob selects the classic 2-key address and is not serialized.
     static const uint8_t kZanoSpendKey[kCryptoNotePublicKeySize] = {
-        0xf7, 0x24, 0xbc, 0x5c, 0x6c, 0xfb, 0xb9, 0xd9, 0x76, 0x02, 0xc3,
-        0x00, 0x42, 0x3a, 0x2f, 0x28, 0x64, 0x18, 0x74, 0x51, 0x3a, 0x03,
-        0x57, 0x78, 0xa0, 0xc1, 0x77, 0x8d, 0x83, 0x32, 0x01, 0xe9,
+        0xf7,
+        0x24,
+        0xbc,
+        0x5c,
+        0x6c,
+        0xfb,
+        0xb9,
+        0xd9,
+        0x76,
+        0x02,
+        0xc3,
+        0x00,
+        0x42,
+        0x3a,
+        0x2f,
+        0x28,
+        0x64,
+        0x18,
+        0x74,
+        0x51,
+        0x3a,
+        0x03,
+        0x57,
+        0x78,
+        0xa0,
+        0xc1,
+        0x77,
+        0x8d,
+        0x83,
+        0x32,
+        0x01,
+        0xe9,
     };
     static const uint8_t kZanoViewKey[kCryptoNotePublicKeySize] = {
-        0x22, 0x09, 0x39, 0x68, 0x9e, 0xdf, 0x1a, 0xbd, 0x5b, 0xc1, 0xd0,
-        0x31, 0xf7, 0x3e, 0xcd, 0x6c, 0x99, 0x3a, 0xdd, 0x66, 0xd6, 0x80,
-        0x88, 0x70, 0x45, 0x6a, 0xfe, 0xb8, 0xe7, 0xee, 0xb6, 0x8d,
+        0x22,
+        0x09,
+        0x39,
+        0x68,
+        0x9e,
+        0xdf,
+        0x1a,
+        0xbd,
+        0x5b,
+        0xc1,
+        0xd0,
+        0x31,
+        0xf7,
+        0x3e,
+        0xcd,
+        0x6c,
+        0x99,
+        0x3a,
+        0xdd,
+        0x66,
+        0xd6,
+        0x80,
+        0x88,
+        0x70,
+        0x45,
+        0x6a,
+        0xfe,
+        0xb8,
+        0xe7,
+        0xee,
+        0xb6,
+        0x8d,
     };
     static const char kExpectedZanoAddress[] =
         "ZxDqHy6WnyYY5yQcdApjMb8tVPik5BC3LFdaevfbGq7X1KY5vdsWmUi5UQgse"
@@ -714,9 +770,6 @@ namespace hexwallet
                                              derived_spend) == WalletError::Ok &&
              strcmp(address, kExpectedSubaddress10) == 0;
 
-    // Subaddress spend material: b + Hs("SubAddr" || a || major || minor) must
-    // reproduce exactly the key pair the address encoder exports, and (0, 0)
-    // must return the master pair untouched.
     {
       uint8_t master_spend_public[kCryptoNotePublicKeySize];
       uint8_t sub_secret[kCryptoNoteScalarSize];

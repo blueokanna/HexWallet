@@ -5,6 +5,9 @@
 #include "NearTransaction.h"
 #include "TezosTransaction.h"
 #include "SuiTransaction.h"
+#include "AptosTransaction.h"
+#include "StarknetCrypto.h"
+#include "StarknetTransaction.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +20,7 @@
 #include "IcpTransaction.h"
 #include "CryptoNoteAddress.h"
 #include "CryptoPrimitives.h"
+#include "QrlV2Transaction.h"
 #include "QrlXmss.h"
 #include "WalletAddresses.h"
 #include "WalletAltAddresses.h"
@@ -205,6 +209,10 @@ WalletError derive_ed25519_address(const NetworkProfile &network,
       result = sui_address(public_key, out->address, sizeof(out->address))
           ? WalletError::Ok : WalletError::CryptoFailure;
       break;
+    case AddressEncoding::AptosEd25519:
+      result = aptos_address(public_key, out->address, sizeof(out->address))
+          ? WalletError::Ok : WalletError::CryptoFailure;
+      break;
     case AddressEncoding::IcpPrincipal:
       result = address_icp(public_key, out->address, sizeof(out->address));
       break;
@@ -310,14 +318,23 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
     return result;
   }
 
+  // QRL v2 uses an ordinary BIP44 child as the ML-DSA-87 seed, so the same
+  // path can be rebuilt for signing without a second derivation style.
+  if (network.encoding == AddressEncoding::QrlMlDsa) {
+    HdPrivateNode child;
+    WalletError result = hd_private_derive_path(&master, out->path, &child);
+    if (result == WalletError::Ok) {
+      memcpy(out->private_key, child.private_key, kPrivateKeySize);
+      result = qrl_v2_address_from_seed(child.private_key, out->address,
+                                        sizeof(out->address));
+    }
+    secure_zero(&child, sizeof(child));
+    if (result != WalletError::Ok) clear_derived_address(out);
+    return result;
+  }
+
   // EIP-2333 networks derive straight from the BIP39 seed.
   if (network.encoding == AddressEncoding::Bech32mBlsChia) {
-#if !defined(HEXWALLET_HOST_TEST)
-    // Current BLS scalar multiplication uses variable-time MPI arithmetic.
-    // Do not process a device secret until a reviewed constant-time backend exists.
-    clear_derived_address(out);
-    return WalletError::InvalidArgument;
-#endif
     if (seed == nullptr) {
       clear_derived_address(out);
       return WalletError::InvalidArgument;
@@ -453,6 +470,31 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
           {
             size_t output_size = sizeof(out->address);
             result = address_ripple(public_key, out->address, &output_size);
+            break;
+          }
+        case AddressEncoding::StarknetKey:
+          {
+            // Starknet keys live on the Stark curve, so the secp256k1 key just
+            // derived is only a seed: grindKey() hashes it into a scalar in
+            // [1, n) and the Stark key is the x coordinate of that scalar * G.
+            uint8_t stark_private[kStarkFeltSize];
+            uint8_t stark_public[kStarkFeltSize];
+            if (!stark_grind_key(child.private_key, stark_private) ||
+                !stark_public_key(stark_private, stark_public)) {
+              result = WalletError::CryptoFailure;
+            } else {
+              static const char kHexDigits[] = "0123456789abcdef";
+              out->address[0] = '0';
+              out->address[1] = 'x';
+              for (size_t index = 0; index < kStarkFeltSize; ++index) {
+                out->address[2 + index * 2] = kHexDigits[stark_public[index] >> 4];
+                out->address[3 + index * 2] = kHexDigits[stark_public[index] & 0x0f];
+              }
+              out->address[2 + kStarkFeltSize * 2] = '\0';
+              result = WalletError::Ok;
+            }
+            secure_zero(stark_private, sizeof(stark_private));
+            secure_zero(stark_public, sizeof(stark_public));
             break;
           }
         default:
@@ -732,7 +774,28 @@ bool run_address_self_tests() {
     ok = ok && derive_cryptonote_subaddress(master, *zano, 0, 0, 0, 0, 1,
                                             &derived) ==
                    WalletError::InvalidArgument;
+    // Starknet shows the account key, which must be the Stark key of the very
+    // child key the profile derived: a profile wired to the wrong encoder would
+    // otherwise produce a well-formed 32-byte hex string that no key controls.
+    const NetworkProfile *starknet = find_network_profile("stark");
+    DerivedAddress stark = {};
+    ok = ok && starknet != nullptr &&
+         derive_address(master, seed, *starknet, 0, 0, 0, &stark) ==
+             WalletError::Ok &&
+         strncmp(stark.address, "0x", 2) == 0 &&
+         strlen(stark.address) == kStarknetAddressTextSize - 1;
+    uint8_t stark_private[kStarknetFeltSize];
+    uint8_t stark_public[kStarknetFeltSize];
+    char stark_text[kStarknetAddressTextSize];
+    ok = ok &&
+         starknet_key_pair(stark.private_key, stark_private, stark_public) &&
+         starknet_felt_text(stark_public, stark_text, sizeof(stark_text)) &&
+         strcmp(stark_text, stark.address) == 0;
+    clear_derived_address(&stark);
     clear_derived_address(&derived);
+    secure_zero(stark_private, sizeof(stark_private));
+    secure_zero(stark_public, sizeof(stark_public));
+    secure_zero(stark_text, sizeof(stark_text));
     secure_zero(&master, sizeof(master));
     secure_zero(seed, sizeof(seed));
     passed = passed && ok;

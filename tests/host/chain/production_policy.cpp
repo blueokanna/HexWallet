@@ -8,6 +8,7 @@
 #include "WalletEngine.h"
 #include "WalletSession.h"
 #include "QrlXmss.h"
+#include "StarknetTransaction.h"
 #include "SecureElementPort.h"
 
 using namespace hexwallet;
@@ -48,26 +49,56 @@ int main() {
   CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") == WalletError::CustodyUnavailable);
   CHECK(secure_element_register_backend(nullptr));
 
-  // Historical Substrate codecs are host-test only. Production has no
-  // authenticated runtime metadata, so DOT/KSM must not be admitted at all.
-  static const char *const kBlockedNetworks[] = {"dot", "ksm"};
-  for (const char *blocked : kBlockedNetworks) {
+  // DOT/KSM are admitted in production only through the pinned runtime pair.
+  // The historical DOT1 layout is not compiled into this build at all, so a
+  // DOT1 payload must be refused before any key is touched.
+  static const char *const kPinnedNetworks[] = {"dot", "ksm"};
+  for (size_t i = 0; i < sizeof(kPinnedNetworks) / sizeof(kPinnedNetworks[0]); ++i) {
+    const char *network = kPinnedNetworks[i];
     ChainFamily family = ChainFamily::None;
-    CHECK(!chain_family_for_network(blocked, &family));
+    CHECK(chain_family_for_network(network, &family));
+    CHECK(family == (strcmp(network, "dot") == 0 ? ChainFamily::Polkadot
+                                                 : ChainFamily::Kusama));
     WalletCatalogEntry entry{};
-    CHECK(wallet_catalog_find(blocked, &entry));
-    CHECK(!wallet_catalog_has(entry, WalletCapabilitySigning));
+    CHECK(wallet_catalog_find(network, &entry));
+    CHECK(wallet_catalog_has(entry, WalletCapabilitySigning));
+  }
+  {
+    uint8_t dot1[130] = {};
+    memcpy(dot1, "DOT1", 4);
+    ChainTransaction tx{};
+    // No legacy DOT1 payload may be reviewable in a production build: the codec
+    // for that layout is compiled out, so this never reaches a signature.
+    CHECK(chain_review_transaction(ChainFamily::Polkadot, dot1, sizeof(dot1),
+                                   master, seed, 0, &tx) != ChainError::Ok);
+    memset(dot1, 0, sizeof(dot1));
   }
 
-  // Chia is address-only: the BLS secret scalar path is variable time, so even
-  // address derivation is refused on a production build.
+  // Chia signs with the in-tree BLS12-381 backend, so a production build admits both
+  // the address and the standard-coin spend path.
   WalletCatalogEntry xch{};
   CHECK(wallet_catalog_find("xch", &xch));
   CHECK(wallet_catalog_has(xch, WalletCapabilityAddress));
-  CHECK(!wallet_catalog_has(xch, WalletCapabilitySigning));
+  CHECK(wallet_catalog_has(xch, WalletCapabilitySigning));
   ChainFamily chia_family = ChainFamily::None;
   CHECK(chain_family_for_network("xch", &chia_family));
   CHECK(chia_family == ChainFamily::Chia);
+
+  // QRL signs native transfers only after a durable one-time index exists. With
+  // no Mbed TLS custody in this build the adapter must still refuse a malformed
+  // payload instead of reaching the signer.
+  {
+    WalletCatalogEntry qrl_entry{};
+    CHECK(wallet_catalog_find("qrl", &qrl_entry));
+    CHECK(wallet_catalog_has(qrl_entry, WalletCapabilitySigning));
+    ChainFamily qrl_family = ChainFamily::None;
+    CHECK(chain_family_for_network("qrl", &qrl_family));
+    CHECK(qrl_family == ChainFamily::Qrl);
+    uint8_t bad[8] = {'Q', 'R', 'L', '1', 0, 0, 0, 0};
+    ChainTransaction tx{};
+    CHECK(chain_review_transaction(ChainFamily::Qrl, bad, sizeof(bad), master,
+                                   seed, 0, &tx) != ChainError::Ok);
+  }
 
   // Ergo P2PK signing is admitted; a one-byte frame is not a review request and
   // every failure path must clear the caller's output range.
@@ -82,9 +113,23 @@ int main() {
   CHECK(wallet_catalog_find("hive", &hive));
   CHECK(!wallet_catalog_has(hive, WalletCapabilityAddress));
   CHECK(wallet_catalog_has(hive, WalletCapabilitySigning));
+
+  // Starknet signs only v3 deploy_account / single-transfer invoke, and proves
+  // the account belongs to this key by recomputing its SNIP-5 address.
+  WalletCatalogEntry stark{};
+  CHECK(wallet_catalog_find("stark", &stark));
+  CHECK(wallet_catalog_has(stark, WalletCapabilityAddress));
+  CHECK(wallet_catalog_has(stark, WalletCapabilitySigning));
+  ChainFamily stark_family = ChainFamily::None;
+  CHECK(chain_family_for_network("stark", &stark_family));
+  CHECK(stark_family == ChainFamily::Starknet);
+  CHECK(run_starknet_self_tests());
   DerivedAddress address{};
-  CHECK(derive_address(master, seed, *find_network_profile("xch"), 0, 0, 0, &address) != WalletError::Ok);
-  CHECK(zero(&address, sizeof(address)));
+  // Chia is admitted now that the in-tree BLS12-381 scalar multiplication is
+  // constant time; the account must be a real xch1 address.
+  CHECK(derive_address(master, seed, *find_network_profile("xch"), 0, 0, 0,
+                       &address) == WalletError::Ok);
+  CHECK(strncmp(address.address, "xch1", 4) == 0);
   // Qubic needs FourQ/KangarooTwelve. The former Ed25519/SHA3/base26 substitute
   // could not produce a spendable identity, so the profile is gone; it must not
   // reappear without a native implementation and independent vectors.
@@ -92,7 +137,8 @@ int main() {
   CHECK(derive_address(master, seed, *find_network_profile("qrl"), 1, 0, 0, &address) == WalletError::InvalidArgument);
   CHECK(derive_address(master, seed, *find_network_profile("qrl"), 0, 1, 0, &address) == WalletError::InvalidArgument);
   static const ChainFamily kGuardedFamilies[] = {ChainFamily::Chia,
-                                                 ChainFamily::Ergo};
+                                                 ChainFamily::Ergo,
+                                                 ChainFamily::Starknet};
   for (ChainFamily family : kGuardedFamilies) {
     ChainTransaction tx{};
     const uint8_t payload = 0;

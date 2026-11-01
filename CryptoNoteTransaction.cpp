@@ -1195,8 +1195,6 @@ namespace hexwallet
 
   bool run_cryptonote_mainnet_vector_self_test()
   {
-    // Reconstructed explorer blob authenticated against the external full v2 ID.
-    // Length and round-trip checks alone would not establish byte provenance.
     struct MainnetVector
     {
       const char *txid;
@@ -1250,11 +1248,18 @@ namespace hexwallet
       for (size_t cut = 0; cut < blob_size; ++cut)
       {
         if (cryptonote_parse_transaction(blob, cut, &tx) == CryptoNoteTxError::Ok)
-        { ok = false; break; }
+        {
+          ok = false;
+          break;
+        }
       }
-      if (!ok) break;
+      if (!ok)
+        break;
       if (cryptonote_parse_transaction(blob, blob_size, &tx) != CryptoNoteTxError::Ok)
-      { ok = false; break; }
+      {
+        ok = false;
+        break;
+      }
 
       // Pinned length from the chain, then a full parse.
       ok = blob_size == vector.size &&

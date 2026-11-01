@@ -7,8 +7,8 @@
 namespace hexwallet {
 
 // Monochrome e-paper panel layer for the 2.9" 128x296 class (SSD1680 and the
-// UC8151-compatible clones). Two things this file is deliberately explicit
-// about:
+// UC8151-compatible clones), plus the 4-color variant of the same size
+// (SSD1683). Two things this file is deliberately explicit about:
 //
 //  1. These panels are SPI. A 128x296 e-paper module has no MIPI DSI interface;
 //     MIPI DSI is what the colour panels in this project use. If a future board
@@ -19,11 +19,19 @@ namespace hexwallet {
 //     and every byte of it matters. The sequence is implemented here, the LUT is
 //     a board-profile constant (EinkPanelConfig::partial_lut). With no LUT the
 //     driver refuses partial updates instead of pretending and producing grey
-//     smears; callers fall back to a full refresh.
+//     smears; callers fall back to a full refresh. The 4-color panels have no
+//     partial waveform at all, so EinkColorMode::FourColor rejects
+//     partial_refresh() outright, whatever the config says.
 //
-// Framebuffer format: 1 bit per pixel, MSB first, each row padded to a byte,
-// bit 1 = black. That is the format the panel RAM takes after the inversion the
-// controller applies, so no per-pixel branch is needed on the hot path.
+// Framebuffer formats (both MSB-first, rows padded to a byte):
+//   Mono       1 bit per pixel, bit 1 = black.
+//   FourColor  2 bits per pixel, 4 pixels per byte. The nibble values are not
+//              painted by this driver: EinkPanelConfig::palette maps the
+//              framebuffer's palette index (0 black, 1 white, 2 red, 3 yellow,
+//              the order EinkFrame produces) to the panel's code. SSD1683
+//              4-color modules use {0b00, 0b01, 0b11, 0b10}; that is the
+//              default, and a panel with a different table must override it
+//              rather than being drawn with the wrong colours.
 
 struct EinkRect {
   uint16_t x;
@@ -35,13 +43,35 @@ struct EinkRect {
 constexpr uint16_t kEink29Width = 128;
 constexpr uint16_t kEink29Height = 296;
 
-// Row stride in bytes for a 1bpp frame of the given width.
+enum class EinkColorMode : uint8_t {
+  Mono = 0,
+  FourColor = 1,
+};
+
+// Framebuffer palette indices, the order eink_convert_rgb565() writes.
+constexpr uint8_t kEinkPaletteBlack = 0;
+constexpr uint8_t kEinkPaletteWhite = 1;
+constexpr uint8_t kEinkPaletteRed = 2;
+constexpr uint8_t kEinkPaletteYellow = 3;
+
+// Row stride in bytes for a frame of the given width and mode.
+constexpr size_t eink_row_bytes(uint16_t width, EinkColorMode mode) {
+  const size_t per_pixel_bits = mode == EinkColorMode::FourColor ? 2U : 1U;
+  return (static_cast<size_t>(width) * per_pixel_bits + 7U) / 8U;
+}
+
+constexpr size_t eink_frame_bytes(uint16_t width, uint16_t height,
+                                  EinkColorMode mode) {
+  return eink_row_bytes(width, mode) * height;
+}
+
+// Monochrome callers keep the original one-argument form.
 constexpr size_t eink_row_bytes(uint16_t width) {
-  return static_cast<size_t>((width + 7) / 8);
+  return eink_row_bytes(width, EinkColorMode::Mono);
 }
 
 constexpr size_t eink_frame_bytes(uint16_t width, uint16_t height) {
-  return eink_row_bytes(width) * height;
+  return eink_frame_bytes(width, height, EinkColorMode::Mono);
 }
 
 // Transport supplied by the board port. `context` is opaque (an SPI instance,
@@ -58,7 +88,13 @@ struct EinkBus {
 struct EinkPanelConfig {
   uint16_t width;
   uint16_t height;
-  // Waveform LUT for partial updates; nullptr disables partial refresh.
+  EinkColorMode color;
+  // Framebuffer palette index -> panel 2-bit code, used by FourColor only.
+  // Defaults to the SSD1683 4-color table when left zero-initialised, see
+  // EinkPanel::begin().
+  uint8_t palette[4];
+  // Waveform LUT for partial updates; nullptr disables partial refresh. A
+  // 4-color panel must leave this null: it has no partial waveform.
   const uint8_t *partial_lut;
   size_t partial_lut_size;
   // BUSY timeout. A panel that never releases BUSY is a hardware fault and the
@@ -99,7 +135,13 @@ class EinkPanel {
   EinkRefreshResult sleep();
 
   const EinkStats &stats() const { return stats_; }
-  bool partial_supported() const { return config_.partial_lut != nullptr; }
+  bool partial_supported() const {
+    return config_.color == EinkColorMode::Mono && config_.partial_lut != nullptr;
+  }
+  EinkColorMode color_mode() const { return config_.color; }
+  size_t frame_bytes() const {
+    return eink_frame_bytes(config_.width, config_.height, config_.color);
+  }
   bool full_refresh_due() const {
     return stats_.partials_since_full >= config_.partial_budget;
   }
@@ -108,6 +150,10 @@ class EinkPanel {
  private:
   EinkRefreshResult wait_idle(uint32_t timeout_ms);
   bool push_window(const uint8_t *bitmap, size_t size, const EinkRect &window);
+  // Packs one frame row slice into panel codes. Mono copies bytes through;
+  // FourColor unpacks 2-bit palette indices and remaps them via palette_.
+  bool push_window_color(const uint8_t *bitmap, size_t size,
+                         const EinkRect &window);
   bool set_window(const EinkRect &window);
   bool begin_panel();
 

@@ -1,4 +1,5 @@
 #include "BitcoinTransaction.h"
+#include "src/Secp256k1Sign.h"
 #include "PeercoinSighash.h"
 
 #include "WalletAltAddresses.h"
@@ -18,7 +19,7 @@ constexpr uint64_t kMaximumBitcoinSupply = 21000000ULL * 100000000ULL;
 constexpr uint32_t kSighashAll = 1;
 constexpr uint32_t kSighashForkIdAll = 0x41;
 constexpr size_t kLegacyP2pkhScriptSize = 25;
-constexpr size_t kMaxLegacyScriptSigSize = 1 + kBitcoinMaxDerSignatureSize + 1 + kCompressedPublicKeySize;
+constexpr size_t kMaxLegacyScriptSigSize = 1 + kBitcoinMaxDerSignatureSize + 1 + 1 + kCompressedPublicKeySize;
 constexpr uint8_t kPsbtMagic[] = { 'p', 's', 'b', 't', 0xff };
 
 struct Cursor {
@@ -47,6 +48,15 @@ WalletError chain_address_from_script(const BitcoinChainParams &chain,
 bool add_u64(uint64_t left, uint64_t right, uint64_t *out) {
   if (UINT64_MAX - left < right) return false;
   *out = left + right;
+  return true;
+}
+
+bool distinct_outpoints(const BitcoinSigningRequest &request) {
+  for (size_t i = 0; i < request.input_count; ++i)
+    for (size_t j = 0; j < i; ++j)
+      if (request.inputs[i].previous_index == request.inputs[j].previous_index &&
+          memcmp(request.inputs[i].previous_txid, request.inputs[j].previous_txid, 32) == 0)
+        return false;
   return true;
 }
 
@@ -172,6 +182,7 @@ TransactionError parse_unsigned_transaction(const uint8_t *data, size_t size,
     if (script_size != 0) return TransactionError::Unsupported;
     if (!read_u32(&cursor, &request->inputs[index].sequence)) return TransactionError::Truncated;
   }
+  if (!distinct_outpoints(*request)) return TransactionError::DuplicateField;
   uint64_t output_count;
   result = read_compact_size(&cursor, &output_count);
   if (result != TransactionError::Ok) return result;
@@ -323,13 +334,13 @@ TransactionError parse_previous_transaction(const uint8_t *data, size_t size,
   if (input_count == 0) {
     const uint8_t *flag;
     if (!read_bytes(&cursor, 1, &flag) || flag[0] != 0x01) return TransactionError::NonCanonical;
+    // txid commits to the CompactSize input count as well as the inputs.
+    inputs_offset = cursor.position;
     result = read_compact_size(&cursor, &input_count);
     if (result != TransactionError::Ok) return result;
     segwit = true;
-    inputs_offset = cursor.position;
   }
   if (input_count == 0 || input_count > 255) return TransactionError::Unsupported;
-  if (segwit && input_count < 2) return TransactionError::NonCanonical;
   for (uint64_t index = 0; index < input_count; ++index) {
     const uint8_t *txid;
     uint32_t previous_index;
@@ -371,11 +382,13 @@ TransactionError parse_previous_transaction(const uint8_t *data, size_t size,
   }
   const size_t witness_start = cursor.position;
   if (segwit) {
+    bool has_witness = false;
     for (uint64_t index = 0; index < input_count; ++index) {
       uint64_t item_count;
       result = read_compact_size(&cursor, &item_count);
       if (result != TransactionError::Ok) return result;
       if (item_count > 1024) return TransactionError::Unsupported;
+      has_witness = has_witness || item_count != 0;
       for (uint64_t item = 0; item < item_count; ++item) {
         uint64_t item_size;
         const uint8_t *item_data;
@@ -386,6 +399,7 @@ TransactionError parse_previous_transaction(const uint8_t *data, size_t size,
         }
       }
     }
+    if (!has_witness) return TransactionError::NonCanonical;
   }
   const size_t witness_end = cursor.position;
   uint32_t lock_time;
@@ -490,6 +504,13 @@ TransactionError parse_input_map(Cursor *cursor, const HdPrivateNode &master,
       if (script_size > kBitcoinMaxScriptSize || !read_bytes(&utxo, static_cast<size_t>(script_size), &script) || utxo.position != utxo.size) {
         return TransactionError::Unsupported;
       }
+      // Legacy SIGHASH_ALL does not commit to the spent amount. A host-only
+      // witness_utxo could therefore make an excessive actual fee look small.
+      // ForkID commits to the amount and intentionally keeps its own policy.
+      if (chain.sighash == SighashFamily::Bitcoin && script_size == 25 &&
+          script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
+          script[23] == 0x88 && script[24] == 0xac)
+        return TransactionError::MissingField;
       memcpy(utxo_script, script, static_cast<size_t>(script_size));
       utxo_script_size = static_cast<uint8_t>(script_size);
       has_witness_utxo = true;
@@ -669,72 +690,6 @@ TransactionError legacy_digest(const BitcoinSigningRequest &request, size_t inpu
   return hashed ? TransactionError::Ok : TransactionError::CryptoFailure;
 }
 
-int random_callback(void *, unsigned char *output, size_t length) {
-  random_fill(output, length);
-  return 0;
-}
-
-size_t der_integer(const mbedtls_mpi &value, uint8_t *out) {
-  uint8_t raw[32];
-  mbedtls_mpi_write_binary(&value, raw, sizeof(raw));
-  size_t first = 0;
-  while (first + 1 < sizeof(raw) && raw[first] == 0) ++first;
-  const bool prefix_zero = (raw[first] & 0x80) != 0;
-  const size_t length = sizeof(raw) - first + (prefix_zero ? 1 : 0);
-  out[0] = 0x02;
-  out[1] = static_cast<uint8_t>(length);
-  size_t position = 2;
-  if (prefix_zero) out[position++] = 0;
-  memcpy(out + position, raw + first, sizeof(raw) - first);
-  secure_zero(raw, sizeof(raw));
-  return 2 + length;
-}
-
-TransactionError sign_digest(const uint8_t private_key[kPrivateKeySize],
-                             const uint8_t digest[kSha256Size], uint8_t *der, size_t *der_size) {
-  mbedtls_ecp_group group;
-  mbedtls_mpi d;
-  mbedtls_mpi r;
-  mbedtls_mpi s;
-  mbedtls_mpi half_order;
-  mbedtls_ecp_point public_key;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_mpi_init(&d);
-  mbedtls_mpi_init(&r);
-  mbedtls_mpi_init(&s);
-  mbedtls_mpi_init(&half_order);
-  mbedtls_ecp_point_init(&public_key);
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
-  if (result == 0) result = mbedtls_mpi_read_binary(&d, private_key, kPrivateKeySize);
-  if (result == 0) result = mbedtls_ecdsa_sign_det_ext(&group, &r, &s, &d, digest, kSha256Size,
-                                                       MBEDTLS_MD_SHA256, random_callback, nullptr);
-  if (result == 0) result = mbedtls_mpi_copy(&half_order, &group.N);
-  if (result == 0) result = mbedtls_mpi_shift_r(&half_order, 1);
-  if (result == 0 && mbedtls_mpi_cmp_mpi(&s, &half_order) > 0) result = mbedtls_mpi_sub_mpi(&s, &group.N, &s);
-  if (result == 0) result = mbedtls_ecp_mul(&group, &public_key, &d, &group.G, random_callback, nullptr);
-  if (result == 0) result = mbedtls_ecdsa_verify(&group, digest, kSha256Size, &public_key, &r, &s);
-  uint8_t integers[70];
-  size_t integer_size = 0;
-  if (result == 0) {
-    integer_size = der_integer(r, integers);
-    integer_size += der_integer(s, integers + integer_size);
-    if (*der_size < integer_size + 2) result = -1;
-  }
-  if (result == 0) {
-    der[0] = 0x30;
-    der[1] = static_cast<uint8_t>(integer_size);
-    memcpy(der + 2, integers, integer_size);
-    *der_size = integer_size + 2;
-  }
-  secure_zero(integers, sizeof(integers));
-  mbedtls_mpi_free(&half_order);
-  mbedtls_ecp_point_free(&public_key);
-  mbedtls_mpi_free(&s);
-  mbedtls_mpi_free(&r);
-  mbedtls_mpi_free(&d);
-  mbedtls_ecp_group_free(&group);
-  return result == 0 ? TransactionError::Ok : TransactionError::CryptoFailure;
-}
 
 uint32_t stripped_size(const BitcoinSigningRequest &request) {
   uint32_t size = 4 + 1 + 1 + 4;
@@ -770,7 +725,8 @@ TransactionError bitcoin_parse_psbt(const uint8_t *psbt, size_t psbt_size,
                                     const BitcoinChainParams &chain,
                                     BitcoinSigningRequest *out) {
   if (psbt == nullptr || out == nullptr || psbt_size < sizeof(kPsbtMagic) || psbt_size > HEXWALLET_MAX_PSBT_BYTES) return TransactionError::InvalidArgument;
-  if (chain.sighash == SighashFamily::None) return TransactionError::Unsupported;
+  if (chain.sighash != SighashFamily::Bitcoin && chain.sighash != SighashFamily::ForkId)
+    return TransactionError::Unsupported;
   BitcoinSigningRequest parsed;
   clear_bitcoin_request(&parsed);
   parsed.chain = chain;
@@ -825,6 +781,9 @@ TransactionError bitcoin_sign_request(const BitcoinSigningRequest &request,
   if (out_transaction == nullptr || in_out_size == nullptr || request.input_count == 0 || request.input_count > kBitcoinMaxInputs || request.output_count == 0 || request.output_count > kBitcoinMaxOutputs || (request.version != 1 && request.version != 2)) {
     return TransactionError::InvalidArgument;
   }
+  if (request.chain.sighash != SighashFamily::Bitcoin && request.chain.sighash != SighashFamily::ForkId)
+    return TransactionError::Unsupported;
+  if (!distinct_outpoints(request)) return TransactionError::DuplicateField;
   uint64_t input_total = 0;
   uint64_t output_total = 0;
   const bool fork_id_family = request.chain.sighash == SighashFamily::ForkId;
@@ -858,7 +817,7 @@ TransactionError bitcoin_sign_request(const BitcoinSigningRequest &request,
   if (input_total < output_total || input_total != request.input_total || output_total != request.output_total || input_total - output_total != request.fee || request.fee > HEXWALLET_MAX_BITCOIN_FEE_SATS || request.estimated_vbytes == 0 || request.estimated_vbytes != expected_vbytes || request.fee > HEXWALLET_MAX_BITCOIN_FEE_RATE * static_cast<uint64_t>(request.estimated_vbytes)) {
     return TransactionError::FeePolicy;
   }
-  uint8_t signatures[kBitcoinMaxInputs][kBitcoinMaxDerSignatureSize];
+  uint8_t signatures[kBitcoinMaxInputs][kBitcoinMaxDerSignatureSize + 1];
   uint8_t signature_sizes[kBitcoinMaxInputs] = {};
   for (size_t index = 0; index < request.input_count; ++index) {
     HdPrivateNode derived;
@@ -879,7 +838,7 @@ TransactionError bitcoin_sign_request(const BitcoinSigningRequest &request,
                                   ? legacy_digest(request, index, sighash_type, digest)
                                   : bip143_digest(request, index, sighash_type, digest);
     size_t der_size = sizeof(signatures[index]) - 1;
-    if (result == TransactionError::Ok) result = sign_digest(derived.private_key, digest, signatures[index], &der_size);
+    if (result == TransactionError::Ok && !secp256k1_sign_der(derived.private_key, digest, signatures[index], &der_size)) result = TransactionError::CryptoFailure;
     secure_zero(&derived, sizeof(derived));
     secure_zero(digest, sizeof(digest));
     if (result != TransactionError::Ok || der_size + 1 > sizeof(signatures[index])) {
@@ -1052,6 +1011,46 @@ bool run_peercoin_sighash_self_tests() {
 // device. Expected values were produced by an independent Python secp256k1/
 // SHA-256 implementation from the same transaction fields.
 bool run_bitcoin_sighash_self_tests() {
+  // The same funding transaction with and without witness must yield the
+  // same txid, including for one input. The witness marker cannot stand for
+  // an entirely empty witness. These cases previously failed reconstruction.
+  uint8_t base[85] = {};
+  base[0] = 2; base[4] = 1; base[5] = 1;
+  memset(base + 42, 0xff, 4);
+  base[46] = 1; base[47] = 0xa0; base[48] = 0x86; base[49] = 1;
+  base[55] = 25; base[56] = 0x76; base[57] = 0xa9; base[58] = 0x14;
+  memset(base + 59, 0x11, 20); base[79] = 0x88; base[80] = 0xac;
+  uint8_t witness[90] = {};
+  memcpy(witness, base, 4); witness[4] = 0; witness[5] = 1;
+  memcpy(witness + 6, base + 4, 77);
+  witness[83] = 1; witness[84] = 1; witness[85] = 0xaa;
+  memcpy(witness + 86, base + 81, 4);
+  uint8_t txid[32] = {}, prev_script[kBitcoinMaxScriptSize] = {};
+  uint64_t prev_value = 0; uint8_t prev_size = 0;
+  if (!crypto_double_sha256(base, sizeof(base), txid) ||
+      parse_previous_transaction(base, sizeof(base), txid, 0, &prev_value, prev_script, &prev_size) != TransactionError::Ok ||
+      parse_previous_transaction(witness, sizeof(witness), txid, 0, &prev_value, prev_script, &prev_size) != TransactionError::Ok ||
+      prev_value != 100000 || prev_size != 25 || memcmp(prev_script, base + 56, 25)) return false;
+  witness[85] ^= 1; // witness mutation is not part of txid
+  if (parse_previous_transaction(witness, sizeof(witness), txid, 0, &prev_value, prev_script, &prev_size) != TransactionError::Ok)
+    return false;
+  witness[83] = 0; // no stack; remaining four bytes are nLockTime
+  if (parse_previous_transaction(witness, 88, txid, 0, &prev_value, prev_script, &prev_size) != TransactionError::NonCanonical)
+    return false;
+  // A fabricated legacy witness_utxo must be rejected before any key work.
+  uint8_t legacy_map[38] = {1, 1, 34};
+  memcpy(legacy_map + 3, base + 47, 34);
+  Cursor legacy_cursor = {legacy_map, sizeof(legacy_map), 0};
+  HdPrivateNode dummy_master = {}; BitcoinInput dummy_input = {};
+  const BitcoinChainParams bitcoin_chain = {"btc44", nullptr, kBitcoinMainnet, SighashFamily::Bitcoin, 0};
+  if (parse_input_map(&legacy_cursor, dummy_master, bitcoin_chain, &dummy_input) != TransactionError::MissingField)
+    return false;
+  BitcoinSigningRequest repeated = {};
+  repeated.version = 2; repeated.chain = bitcoin_chain;
+  repeated.input_count = 2; repeated.output_count = 1;
+  uint8_t rejected[1] = {}; size_t rejected_size = sizeof(rejected);
+  if (bitcoin_sign_request(repeated, dummy_master, rejected, &rejected_size) != TransactionError::DuplicateField)
+    return false;
   const uint8_t previous[32] = { 0xff, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f };
   const uint8_t script[25] = { 0x76, 0xa9, 0x14, 0x1d, 0x0f, 0x17, 0x2a, 0x0e, 0xcb, 0x48, 0xae, 0xe1, 0xbe, 0x1f, 0x26, 0x87, 0xd2, 0x96, 0x3a, 0xe3, 0x3f, 0x71, 0xa1, 0x88, 0xac };
   const uint8_t public_key[33] = { 0x02, 0x54, 0x76, 0xc2, 0xe8, 0x31, 0x88, 0x36, 0x8d, 0xa1, 0xff, 0x3e, 0x29, 0x2e, 0x7a, 0xca, 0xfc, 0xdb, 0x35, 0x66, 0xbb, 0x0a, 0xd2, 0x53, 0xf6, 0x2f, 0xc7, 0x0f, 0x07, 0xae, 0xee, 0x63, 0x57 };
@@ -1079,7 +1078,7 @@ bool run_bitcoin_sighash_self_tests() {
            crypto_constant_time_equal(digest, expected_forkid, sizeof(expected_forkid));
   passed = passed && legacy_digest(request, 0, kSighashForkIdAll, digest) == TransactionError::Ok &&
            crypto_constant_time_equal(digest, expected_forkid, sizeof(expected_forkid));
-  passed = passed && estimated_vbytes(request) == 192;
+  passed = passed && estimated_vbytes(request) == 193;
   passed = passed && legacy_digest(request, 1, kSighashAll, digest) == TransactionError::InvalidArgument &&
            bip143_digest(request, 0, 2, digest) == TransactionError::InvalidArgument &&
            legacy_digest(request, 0, kSighashAll, nullptr) == TransactionError::InvalidArgument;
@@ -1122,7 +1121,7 @@ bool run_bitcoin_transaction_self_test() {
   uint8_t digest[kSha256Size];
   uint8_t signature[kBitcoinMaxDerSignatureSize];
   size_t signature_size = sizeof(signature);
-  bool passed = bip143_digest(request, 1, kSighashAll, digest) == TransactionError::Ok && crypto_constant_time_equal(digest, expected, sizeof(expected)) && sign_digest(private_key, digest, signature, &signature_size) == TransactionError::Ok && signature_size == sizeof(expected_signature) && crypto_constant_time_equal(signature, expected_signature, sizeof(expected_signature));
+  bool passed = bip143_digest(request, 1, kSighashAll, digest) == TransactionError::Ok && crypto_constant_time_equal(digest, expected, sizeof(expected)) && secp256k1_sign_der(private_key, digest, signature, &signature_size) && signature_size == sizeof(expected_signature) && crypto_constant_time_equal(signature, expected_signature, sizeof(expected_signature));
   secure_zero(digest, sizeof(digest));
   secure_zero(signature, sizeof(signature));
   clear_bitcoin_request(&request);
@@ -1151,7 +1150,7 @@ bool run_bitcoin_transaction_self_test() {
   uint8_t legacy_digest_out[32];
   uint8_t forkid_digest_out[32];
   size_t legacy_signature_size = sizeof(signature);
-  passed = passed && legacy_digest(legacy, 0, kSighashAll, legacy_digest_out) == TransactionError::Ok && crypto_constant_time_equal(legacy_digest_out, expected_legacy, sizeof(expected_legacy)) && legacy_digest(legacy, 0, kSighashForkIdAll, forkid_digest_out) == TransactionError::Ok && crypto_constant_time_equal(forkid_digest_out, expected_forkid, sizeof(expected_forkid)) && bip143_digest(legacy, 0, kSighashForkIdAll, forkid_digest_out) == TransactionError::Ok && crypto_constant_time_equal(forkid_digest_out, expected_forkid, sizeof(expected_forkid)) && sign_digest(legacy_key, legacy_digest_out, signature, &legacy_signature_size) == TransactionError::Ok;
+  passed = passed && legacy_digest(legacy, 0, kSighashAll, legacy_digest_out) == TransactionError::Ok && crypto_constant_time_equal(legacy_digest_out, expected_legacy, sizeof(expected_legacy)) && legacy_digest(legacy, 0, kSighashForkIdAll, forkid_digest_out) == TransactionError::Ok && crypto_constant_time_equal(forkid_digest_out, expected_forkid, sizeof(expected_forkid)) && bip143_digest(legacy, 0, kSighashForkIdAll, forkid_digest_out) == TransactionError::Ok && crypto_constant_time_equal(forkid_digest_out, expected_forkid, sizeof(expected_forkid)) && secp256k1_sign_der(legacy_key, legacy_digest_out, signature, &legacy_signature_size);
   secure_zero(legacy_digest_out, sizeof(legacy_digest_out));
   secure_zero(forkid_digest_out, sizeof(forkid_digest_out));
   secure_zero(signature, sizeof(signature));

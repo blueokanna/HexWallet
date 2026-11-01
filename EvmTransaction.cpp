@@ -4,7 +4,9 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "ChainCommon.h"
 #include "WalletConfig.h"
+#include "WalletCustomTokens.h"
 #include "WalletSecurity.h"
 
 namespace hexwallet {
@@ -217,7 +219,7 @@ bool serialize_transaction(const EvmSigningRequest &request,
          (!dynamic_fee || write_rlp_u64(&writer, request.max_priority_fee)) &&
          write_rlp_u64(&writer, request.gas_price_or_max_fee) &&
          write_rlp_u64(&writer, request.gas_limit) &&
-         write_rlp_bytes(&writer, request.contract, sizeof(request.contract)) &&
+         write_rlp_bytes(&writer, request.contract, request.contract_creation ? 0 : sizeof(request.contract)) &&
          write_rlp_uint256(&writer, native_value) &&
          write_rlp_bytes(&writer, request.data, request.data_size) &&
          write_rlp_prefix(&writer, request.access_list_size, true) &&
@@ -231,7 +233,7 @@ bool serialize_transaction(const EvmSigningRequest &request,
     ok = write_rlp_u64(&writer, request.nonce) &&
          write_rlp_u64(&writer, request.gas_price_or_max_fee) &&
          write_rlp_u64(&writer, request.gas_limit) &&
-         write_rlp_bytes(&writer, request.contract, sizeof(request.contract)) &&
+         write_rlp_bytes(&writer, request.contract, request.contract_creation ? 0 : sizeof(request.contract)) &&
          write_rlp_uint256(&writer, native_value) &&
          write_rlp_bytes(&writer, request.data, request.data_size);
     if (ok && signature == nullptr) {
@@ -281,6 +283,31 @@ bool decode_contract(const char *text, uint8_t out[kEvmAddressSize]) {
   return true;
 }
 
+// Profiles for user-declared tokens, one slot per table entry so a pointer
+// handed to a request stays valid while a second parse runs. The id prefix is
+// the marker the review uses to say "nobody verified this contract".
+const TokenProfile *custom_token_profile(const CustomTokenRecord &record,
+                                         size_t index) {
+  static TokenProfile profiles[kCustomTokenMax];
+  static char ids[kCustomTokenMax][20];
+  static char contracts[kCustomTokenMax][43];
+  if (index >= kCustomTokenMax) return nullptr;
+  TokenProfile &profile = profiles[index];
+  snprintf(ids[index], sizeof(ids[index]), "custom-%u",
+           static_cast<unsigned>(index));
+  contracts[index][0] = '0';
+  contracts[index][1] = 'x';
+  chain_hex(record.identifier, kEvmAddressSize, contracts[index] + 2,
+            sizeof(contracts[index]) - 2);
+  profile = {ids[index], record.network_id, record.symbol, record.name,
+             TokenStandard::Erc20, contracts[index], record.decimals,
+             static_cast<uint8_t>(TokenCapabilityAccountAddress |
+                                  TokenCapabilityTransferSigning),
+             "User-declared token: the contract address was entered on this "
+             "device, the issuer was never verified"};
+  return &profile;
+}
+
 const TokenProfile *find_token(const NetworkProfile &network,
                                const uint8_t contract[kEvmAddressSize]) {
   uint8_t candidate[kEvmAddressSize];
@@ -294,6 +321,15 @@ const TokenProfile *find_token(const NetworkProfile &network,
     }
   }
   secure_zero(candidate, sizeof(candidate));
+  // A user-declared token is consulted only after the shipped registry misses,
+  // so it can never shadow a verified entry for the same address.
+  const size_t custom =
+      custom_token_index_of(network.id, contract, kEvmAddressSize);
+  if (custom < kCustomTokenMax) {
+    const CustomTokenRecord *record =
+        custom_token_find(network.id, contract, kEvmAddressSize);
+    if (record != nullptr) return custom_token_profile(*record, custom);
+  }
   return nullptr;
 }
 
@@ -418,7 +454,7 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
                                           const NetworkProfile &network,
                                           const HdPrivateNode &master,
                                           uint32_t address_index,
-                                          EvmSigningRequest *out) {
+                                          EvmSigningRequest *out, bool opaque_review) {
   if (out != nullptr) clear_evm_request(out);
   if (transaction == nullptr || out == nullptr || transaction_size == 0 ||
       transaction_size > kEvmMaxUnsignedTransactionSize ||
@@ -492,14 +528,29 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     to = &fields[3]; value = &fields[4]; data = &fields[5];
   }
   if (chain_id != network.evm_chain_id) return EvmTransactionError::WrongNetwork;
-  if (to->list || to->size != kEvmAddressSize || data->list || data->size > kEvmMaxDataSize) {
+  if (to->list || (to->size != kEvmAddressSize && to->size != 0) ||
+      data->list || data->size > kEvmMaxDataSize) {
     return EvmTransactionError::Unsupported;
   }
+  parsed.contract_creation = to->size == 0;
+  if (parsed.contract_creation && !opaque_review) return EvmTransactionError::Unsupported;
+  parsed.opaque = opaque_review && (parsed.contract_creation || data->size != 0);
   error = read_integer(*value, native_value, sizeof(native_value));
   if (error != EvmTransactionError::Ok) return error;
   uint64_t intrinsic_gas = kMinimumTransferGas +
       2400ULL * parsed.access_list_addresses + 1900ULL * parsed.access_list_keys;
   for (size_t i = 0; i < data->size; ++i) intrinsic_gas += data->data[i] == 0 ? 4 : 16;
+  if (parsed.contract_creation) {
+    intrinsic_gas += 32000;
+    // Ethereum mainnet has activated EIP-3860; do not infer fork schedules
+    // from EVM compatibility on other chains.
+    if (network.evm_chain_id == 1) intrinsic_gas += 2 * ((data->size + 31) / 32);
+  }
+  if (network.evm_chain_id == 1) {
+    uint64_t floor_gas = kMinimumTransferGas;
+    for (size_t i = 0; i < data->size; ++i) floor_gas += data->data[i] == 0 ? 10 : 40;
+    if (floor_gas > intrinsic_gas) intrinsic_gas = floor_gas; // EIP-7623
+  }
   if (parsed.gas_limit < intrinsic_gas || parsed.gas_limit > kMaximumTransferGas ||
       parsed.gas_price_or_max_fee == 0 ||
       parsed.gas_limit > HEXWALLET_MAX_EVM_FEE_WEI / parsed.gas_price_or_max_fee) {
@@ -507,11 +558,14 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     return EvmTransactionError::FeePolicy;
   }
   parsed.maximum_fee = parsed.gas_limit * parsed.gas_price_or_max_fee;
-  memcpy(parsed.contract, to->data, sizeof(parsed.contract));
+  if (!parsed.contract_creation) memcpy(parsed.contract, to->data, sizeof(parsed.contract));
   parsed.data_size = static_cast<uint16_t>(data->size);
   if (data->size != 0) memcpy(parsed.data, data->data, data->size);
 
-  if (data->size == 0) {
+  if (parsed.opaque) {
+    memcpy(parsed.recipient, parsed.contract, sizeof(parsed.recipient));
+    memcpy(parsed.amount, native_value, sizeof(parsed.amount));
+  } else if (data->size == 0) {
     if (is_zero(native_value, sizeof(native_value))) {
       secure_zero(native_value, sizeof(native_value));
       return EvmTransactionError::InvalidAmount;
@@ -678,6 +732,21 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     secure_zero(binding, sizeof(binding)); secure_zero(public_hash, sizeof(public_hash));
     clear_evm_request(&parsed); return EvmTransactionError::CryptoFailure;
   }
+  if (parsed.contract_creation) {
+    uint8_t fields[32] = {}, encoded[40] = {}, hash[32] = {};
+    Writer writer{fields, sizeof(fields), 0};
+    size_t encoded_size = 0;
+    const bool created = write_rlp_bytes(&writer, public_hash + 12, 20) &&
+        write_rlp_u64(&writer, parsed.nonce) &&
+        wrap_rlp_list(fields, writer.position, 0, encoded, sizeof(encoded), &encoded_size) &&
+        crypto_keccak256(encoded, encoded_size, hash);
+    if (!created) {
+      secure_zero(binding, sizeof(binding)); secure_zero(public_hash, sizeof(public_hash));
+      clear_evm_request(&parsed); return EvmTransactionError::CryptoFailure;
+    }
+    memcpy(parsed.recipient, hash + 12, 20);
+    address_text(parsed.recipient, parsed.recipient_address);
+  }
   // A caller-supplied `from`/`owner` must be this wallet. Otherwise the review
   // would describe an allowance-driven transfer of somebody else's asset.
   if (parsed.has_call && call_requires_wallet_sender(parsed.call)) {
@@ -701,6 +770,22 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
   if (!bound) { clear_evm_request(&parsed); return EvmTransactionError::CryptoFailure; }
   *out = parsed;
   return EvmTransactionError::Ok;
+}
+
+EvmTransactionError evm_parse_for_review(const uint8_t *transaction, size_t size,
+    const NetworkProfile &network, const HdPrivateNode &master,
+    uint32_t address_index, EvmSigningRequest *out) {
+  EvmTransactionError error = evm_parse_transaction(transaction, size, network,
+      master, address_index, out);
+  if (error == EvmTransactionError::Unsupported)
+    error = evm_parse_transaction(transaction, size, network, master, address_index, out, true);
+  return error;
+}
+
+const char *evm_operation_text(const EvmSigningRequest &request) {
+  if (request.contract_creation) return "CONTRACT CREATION";
+  if (request.opaque) return "UNDECODED CONTRACT CALL";
+  return request.has_call ? "DECODED CONTRACT CALL" : "NATIVE TRANSFER";
 }
 
 namespace {
@@ -742,6 +827,8 @@ bool same_decoded_call(const DecodedTokenCalldata &a, const DecodedTokenCalldata
 bool evm_same_review(const EvmSigningRequest &reviewed,
                      const EvmSigningRequest &request) {
   return reviewed.type == request.type &&
+         reviewed.opaque == request.opaque &&
+         reviewed.contract_creation == request.contract_creation &&
          reviewed.network == request.network &&
          reviewed.token == request.token &&
          reviewed.address_index == request.address_index &&
@@ -797,7 +884,7 @@ EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
   EvmSigningRequest validated;
   EvmTransactionError error = evm_parse_transaction(
       request.unsigned_transaction, request.unsigned_transaction_size,
-      *request.network, master, request.address_index, &validated);
+      *request.network, master, request.address_index, &validated, request.opaque);
   if (error != EvmTransactionError::Ok) return error;
   const bool same_request = crypto_constant_time_equal(validated.request_hash, request.request_hash,
                                                         sizeof(request.request_hash)) &&
@@ -910,7 +997,8 @@ const char *evm_transaction_type_text(EvmTransactionType type) {
 bool evm_review_details(const EvmSigningRequest &request, char *out, size_t size) {
   if (out == nullptr || size == 0) return false;
   secure_zero(out, size);
-  if (request.network == nullptr ||
+  if (request.network == nullptr || request.data_size > kEvmMaxDataSize ||
+      (request.contract_creation && !request.opaque) ||
       memchr(request.from_address, '\0', sizeof(request.from_address)) == nullptr ||
       memchr(request.native_value_text, '\0', sizeof(request.native_value_text)) == nullptr ||
       memchr(request.value_text, '\0', sizeof(request.value_text)) == nullptr ||
@@ -936,11 +1024,41 @@ bool evm_review_details(const EvmSigningRequest &request, char *out, size_t size
       static_cast<unsigned long long>(request.gas_price_or_max_fee));
   if (request.type == EvmTransactionType::Eip1559)
     append("MAX PRIORITY %llu WEI\n", static_cast<unsigned long long>(request.max_priority_fee));
+  if (request.opaque) {
+    uint8_t hash[32] = {};
+    char hash_text[kEvmBytes32TextSize], address[kAddressTextSize];
+    if (!crypto_keccak256(request.data, request.data_size, hash)) return false;
+    bytes32_text(hash, hash_text);
+    address_text(request.recipient, address);
+    append("%s\nUNDECODED CODE: effects and permissions are not verified.\n"
+           "%s\n%s\nDATA BYTES %u\nDATA KECCAK256\n%s\nFULL DATA HEX\n",
+        evm_operation_text(request),
+        request.contract_creation ? "EXPECTED CREATED ADDRESS" : "TARGET", address,
+        request.data_size, hash_text);
+    for (size_t i = 0; i < request.data_size; ++i) {
+      append("%02x", request.data[i]);
+      if ((i + 1) % 32 == 0) append("\n");
+    }
+    if (request.data_size % 32 != 0 || request.data_size == 0) append("\n");
+    bytes32_text(request.signing_hash, hash_text);
+    append("SIGNING HASH\n%s\n", hash_text);
+  }
   if (request.has_call) {
     char address[kTokenAddressTextSize];
     address_text(request.contract, address);
     append("CONTRACT\n%s\nCALL\n%s.%s\n", address,
         evm_token_standard_name(request.call.standard), token_function_name(request.call.function));
+    // A custom token is decoded like any ERC-20 but its identity is the user's
+    // claim, not a verified registry row. Saying so on screen is the whole
+    // difference between convenience and a phishing surface.
+    if (request.token != nullptr &&
+        strncmp(request.token->id, "custom-", 7) == 0) {
+      append("UNVERIFIED CUSTOM TOKEN\n");
+      append("SYMBOL\n%s\nDECIMALS %u\n", request.token->symbol,
+             static_cast<unsigned>(request.token->decimals));
+      append("This contract was entered on the device. The device cannot check "
+             "that it is the token it claims to be.\n");
+    }
     const auto address_field = [&](const char *label, const uint8_t *bytes) {
       if (!is_zero(bytes, kEvmAddressSize)) {
         address_text(bytes, address);

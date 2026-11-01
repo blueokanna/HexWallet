@@ -36,6 +36,7 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 #include "Mascot.h"
 #include "WalletNfcApdu.h"
 #include "WalletSecurity.h"
+#include "WalletCustomTokens.h"
 #include "WalletSigning.h"
 #include "WalletTokens.h"
 #include "WalletTransportPolicy.h"
@@ -247,6 +248,13 @@ void setup()
   if (!hexwallet::mascot_nvs_begin())
   {
     Serial.println("INFO: companion starts fresh (no stored state)");
+  }
+
+  // User-declared tokens. A missing or unreadable table is an empty table, not a
+  // failure: the device then simply has no custom tokens to offer.
+  if (!hexwallet::custom_tokens_nvs_begin())
+  {
+    Serial.println("WARN: custom token table not available");
   }
 
 #if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS

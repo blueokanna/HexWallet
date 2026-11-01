@@ -103,6 +103,13 @@ const CatalogSeed kCatalog[] = {
   { "qtum", "QTUM", "Qtum", 2301, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "qtum", "P2PKH address and Bitcoin/BIP143 PSBT signing; no Qtum EVM contract calls" },
   { "vet", "VET", "VeChain", 818, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vet", "native VET transfer; one clause, empty data, mainnet chain tag; no VIP-191 delegation or contract calls" },
   { "flow-evm", "FLOW", "Flow EVM Mainnet", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "flow-evm", "Flow EVM chain 747, native FLOW, EIP-155 transfer; distinct from Cadence accounts" },
+  { "robinhood", "ETH", "Robinhood Chain", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "robinhood", "Arbitrum Orbit L2 chain 4663, native ETH, EIP-155 legacy transfers and registered token calls; no token contract is registered" },
+  { "flare", "FLR", "Flare", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "flare", "EVM chain 14, native FLR, EIP-155 transfers and registered token calls" },
+  { "xdc", "XDC", "XinFin Network", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "xdc", "EVM chain 50, native XDC, EIP-155 transfers and registered token calls" },
+  { "zen", "ZEN", "Horizen EON", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "zen", "EON EVM chain 7332, native ZEN; the Horizen mainchain is not this profile" },
+  { "rose", "ROSE", "Oasis Sapphire", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "rose", "Sapphire EVM chain 23294, native ROSE; the Oasis consensus layer is not this profile" },
+  { "merlin", "BTC", "Merlin Chain", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "merlin", "Bitcoin L2 EVM chain 4200 with BTC as the native gas asset; not Bitcoin mainnet" },
+  { "bitlayer", "BTC", "Bitlayer", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "bitlayer", "Bitcoin L2 EVM chain 200901 with BTC as the native gas asset; not Bitcoin mainnet" },
   { "icx", "ICX", "ICON", 74, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "icx", "native ICX transfer with canonical icx_sendTransaction serialization; no SCORE calls" },
   { "ton", "TON", "TON", 607, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ton", "wallet v4R2 native transfer; empty body only; no comments, jettons or multi-message orders" },
   { "hbar", "HBAR", "Hedera", 3030, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "hbar", "Ed25519 key alias receive; numeric-account HBAR CryptoTransfer, one debit/credit; no HTS, allowances or contracts; node must verify payer ownership and network" },
@@ -112,8 +119,8 @@ const CatalogSeed kCatalog[] = {
   { "ckb", "CKB", "Nervos CKB", 309, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ckb", "native CKB single-input transfer to SECP256K1/blake160 locks; no type scripts or DAO operations" },
   { "hive", "HIVE", "Hive", 3054, WalletCapabilityTransactionReview | WalletCapabilitySigning, "hive", "Single transfer; derived STM value is an active PUBLIC KEY, not a receive address. Named account/authority must be checked by node; no encrypted memo" },
   { "icp", "ICP", "Internet Computer", 223, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "icp", "Ed25519 default ledger account; pinned ICP ledger Candid transfer and signed CBOR request; no arbitrary canisters or staking; not Ledger seed/path compatible" },
-  { "dot", "DOT", "Polkadot", 354, WalletCapabilityAddress, "dot", "Ed25519 SS58 address; signing disabled until current runtime metadata and signed extensions are authenticated" },
-  { "ksm", "KSM", "Kusama", 434, WalletCapabilityAddress, "ksm", "Ed25519 SS58 address; signing disabled until current runtime metadata and signed extensions are authenticated" },
+  { "dot", "DOT", "Polkadot", 354, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "dot", "Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005002/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update" },
+  { "ksm", "KSM", "Kusama", 434, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ksm", "Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005001/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update" },
   { "kas", "KAS", "Kaspa", 111111, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "kas", "Kaspa bech32 address; BIP340 Schnorr v0 transaction review and signing" },
   { "vtc", "VTC", "Vertcoin Legacy", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc", "P2PKH address and Bitcoin-sighash signing" },
   { "vtc49", "VTC", "Vertcoin Nested SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc49", "P2SH-P2WPKH address and BIP143 signing" },
@@ -133,8 +140,12 @@ const CatalogSeed kCatalog[] = {
   { "ada", "ADA", "Cardano (Ledger CIP-1852)", 1815, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ada", "CIP-0003 Ledger/BitBox02 root, CIP-1852 BIP32-Ed25519; mainnet ADA-only transfer; UTxO ownership/value must be checked by the node; no tokens, scripts, staking or governance" },
   { "fil", "FIL", "Filecoin", 461, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "fil", "f1 sender, f0/f1/f3 recipient; canonical CBOR Send, CID signing; no actor calls or BLS signing" },
   { "sui", "SUI", "Sui", 784, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "sui", "Ed25519 BCS split-gas native SUI transfer; no Move calls, sponsored transactions or tokens" },
+  { "apt", "APT", "Aptos", 637, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "apt", "Ed25519 account address (sha3-256 of key || 0x00); 0x1::aptos_account::transfer only, signed over sha3-256(\"APTOS::RawTransaction\" || BCS RawTransaction); no EntryFunction calls, sponsored transactions, multisig or tokens" },
   { "erg", "ERG", "Ergo", 429, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "erg", "P2PK (ProveDlog) transfers: device rebuilds the tx-id preimage, signs the Schnorr proof and returns the signed transaction. Review displays the single external output plus every token it carries and refuses a second external output or an undisplayable token list; only inputs owned by this key are signed" },
-  { "xch", "XCH", "Chia", 8444, WalletCapabilityAddress, "xch", "Address verified against blspy (EIP-2333 raw-salt order, authoritative curry, independent bech32m). Signing stays disabled: AGG_SIG_ME is now bound on-device to the displayed conditions, but the BLS secret-scalar operations still use variable-time MPI, so no constant-time backend exists yet" },
+  { "xch", "XCH", "Chia", 8444, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xch", "Standard-coin spends: the device rebuilds the delegated puzzle and the AGG_SIG_ME message from the conditions it displays, then signs in G2 with the in-tree BLS12-381 backend (no variable-time MPI on the secret scalar). CAT/NFT, plot-NFT and offer spends are not admitted" },
+  { "qrl", "QRL", "Quantum Resistant Ledger", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "qrl", "QRL v1 XMSS/SHAKE-256 tree height 10: native transfers only, the one-time leaf is reserved in durable storage before the WOTS+ signature exists and the device verifies its own signature before releasing it. Use the qrl2 entry for v2 accounts" },
+  { "qrl2", "QRL", "Quantum Resistant Ledger v2", 238, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "qrl2", "QRL v2 (Zond) ML-DSA-87 accounts and dynamic-fee transactions: BIP44 m/44'/238'/account'/change/index, SHAKE-256 checksummed Q address, ML-DSA-87 over keccak-256 of the reviewed envelope. Mainnet chain id 1 only; unknown descriptors or non-empty extra_params are refused" },
+  { "stark", "STRK", "Starknet", 9004, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "stark", "Stark curve keys (grindKey of the BIP32 child) and Cairo v3 transactions: deploy_account and one ERC-20 transfer through the account's execute entry point. The device rebuilds the SNIP-5 account address from the class hash, salt and single-key constructor it displays, and pins the chain id to SN_MAIN. Multi-call accounts, declare, paymaster, multisig and non-mainnet networks are refused" },
 #include "src/generated/WalletForkCatalog.inc"
 };
 
@@ -149,9 +160,15 @@ WalletCatalogEntry resolved_entry(size_t index) {
   const char *status = seed.status;
   if (network != nullptr && network->encoding == AddressEncoding::Evm) {
     capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
-    status = network_supports_eip1559(*network)
-                 ? "EIP-155/EIP-1559 native and registered token-call signing; ABI recognition alone does not enable a contract"
-                 : "EIP-155 legacy native and whitelisted token-call signing; type-2 rejected by chain policy";
+    // Every EVM domain admits arbitrary calldata and contract creation: the
+    // device cannot decode unknown code, so it shows the bytes and their hash
+    // instead of pretending to understand them. The text only has to state
+    // which envelopes the chain accepts.
+    status = network_supports_eip2930(*network)
+                 ? "EIP-155/EIP-2930/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256"
+                 : network_supports_eip1559(*network)
+                 ? "EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256"
+                 : "EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy";
   }
   const NetworkSigningPolicy *policy =
       network == nullptr ? nullptr : find_network_signing_policy(network->id);
@@ -289,12 +306,17 @@ bool run_catalog_self_tests() {
   WalletCatalogEntry ethereum = {};
   if (!wallet_catalog_find("ETH", &ethereum) || strcmp(ethereum.id, "eth") != 0)
     return false;
+  // BNB is native on more than one registered chain. No first-row guessing.
+  if (wallet_catalog_find("BNB", &ethereum)) return false;
   for (size_t index = 0; index < wallet_catalog_count(); ++index) {
     const WalletCatalogEntry entry = resolved_entry(index);
     if (entry.id == nullptr || entry.symbol == nullptr || entry.name == nullptr ||
         entry.status == nullptr) {
       return false;
     }
+    WalletCatalogEntry exact = {};
+    if (!wallet_catalog_find(entry.id, &exact) || strcmp(exact.id, entry.id) != 0 ||
+        exact.network != entry.network) return false;
     if ((entry.capabilities & static_cast<uint8_t>(WalletCapabilityAddress)) != 0 &&
         entry.network == nullptr) {
       return false;

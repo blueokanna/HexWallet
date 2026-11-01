@@ -16,9 +16,6 @@ constexpr uint8_t kDirectionDeviceToPhone = 1;
 constexpr uint8_t kDirectionPhoneToDevice = 2;
 constexpr uint32_t kPairingTimeoutMs = 60UL * 1000UL;
 
-// Every link request is handled on the Arduino loop task, which has 8 KiB of
-// stack. Two kLinkMaxPayload frames there would overflow it, so the request and
-// reply scratch space is static; the link processes one request at a time.
 uint8_t *link_request_scratch() {
   static uint8_t buffer[kLinkMaxPayload];
   return buffer;

@@ -22,9 +22,11 @@ enum class KeyScheme : uint8_t {
   CryptoNoteEdwards, // Keccak-reduced Edwards25519 (XMR/MSR)
   Bls12381G1,        // EIP-2333 BLS12-381 G1 (XCH)
   XmssShake256,      // stateful hash-based XMSS (QRL)
+  MlDsa87,           // FIPS 204 ML-DSA-87 signature over a 32-byte seed (QRL v2)
   CardanoEd25519Bip32, // expanded kL/kR keys; not a standard Ed25519 seed
   ErgoSchnorr,       // Ergo Sigma Schnorr; not ECDSA or BIP340
   NemKeccakEd25519,  // NEM Keccak variant; not RFC 8032 Ed25519
+  StarkEcdsa,        // Stark curve (2^251+17*2^192+1) ECDSA over a BIP32 child
   Unsupported,
 };
 

@@ -182,4 +182,37 @@ if ($failures.Count -ne 0) {
 }
 $scope = if ($RegistryOnly) { 'registry-policy' } else { 'policy' }
 Write-Output "graveyard-identities=$($graveyard.Count) registries=$($registries.Count) $scope=pass"
+# --- 6. Unbounded string copies may not grow -------------------------------
+# strcpy/strcat/sprintf carry no length. Every remaining occurrence is either a
+# string literal into a larger buffer, or preceded by an explicit strlen check
+# in the same function. The counts below are the reviewed baseline; a new
+# occurrence - or these calls appearing in a file that had none - fails here so
+# the next adapter cannot quietly reintroduce the pattern.
+# Review buffers are never truncated: chain_copy_text() refuses instead, because
+# a shortened address on the approval screen is a different destination.
+$stringCopyBaseline = @{
+  'AlgorandTransaction.cpp' = 1   # previous[8] <- key[8], both fixed and equal
+  'ChainCommon.cpp' = 1           # "0" into a formatted buffer
+  'CkbTransaction.cpp' = 4        # strlen-checked, or literals
+  'FilecoinTransaction.cpp' = 1   # "FIL"
+  'HederaTransaction.cpp' = 2     # fixed key alias
+  'HiveTransaction.cpp' = 4       # strlen-checked, or a literal
+  'IcpTransaction.cpp' = 1        # "ICP"
+  'KaspaTransaction.cpp' = 1      # self-test corrupting a fixed local copy
+  'NearTransaction.cpp' = 1       # "ed25519:" prefix
+  'SiaTransaction.cpp' = 1        # "SC"
+  'StellarTransaction.cpp' = 2    # "NONE" / "XLM"
+  'SuiTransaction.cpp' = 1        # "SUI"
+}
+$stringCopyFiles = Get-ChildItem -Path $root -File | Where-Object { $_.Extension -eq '.cpp' -or $_.Extension -eq '.h' }
+foreach ($file in $stringCopyFiles) {
+  $found = @(Select-String -Path $file.FullName -Pattern '\b(strcpy|strcat|sprintf)\(' |
+             Where-Object { $_.Line.Trim() -notmatch '^//' }).Count
+  $expected = 0
+  if ($stringCopyBaseline.ContainsKey($file.Name)) { $expected = $stringCopyBaseline[$file.Name] }
+  if ($found -gt $expected) {
+    throw "policy: $($file.Name) uses $found unbounded string cop(ies), baseline is $expected. Use chain_copy_text() or a bounded snprintf."
+  }
+}
+Write-Output "unbounded-string-copies=baseline policy=pass"
 exit 0

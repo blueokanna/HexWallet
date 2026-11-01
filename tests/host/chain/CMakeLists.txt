@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 project(hexwallet_chain_probe LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 get_filename_component(WALLET_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
@@ -12,13 +12,14 @@ add_subdirectory("${WALLET_ROOT}/build/chain-mbedtls" mbedtls EXCLUDE_FROM_ALL)
 set(WALLET_SOURCES
   CryptoPrimitives.cpp WalletSecurity.cpp WalletEngine.cpp WalletAddresses.cpp
   WalletAltAddresses.cpp WalletNetworks.cpp WalletCatalog.cpp WalletMiningCatalog.cpp
-  WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp base58.cpp
+  WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp Bls12381.cpp base58.cpp
   local_bech32.cpp local_segwit.cpp keccak256.cpp local_ripemd160.cpp
   ChainCommon.cpp ChainTransaction.cpp VeChainTransaction.cpp IconTransaction.cpp
   PolkadotTransaction.cpp SuiTransaction.cpp FilecoinTransaction.cpp TonTransaction.cpp TonCell.cpp
   DecredTransaction.cpp CkbTransaction.cpp ZcashTransaction.cpp CardanoDerivation.cpp CardanoTransaction.cpp HiveTransaction.cpp HederaTransaction.cpp SiaTransaction.cpp NemTransaction.cpp IcpTransaction.cpp ErgoTransaction.cpp Clvm.cpp ChiaTransaction.cpp BlsG2.cpp EvmTransaction.cpp TokenCalldata.cpp
   CosmosTransaction.cpp StellarTransaction.cpp AlgorandTransaction.cpp DashTransaction.cpp
-  NearTransaction.cpp TezosTransaction.cpp QrlXmss.cpp WalletCustody.cpp SecureElementPort.cpp RandomSource.cpp EinkPanel.cpp QrCode.cpp
+  NearTransaction.cpp TezosTransaction.cpp QrlXmss.cpp QrlOtsJournal.cpp QrlOtsStore.cpp
+  QrlTransaction.cpp QrlV2Transaction.cpp MlDsa87.cpp StarknetCrypto.cpp AptosTransaction.cpp StarknetTransaction.cpp WalletCustomTokens.cpp WalletCustody.cpp SecureElementPort.cpp RandomSource.cpp EinkPanel.cpp QrCode.cpp
   CryptoNoteAddress.cpp CryptoNoteRingCt.cpp CryptoNoteAmounts.cpp CryptoNoteSpend.cpp
   CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp)
 list(TRANSFORM WALLET_SOURCES PREPEND "${WALLET_ROOT}/")

@@ -43,6 +43,7 @@ KeyScheme key_scheme_for(const NetworkProfile &network) {
     case AddressEncoding::NearImplicit:
     case AddressEncoding::Ss58Ed25519:
     case AddressEncoding::SuiEd25519:
+    case AddressEncoding::AptosEd25519:
     case AddressEncoding::TonAddress:
     case AddressEncoding::HederaKeyAlias:
     case AddressEncoding::IcpPrincipal:
@@ -59,6 +60,10 @@ KeyScheme key_scheme_for(const NetworkProfile &network) {
       return KeyScheme::Bls12381G1;
     case AddressEncoding::QrlXmss:
       return KeyScheme::XmssShake256;
+    case AddressEncoding::QrlMlDsa:
+      return KeyScheme::MlDsa87;
+    case AddressEncoding::StarknetKey:
+      return KeyScheme::StarkEcdsa;
     case AddressEncoding::P2pkh:
     case AddressEncoding::P2shP2wpkh:
     case AddressEncoding::P2wpkh:
@@ -131,6 +136,12 @@ CustodyPlan plan_key_custody(const NetworkProfile &network,
       plan.mcu_must_hold_key = !plan.se_can_sign;
       plan.reason = "QRL XMSS needs SHAKE-256, a Merkle tree and stateful leaf indices; the SE050 provides none of them";
       break;
+    case KeyScheme::MlDsa87:
+      plan.key_can_live_in_se = false;
+      plan.se_can_sign = false;
+      plan.mcu_must_hold_key = true;
+      plan.reason = "ML-DSA-87 key expansion and signing need ~140 KB of MCU RAM; no SE primitive exists";
+      break;
     case KeyScheme::CardanoEd25519Bip32:
       plan.reason = "Cardano uses expanded BIP32-Ed25519 kL/kR; standard SE Ed25519 seed signing is not interchangeable";
       break;
@@ -140,6 +151,11 @@ CustodyPlan plan_key_custody(const NetworkProfile &network,
     case KeyScheme::NemKeccakEd25519:
       plan.reason = "NEM Keccak-Ed25519 is not standard Ed25519; no validated SE applet signing primitive";
       break;
+    case KeyScheme::StarkEcdsa:
+      plan.key_can_live_in_se = false;
+      plan.se_can_sign = false;
+      plan.mcu_must_hold_key = true;
+      plan.reason = "Starknet signs on the Stark curve (2^251 + 17*2^192 + 1); the SE050/SE051 only hold NIST P-256 and secp256k1 keys";
     case KeyScheme::Unsupported:
       plan.reason = "unknown key scheme; hardware custody cannot be inferred from an address encoding";
       break;

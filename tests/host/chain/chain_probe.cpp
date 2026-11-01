@@ -13,6 +13,7 @@
 #include "DashTransaction.h"
 #include "EvmTransaction.h"
 #include "QrlXmss.h"
+#include "StarknetTransaction.h"
 using namespace hexwallet;
 static void hex(const char *key, const uint8_t *p, size_t n) {
   printf("%s=", key); for (size_t i = 0; i < n; ++i) printf("%02x", p[i]); puts("");
@@ -34,6 +35,54 @@ int main(int argc, char **argv) {
     const bool ok = run_chain_self_tests();
     if (!ok) report_chain_self_tests();
     printf("chain=%s\n", ok ? "pass" : "FAIL");
+    return ok ? 0 : 1;
+  }
+  // Starknet needs real BIP32/Stark arithmetic: the main host suite derives no
+  // keys, so the profile -> encoder mapping is checked here.
+  if (argc == 2 && !strcmp(argv[1], "stark-selftest")) {
+    uint8_t seed[64] = {};
+    for (size_t index = 0; index < sizeof(seed); ++index) {
+      seed[index] = static_cast<uint8_t>(index * 3 + 1);
+    }
+    HdPrivateNode master = {};
+    DerivedAddress stark = {};
+    const NetworkProfile *network = find_network_profile("stark");
+    bool ok = network != nullptr && network->encoding == AddressEncoding::StarknetKey &&
+              hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
+              derive_address(master, seed, *network, 0, 0, 0, &stark) ==
+                  WalletError::Ok;
+    if (ok) {
+      uint8_t private_key[kStarknetFeltSize] = {};
+      uint8_t public_key[kStarknetFeltSize] = {};
+      char text[kStarknetAddressTextSize] = {};
+      ok = starknet_key_pair(stark.private_key, private_key, public_key) &&
+           starknet_felt_text(public_key, text, sizeof(text)) &&
+           strcmp(text, stark.address) == 0 &&
+           strlen(stark.address) == kStarknetAddressTextSize - 1;
+      // The account address must be the SNIP-5 address of this key, not a value
+      // the host could substitute.
+      uint8_t class_hash[kStarknetFeltSize] = {};
+      uint8_t salt[kStarknetFeltSize] = {};
+      uint8_t account[kStarknetFeltSize] = {};
+      class_hash[kStarknetFeltSize - 1] = 0x21;
+      salt[kStarknetFeltSize - 1] = 0x42;
+      const bool address_ok =
+          starknet_account_address(class_hash, salt, public_key, account);
+      uint8_t other[kStarknetFeltSize] = {};
+      salt[kStarknetFeltSize - 1] = 0x43;
+      ok = ok && address_ok &&
+           starknet_account_address(class_hash, salt, public_key, other) &&
+           !crypto_constant_time_equal(account, other, kStarknetFeltSize);
+      memset(private_key, 0, sizeof(private_key));
+      memset(public_key, 0, sizeof(public_key));
+      memset(account, 0, sizeof(account));
+      memset(other, 0, sizeof(other));
+    }
+    printf("path=%s\naddress=%s\n", stark.path, stark.address);
+    printf("stark-derivation=%s\n", ok ? "pass" : "FAIL");
+    clear_derived_address(&stark);
+    memset(&master, 0, sizeof(master));
+    memset(seed, 0, sizeof(seed));
     return ok ? 0 : 1;
   }
   // Full Zcash signing path with the real BIP32/ECDSA stack. The main host

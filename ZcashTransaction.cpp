@@ -27,8 +27,6 @@ namespace hexwallet
     constexpr size_t kP2pkhScriptSize = 25;
     constexpr size_t kP2shScriptSize = 23;
     constexpr uint8_t kZcashPayloadMagic[4] = {'Z', 'E', 'C', '4'};
-    // ZEC5 appends `u8 redeem_size + redeem script` to every input record so a
-    // t3 P2SH prevout can be spent. ZEC4 stays valid for P2PKH-only requests.
     constexpr uint8_t kZcashPayloadMagicRedeem[4] = {'Z', 'E', 'C', '5'};
 
     struct Cursor
@@ -745,13 +743,10 @@ namespace hexwallet
       if (public_ok && p2pkh_script(input.script, input.script_size))
       {
         script_ok = crypto_constant_time_equal(hash, input.script + 3,
-                                              kRipemd160Size);
+                                               kRipemd160Size);
       }
       else if (public_ok && p2sh_script(input.script, input.script_size))
       {
-        // The redeem script must carry this wallet's own key and must be the
-        // script the t3 address commits to; otherwise the device would be
-        // signing for a script it cannot legitimately satisfy.
         script_ok =
             zcash_p2sh_redeem_commits(input.script, input.script_size,
                                       input.redeem, input.redeem_size) &&
@@ -1461,8 +1456,6 @@ namespace hexwallet
 
   bool run_zcash_sighash_self_tests()
   {
-    // Official ZIP-243 test vector 3: a transparent v4 testnet transaction with
-    // nIn=0, SIGHASH_ALL, amount 0.5 ZEC. Source: zcash/zips zip-0243.rst.
     static const char kOfficialTransaction[] =
         "0400008085202f8901"
         "a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5bb6a1d9952104d9"

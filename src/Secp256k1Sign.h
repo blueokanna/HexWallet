@@ -12,15 +12,17 @@
 
 namespace hexwallet {
 
-// One secp256k1 signature path for every UTXO and account adapter.
+// One secp256k1 signature path for the UTXO adapters.
 //
-// Bitcoin, Dash, Zcash, the account-model chains and the self-tests all need the
-// same thing: an RFC 6979 deterministic signature, normalised to low-S, encoded
-// as strict DER, and verified before it is handed back. Each module used to keep
-// its own copy of that code, which drifted - the Dash copy had quietly lost the
-// blinding RNG and the self-check that the others pass to mbedtls. Keeping one
-// implementation removes both the drift and the question of which copy a new
-// chain will inherit.
+// Every adapter needs the same thing: an RFC 6979 deterministic signature,
+// normalised to low-S, encoded as strict DER, and checked on the curve before it
+// is handed back. Each module used to keep its own copy, and they drifted: the
+// Dash copy had quietly lost both the blinding RNG and the self-check the
+// others pass to mbedtls. Bitcoin and Dash now share this one; Zcash still
+// carries its own copy, which this was derived from, and is next to be moved.
+//
+// Determinism is load-bearing: the same key and digest must always produce the
+// same bytes, because the pinned vectors compare signatures byte for byte.
 //
 // Determinism is load-bearing: the same key and digest must always produce the
 // same bytes, because the pinned vectors compare signatures byte for byte.

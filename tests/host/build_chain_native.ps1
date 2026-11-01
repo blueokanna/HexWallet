@@ -40,6 +40,9 @@ try {
   & 'build/chain-native/Release/chain_probe.exe' evm-sign-selftest
   if ($LASTEXITCODE -ne 0) { throw 'evm sign self-test failed' }
 
+  & 'build/chain-native/Release/chain_probe.exe' stark-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'stark derivation self-test failed' }
+
   & 'build/chain-native/Release/production_policy.exe'
   if ($LASTEXITCODE -ne 0) { throw 'production_policy failed' }
 

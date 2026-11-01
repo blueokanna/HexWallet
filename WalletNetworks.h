@@ -43,6 +43,7 @@ namespace hexwallet
     IconAddress,             // hx + sha3-256(uncompressed pubkey)[12..31] (ICX)
     Ss58Ed25519,             // Substrate SS58 of a 32-byte Ed25519 key (DOT/KSM)
     SuiEd25519,              // 0x + BLAKE2b-256(0x00 || Ed25519 public key)
+    AptosEd25519,            // 0x + SHA3-256(Ed25519 public key || 0x00) (APT)
     TonAddress,              // TON wallet v4R2 user-friendly address (TON)
     DecredAddress,           // base58check with 2-byte version + BLAKE-256d (DCR)
     CkbAddress,              // bech32 short address of SECP256K1/blake160 (CKB)
@@ -52,6 +53,8 @@ namespace hexwallet
     SiaV2,                  // checksummed PolicyPublicKey hash (Sia v2)
     Nem,                    // NEM mainnet Keccak-Ed25519 account
     IcpLedgerAccount,       // default ICP ledger account identifier (32-byte CRC/hash)
+    QrlMlDsa,               // QRL v2: SHAKE256(010000 || ML-DSA-87 pk), 'Q' + 128 hex
+    StarknetKey,            // Starknet: 0x + 64 hex x-coordinate of grindKey(BIP32 child) * G
   };
 
   // BIP32-style derivation policy per network. `derive_address` selects the path

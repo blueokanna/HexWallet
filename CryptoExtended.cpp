@@ -318,10 +318,14 @@ namespace hexwallet
     void sha512_half_one_shot(const uint8_t *data, size_t size, uint8_t out[32])
     {
       uint64_t state[8] = {
-          UINT64_C(0x6a09e667f3bcc908), UINT64_C(0xbb67ae8584caa73b),
-          UINT64_C(0x3c6ef372fe94f82b), UINT64_C(0xa54ff53a5f1d36f1),
-          UINT64_C(0x510e527fade682d1), UINT64_C(0x9b05688c2b3e6c1f),
-          UINT64_C(0x1f83d9abfb41bd6b), UINT64_C(0x5be0cd19137e2179),
+          UINT64_C(0x6a09e667f3bcc908),
+          UINT64_C(0xbb67ae8584caa73b),
+          UINT64_C(0x3c6ef372fe94f82b),
+          UINT64_C(0xa54ff53a5f1d36f1),
+          UINT64_C(0x510e527fade682d1),
+          UINT64_C(0x9b05688c2b3e6c1f),
+          UINT64_C(0x1f83d9abfb41bd6b),
+          UINT64_C(0x5be0cd19137e2179),
       };
       const uint64_t total_bits = static_cast<uint64_t>(size) * 8U;
       const uint64_t total_high = static_cast<uint64_t>(size) >> 61;
@@ -363,7 +367,6 @@ namespace hexwallet
 
     void sha512_256_one_shot(const uint8_t *data, size_t size, uint8_t out[32])
     {
-      // FIPS 180-4 §5.3.6.1 SHA-512/256 initial hash values.
       uint64_t state[8] = {
           UINT64_C(0x22312194fc2bf72c),
           UINT64_C(0x9f555fa3c84c64c2),
@@ -1007,23 +1010,53 @@ namespace hexwallet
     passed = selftest_report("sha512/256 empty", crypto_sha512_256(nullptr, 0, digest) && crypto_constant_time_equal(digest, kSha512256Empty, 32)) && passed;
     passed = selftest_report("sha512/256 abc", crypto_sha512_256(kAbc, sizeof(kAbc), digest) && crypto_constant_time_equal(digest, kSha512256Abc, 32)) && passed;
     static const uint8_t kSha512HalfAbc[32] = {
-        0xdd,0xaf,0x35,0xa1,0x93,0x61,0x7a,0xba,0xcc,0x41,0x73,0x49,0xae,0x20,0x41,0x31,
-        0x12,0xe6,0xfa,0x4e,0x89,0xa9,0x7e,0xa2,0x0a,0x9e,0xee,0xe6,0x4b,0x55,0xd3,0x9a};
+        0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba, 0xcc, 0x41, 0x73, 0x49, 0xae, 0x20, 0x41, 0x31,
+        0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e, 0xee, 0xe6, 0x4b, 0x55, 0xd3, 0x9a};
     passed = selftest_report("sha512half abc", crypto_sha512_half(kAbc, sizeof(kAbc), digest) &&
-                                                   crypto_constant_time_equal(digest, kSha512HalfAbc, 32)) && passed;
+                                                   crypto_constant_time_equal(digest, kSha512HalfAbc, 32)) &&
+             passed;
     // Multi-block vector guards the 128-bit length field: a reused block left
     // bits 112..119 of the final chunk set to the previous message tail.
     static const uint8_t kSha512256Block[32] = {
-        0xb8, 0x8f, 0x97, 0xe2, 0x74, 0xf9, 0xc1, 0xd4,
-        0x9f, 0x18, 0x1c, 0x8c, 0xbd, 0x01, 0xa9, 0xc7,
-        0x49, 0x30, 0xad, 0x05, 0x5a, 0x46, 0xac, 0x44,
-        0x99, 0xa1, 0xd6, 0x01, 0xf1, 0xc8, 0x0b, 0xf2,
+        0xb8,
+        0x8f,
+        0x97,
+        0xe2,
+        0x74,
+        0xf9,
+        0xc1,
+        0xd4,
+        0x9f,
+        0x18,
+        0x1c,
+        0x8c,
+        0xbd,
+        0x01,
+        0xa9,
+        0xc7,
+        0x49,
+        0x30,
+        0xad,
+        0x05,
+        0x5a,
+        0x46,
+        0xac,
+        0x44,
+        0x99,
+        0xa1,
+        0xd6,
+        0x01,
+        0xf1,
+        0xc8,
+        0x0b,
+        0xf2,
     };
     uint8_t block_message[128];
     memset(block_message, 'a', sizeof(block_message));
     passed = selftest_report("sha512/256 128-byte block", crypto_sha512_256(
-        block_message, sizeof(block_message), digest) && crypto_constant_time_equal(digest, kSha512256Block, 32)) && passed;
-
+                                                              block_message, sizeof(block_message), digest) &&
+                                                              crypto_constant_time_equal(digest, kSha512256Block, 32)) &&
+             passed;
 
     // RFC 7693 BLAKE2b-512("abc") and BLAKE2b-256("abc").
     static const uint8_t kBlake2b512Abc[64] = {

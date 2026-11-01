@@ -12,7 +12,8 @@
 namespace hexwallet {
 
 constexpr size_t kDerivationPathTextSize = 48;
-constexpr size_t kAddressTextSize = 128;
+// QRL v2 is the widest account text: 'Q' plus 128 checksummed hex digits.
+constexpr size_t kAddressTextSize = 136;
 
 struct DerivedAddress {
   const NetworkProfile *network;

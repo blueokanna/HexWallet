@@ -245,9 +245,9 @@ namespace hexwallet
             return CryptoNoteTxError::InvalidArgument;
           }
           const bool valid = declared.address_type == 1
-              ? ed25519_point_mul_compressed(declared.spend_public, secret,
-                                             derived_public)
-              : cryptonote_scalar_to_point(secret, derived_public);
+                                 ? ed25519_point_mul_compressed(declared.spend_public, secret,
+                                                                derived_public)
+                                 : cryptonote_scalar_to_point(secret, derived_public);
           secure_zero(validation_derivation, sizeof(validation_derivation));
           if (!valid ||
               !equals(derived_public, extra_keys.additional[index]))

@@ -54,16 +54,13 @@ namespace hexwallet
       return memcmp(&left, &right, sizeof(QrlOtsRecord)) == 0;
     }
 
-    // Reads both slots. `newest` is only meaningful when `have_any` is set; the
-    // short-circuit in the comparison below is what keeps index 2 unread before
-    // the first valid record arrives.
     struct Journal
     {
       bool valid[kQrlOtsSlotCount];
       QrlOtsRecord record[kQrlOtsSlotCount];
       size_t newest;
       bool have_any;
-      bool foreign;   // a valid record exists but for a different tag
+      bool foreign; // a valid record exists but for a different tag
     };
 
     Journal read_journal(QrlOtsStorage &storage, const uint8_t *tag)
@@ -161,7 +158,6 @@ namespace hexwallet
       return QrlOtsError::Exhausted;
     const QrlOtsRecord next =
         make_record(tag, newest.index + 1U, newest.sequence + 1U);
-    // Nothing is handed out until both durable copies prove themselves.
     if (write_journal(storage, next) != QrlOtsError::Ok)
       return QrlOtsError::StorageFailure;
     uint32_t high_water = 0;
@@ -227,9 +223,9 @@ namespace hexwallet
     };
 
     const uint8_t kTagA[kQrlOtsTagSize] = {1, 2, 3, 4, 5, 6, 7, 8,
-                                          9, 10, 11, 12, 13, 14, 15, 16};
+                                           9, 10, 11, 12, 13, 14, 15, 16};
     const uint8_t kTagB[kQrlOtsTagSize] = {16, 15, 14, 13, 12, 11, 10, 9,
-                                          8, 7, 6, 5, 4, 3, 2, 1};
+                                           8, 7, 6, 5, 4, 3, 2, 1};
 
     bool reserve_is(FakeOtsStorage &storage, const uint8_t *tag,
                     uint32_t expected)
@@ -285,9 +281,6 @@ namespace hexwallet
                index == 8;
     }
 
-    // A write that never lands hands out nothing and consumes nothing. The
-    // reservation always targets the slot that is not the high-water mark, so
-    // each state is failed on exactly the slot it would have written.
     {
       FakeOtsStorage storage;
       passed = passed && qrl_ots_initialise(storage, kTagA) == QrlOtsError::Ok &&
@@ -342,9 +335,6 @@ namespace hexwallet
                              QrlOtsError::Unknown;
       passed = passed &&
                qrl_ots_reserve(storage, kTagA, &index) == QrlOtsError::Unknown;
-      // With nothing left to compare against, re-initialising is the only way
-      // back - which is exactly why the custody layer has to refuse this case
-      // instead of calling it.
       passed = passed && qrl_ots_initialise(storage, kTagA) == QrlOtsError::Ok;
     }
 
@@ -354,8 +344,6 @@ namespace hexwallet
       FakeOtsStorage storage;
       passed = passed && qrl_ots_initialise(storage, kTagA) == QrlOtsError::Ok &&
                reserve_is(storage, kTagA, 0) && reserve_is(storage, kTagA, 1);
-      // Two reservations left the mark at 2 in slot 0; corrupting slot 1 must
-      // not disturb it.
       storage.slot[1].index ^= 0x01U;
       uint32_t index = 0;
       passed = passed &&

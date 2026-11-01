@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "AptosTransaction.h"
 #include "ChainCommon.h"
 #include "CryptoExtended.h"
 #include "CardanoTransaction.h"
@@ -19,6 +20,9 @@
 #include "DecredTransaction.h"
 #include "IconTransaction.h"
 #include "PolkadotTransaction.h"
+#include "QrlTransaction.h"
+#include "QrlV2Transaction.h"
+#include "StarknetTransaction.h"
 #include "TonTransaction.h"
 #include "VeChainTransaction.h"
 #include "SuiTransaction.h"
@@ -28,12 +32,6 @@
 
 namespace hexwallet {
 namespace {
-
-// The historical SCALE codec has no authenticated runtime metadata, so it must
-// never be compiled into a build that promises production custody.
-#if defined(HEXWALLET_REQUIRE_SECURE_CUSTODY) && defined(HEXWALLET_LEGACY_SUBSTRATE_TEST_ONLY)
-#error "Historical Substrate codec is test-only and cannot be part of a production custody build."
-#endif
 
 struct FamilyMap {
   ChainFamily family;
@@ -48,11 +46,11 @@ constexpr FamilyMap kFamilyMap[] = {
     {ChainFamily::InternetComputer, "icp"},
     {ChainFamily::VeChain, "vet"},
     {ChainFamily::Icon, "icx"},
-#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_LEGACY_SUBSTRATE_TEST_ONLY)
-    // Historical codec vectors only; current runtime metadata is not authenticated.
+    // DOT/KSM sign the extrinsic payload with the runtime versions pinned in
+    // PolkadotTransaction.cpp. The historical DOT1 layout is test-only; see
+    // that file for why the pin exists.
     {ChainFamily::Polkadot, "dot"},
     {ChainFamily::Kusama, "ksm"},
-#endif
     {ChainFamily::Sui, "sui"},
     {ChainFamily::Filecoin, "fil"},
     {ChainFamily::Ton, "ton"},
@@ -61,6 +59,10 @@ constexpr FamilyMap kFamilyMap[] = {
     {ChainFamily::Hive, "hive"},
     {ChainFamily::Ergo, "erg"},
     {ChainFamily::Chia, "xch"},
+    {ChainFamily::Qrl, "qrl"},
+    {ChainFamily::Aptos, "apt"},
+    {ChainFamily::QrlV2, "qrl2"},
+    {ChainFamily::Starknet, "stark"},
 };
 
 bool review_equals(const ChainReview &left, const ChainReview &right) {
@@ -110,7 +112,11 @@ const char *chain_family_name(ChainFamily family) {
     case ChainFamily::Ergo: return "ERG";
     case ChainFamily::Hedera: return "HBAR";
     case ChainFamily::Chia: return "XCH";
+    case ChainFamily::Qrl: return "QRL";
+    case ChainFamily::QrlV2: return "QRL";
+    case ChainFamily::Aptos: return "APT";
     case ChainFamily::InternetComputer: return "ICP";
+    case ChainFamily::Starknet: return "STRK";
     default: return "?";
   }
 }
@@ -127,6 +133,8 @@ const char *chain_error_text(ChainError error) {
     case ChainError::FeePolicy: return "fee policy";
     case ChainError::CryptoFailure: return "crypto failure";
     case ChainError::BufferTooSmall: return "buffer too small";
+    case ChainError::StorageUnavailable: return "durable state unavailable";
+    case ChainError::RuntimeMismatch: return "runtime version not pinned";
   }
   return "unknown";
 }
@@ -207,6 +215,24 @@ ChainError chain_review_transaction(ChainFamily family, const uint8_t *payload,
     case ChainFamily::Chia:
       error = chia_review_payload(payload, size, derived.address, &out->review,
                                   out->digest);
+      break;
+    case ChainFamily::Qrl:
+      error = qrl_review_payload(payload, size, derived.address, &out->review,
+                                 out->digest);
+      break;
+    case ChainFamily::QrlV2:
+      error = qrl_v2_review_payload(payload, size, derived.address,
+                                    &out->review, out->digest);
+      break;
+    case ChainFamily::Aptos:
+      error = aptos_review_payload(payload, size, derived.address, &out->review,
+                                   out->digest);
+      break;
+    case ChainFamily::Starknet:
+      // Starknet accounts are contracts: the adapter rebuilds the SNIP-5 address
+      // from the class hash in the payload and proves it belongs to this key.
+      error = starknet_review_payload(payload, size, derived.private_key,
+                                      &out->review, out->digest);
       break;
     case ChainFamily::Ton:
       error = ton_review_payload(payload, size, derived.address, &out->review,
@@ -347,6 +373,30 @@ ChainError chain_sign_transaction(const ChainTransaction &transaction,
       error = chia_sign_payload(transaction.payload, transaction.payload_size,
                                 derived.private_key, out, in_out_size);
       break;
+    case ChainFamily::Qrl:
+      // QRL keys and one-time indices are not derived from the BIP32 node:
+      // this adapter needs the BIP39 seed and the account the review showed,
+      // and it refuses a payload whose preimage maps to another account.
+      error = qrl_sign_payload(nullptr, transaction.payload,
+                               transaction.payload_size, derived.address, seed,
+                               transaction.address_index, out, in_out_size);
+      break;
+    case ChainFamily::QrlV2:
+      error = qrl_v2_sign_payload(transaction.payload,
+                                  transaction.payload_size, derived.address,
+                                  master, transaction.address_index, out,
+                                  in_out_size);
+      break;
+    case ChainFamily::Aptos:
+      error = aptos_sign_payload(transaction.payload, transaction.payload_size,
+                                 derived.address, derived.private_key, out,
+                                 in_out_size);
+      break;
+    case ChainFamily::Starknet:
+      error = starknet_sign_payload(transaction.payload,
+                                    transaction.payload_size,
+                                    derived.private_key, out, in_out_size);
+      break;
     case ChainFamily::Ton:
       error = ton_sign_payload(transaction.payload, transaction.payload_size,
                                derived.private_key, out, in_out_size);
@@ -391,6 +441,10 @@ bool run_chain_self_tests() {
   const bool bls = run_bls_g2_self_tests();
   const bool clvm = run_clvm_self_tests();
   const bool chia = run_chia_self_tests();
+  const bool qrl = run_qrl_transaction_self_tests();
+  const bool qrl_v2 = run_qrl_v2_self_tests();
+  const bool apt = run_aptos_self_tests();
+  const bool stark = run_starknet_self_tests();
   ChainFamily family = ChainFamily::None;
   bool admission =
       chain_family_for_network("sui", &family) && family == ChainFamily::Sui &&
@@ -399,16 +453,16 @@ bool run_chain_self_tests() {
       chain_family_for_network("ckb", &family) && family == ChainFamily::Ckb &&
       chain_family_for_network("hive", &family) && family == ChainFamily::Hive &&
       chain_family_for_network("erg", &family) && family == ChainFamily::Ergo &&
-      chain_family_for_network("xch", &family) && family == ChainFamily::Chia;
-#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_LEGACY_SUBSTRATE_TEST_ONLY)
-  admission = admission && chain_family_for_network("dot", &family) &&
-      chain_family_for_network("ksm", &family);
-#else
-  admission = admission && !chain_family_for_network("dot", &family) &&
-      !chain_family_for_network("ksm", &family);
-#endif
+      chain_family_for_network("xch", &family) && family == ChainFamily::Chia &&
+      chain_family_for_network("qrl", &family) && family == ChainFamily::Qrl &&
+      chain_family_for_network("qrl2", &family) && family == ChainFamily::QrlV2 &&
+      chain_family_for_network("dot", &family) && family == ChainFamily::Polkadot &&
+      chain_family_for_network("ksm", &family) && family == ChainFamily::Kusama &&
+      chain_family_for_network("apt", &family) && family == ChainFamily::Aptos &&
+      chain_family_for_network("stark", &family) && family == ChainFamily::Starknet;
   return ada && vet && icx && dot && ton && sui && fil && dcr && ckb && hive &&
-         erg && bls && clvm && chia && admission;
+         erg && bls && clvm && chia && qrl && qrl_v2 && apt && stark &&
+         admission;
 }
 
 #if defined(HEXWALLET_HOST_TEST)
@@ -433,6 +487,10 @@ void report_chain_self_tests() {
       {"bls-g2", run_bls_g2_self_tests},
       {"clvm", run_clvm_self_tests},
       {"chia", run_chia_self_tests},
+      {"qrl", run_qrl_transaction_self_tests},
+      {"qrl-v2", run_qrl_v2_self_tests},
+      {"aptos", run_aptos_self_tests},
+      {"starknet", run_starknet_self_tests},
   };
   for (size_t i = 0; i < sizeof(kTests) / sizeof(kTests[0]); ++i) {
     ::printf("  chain.%s=%s\n", kTests[i].name,

@@ -10,10 +10,10 @@ namespace hexwallet
   // Trusted verification has two halves and this file owns both:
   //
   //  1. Device trust - what the hardware can prove about the firmware it is
-  //     running: secure boot enabled, flash encryption enabled, anti-rollback
-  //     counter, and the running app's ELF digest. On the ESP32-P4 these come from
-  //     eFuses and the app descriptor, not from anything the firmware writes
-  //     about itself.
+  //     running: secure boot, flash encryption and the app's ELF digest. P4
+  //     reads SECURE_BOOT_EN through the public eFuse API; configuration-only
+  //     fallback on other targets is explicitly unverified. Anti-rollback and
+  //     physical tamper resistance are outside this state report.
   //
   //  2. Review seal - a single-use authorization ticket for exactly the text the
   //     panel was asked to show. It is built when a review is rendered, armed when

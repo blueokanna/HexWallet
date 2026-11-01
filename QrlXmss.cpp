@@ -1,8 +1,9 @@
-#include "QrlXmss.h"
+﻿#include "QrlXmss.h"
 
 #include <string.h>
 
 #include "CryptoPrimitives.h"
+#include "SensitiveValue.h"
 
 namespace hexwallet {
 namespace {
@@ -176,7 +177,8 @@ bool l_tree(uint8_t out[kN], uint8_t *public_key, const uint8_t pub_seed[kN],
 
 int treehash(uint8_t out[kN], uint8_t height, const uint8_t sk_seed[kN],
              const uint8_t pub_seed[kN], const uint32_t root_addr[8],
-             QrlProgressHook progress, void *context) {
+             QrlProgressHook progress, void *context,
+             uint8_t *authentication_path = nullptr, uint32_t target = 0) {
   uint8_t stack[(kMaxHeight + 1) * kN];
   WipeOnExit wipe_stack{stack, sizeof(stack)};
   uint8_t levels[kMaxHeight + 1];
@@ -209,6 +211,8 @@ int treehash(uint8_t out[kN], uint8_t height, const uint8_t sk_seed[kN],
     secure_zero(wots_public, sizeof(wots_public));
     secure_zero(ots_seed, sizeof(ots_seed));
     if (!generated) return 0;
+    if (authentication_path != nullptr && index == (target ^ 1U))
+      memcpy(authentication_path, stack + offset * kN, kN);
 
     levels[offset] = 0;
     ++offset;
@@ -221,6 +225,10 @@ int treehash(uint8_t out[kN], uint8_t height, const uint8_t sk_seed[kN],
       }
       ++levels[offset - 2];
       --offset;
+      const uint8_t level = levels[offset - 1];
+      if (authentication_path != nullptr && level < height &&
+          (index >> level) == ((target >> level) ^ 1U))
+        memcpy(authentication_path + level * kN, stack + (offset - 1) * kN, kN);
     }
     if (progress != nullptr && !progress(index + 1, leaf_count, context)) {
       return -1;
@@ -298,10 +306,11 @@ WalletError qrl_xmss_public_key(const uint8_t seed[kQrlSeedSize], uint8_t height
   return qrl_xmss_public_key_ex(seed, height, nullptr, nullptr, out_public_key);
 }
 
-WalletError qrl_address_from_public_key(
-  const uint8_t public_key[kQrlPublicKeySize], char *out, size_t out_size) {
-  if (out != nullptr && out_size != 0) out[0] = '\0';
-  if (public_key == nullptr || out == nullptr || out_size < kQrlAddressTextSize) {
+WalletError qrl_address_bytes_from_public_key(
+  const uint8_t public_key[kQrlPublicKeySize],
+  uint8_t out_address[kQrlAddressBytes]) {
+  if (out_address != nullptr) secure_zero(out_address, kQrlAddressBytes);
+  if (public_key == nullptr || out_address == nullptr) {
     return WalletError::InvalidArgument;
   }
   const uint8_t height = descriptor_height(public_key[1]);
@@ -311,23 +320,45 @@ WalletError qrl_address_from_public_key(
       (height & 1U) != 0) {
     return WalletError::InvalidArgument;
   }
-  uint8_t address[kQrlAddressBytes];
-  memcpy(address, public_key, 3);
   uint8_t hashed[kSha256Size];
   uint8_t checksum[kSha256Size];
+  memcpy(out_address, public_key, 3);
   bool ok = crypto_sha256(public_key, kQrlPublicKeySize, hashed);
   if (ok) {
-    memcpy(address + 3, hashed, kN);
-    ok = crypto_sha256(address, 3 + kN, checksum);
+    memcpy(out_address + 3, hashed, kN);
+    ok = crypto_sha256(out_address, 3 + kN, checksum);
   }
-  if (ok) {
-    memcpy(address + 3 + kN, checksum + kSha256Size - 4, 4);
-    ok = encode_text(address, out, out_size);
-  }
+  if (ok) memcpy(out_address + 3 + kN, checksum + kSha256Size - 4, 4);
   secure_zero(hashed, sizeof(hashed));
   secure_zero(checksum, sizeof(checksum));
+  if (!ok) secure_zero(out_address, kQrlAddressBytes);
+  return ok ? WalletError::Ok : WalletError::CryptoFailure;
+}
+
+WalletError qrl_address_from_public_key(
+  const uint8_t public_key[kQrlPublicKeySize], char *out, size_t out_size) {
+  if (out != nullptr && out_size != 0) out[0] = '\0';
+  if (out == nullptr || out_size < kQrlAddressTextSize) {
+    return WalletError::InvalidArgument;
+  }
+  uint8_t address[kQrlAddressBytes];
+  const WalletError built =
+    qrl_address_bytes_from_public_key(public_key, address);
+  if (built != WalletError::Ok) return built;
+  const bool ok = encode_text(address, out, out_size);
   secure_zero(address, sizeof(address));
   return ok ? WalletError::Ok : WalletError::CryptoFailure;
+}
+
+WalletError qrl_address_text(const uint8_t address[kQrlAddressBytes], char *out,
+                             size_t out_size) {
+  if (out != nullptr && out_size != 0) out[0] = '\0';
+  if (address == nullptr || out == nullptr || out_size < kQrlAddressTextSize ||
+      !qrl_address_bytes_valid(address)) {
+    return WalletError::InvalidArgument;
+  }
+  return encode_text(address, out, out_size) ? WalletError::Ok
+                                             : WalletError::CryptoFailure;
 }
 
 WalletError qrl_xmss_address_ex(const uint8_t seed[kQrlSeedSize], uint8_t height,
@@ -380,8 +411,23 @@ WalletError qrl_seed_from_bip39(const uint8_t bip39_seed[kSeedSize],
   return ok ? WalletError::Ok : WalletError::CryptoFailure;
 }
 
-bool qrl_address_validate(const char *address) {
-  if (address == nullptr || strlen(address) != kQrlAddressTextSize - 1 ||
+bool qrl_address_bytes_valid(const uint8_t address[kQrlAddressBytes]) {
+  if (address == nullptr) return false;
+  // Consensus deliberately does not validate the XMSS descriptor here. Some
+  // historical mainnet holders use descriptors a new signer would reject.
+  if ((address[1] >> 4) != 0) return false;
+  uint8_t checksum[kSha256Size];
+  const bool valid =
+    crypto_sha256(address, 3 + kN, checksum) &&
+    crypto_constant_time_equal(address + 3 + kN, checksum + kSha256Size - 4, 4);
+  secure_zero(checksum, sizeof(checksum));
+  return valid;
+}
+
+bool qrl_address_decode(const char *address, uint8_t out[kQrlAddressBytes]) {
+  if (out != nullptr) secure_zero(out, kQrlAddressBytes);
+  if (address == nullptr || out == nullptr ||
+      strlen(address) != kQrlAddressTextSize - 1 ||
       (address[0] != 'Q' && address[0] != 'q')) {
     return false;
   }
@@ -389,20 +435,21 @@ bool qrl_address_validate(const char *address) {
   for (size_t index = 0; index < kQrlAddressBytes; ++index) {
     const int high = hex_value(address[1 + index * 2]);
     const int low = hex_value(address[2 + index * 2]);
-    if (high < 0 || low < 0) return false;
+    if (high < 0 || low < 0) {
+      secure_zero(bytes, sizeof(bytes));
+      return false;
+    }
     bytes[index] = static_cast<uint8_t>((high << 4) | low);
   }
-  const uint8_t height = descriptor_height(bytes[1]);
-  bool valid = (bytes[0] & 0x0F) == kHashShake256 &&
-               ((bytes[0] >> 4) & 0x0F) == 0 && bytes[2] == 0 &&
-               (bytes[1] >> 4) == 0 && height >= kMinHeight &&
-               height <= kMaxHeight && (height & 1U) == 0;
-  if (valid) {
-    uint8_t checksum[kSha256Size];
-    valid = crypto_sha256(bytes, 3 + kN, checksum) &&
-            crypto_constant_time_equal(bytes + 3 + kN, checksum + kSha256Size - 4, 4);
-    secure_zero(checksum, sizeof(checksum));
-  }
+  const bool valid = qrl_address_bytes_valid(bytes);
+  if (valid) memcpy(out, bytes, kQrlAddressBytes);
+  secure_zero(bytes, sizeof(bytes));
+  return valid;
+}
+
+bool qrl_address_validate(const char *address) {
+  uint8_t bytes[kQrlAddressBytes];
+  const bool valid = qrl_address_decode(address, bytes);
   secure_zero(bytes, sizeof(bytes));
   return valid;
 }
@@ -437,6 +484,282 @@ bool qrl_ots_next_high_water(uint8_t height, uint32_t burned_high_water,
   return true;
 }
 
+// --- WOTS+ signing ---------------------------------------------------------
+//
+// Digits are the base-16 digits of the message digest followed by the base-16
+// digits of the digit-sum checksum. The checksum is what stops an attacker from
+// choosing a message with fewer digits and walking a chain backwards.
+
+namespace {
+
+void wots_digits(const uint8_t digest[kN], uint8_t digits[kWotsLen]) {
+  size_t produced = 0;
+  uint32_t total = 0;
+  uint32_t bits = 0;
+  for (size_t index = 0; index < kN; ++index) {
+    // Keep only the bits that have not been emitted yet: shifting an unmasked
+    // accumulator left by 8 overflows, and the reference implementation's
+    // reliance on int wrapping is undefined behaviour here.
+    total = ((total & ((uint32_t{1} << bits) - 1U)) << 8) | digest[index];
+    bits += 8;
+    while (bits >= 4) {
+      bits -= 4;
+      digits[produced++] = static_cast<uint8_t>((total >> bits) & 0x0f);
+    }
+  }
+  // len_2 * 4 = 12 checksum bits, shifted so a whole number of digits comes
+  // out: csum <<= (8 - ((len_2 * 4) % 8)) = 4.
+  uint32_t checksum = 0;
+  for (size_t index = 0; index < kWotsLen1; ++index) {
+    checksum += 15U - digits[index];
+  }
+  checksum <<= 4;
+  const uint8_t high = static_cast<uint8_t>((checksum >> 8) & 0xff);
+  const uint8_t low = static_cast<uint8_t>(checksum & 0xff);
+  digits[produced++] = static_cast<uint8_t>(high >> 4);
+  digits[produced++] = static_cast<uint8_t>(high & 0x0f);
+  digits[produced++] = static_cast<uint8_t>(low >> 4);
+}
+
+bool wots_walk(uint8_t *value, const uint8_t pub_seed[kN], uint32_t addr[8],
+               uint32_t start, uint32_t steps) {
+  for (uint32_t step = 0; step < steps; ++step) {
+    set_hash(addr, start + step);
+    if (!hash_f(value, value, pub_seed, addr)) return false;
+  }
+  return true;
+}
+
+void wots_leaf_address(uint32_t addr[8], uint32_t leaf_index) {
+  memset(addr, 0, sizeof(uint32_t) * 8);
+  set_type(addr, 0);
+  set_ots(addr, leaf_index);
+  clear_chain_hash_key(addr);
+}
+
+} // namespace
+
+bool qrl_wots_sign(uint8_t *signature, const uint8_t digest[32],
+                   const uint8_t sk_seed[32], const uint8_t pub_seed[32],
+                   uint8_t tree_height, uint32_t leaf_index) {
+  if (signature == nullptr || digest == nullptr || sk_seed == nullptr ||
+      pub_seed == nullptr) {
+    return false;
+  }
+  if (tree_height < kMinHeight || tree_height > kMaxHeight) return false;
+  if (leaf_index >= (uint32_t{1} << tree_height)) return false;
+  uint8_t digits[kWotsLen];
+  wots_digits(digest, digits);
+  uint32_t addr[8];
+  wots_leaf_address(addr, leaf_index);
+  for (uint32_t chain = 0; chain < kWotsLen; ++chain) {
+    uint8_t counter[32];
+    memset(counter, 0, sizeof(counter));
+    to_bytes_be(chain, counter, sizeof(counter));
+    uint8_t *value = signature + chain * kN;
+    if (!prf(value, counter, sk_seed)) {
+      secure_zero(digits, sizeof(digits));
+      return false;
+    }
+    set_chain(addr, chain);
+    // Signing walks `digit` steps from the secret value; verification walks the
+    // remaining 15 - digit steps from there, so the two always meet at c^15.
+    if (!wots_walk(value, pub_seed, addr, 0, digits[chain])) {
+      secure_zero(digits, sizeof(digits));
+      return false;
+    }
+  }
+  secure_zero(digits, sizeof(digits));
+  return true;
+}
+
+bool qrl_wots_recover(uint8_t *public_key, const uint8_t *signature,
+                      const uint8_t digest[32], const uint8_t pub_seed[32],
+                      uint8_t tree_height, uint32_t leaf_index) {
+  if (public_key == nullptr || signature == nullptr || digest == nullptr ||
+      pub_seed == nullptr) {
+    return false;
+  }
+  if (tree_height < kMinHeight || tree_height > kMaxHeight) return false;
+  if (leaf_index >= (uint32_t{1} << tree_height)) return false;
+  uint8_t digits[kWotsLen];
+  wots_digits(digest, digits);
+  uint32_t addr[8];
+  wots_leaf_address(addr, leaf_index);
+  for (uint32_t chain = 0; chain < kWotsLen; ++chain) {
+    uint8_t *value = public_key + chain * kN;
+    memcpy(value, signature + chain * kN, kN);
+    set_chain(addr, chain);
+    if (!wots_walk(value, pub_seed, addr, digits[chain],
+                   kWotsW - 1U - digits[chain])) {
+      secure_zero(digits, sizeof(digits));
+      return false;
+    }
+  }
+  secure_zero(digits, sizeof(digits));
+  return true;
+}
+
+
+namespace {
+uint8_t signing_height(const uint8_t *public_key) {
+  if (!public_key || public_key[0] != kHashShake256 ||
+      (public_key[1] & 0xf0) != 0 || public_key[2] != 0) return 0;
+  const uint8_t height = descriptor_height(public_key[1]);
+  return qrl_xmss_signature_size(height) ? height : 0;
+}
+bool message_digest(const uint8_t r[kN], const uint8_t root[kN],
+                    uint32_t index, const uint8_t message[kN], uint8_t out[kN]) {
+  uint8_t buffer[5 * kN] = {};
+  to_bytes_be(2, buffer, kN);
+  memcpy(buffer + kN, r, kN);
+  memcpy(buffer + 2 * kN, root, kN);
+  to_bytes_be(index, buffer + 3 * kN, kN);
+  memcpy(buffer + 4 * kN, message, kN);
+  return crypto_shake256(buffer, sizeof(buffer), out, kN);
+}
+}
+
+bool qrl_xmss_verify_digest(const uint8_t public_key[kQrlPublicKeySize],
+    const uint8_t digest[32], const uint8_t *signature, size_t signature_size) {
+  const uint8_t height = signing_height(public_key);
+  if (!height || !digest || !signature ||
+      signature_size != qrl_xmss_signature_size(height)) return false;
+  const uint32_t index = (uint32_t(signature[0]) << 24) |
+      (uint32_t(signature[1]) << 16) | (uint32_t(signature[2]) << 8) | signature[3];
+  if (index >= qrl_xmss_leaf_count(height)) return false;
+  uint8_t hashed[kN];
+  if (!message_digest(signature + 4, public_key + 3, index, digest, hashed)) return false;
+  uint8_t wots_public[kWotsKeySize];
+  const uint8_t *pub_seed = public_key + 3 + kN;
+  if (!qrl_wots_recover(wots_public, signature + 4 + kN, hashed, pub_seed,
+                         height, index)) return false;
+  uint32_t addr[8] = {};
+  set_type(addr, 1);
+  set_ltree(addr, index);
+  uint8_t node[kN];
+  if (!l_tree(node, wots_public, pub_seed, addr)) return false;
+  const uint8_t *path = signature + 4 + kN + kWotsKeySize;
+  set_type(addr, 2);
+  for (uint8_t level = 0; level < height; ++level) {
+    uint8_t pair[2 * kN];
+    const bool right = ((index >> level) & 1U) != 0;
+    memcpy(pair + (right ? kN : 0), node, kN);
+    memcpy(pair + (right ? 0 : kN), path + level * kN, kN);
+    set_tree_height(addr, level);
+    set_tree_index(addr, index >> (level + 1));
+    if (!hash_h(node, pair, pub_seed, addr)) return false;
+  }
+  return crypto_constant_time_equal(node, public_key + 3, kN);
+}
+
+QrlSignError qrl_xmss_sign_digest(const uint8_t seed[kQrlSeedSize],
+    const uint8_t public_key[kQrlPublicKeySize], uint32_t leaf_index,
+    const uint8_t digest[32], const QrlOtsPort &storage,
+    uint8_t *signature, size_t *in_out_size,
+    QrlProgressHook progress, void *context) {
+  SigningOutputGuard output(signature, in_out_size);
+  const uint8_t height = signing_height(public_key);
+  if (!seed || !digest || !height || !output.valid() ||
+      leaf_index >= qrl_xmss_leaf_count(height)) return QrlSignError::InvalidArgument;
+  const size_t signature_size = qrl_xmss_signature_size(height);
+  if (*in_out_size < signature_size) return QrlSignError::BufferTooSmall;
+  if (!storage.read || !storage.reserve) return QrlSignError::OtsUnavailable;
+  uint8_t key_id[kN];
+  if (!crypto_sha256(public_key, kQrlPublicKeySize, key_id)) return QrlSignError::CryptoFailure;
+  uint32_t high_water = 0, next = 0;
+  if (!storage.read(storage.context, key_id, &high_water)) return QrlSignError::OtsUnavailable;
+  if (!qrl_ots_next_high_water(height, high_water, leaf_index, &next))
+    return QrlSignError::OtsReuse;
+  SensitiveValue<uint8_t[3 * kN]> expanded;
+  if (!crypto_shake256(seed, kQrlSeedSize, expanded.get(), 3 * kN))
+    return QrlSignError::CryptoFailure;
+  const uint8_t *pub_seed = expanded.get() + 2 * kN;
+  if (!crypto_constant_time_equal(pub_seed, public_key + 3 + kN, kN))
+    return QrlSignError::WrongKey;
+  uint8_t root[kN];
+  const uint32_t root_addr[8] = {};
+  const int built = treehash(root, height, expanded.get(), pub_seed, root_addr,
+      progress, context, signature + 4 + kN + kWotsKeySize, leaf_index);
+  if (built < 0) return QrlSignError::Aborted;
+  if (!built) return QrlSignError::CryptoFailure;
+  if (!crypto_constant_time_equal(root, public_key + 3, kN)) return QrlSignError::WrongKey;
+  // This is the irrevocable boundary. Any failure below leaves the leaf burned.
+  if (!storage.reserve(storage.context, key_id, high_water, next))
+    return QrlSignError::OtsCommitFailed;
+  uint8_t index_bytes[kN];
+  to_bytes_be(leaf_index, index_bytes, kN);
+  to_bytes_be(leaf_index, signature, 4);
+  if (!prf(signature + 4, index_bytes, expanded.get() + kN))
+    return QrlSignError::CryptoFailure;
+  uint8_t hashed[kN];
+  if (!message_digest(signature + 4, root, leaf_index, digest, hashed))
+    return QrlSignError::CryptoFailure;
+  uint32_t addr[8];
+  wots_leaf_address(addr, leaf_index);
+  uint8_t addr_bytes[kN];
+  addr_to_bytes(addr, addr_bytes);
+  SensitiveValue<uint8_t[kN]> ots_seed;
+  if (!prf(ots_seed.get(), addr_bytes, expanded.get()) ||
+      !qrl_wots_sign(signature + 4 + kN, hashed, ots_seed.get(), pub_seed, height, leaf_index))
+    return QrlSignError::CryptoFailure;
+  if (!qrl_xmss_verify_digest(public_key, digest, signature, signature_size))
+    return QrlSignError::CryptoFailure;
+  *in_out_size = signature_size;
+  return output.commit() ? QrlSignError::Ok : QrlSignError::CryptoFailure;
+}
+
+bool run_qrl_wots_self_tests() {
+  uint8_t sk_seed[kN];
+  uint8_t pub_seed[kN];
+  for (size_t index = 0; index < kN; ++index) {
+    sk_seed[index] = static_cast<uint8_t>(index + 1);
+    pub_seed[index] = static_cast<uint8_t>(0x80 + index);
+  }
+  uint8_t digest[kN];
+  for (size_t index = 0; index < kN; ++index) {
+    digest[index] = static_cast<uint8_t>(index * 7 + 3);
+  }
+  constexpr uint8_t kTestHeight = 4;
+  bool passed = true;
+  for (uint32_t leaf = 0; leaf < 3; ++leaf) {
+    uint8_t generated[kWotsKeySize];
+    uint8_t recovered[kWotsKeySize];
+    uint8_t signature[kWotsSignatureSize];
+    uint32_t addr[8];
+    memset(addr, 0, sizeof(addr));
+    set_type(addr, 0);
+    set_ots(addr, leaf);
+    clear_chain_hash_key(addr);
+    passed = passed && wots_pkgen(generated, sk_seed, pub_seed, addr);
+    passed = passed && qrl_wots_sign(signature, digest, sk_seed, pub_seed,
+                                     kTestHeight, leaf);
+    // Walking the remaining steps from each signature element must land exactly
+    // on the key the generator produced for this leaf.
+    passed = passed && qrl_wots_recover(recovered, signature, digest, pub_seed,
+                                        kTestHeight, leaf) &&
+             crypto_constant_time_equal(generated, recovered, kWotsKeySize);
+    // A flipped bit must not recover the same key.
+    signature[5] ^= 0x01;
+    passed = passed && qrl_wots_recover(recovered, signature, digest, pub_seed,
+                                        kTestHeight, leaf) &&
+             !crypto_constant_time_equal(generated, recovered, kWotsKeySize);
+    // A different digest must not either: the digits really do drive the walk.
+    signature[5] ^= 0x01;
+    digest[0] ^= 0x80;
+    passed = passed && qrl_wots_recover(recovered, signature, digest, pub_seed,
+                                        kTestHeight, leaf) &&
+             !crypto_constant_time_equal(generated, recovered, kWotsKeySize);
+    digest[0] ^= 0x80;
+    secure_zero(signature, sizeof(signature));
+    secure_zero(generated, sizeof(generated));
+    secure_zero(recovered, sizeof(recovered));
+  }
+  secure_zero(sk_seed, sizeof(sk_seed));
+  secure_zero(pub_seed, sizeof(pub_seed));
+  secure_zero(digest, sizeof(digest));
+  return passed;
+}
 bool run_qrl_xmss_self_tests() {
   // qrllib tests/cpp/qrl/xmssBasicSHAKE256_test.cpp: 48 zero bytes, height 4.
   static const char kExpected[] =
@@ -514,6 +837,9 @@ bool run_qrl_xmss_self_tests() {
   secure_zero(public_key, sizeof(public_key));
   secure_zero(address, sizeof(address));
   secure_zero(seed, sizeof(seed));
+  // The one-time signature inside every leaf: sign, then rebuild the key and
+  // require it to equal the generated one.
+  passed = passed && run_qrl_wots_self_tests();
   return passed;
 }
 

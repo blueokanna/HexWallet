@@ -38,8 +38,6 @@ namespace hexwallet
   }
   bool run_cryptonote_output_scan_self_tests()
   {
-    // Public synthetic keys; no real funds. Exercise the recipient/sender ECDH
-    // paths independently, both ECDH encodings and host substitution rejection.
     uint8_t a[32] = {3}, b[32] = {5}, r[32] = {7}, zero[32] = {};
     uint8_t A[32], B[32], R[32], d[32], P[32], key[32], C[32], wire[64];
     if (cryptonote_public_key_from_scalar(a, A) != WalletError::Ok ||

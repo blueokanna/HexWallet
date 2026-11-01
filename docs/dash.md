@@ -32,6 +32,6 @@ txid 是 outpoint 中的字节顺序，不是区块浏览器显示字符串的�
 
 ## 回归依据
 
-`src/generated/DashVectorsTest.inc` 保留两条现有主网交易的摘要及签名材料（v2、v3 各一条），并添加含前序交易的合成 funding/spend 向量。`tools/generate_dash_vectors.py` 生成合成向量并独立验证 ECDSA；它是测试工具，不进入固件。`chain_probe dash-sign-selftest` 运行真实 WalletSecurity/BIP32/Mbed TLS 的签名与固定字节比较。拒绝用例覆盖金额、txid、索引、script、尾部、截断、重复输入、缺前序交易、手续费与非 ALL sighash。
+`src/generated/DashVectorsTest.inc` 保留两条现有主网交易的摘要及签名材料（v2、v3 各一条），并添加含前序交易的合成 funding/spend 向量。合成向量的生成器当前未随仓库交付，故本轮只记录固定字节回归，不宣称该生成步骤可在仓库内复现。`chain_probe dash-sign-selftest` 运行真实 WalletSecurity/BIP32/Mbed TLS 的签名与固定字节比较。拒绝用例覆盖金额、txid、索引、script、尾部、截断、重复输入、缺前序交易、手续费与非 ALL sighash。
 
 协议依据：[Dash DIP2](https://github.com/dashpay/dips/blob/master/dip-0002-special-transactions.md)、[Dash 特殊交易格式](https://docs.dash.org/en/stable/docs/core/reference/transactions-special-transactions.html)、[Dash 交易指南](https://docs.dash.org/en/stable/docs/core/guide/transactions.html)。这些资料规定序列化和交易类型；本仓库的节点广播与硬件验收不能由文档或主机测试代替。

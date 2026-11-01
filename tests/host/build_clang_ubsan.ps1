@@ -39,7 +39,7 @@ $common = @(
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $cppSources = @(
-  "CryptoPrimitives.cpp",
+  "CryptoPrimitives.cpp", "Bls12381.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp",
   "SolanaTransaction.cpp",
   "TronTransaction.cpp",
   "CosmosTransaction.cpp", "StellarTransaction.cpp",
@@ -50,7 +50,7 @@ $cppSources = @(
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletTokens.cpp",
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "QrlXmss.cpp", "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp",
-  "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp",
+  "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "QrlV2Transaction.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp",
   "BitcoinTransaction.cpp", "MaidSprite.cpp",
   "host_security.cpp", "host_test_main.cpp"
 )
@@ -99,4 +99,3 @@ foreach ($probe in @('algorand_probe', 'near_probe', 'tezos_probe', 'totp_probe'
 }
 
 exit $LASTEXITCODE
-

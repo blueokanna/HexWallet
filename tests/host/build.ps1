@@ -21,7 +21,8 @@ cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
 }
 
 $out = Join-Path $PSScriptRoot "host_test.exe"
-$objDir = Join-Path $PSScriptRoot "obj"
+# Concurrent checks must not overwrite an object while another linker reads it.
+$objDir = Join-Path $PSScriptRoot "obj/host-$PID"
 New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 
 $common = @(
@@ -39,6 +40,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $cppSources = @(
   "CryptoPrimitives.cpp",
+  "Bls12381.cpp",
+  "MlDsa87.cpp",
+  "StarknetCrypto.cpp",
   "SolanaTransaction.cpp",
   "StellarTransaction.cpp",
   "WalletEngine.cpp",
@@ -86,7 +90,7 @@ $cppSources = @(
   "ZcashTransaction.cpp",
         "DashTransaction.cpp",
         "CoinIcons.cpp",
-        "QrlOtsJournal.cpp",
+        "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "QrlV2Transaction.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp",
   "host_security.cpp",
   "host_test_main.cpp"
 )
@@ -110,6 +114,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # end to end without hardware.
 $pipeSources = @(
   "CryptoPrimitives.cpp",
+  "Bls12381.cpp",
   "Blake2b.cpp",
   "CryptoExtended.cpp", "RandomSource.cpp",
   "WalletLinkCrypto.cpp",
@@ -146,24 +151,26 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & (Join-Path $PSScriptRoot 'worker_execution_test.exe')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Resolved-catalog dump used by tools/coin_coverage_report.py. It links the
+# Resolved-catalog dump used by tools/native_coverage.ps1. It links the
 # real WalletCatalog/WalletNetworks objects, so the report reflects what the
 # firmware actually exposes instead of what the source text looks like.
 $catalogSources = @(
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoPrimitives.cpp", "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
+  "CryptoPrimitives.cpp",
+  "Bls12381.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "QrlV2Transaction.cpp", "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
   "BlsG1.cpp", "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
   "CosmosTransaction.cpp", "StellarTransaction.cpp",
   "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp",
   "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp",
-  "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletEngine.cpp", "QrlXmss.cpp",
+  "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletEngine.cpp", "QrlXmss.cpp", "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp", "WalletCustomTokens.cpp",
   "AlgorandTransaction.cpp", "NearTransaction.cpp", "TezosTransaction.cpp",
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
   "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
   "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
   "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp", "host_security.cpp"
 )
+$catalogSources = @($catalogSources | Select-Object -Unique)
 $catalogObjs = @()
 foreach ($s in $catalogSources) {
   $src = Join-Path $root $s

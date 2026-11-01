@@ -57,7 +57,7 @@ $includes = @(
 # EvmTransaction.cpp and only the device build caught it, so any source that
 # can compile with the curated include set is kept in this list.
 $sources = @(
-  "CryptoPrimitives.cpp",
+  "CryptoPrimitives.cpp", "Bls12381.cpp",
   "SolanaTransaction.cpp",
   "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "WalletLinkCrypto.cpp", "WalletLink.cpp", "WalletNfcApdu.cpp",
@@ -67,7 +67,7 @@ $sources = @(
   "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
   "WalletSecurity.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",
-  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp", "TronTransaction.cpp", "CosmosTransaction.cpp", "StellarTransaction.cpp", "AlgorandTransaction.cpp", "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletSigning.cpp", "NearTransaction.cpp", "TezosTransaction.cpp", "XrpTransaction.cpp", "Totp.cpp", "EinkFrame.cpp"
+  "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "QrlV2Transaction.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp", "TronTransaction.cpp", "CosmosTransaction.cpp", "StellarTransaction.cpp", "AlgorandTransaction.cpp", "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletSigning.cpp", "NearTransaction.cpp", "TezosTransaction.cpp", "XrpTransaction.cpp", "Totp.cpp", "EinkFrame.cpp"
 )
 
 $objDir = Join-Path $PSScriptRoot "obj-device/$Target"
@@ -103,7 +103,7 @@ foreach ($s in $sources) {
 # which the Arduino core does not ship, and nothing here compiled that branch.
 # These sources are therefore also compiled exactly the way arduino-cli does it:
 # every component include directory plus -DARDUINO.
-$paritySources = @("TrustAnchor.cpp")
+$paritySources = @("TrustAnchor.cpp", "QrlOtsStore.cpp", "WalletCustomTokensNvs.cpp")
 # arduino-cli builds its include path from the SDK's flags/includes file, which
 # is a list of "-iprefix + iwithprefixbefore" pairs. Reproducing that exact
 # mechanism here turned out to be fragile, so this step spells the same directory
@@ -115,6 +115,7 @@ $parityArgs += "-I" + (Join-Path $core "cores\esp32")
 $parityArgs += "-I" + $root
 $parityArgs += "-I" + $mbedtlsInclude
 $parityArgs += "-I" + $mbedtlsPort
+
 foreach ($dir in Get-ChildItem (Join-Path $libs "include") -Directory -Recurse -ErrorAction SilentlyContinue) {
   # Component includes sit at include/<component>/include and, for per-chip
   # headers, at include/<component>/<chip>/include. Register maps are

@@ -118,6 +118,23 @@ namespace hexwallet
       // zkSync Era 324, OKT Chain 66. Token rows are only added where the
       // issuer publishes the contract (Circle USDC table below).
       {"okt", "OKT", "OKT Chain", 66, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 66, 0, 0, nullptr},
+      // Robinhood Chain is an Arbitrum Orbit L2 with chain id 4663 and ETH as
+      // its native gas token (docs.robinhood.com/chain). Registration is
+      // legacy-envelope only until the chain's own docs state EIP-1559
+      // support; the type-2 allowlist below is the narrower gate.
+      {"robinhood", "ETH", "Robinhood Chain", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 4663, 0, 0, nullptr},
+      // Chain IDs verified by eth_chainId against each network's official RPC:
+      // Flare 0xe (14), XinFin 0x32 (50), Horizen EON 0x1ca4 (7332),
+      // Oasis Sapphire 0x5afe (23294). Native coins are FLR, XDC, ZEN, ROSE.
+      {"flare", "FLR", "Flare", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 14, 0, 0, nullptr},
+      {"xdc", "XDC", "XinFin Network", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 50, 0, 0, nullptr},
+      {"zen", "ZEN", "Horizen EON", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 7332, 0, 0, nullptr},
+      {"rose", "ROSE", "Oasis Sapphire", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 23294, 0, 0, nullptr},
+      // Merlin and Bitlayer are Bitcoin L2s whose EVM gas asset is BTC:
+      // docs.merlinchain.io mainnet table and docs.bitlayer.org PoS networks
+      // both name BTC, and eth_chainId returns 0x1068 / 0x310c5.
+      {"merlin", "BTC", "Merlin Chain", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 4200, 0, 0, nullptr},
+      {"bitlayer", "BTC", "Bitlayer", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 200901, 0, 0, nullptr},
       // --- Other existing chains ---------------------------------------------
       {"xrp", "XRP", "XRP Ledger", 144, 144, 44, DerivationStyle::Bip44, AddressEncoding::Ripple, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"trx", "TRX", "TRON", 195, 195, 44, DerivationStyle::Bip44, AddressEncoding::Tron, {0, 0, nullptr, false}, 0x41, 0, 0, 0, nullptr},
@@ -141,6 +158,7 @@ namespace hexwallet
       // Flow EVM is a distinct address/transaction domain from Cadence accounts.
       {"flow-evm", "FLOW", "Flow EVM Mainnet", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 747, 0, 0, nullptr},
       {"sui", "SUI", "Sui", 784, 784, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::SuiEd25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+    {"apt", "APT", "Aptos", 637, 637, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::AptosEd25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"icx", "ICX", "ICON", 74, 74, 44, DerivationStyle::Bip44, AddressEncoding::IconAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       // Substrate ed25519 accounts. Ledger seed/path recovery equivalence has
       // not been established by these SS58 encoding tests. The
@@ -187,6 +205,12 @@ namespace hexwallet
       {"erg", "ERG", "Ergo", 429, 429, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase58Ergo, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xch", "XCH", "Chia", 8444, 8444, 12381, DerivationStyle::ChiaEip2333, AddressEncoding::Bech32mBlsChia, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"qrl", "QRL", "Quantum Resistant Ledger", 0, 0, 0, DerivationStyle::QrlXmss, AddressEncoding::QrlXmss, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, true},
+      {"qrl2", "QRL", "Quantum Resistant Ledger v2", 238, 238, 44, DerivationStyle::Bip44, AddressEncoding::QrlMlDsa, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      // Starknet (SLIP-0044 9004). The account address is a SNIP-5 contract
+      // address that depends on the account class hash, so this profile shows
+      // the Stark account key; StarknetTransaction computes and verifies the
+      // deployed account address for every reviewed transaction.
+      {"stark", "STRK", "Starknet", 9004, 9004, 44, DerivationStyle::Bip44, AddressEncoding::StarknetKey, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
 #include "src/generated/WalletForkProfiles.inc"
   };
 
@@ -199,14 +223,9 @@ namespace hexwallet
       {"ltc49", SighashFamily::Bitcoin, 0},
       {"ltc84", SighashFamily::Bitcoin, 0},
       {"doge", SighashFamily::Bitcoin, 0},
-      // DASH is deliberately absent. Dash serializes its header as
-      // version+type (nType in the high 16 bits) followed by nLockTime *before*
-      // vin, and appends extraPayload for version >= 3. The Bitcoin PSBT
-      // serializer writes version, vin, vout, locktime and has no extraPayload,
-      // so the bytes - and therefore the sighash - would be wrong. InstantSend
-      // adds nothing to the transaction itself (it is a quorum lock on the
-      // inputs), so a correct Dash adapter needs that header/sighash work and
-      // its own vectors before the catalog may advertise signing.
+      // Dash uses its dedicated DAS2 adapter/type15, not this PSBT route.
+      // Its nVersion contains nType; special transactions append extraPayload
+      // after nLockTime. Normal type0 payments have no extraPayload.
       {"dgb", SighashFamily::Bitcoin, 0},
       {"dgb49", SighashFamily::Bitcoin, 0},
       {"dgb84", SighashFamily::Bitcoin, 0},
@@ -394,6 +413,8 @@ namespace hexwallet
     const NetworkProfile *solana = find_network_profile("sol");
     const NetworkProfile *chia = find_network_profile("xch");
     const NetworkProfile *qrl = find_network_profile("qrl");
+    const NetworkProfile *qrl2 = find_network_profile("qrl2");
+    const NetworkProfile *starknet = find_network_profile("stark");
     const uint8_t test_public_key[kCompressedPublicKeySize] = {
         0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0,
         0x62, 0x95, 0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d,
@@ -736,7 +757,17 @@ namespace hexwallet
         solana == nullptr || solana->slip44_coin_type != 501 || chia == nullptr ||
         chia->slip44_coin_type != 8444 || chia->bip_purpose != 12381 ||
         qrl == nullptr || qrl->encoding != AddressEncoding::QrlXmss ||
-        !qrl->explicit_only_derivation)
+        !qrl->explicit_only_derivation || qrl2 == nullptr ||
+        qrl2->encoding != AddressEncoding::QrlMlDsa ||
+        qrl2->derivation_coin_type != 238 ||
+        qrl2->derivation != DerivationStyle::Bip44 ||
+        qrl2->explicit_only_derivation ||
+        starknet == nullptr ||
+        starknet->encoding != AddressEncoding::StarknetKey ||
+        starknet->slip44_coin_type != 9004 ||
+        starknet->derivation_coin_type != 9004 ||
+        starknet->derivation != DerivationStyle::Bip44 ||
+        starknet->explicit_only_derivation)
     {
       return false;
     }

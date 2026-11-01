@@ -306,12 +306,11 @@ namespace hexwallet
     passed = !ringct_decode_amount(RingCtAmountEncoding::Compact, nullptr,
                                    expected_wire, 8, expected, &recovered, recovered_mask) &&
              recovered == 0 && all_zero(recovered_mask, 32) && passed;
-    // Legacy decoded amounts above uint64 must fail before commitment checking.
     uint8_t high_amount[32] = {}, first[32], second[32];
     high_amount[8] = 1;
     passed = cryptonote_hash_to_scalar(key, 32, first) &&
              cryptonote_hash_to_scalar(first, 32, second) && passed;
-    memcpy(wire, first, 32); // zero mask encoded with shared scalar
+    memcpy(wire, first, 32);
     ed25519_scalar_muladd(wire + 32, kOne, high_amount, second);
     passed = !ringct_decode_amount(RingCtAmountEncoding::Legacy, key, wire, 64,
                                    expected, &recovered, recovered_mask) &&

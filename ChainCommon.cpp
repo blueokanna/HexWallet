@@ -1,4 +1,5 @@
 #include "ChainCommon.h"
+#include "src/Secp256k1Sign.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -41,7 +42,75 @@ bool append_prefix(uint8_t *out, size_t capacity, size_t *offset,
   return true;
 }
 
+bool bytes_are_zero(const uint8_t *value, size_t size) {
+  uint8_t aggregate = 0;
+  for (size_t index = 0; index < size; ++index) aggregate |= value[index];
+  return aggregate == 0;
+}
+
 }  // namespace
+
+// Shared by every adapter that must render a wide integer: repeated division by
+// ten on the big-endian buffer keeps the result exact without compiler-specific
+// 128-bit integer extensions or floating point.
+bool chain_format_units_bytes(const uint8_t *value, size_t size,
+                              uint8_t decimals, const char *symbol, char *out,
+                              size_t out_size) {
+  if (value == nullptr || size == 0 || size > kChainUint256Size || out == nullptr ||
+      out_size == 0 || symbol == nullptr || decimals > 38) {
+    return false;
+  }
+  uint8_t work[kChainUint256Size] = {};
+  memcpy(work, value, size);
+  char reversed[80] = {};
+  size_t digits = 0;
+  bool nonzero = !bytes_are_zero(work, size);
+  while (nonzero && digits < sizeof(reversed) - 1) {
+    uint32_t remainder = 0;
+    for (size_t index = 0; index < size; ++index) {
+      const uint32_t current = (remainder << 8) | work[index];
+      work[index] = static_cast<uint8_t>(current / 10);
+      remainder = current % 10;
+    }
+    reversed[digits++] = static_cast<char>('0' + remainder);
+    nonzero = !bytes_are_zero(work, size);
+  }
+  secure_zero(work, sizeof(work));
+  if (digits == 0) reversed[digits++] = '0';
+  char decimal[80] = {};
+  for (size_t index = 0; index < digits; ++index) {
+    decimal[index] = reversed[digits - 1 - index];
+  }
+  decimal[digits] = '\0';
+
+  char whole[80] = {};
+  char fraction[40] = {};
+  if (digits <= decimals) {
+    strcpy(whole, "0");
+    const size_t zeros = decimals - digits;
+    memset(fraction, '0', zeros);
+    memcpy(fraction + zeros, decimal, digits);
+    fraction[decimals] = '\0';
+  } else {
+    const size_t whole_digits = digits - decimals;
+    memcpy(whole, decimal, whole_digits);
+    whole[whole_digits] = '\0';
+    memcpy(fraction, decimal + whole_digits, decimals);
+    fraction[decimals] = '\0';
+  }
+  if (decimals == 0) {
+    const int written = snprintf(out, out_size, "%s %s", whole, symbol);
+    return written > 0 && static_cast<size_t>(written) < out_size;
+  }
+  size_t fraction_length = decimals;
+  while (fraction_length > 1 && fraction[fraction_length - 1] == '0') {
+    --fraction_length;
+  }
+  fraction[fraction_length] = '\0';
+  const int written = snprintf(out, out_size, "%s.%s %s", whole, fraction,
+                               symbol);
+  return written > 0 && static_cast<size_t>(written) < out_size;
+}
 
 bool RlpWriter::bytes(const uint8_t *data, size_t size) {
   if (!ok_ || (size != 0 && data == nullptr)) {
@@ -188,59 +257,10 @@ size_t chain_der_integer(const mbedtls_mpi &value, uint8_t *out) {
 bool chain_secp256k1_sign_der(const uint8_t private_key[32],
                               const uint8_t digest[32], uint8_t *der,
                               size_t *in_out_size) {
-  if (private_key == nullptr || digest == nullptr || der == nullptr ||
-      in_out_size == nullptr || *in_out_size < 72) {
-    return false;
-  }
-  mbedtls_ecp_group group;
-  mbedtls_mpi d, r, s, half_order;
-  mbedtls_ecp_point public_key;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_mpi_init(&d);
-  mbedtls_mpi_init(&r);
-  mbedtls_mpi_init(&s);
-  mbedtls_mpi_init(&half_order);
-  mbedtls_ecp_point_init(&public_key);
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
-  if (result == 0) result = mbedtls_mpi_read_binary(&d, private_key, 32);
-  if (result == 0) {
-    result = mbedtls_ecdsa_sign_det_ext(&group, &r, &s, &d, digest, 32,
-                                        MBEDTLS_MD_SHA256,
-                                        chain_random_callback, nullptr);
-  }
-  if (result == 0) result = mbedtls_mpi_copy(&half_order, &group.N);
-  if (result == 0) result = mbedtls_mpi_shift_r(&half_order, 1);
-  if (result == 0 && mbedtls_mpi_cmp_mpi(&s, &half_order) > 0) {
-    result = mbedtls_mpi_sub_mpi(&s, &group.N, &s);
-  }
-  if (result == 0) {
-    result = mbedtls_ecp_mul(&group, &public_key, &d, &group.G,
-                             chain_random_callback, nullptr);
-  }
-  if (result == 0) {
-    result = mbedtls_ecdsa_verify(&group, digest, 32, &public_key, &r, &s);
-  }
-  uint8_t integers[70] = {};
-  size_t integer_size = 0;
-  if (result == 0) {
-    integer_size = chain_der_integer(r, integers);
-    integer_size += chain_der_integer(s, integers + integer_size);
-    if (*in_out_size < integer_size + 2) result = -1;
-  }
-  if (result == 0) {
-    der[0] = 0x30;
-    der[1] = static_cast<uint8_t>(integer_size);
-    memcpy(der + 2, integers, integer_size);
-    *in_out_size = integer_size + 2;
-  }
-  secure_zero(integers, sizeof(integers));
-  mbedtls_mpi_free(&half_order);
-  mbedtls_ecp_point_free(&public_key);
-  mbedtls_mpi_free(&s);
-  mbedtls_mpi_free(&r);
-  mbedtls_mpi_free(&d);
-  mbedtls_ecp_group_free(&group);
-  return result == 0;
+  // One implementation for every adapter: RFC 6979, low-S, strict DER, and the
+  // signature is checked on the curve before it is handed back. Zcash still
+  // carries its own copy, which is the next one to move here.
+  return secp256k1_sign_der(private_key, digest, der, in_out_size);
 }
 
 namespace {
@@ -523,62 +543,15 @@ bool chain_u128_hex(const uint8_t value[kChainUint128Size], char *out,
 bool chain_format_units128(const uint8_t value[kChainUint128Size],
                            uint8_t decimals, const char *symbol, char *out,
                            size_t out_size) {
-  if (value == nullptr || out == nullptr || out_size == 0 || symbol == nullptr ||
-      decimals > 38) {
-    return false;
-  }
-  // Repeated division by ten keeps the implementation free of compiler-specific
-  // 128-bit integer extensions.
-  uint8_t work[kChainUint128Size] = {};
-  memcpy(work, value, sizeof(work));
-  char reversed[48] = {};
-  size_t digits = 0;
-  bool nonzero = !chain_u128_is_zero(work);
-  while (nonzero && digits < sizeof(reversed) - 1) {
-    uint32_t remainder = 0;
-    for (size_t index = 0; index < kChainUint128Size; ++index) {
-      const uint32_t current = (remainder << 8) | work[index];
-      work[index] = static_cast<uint8_t>(current / 10);
-      remainder = current % 10;
-    }
-    reversed[digits++] = static_cast<char>('0' + remainder);
-    nonzero = !chain_u128_is_zero(work);
-  }
-  if (digits == 0) reversed[digits++] = '0';
-  char decimal[56] = {};
-  for (size_t index = 0; index < digits; ++index) {
-    decimal[index] = reversed[digits - 1 - index];
-  }
-  decimal[digits] = '\0';
+  return chain_format_units_bytes(value, kChainUint128Size, decimals, symbol,
+                                  out, out_size);
+}
 
-  char whole[56] = {};
-  char fraction[40] = {};
-  if (digits <= decimals) {
-    strcpy(whole, "0");
-    const size_t zeros = decimals - digits;
-    memset(fraction, '0', zeros);
-    memcpy(fraction + zeros, decimal, digits);
-    fraction[decimals] = '\0';
-  } else {
-    const size_t whole_digits = digits - decimals;
-    memcpy(whole, decimal, whole_digits);
-    whole[whole_digits] = '\0';
-    memcpy(fraction, decimal + whole_digits, decimals);
-    fraction[decimals] = '\0';
-  }
-  if (decimals == 0) {
-    const int written = snprintf(out, out_size, "%s %s", whole, symbol);
-    return written > 0 && static_cast<size_t>(written) < out_size;
-  }
-  size_t fraction_length = decimals;
-  while (fraction_length > 1 && fraction[fraction_length - 1] == '0') {
-    --fraction_length;
-  }
-  fraction[fraction_length] = '\0';
-  const int written = snprintf(out, out_size, "%s.%s %s", whole, fraction,
-                               symbol);
-  secure_zero(work, sizeof(work));
-  return written > 0 && static_cast<size_t>(written) < out_size;
+bool chain_format_units256(const uint8_t value[kChainUint256Size],
+                           uint8_t decimals, const char *symbol, char *out,
+                           size_t out_size) {
+  return chain_format_units_bytes(value, kChainUint256Size, decimals, symbol,
+                                  out, out_size);
 }
 
 uint64_t chain_read_u32_le(const uint8_t *data) {

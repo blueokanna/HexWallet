@@ -27,10 +27,6 @@ namespace hexwallet
       uint16_t total_codewords;
     };
 
-    // Versions 1-10, levels L, M, Q and H. data + blocks * ec must equal
-    // total_codewords for every row; the self-test checks that invariant and the
-    // host cross-check compares every produced matrix with a reference encoder, so a
-    // mistyped row cannot survive.
     constexpr VersionSpec kSpecs[] = {
         {1, 21, 1, 19, 0, 0, 7, 0x01, 26},     // v1-L
         {1, 21, 1, 16, 0, 0, 10, 0x00, 26},    // v1-M
@@ -283,8 +279,6 @@ namespace hexwallet
       {
         for (uint8_t b = 0; b < count; ++b)
         {
-          // Same exclusion as the drawing pass: a centre that overlaps a finder
-          // pattern has no alignment pattern, so its 5x5 area must stay data.
           if (in_finder(centres[a], centres[b], size))
             continue;
           const int dr = static_cast<int>(row) - centres[a];
@@ -296,8 +290,6 @@ namespace hexwallet
       return false;
     }
 
-    // Function modules (finder, separators, timing, alignment, version information,
-    // format, dark module) are written before data and never overwritten by it.
     bool is_function_module(uint8_t row, uint8_t column, uint8_t version,
                             uint8_t size)
     {

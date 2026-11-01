@@ -96,6 +96,9 @@ struct TronTransferReview {
   uint8_t asset_id_size;
   char asset_id_text[kTronAssetIdTextSize];
   bool asset_registered;
+  // True when a TRC-20 contract is only known from the user-declared table:
+  // the symbol/decimals are the owner's claim, not a verified registration.
+  bool token_user_declared;
   // TRC-20 entry point, so transfer and transferFrom cannot be confused.
   char method_text[kTronMethodSize];
   // raw_data memo (field 10); present only when the reviewed bytes carry one.

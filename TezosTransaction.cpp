@@ -19,7 +19,6 @@ class Reader {
   bool byte(uint8_t *out) { return bytes(out, 1); }
   bool natural(uint64_t *out) {
     *out = 0;
-    // Zarith unsigned N, minimally encoded, bounded to int64 for mutez/counters.
     for (unsigned i = 0; i < 9; ++i) {
       uint8_t b = 0;
       if (!byte(&b)) return false;

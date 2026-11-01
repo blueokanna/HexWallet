@@ -1,8 +1,6 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-/* clang-format off */
-
 /*====================
    COLOR SETTINGS
  *====================*/
@@ -12,7 +10,6 @@
  * the high byte of RGB565 first, so store the two bytes swapped in memory and
  * stream the buffer straight to the panel without a per-pixel copy. */
 #define LV_COLOR_16_SWAP 1
-
 #define LV_COLOR_SCREEN_TRANSP 0
 #define LV_COLOR_MIX_ROUND_OFS 0
 #define LV_COLOR_CHROMA_KEY lv_color_hex(0x00ff00)

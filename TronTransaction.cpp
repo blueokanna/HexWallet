@@ -5,6 +5,7 @@
 
 #include "CryptoPrimitives.h"
 #include "WalletAddresses.h"
+#include "WalletCustomTokens.h"
 #include "WalletTokens.h"
 #include "base58.h"
 #include "src/BytesText.h"
@@ -95,6 +96,7 @@ bool same_review(const TronTransferReview &a, const TronTransferReview &b) {
   return a.kind == b.kind && a.token_decimals == b.token_decimals &&
       a.has_token_id == b.has_token_id && a.fee_limit_sun == b.fee_limit_sun &&
       a.asset_id_size == b.asset_id_size && a.asset_registered == b.asset_registered &&
+      a.token_user_declared == b.token_user_declared &&
       a.has_memo == b.has_memo &&
       a.expiration_ms == b.expiration_ms && a.timestamp_ms == b.timestamp_ms &&
       bytes_equal(a.asset_id, b.asset_id, sizeof(a.asset_id)) &&
@@ -763,12 +765,28 @@ TronError tron_review_raw_data(const uint8_t *data, size_t size,
       return TronError::FeePolicy;
     }
     const TokenProfile *token = find_trc20(review.token_contract);
-    if (token == nullptr || token->symbol == nullptr || token->symbol[0] == '\0' ||
-        token->decimals > 32) {
-      return TronError::UnknownToken;
+    if (token != nullptr && token->symbol != nullptr &&
+        token->symbol[0] != '\0' && token->decimals <= 32) {
+      review.token_user_declared = false;
+      review.token_decimals = token->decimals;
+      snprintf(review.token_symbol, sizeof(review.token_symbol), "%s",
+               token->symbol);
+    } else {
+      // A TRC-20 contract the registry does not know is signable only when the
+      // user declared it on this device. The labels are the owner's claim and
+      // the screen marks them unverified; without a record the request is
+      // refused, because the amount could not be rendered.
+      const CustomTokenRecord *custom =
+          custom_token_find("trx", review.token_contract, kTronAddressSize);
+      if (custom == nullptr || custom->symbol[0] == '\0' ||
+          custom->decimals > 32) {
+        return TronError::UnknownToken;
+      }
+      review.token_user_declared = true;
+      review.token_decimals = custom->decimals;
+      snprintf(review.token_symbol, sizeof(review.token_symbol), "%s",
+               custom->symbol);
     }
-    review.token_decimals = token->decimals;
-    snprintf(review.token_symbol, sizeof(review.token_symbol), "%s", token->symbol);
   } else {
     // There are no verified TRC-721/1155 contract registrations yet. Parsing
     // the ABI is insufficient evidence of the contract's effects.
@@ -939,6 +957,7 @@ bool run_tron_self_tests() {
   uint8_t foreign_owner[kTronAddressSize];
   memcpy(foreign_owner, owner, sizeof(foreign_owner));
   foreign_owner[20] ^= 1;
+  bool custom_token_checked = false;
 
   for (const TronVectorCase &vector : kTronVectorCases) {
     if (!passed) break;
@@ -1042,6 +1061,53 @@ bool run_tron_self_tests() {
       passed = tron_review_raw_data(raw, raw_size, foreign_owner, &other) ==
                TronError::WrongWallet;
       clear_tron_transaction(&other);
+    }
+    // A TRC-20 contract outside the registry is refused until the user declares
+    // it; once declared, the record supplies the labels and the review marks
+    // them unverified. The raw transaction is a registry vector with only the
+    // contract field swapped, so every other byte stays a real transaction.
+    if (passed && !custom_token_checked &&
+        vector.expected_kind == TronKind::Trc20) {
+      custom_token_checked = true;
+      uint8_t patched[kTronMaxRawData];
+      memcpy(patched, raw, raw_size);
+      uint8_t custom_contract[kTronAddressSize];
+      memcpy(custom_contract, transaction.review.token_contract,
+             sizeof(custom_contract));
+      custom_contract[kTronAddressSize - 1] ^= 0x5a;
+      size_t offset = SIZE_MAX;
+      for (size_t at = 0; at + kTronAddressSize <= raw_size; ++at) {
+        if (memcmp(patched + at, transaction.review.token_contract,
+                   kTronAddressSize) == 0) {
+          offset = at;
+          break;
+        }
+      }
+      passed = offset != SIZE_MAX;
+      if (passed) {
+        memcpy(patched + offset, custom_contract, sizeof(custom_contract));
+        TronTransaction undeclared;
+        passed = tron_review_raw_data(patched, raw_size, case_owner,
+                                      &undeclared) == TronError::UnknownToken;
+        clear_tron_transaction(&undeclared);
+        passed = passed &&
+                 custom_token_add("trx", custom_contract,
+                                  sizeof(custom_contract), "CUST",
+                                  "Custom Tron", 6) == CustomTokenError::Ok;
+        TronTransaction declared;
+        passed = passed && tron_review_raw_data(patched, raw_size, case_owner,
+                                                &declared) == TronError::Ok &&
+                 declared.review.token_user_declared &&
+                 strcmp(declared.review.token_symbol, "CUST") == 0 &&
+                 declared.review.token_decimals == 6;
+        clear_tron_transaction(&declared);
+        passed = passed &&
+                 custom_token_remove("trx", custom_contract,
+                                     sizeof(custom_contract)) ==
+                     CustomTokenError::Ok;
+      }
+      secure_zero(patched, sizeof(patched));
+      secure_zero(custom_contract, sizeof(custom_contract));
     }
     // Every truncated prefix must be refused. The one exception is a prefix
     // that cuts only trailing optional data (the memo): that prefix is a

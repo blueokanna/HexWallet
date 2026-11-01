@@ -166,6 +166,12 @@ jobs:
           # synthetic camera pins.
           powershell -ExecutionPolicy Bypass -File tests/host/board_port_compile_check.ps1
 
+      - name: Real LVGL lifetime, mascot and review regressions
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File tests/host/ui_check.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: QR encoder cross-check against a reference implementation
         shell: pwsh
         run: |

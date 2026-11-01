@@ -62,20 +62,14 @@ namespace hexwallet
       {
         return false;
       }
-      // Keys must be unique, otherwise a lookup depends on table order rather
-      // than on the manifest.
       for (size_t other = index + 1; other < kCoinIconTableCount; ++other)
       {
         if (strcmp(icon.key, kCoinIconTable[other].key) == 0)
           return false;
       }
       const size_t ink = ink_pixels(icon);
-      // Blank and fully filled masks are what a mis-mapped or empty source file
-      // looks like after packing; either one means the packer lied.
       if (ink * 10 < kPixels || ink * 10 > kPixels * 9)
         return false;
-      // Two different icons sharing one blob means a manifest or packer bug,
-      // and the review would show the wrong logo with full confidence.
       for (size_t other = 0; other < kCoinIconTableCount; ++other)
       {
         const CoinIcon &candidate = kCoinIconTable[other];
@@ -88,7 +82,6 @@ namespace hexwallet
         }
       }
     }
-    // Contract the display relies on.
     const CoinIcon *dash = coin_icon_find("DASH");
     if (dash == nullptr || dash->size != kCoinIconBytes)
       return false;
@@ -98,4 +91,4 @@ namespace hexwallet
            coin_icon_find(nullptr) == nullptr;
   }
 
-} // namespace hexwallet
+}

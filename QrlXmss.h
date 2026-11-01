@@ -15,17 +15,51 @@ namespace hexwallet {
 // descriptor||hash||checksum rendered as 'Q' + 78 hex characters.
 //
 // The NXP SE050 has no SHAKE-256 or XMSS engine, so this key material can only
-// be generated in MCU RAM.  Signing is not implemented: an XMSS signature also
-// consumes a stateful leaf index and requires the BDS traversal state, which
-// this module deliberately does not fake.
+// be generated in MCU RAM. Signing requires an independent durable OTS store;
+// tree traversal is recomputed with bounded RAM rather than persisted as BDS.
 constexpr size_t kQrlSeedSize = 48;
 constexpr size_t kQrlRootSize = 32;
 constexpr size_t kQrlPublicKeySize = 67;    // descriptor || root || pub_seed
 constexpr size_t kQrlAddressBytes = 39;     // descriptor || sha256 || checksum
 constexpr size_t kQrlAddressTextSize = 80;  // 'Q' + 78 hex + NUL
 constexpr uint8_t kQrlDefaultHeight = 10;
+constexpr size_t kQrlMaxSignatureSize = 4 + 32 + 67 * 32 + 12 * 32;
 
 using QrlProgressHook = bool (*)(uint32_t completed, uint32_t total, void *context);
+
+enum class QrlSignError : uint8_t {
+  Ok, InvalidArgument, BufferTooSmall, WrongKey, OtsUnavailable, OtsReuse,
+  OtsCommitFailed, Aborted, CryptoFailure
+};
+
+// This is a storage contract, not a RAM counter or a claim that flash is safe.
+// key_id = SHA256(extended public key). read must fail for unknown/restored keys.
+// reserve must atomically compare the current mark with expected, persist next,
+// and make rollback impossible before returning true. A failed/timed-out write
+// may already have burned the index; callers must read state again, never undo.
+// Stores must coordinate every signer/backup that can reconstruct this tree.
+// No default backend is provided. NVS alone does not satisfy this contract.
+//
+// This is only the port. QrlOtsJournal.h owns the durable two-slot record and
+// QrlOtsStore.h adapts one to the other; naming the port separately keeps the
+// two contracts from being confused with each other.
+struct QrlOtsPort {
+  void *context;
+  bool (*read)(void *, const uint8_t key_id[32], uint32_t *high_water);
+  bool (*reserve)(void *, const uint8_t key_id[32], uint32_t expected,
+                  uint32_t next_high_water);
+};
+
+// QRL v1 signs the 32-byte transaction data hash. It is not QRL v2 ML-DSA.
+// The expected extended public key must have been shown to the user. A leaf is
+// durably reserved before any WOTS signature is computed; failure burns it.
+QrlSignError qrl_xmss_sign_digest(const uint8_t seed[kQrlSeedSize],
+    const uint8_t public_key[kQrlPublicKeySize], uint32_t leaf_index,
+    const uint8_t digest[32], const QrlOtsPort &storage,
+    uint8_t *signature, size_t *in_out_size,
+    QrlProgressHook progress = nullptr, void *context = nullptr);
+bool qrl_xmss_verify_digest(const uint8_t public_key[kQrlPublicKeySize],
+    const uint8_t digest[32], const uint8_t *signature, size_t signature_size);
 
 WalletError qrl_xmss_public_key_ex(const uint8_t seed[kQrlSeedSize], uint8_t height,
                                    QrlProgressHook progress, void *context,
@@ -36,6 +70,15 @@ WalletError qrl_xmss_public_key(const uint8_t seed[kQrlSeedSize], uint8_t height
 // Encode an extended public key as QRL's display address (Q + lowercase hex).
 WalletError qrl_address_from_public_key(
   const uint8_t public_key[kQrlPublicKeySize], char *out, size_t out_size);
+// The 39 bytes that address renders: descriptor || sha256(public key) ||
+// checksum. Transaction preimages use these bytes, never the text.
+WalletError qrl_address_bytes_from_public_key(
+  const uint8_t public_key[kQrlPublicKeySize],
+  uint8_t out_address[kQrlAddressBytes]);
+// Text form of arbitrary account bytes. Validates descriptor and checksum first,
+// so what the approval screen shows is the byte string that gets hashed.
+WalletError qrl_address_text(const uint8_t address[kQrlAddressBytes], char *out,
+                             size_t out_size);
 
 // One-shot public-key + address derivation.
 WalletError qrl_xmss_address_ex(const uint8_t seed[kQrlSeedSize], uint8_t height,
@@ -53,8 +96,16 @@ WalletError qrl_seed_from_bip39(const uint8_t bip39_seed[kSeedSize],
                                 uint32_t address_index,
                                 uint8_t out_seed[kQrlSeedSize]);
 
-// Verify the checksum and address-format nibble of a QRL display address.
+// QRL v1 consensus address validation: length, format nibble and checksum only.
+// Receiving addresses may have descriptors this signer cannot itself create.
 bool qrl_address_validate(const char *address);
+// Inverse of the text encoding. Checks the same descriptor nibble and checksum,
+// so a decoded address is byte-for-byte the one that was displayed.
+bool qrl_address_decode(const char *address, uint8_t out[kQrlAddressBytes]);
+// The byte-level test both functions share: descriptor nibble and checksum.
+// Transaction adapters validate payload recipients with this, so a destination
+// accepted from a host is exactly a destination this wallet would display.
+bool qrl_address_bytes_valid(const uint8_t address[kQrlAddressBytes]);
 
 // Bytes of an XMSS signature for this height:
 //   4 (leaf index) || 32 (r) || kWotsLen*32 (WOTS+ signature) ||
@@ -82,6 +133,38 @@ bool qrl_ots_index_usable(uint8_t height, uint32_t burned_high_water,
 bool qrl_ots_next_high_water(uint8_t height, uint32_t burned_high_water,
                              uint32_t candidate, uint32_t *next_high_water);
 
+// --- WOTS+ (the one-time signature inside every XMSS leaf) -----------------
+//
+// A leaf of the XMSS tree is a WOTS+ key pair. Signing means walking each of the
+// 67 hash chains a number of steps given by the message digits, so the signature
+// is 67 * 32 bytes. The remaining steps rebuild the public key, which is what
+// verification does - and it is also how these functions are tested here: the
+// key rebuilt from a signature must equal the one wots_pkgen() derives from the
+// same seed.
+//
+// Signed digest is the XMSS message digest, not the raw transaction hash: on
+// QRL that digest is H_msg(r || root || toByte(idx, 32) || message), which is
+// the piece still missing before a full XMSS signature exists. Keeping WOTS+
+// separate means that gap cannot be papered over.
+constexpr size_t kWotsChainCount = 67;
+constexpr size_t kWotsSignatureSize = kWotsChainCount * 32;
+
+// Produces the WOTS+ signature for one leaf of the tree identified by
+// `tree_height` (QRL uses 10) and `leaf_index`.
+bool qrl_wots_sign(uint8_t *signature, const uint8_t digest[32],
+                   const uint8_t sk_seed[32], const uint8_t pub_seed[32],
+                   uint8_t tree_height, uint32_t leaf_index);
+
+// Rebuilds the WOTS+ public key from a signature. Comparing it with the output
+// of the key generator is the only honest check that a signature is well formed
+// without trusting the signer's own bookkeeping.
+bool qrl_wots_recover(uint8_t *public_key, const uint8_t *signature,
+                       const uint8_t digest[32], const uint8_t pub_seed[32],
+                       uint8_t tree_height, uint32_t leaf_index);
+
+// Host-safe: signature -> public key must reproduce the generated key, and a
+// tampered signature must not.
+bool run_qrl_wots_self_tests();
 bool run_qrl_xmss_self_tests();
 
 }  // namespace hexwallet

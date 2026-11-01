@@ -16,12 +16,15 @@
 //   * esp_flash_encryption_enabled() is defined by libbootloader_support.a
 //     (checked with nm) even though its header is missing, so the prototype is
 //     declared locally and the real eFuse-backed answer is used;
-//   * secure boot cannot be read at runtime without those private headers, so the
-//     sdkconfig that arduino-cli compiles with is used instead. CONFIG_SECURE_BOOT
-//     means the bootloader refuses unsigned images; it does not prove the eFuses
-//     are burned, and TrustState records which of the two it is.
+//   * P4's public eFuse descriptor/API can read SECURE_BOOT_EN without private
+//     bootloader headers. Other targets retain a configuration-only report,
+//     which must never be classified as runtime verification.
 #include <esp_err.h>
 #include <esp_ota_ops.h> // brings esp_app_desc_t and esp_partition.h
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#include <esp_efuse.h>
+#include <esp_efuse_table.h>
+#endif
 
 extern "C" bool esp_flash_encryption_enabled(void);
 
@@ -57,18 +60,24 @@ namespace hexwallet
       return esp_flash_encryption_enabled();
     }
 
-    bool secure_boot_state()
+    bool secure_boot_state(bool *from_config)
     {
+      *from_config = true;
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+      uint8_t enabled = 0;
+      if (esp_efuse_read_field_blob(ESP_EFUSE_SECURE_BOOT_EN, &enabled, 1) == ESP_OK)
+      {
+        *from_config = false;
+        return (enabled & 1U) != 0;
+      }
+#endif
       return HEXWALLET_SECURE_BOOT_COMPILED != 0;
     }
 
     void read_platform_state(TrustState *state)
     {
       state->reported = true;
-      state->secure_boot_enabled = secure_boot_state();
-      // Compiled-in secure boot, not a runtime eFuse read: the header chain for a
-      // runtime check is not shipped by the Arduino core.
-      state->secure_boot_from_config = HEXWALLET_SECURE_BOOT_COMPILED != 0;
+      state->secure_boot_enabled = secure_boot_state(&state->secure_boot_from_config);
       state->flash_encryption_enabled =
           flash_encryption_state(&state->flash_encryption_known);
       const esp_partition_t *running = esp_ota_get_running_partition();

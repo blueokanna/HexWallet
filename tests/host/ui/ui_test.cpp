@@ -98,7 +98,7 @@ int main() {
   CHECK(sealed_lines[64] == details[15]);
   CHECK(sealed_lines[65] == "MAXIMUM NETWORK FEE  0.002 ETH");
   CHECK(sealed_lines[67] == review.note);
-  CHECK(sealed_lines[68] == "CONFIRM 654321");
+  CHECK(sealed_lines[68] == "CONFIRM  654321");
   const size_t review_children = lv_obj_get_child_count(screen_content);
   test_now += kMascotAnimationMs;
   wallet_ui_service();

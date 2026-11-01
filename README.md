@@ -1,6 +1,11 @@
 # HexWallet
 
-> Production acceptance is incomplete. MSR support was withdrawn on 2026-10-24. Native SOL, SPL Token and Token-2022 TransferChecked are implemented; Token-2022 reviews carry an unverifiable-extension warning and ATA creation is rejected. TRX supports native transfers, TRC-10 asset transfers (registered ids render their verified precision, unregistered ids render exact base units), registered TRC-20 `transfer`/self-`transferFrom` and printable memos up to 64 bytes. Hardware and node acceptance remain pending. See [Solana scope and evidence](docs/chain-protocols.md) and [TRON scope and evidence](docs/chain-protocols.md).
+> Every chain in the table below has a signing path in this tree; none of them has
+> completed hardware or node acceptance. Latest additions: Starknet (Cairo v3
+> `deploy_account`, and `execute` with 1-4 ERC-20 `transfer` calls), QRL v2
+> (ML-DSA-87), Aptos, and user-declared tokens on EVM, TRON, Solana, Stellar and
+> Starknet. MSR support was withdrawn on 2026-10-24. Per-chain scope and the
+> evidence behind each claim are in [chain-gates](docs/chain-gates.md).
 
 HexWallet is an offline-first hardware wallet for ESP32-S3. It derives keys from a BIP39 seed, builds and reviews transactions on the MCU, and signs only after a one-time confirmation on the trusted display. The host never receives the seed or private keys.
 
@@ -48,11 +53,14 @@ The public wallet catalog is filtered by the configured signing policies. This f
 | Nervos CKB | BIP44 secp256k1, `m/44'/309'/0'/0/i` | Molecule `RawTransaction`, `ckb-default-hash` BLAKE2b, SECP256K1/blake160 lock | One input, 1–2 outputs, no type script; no DAO or UDT |
 | Hive | BIP44 secp256k1, `m/44'/3054'/0'/0/i` | Single transfer, binary asset, graphene compact signature | `STM` is a public key, not a receive address; account ownership needs a node; no encrypted memo |
 | Internet Computer | SLIP-0010 Ed25519, `m/44'/223'/0'/0'/i'` | Fixed ICP ledger canister Candid transfer, request id, CBOR envelope | Default ledger account only; no arbitrary canisters, ICRC or staking |
+| Polkadot / Kusama | SLIP-0010 Ed25519, `m/44'/coin'/0'/0'/i'` | `balances.transfer` / `transferKeepAlive`, mortal era and tip, SCALE extrinsic | Signed extensions pinned to runtime 2005002/26 (DOT) and 2005001/26 (KSM) with genesis pinned; `CheckMetadataHash` carried as an explicitly disabled mode; a runtime upgrade needs a firmware update |
+| Chia | EIP-2333 from the BIP39 seed, `[12381, 8444, 0, i]` | Standard coin spend: the device rebuilds `(q . conditions)`, hashes the tree itself and signs AGG_SIG_ME | CREATE_COIN-only standard coins; CAT/NFT, plot-NFT and offer spends are refused |
+| QRL (v1) | BIP39 seed → SHAKE-256 → XMSS(sk_seed, pub_seed), hash height 10 | Native transfer preimage `master ‖ fee ‖ message ‖ (addr ‖ amount)*`, XMSS/SHAKE-256 signature | One-time leaf reserved in durable NVS before the signature exists and the signature is self-verified. Use the `qrl2` catalog id for v2 accounts |
+| QRL v2 (Zond) | BIP44 `m/44'/238'/a'/c/i`, child key seeds ML-DSA-87 | `0x02` dynamic-fee envelope, keccak-256 digest, hedged ML-DSA-87 signature | Mainnet chain id 1, descriptor `01 00 00`, empty extra params; no staking, tokens or cross-chain messages |
+| Aptos | SLIP-0010 Ed25519, `m/44'/637'/account'/0'/index'` | `0x1::aptos_account::transfer` BCS `RawTransaction`, `sha3-256("APTOS::RawTransaction" ‖ BCS)` | Native APT only; no arbitrary EntryFunction, multisig, sponsored transactions or FA tokens |
+| Starknet | BIP44 `m/44'/9004'/a'/c/i`, child key ground into a Stark scalar | Cairo v3 `deploy_account` and account `execute` with 1-4 ERC-20 `transfer` calls, Pedersen/Poseidon v3 hash, Stark-curve ECDSA | The account address is recomputed per transaction from class hash, salt and the single-key constructor, so a host cannot swap in a foreign account; `SN_MAIN` only. No `declare`, paymaster, multisig or session keys, and no more than four calls, because five would not fit the review |
 
-Address-only profiles (no transaction signing): DOT/KSM (SS58), Chia (bech32m
-address; BLS secret-scalar arithmetic is not constant time yet), QRL (XMSS
-public derivation; no one-time-signature reservation or signing), Aeternity,
-RyoCurrency and Zano.
+Address-only profiles (no transaction signing): Aeternity, RyoCurrency and Zano.
 
 The Aeternity, RyoCurrency and Zano rows above are deliberately address-only:
 the encoders are vector-checked, but there is no reviewed transaction format,
@@ -60,10 +68,30 @@ fee policy or signing path for them yet. Presenting them as signable wallets
 would be worse than omitting them.
 
 BEP-20 coverage is a registry, not a blind-signing fallback. `WalletTokens.cpp`
-now registers 20 additional BSC contracts (WBNB, CAKE, FDUSD, TUSD, LINK, DOT,
-ADA, XRP, DOGE, SHIB, UNI, AAVE, ATOM, XVS, BSW, ANKR, COMP, BETH, AVAX and
-PENDLE). Every row's symbol and decimals were checked with `eth_call` against
-the BSC public RPC; an unregistered contract is still rejected.
+registers 79 token rows over 61 EVM networks (27 of them BSC), and
+`tools/token_audit.ps1` re-checks every EVM row against the live chain with
+`symbol()` / `decimals()` / `name()`: a decimals mismatch fails the audit, a label
+drift is only reported, because issuers rename contracts in place - Arbitrum's USDT
+contract now reports `USD-T0` at the same address with the same 6 decimals. An
+unregistered contract is still rejected.
+
+User-declared tokens live in `WalletCustomTokens`: at most eight records, each
+bound to one network and one chain-native identifier - a 20-byte EVM contract, a
+21-byte TRON account, a 32-byte SPL mint, a Stellar issuer plus asset code, or a
+32-byte Starknet contract address. The width follows the network, so a caller
+cannot file an Ethereum-shaped key under a Starknet token. The table is one
+digest-checked blob; a torn or edited blob is rejected whole instead of being
+half-applied, and v1 (EVM-only) blobs are upgraded on load.
+
+A record is a label, never an authorization. The amount that gets signed is
+always the base-unit integer the chain carries; the device only rescales it for
+display, and when it does, the row is marked `UNVERIFIED` and the note says the
+label came from this device rather than the issuer. Shipped registry rows win
+over user records. Device commands: `token custom-list`, `token custom-add
+<network> <id-hex> <symbol> <name> <decimals>`, `token custom-add-stellar
+<issuer-hex> <code> <symbol> <name> <decimals>`, and the matching
+`custom-remove` forms. Without a record the device prints the raw amount
+(`1500000 raw`) rather than guessing decimals.
 
 The strict catalog is generated from `WalletForkCatalog.inc` and `WalletCatalog.cpp`. A profile whose network lacks a signing policy is internal test data, not a user wallet.
 
@@ -75,13 +103,19 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 - Spending t3 P2SH Zcash outputs whose redeem script is anything but a single-key `CHECKSIG`. P2SH-P2PK spends are signed (ZIP-243 commits the redeem script and the device re-hashes it against the address); multisig and non-canonical redeem scripts are refused.
 - Peercoin signing. PPC v<3 transactions serialize `nTime`; the Bitcoin legacy signer would build an invalid transaction. PPC is an internal address primitive, not a wallet, until a dedicated Peercoin sighash family with vectors lands.
 - XMR subaddress output support outside the verified forms. A single subaddress destination and mixed/multi-destination transactions using the version-3 additional-key binding are reviewed; malformed, unbound, or MSR subaddress outputs remain rejected.
-- Chia and QRL transaction signing, and DOT/KSM signing. Chia needs a constant-time BLS scalar path; QRL has no one-time-signature reservation; Substrate needs authenticated runtime metadata.
+- Starknet beyond the two admitted operations: `declare`, `deploy` of non-account contracts,
+  paymaster-sponsored fees, multisig or session-key accounts, batches larger than four calls, and
+  every network other than `SN_MAIN`. Calls other than ERC-20 `transfer` are refused instead of
+  being signed as an opaque digest, so an approve-then-swap batch has to be sent from a phone-only
+  wallet for now. See [chain gates](docs/chain-gates.md).
+- Theta and Pearl (PRL) need chain-specific native signing (the Theta EVM only moves TFUEL), and
+  Beam needs the Mimblewimble slate exchange; none of the three is admitted.
 - Qubic. Its identity is a FourQ point hashed with KangarooTwelve, so no Ed25519/SHA3 substitute is shipped: the profile and encoder were removed rather than returning a plausible-looking address.
 - Flux. The MiningPoolStats snapshot of 2026-10-23 lists FLUX under GRAVEYARD, and graveyard identities are not admitted to production registries. The ZIP-243 engine remains in use for Zcash.
 - TRON TRC-721/1155 transfers: the calldata decoder exists, but no NFT contract registration exists, so every request is refused instead of trusting an unregistered contract. Also batch NFT transfers, non-empty NFT callback data, multi-contract transactions, non-owner permissions, memos that are not printable ASCII or longer than 64 bytes, and `transferFrom` that debits a third party's balance. TRC-10 transfers, self-`transferFrom` and printable memos are reviewed and signed.
 - Dash signing is done by a dedicated adapter, not the PSBT path: a plain Dash transaction is `nVersion` (type in the high 16 bits), `vin`, `vout`, `nLockTime` with no `extraPayload`, and the digest is Bitcoin's legacy algorithm over exactly those bytes. Both claims are pinned to two live mainnet transactions whose on-chain signatures verify against the digest this firmware computes. Type-0 P2PKH payments only; the special transaction types (`extraPayload`) are refused. InstantSend adds no bytes - it is a quorum lock on inputs - so the device signs the payment and the phone confirms the lock.
 - Cosmos IBC packet/timeout messages, authz/feegrant and JSON/amino signing modes. Up to four bank sends per transaction, memos and non-native denoms are reviewed and signed; a denom without pinned metadata is displayed verbatim with the exact base-unit amount.
-- Arbitrary EVM calldata, contract creation, unknown tokens and non-standard typed transactions. Type-2 access lists are supported within bounded limits; see [access-list policy](docs/evm-access-lists.md).
+- Blind signing of unknown tokens by address. Any EVM transaction whose calldata is not a registered token call is reviewed as **raw bytes**: the screen shows the envelope, the full data hex, its keccak-256, the exact call value and, for creation, the address the deploy will produce. That is a deliberate "you are signing code, not a transfer" mode, not a decoded transfer. See [access-list policy](docs/evm-access-lists.md).
 - Beam, Grin, MimbleWimbleCoin and Epic Cash as wallets. These are interactive Mimblewimble chains: there is no static UTXO address, and a spend needs a multi-round slate/transaction exchange. A base58 string there is a slatepack/BBS endpoint, not a normal wallet address, so none is exposed.
 - Super Zero (SERO). Its 64/96-byte account identities are superzk public-key bundles, not a single-key address; no vetted encoder or signing path exists in this tree.
 - Swap (XWP), Evolution (EVOX), VeriBlock (VBK). These chains have no SLIP-0044 coin type in the current registry. Reusing Bitcoin's coin type (or another chain's) would silently derive the same key material for two domains; until an upstream coin type and a vector-checked encoder exist, they stay out of the catalog.
@@ -125,6 +159,12 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `MoneroTxVectorsTest.inc` | Real mainnet RCT type-6 transactions pinned for parse/rewrite/balance regression |
 | `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 and LayerZero ABI decoding; ERC-20 needs registered decimals, unique NFT selectors may be reviewed unregistered |
 | `WalletTokens` | Registered EVM token metadata |
+| `WalletCustomTokens` | User-declared tokens for EVM, TRON, Solana, Stellar and Starknet: one digest-checked blob, per-network key widths |
+| `MlDsa87` | FIPS 204 ML-DSA-87 keygen/sign/verify, used by QRL v2 |
+| `QrlV2Transaction` | QRL v2 dynamic-fee envelope, keccak-256 digest, ML-DSA-87 signature |
+| `AptosTransaction` | BCS `RawTransaction`, `APTOS::RawTransaction` domain hash, Ed25519 authenticator |
+| `StarknetCrypto` | Stark curve field/point arithmetic, Pedersen, Poseidon, Stark ECDSA, SNIP-5 address, Cairo v3 hashes |
+| `StarknetTransaction` | v3 `deploy_account`/`execute` review: address recomputation, per-call rows, ERC-20 decode |
 
 ## Serial CLI
 
@@ -210,6 +250,11 @@ nfc-apdu=pass
 secure-element=pass
 eink-panel=pass
 qrcode=pass
+qrl-ots=pass
+ml-dsa-87=pass
+solana=pass
+starknet-crypto=pass
+custom-tokens=pass
 ```
 
 `run_zcash_sighash_self_tests()` checks the published ZIP-243 transparent vector and selected `zcash-test-vectors` rows covering shielded hashes, JoinSplits and ALL/NONE/SINGLE. `run_zcash_transaction_self_test()` runs the full ECDSA/scriptSig/round-trip path on the device.

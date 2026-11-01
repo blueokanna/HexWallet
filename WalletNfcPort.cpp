@@ -1,23 +1,3 @@
-// NXP PN7160/PN7161 (NCI 2.0) NFC controller port.
-//
-// The wallet acts as an ISO-DEP *listening* target (card emulation); the phone
-// is the reader/poller. Link frames arrive as APDUs and are handed to
-// WalletNfcApdu, which forwards them to WalletLinkDevice.
-//
-// Scope and honesty:
-//   * This file implements the NCI control sequence the wallet needs
-//     (CORE_RESET, CORE_INIT, RF_DISCOVER_MAP, RF_DISCOVER listen) and the
-//     DATA packet pump, using the NCI 1.0/2.0 encodings PN71xx speaks.
-//   * The pin map is board specific and deliberately NOT defined anywhere in
-//     this repository. Without HEXWALLET_NFC_PN7161 and the HEXWALLET_NFC_PIN_*
-//     macros the port reports NotConfigured and NFC stays disabled instead of
-//     driving an unrelated peripheral.
-//   * Modules whose NFCC firmware must be patched at boot need that patch
-//     step (vendor loader) before this port can talk NCI. A module that ships
-//     with firmware already flashed works directly.
-//   * The sequence has not yet been validated against a PN7161 EVK. Do not
-//     claim NFC is production ready until it passes a reader-side conformance
-//     run.
 #include "WalletNfcPort.h"
 
 #include <Arduino.h>
@@ -88,7 +68,8 @@ namespace hexwallet
       secure_zero(tx_buffer, sizeof(tx_buffer));
       tx_size = tx_offset = 0;
       tx_limit = tx_credits = 0;
-      if (session_lost != nullptr) session_lost();
+      if (session_lost != nullptr)
+        session_lost();
     }
     bool bus_ready = false;
     uint8_t connection_id = 0;
@@ -107,8 +88,6 @@ namespace hexwallet
       return digitalRead(HEXWALLET_NFC_PIN_IRQ) == HIGH;
     }
 
-    // UM11495 section 4.3: direction byte, then the complete NCI packet.
-    // NCI header byte 2 is the payload length; there is no SPI length prefix.
     bool spi_write_packet(const uint8_t *data, size_t size)
     {
       if (data == nullptr || size < 3 || size > kNciMaxPacket ||
@@ -116,16 +95,19 @@ namespace hexwallet
         return false;
       for (unsigned attempt = 0; attempt < 2; ++attempt)
       {
-        if (irq_asserted()) return false;
+        if (irq_asserted())
+          return false;
         nfc_spi.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
         chip_select(true);
         const bool ready = nfc_spi.transfer(0x00) == 0xff;
         if (ready)
-          for (size_t i = 0; i < size; ++i) nfc_spi.transfer(data[i]);
+          for (size_t i = 0; i < size; ++i)
+            nfc_spi.transfer(data[i]);
         chip_select(false);
         nfc_spi.endTransaction();
-        if (ready) return true;
-        delay(5); // bounded standby wake-up retry, UM11495 section 4.3.3
+        if (ready)
+          return true;
+        delay(5);
       }
       return false;
     }
@@ -133,28 +115,32 @@ namespace hexwallet
     bool spi_read_packet(uint8_t *out, size_t capacity, size_t *out_size,
                          uint32_t timeout_ms)
     {
-      if (out == nullptr || out_size == nullptr || capacity < 3) return false;
+      if (out == nullptr || out_size == nullptr || capacity < 3)
+        return false;
       *out_size = 0;
       const uint32_t started = millis();
       while (!irq_asserted())
       {
-        if (millis() - started >= timeout_ms) return false;
+        if (millis() - started >= timeout_ms)
+          return false;
         delay(1);
       }
       nfc_spi.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
       chip_select(true);
       nfc_spi.transfer(0xff);
-      for (size_t i = 0; i < 3; ++i) out[i] = nfc_spi.transfer(0xff);
+      for (size_t i = 0; i < 3; ++i)
+        out[i] = nfc_spi.transfer(0xff);
       const size_t length = static_cast<size_t>(out[2]) + 3;
-      // Drain an oversized packet completely to preserve transport framing.
       for (size_t i = 3; i < length; ++i)
       {
         const uint8_t byte = nfc_spi.transfer(0xff);
-        if (i < capacity) out[i] = byte;
+        if (i < capacity)
+          out[i] = byte;
       }
       chip_select(false);
       nfc_spi.endTransaction();
-      if (length > capacity) return false;
+      if (length > capacity)
+        return false;
       *out_size = length;
       return true;
     }
@@ -180,7 +166,8 @@ namespace hexwallet
       while (millis() - started < timeout_ms)
       {
         const uint32_t elapsed = millis() - started;
-        if (elapsed >= timeout_ms) return false;
+        if (elapsed >= timeout_ms)
+          return false;
         size_t size = 0;
         if (!spi_read_packet(packet, sizeof(packet), &size,
                              timeout_ms - elapsed))
@@ -333,7 +320,8 @@ namespace hexwallet
 
     void flush_response()
     {
-      if (tx_offset >= tx_size || tx_credits == 0 || irq_asserted()) return;
+      if (tx_offset >= tx_size || tx_credits == 0 || irq_asserted())
+        return;
       const size_t remaining = tx_size - tx_offset;
       const size_t take = remaining < tx_limit ? remaining : tx_limit;
       if (take == 0 || !send_data_packet(0, take < remaining, tx_buffer + tx_offset, take))
@@ -341,7 +329,8 @@ namespace hexwallet
         fail_session();
         return;
       }
-      if (tx_credits != 0xff) --tx_credits;
+      if (tx_credits != 0xff)
+        --tx_credits;
       tx_offset += take;
       if (tx_offset == tx_size)
       {
@@ -363,24 +352,33 @@ namespace hexwallet
       apdu_size = 0;
       tx_offset = 0;
       transfer_started = millis();
-      if (tx_size == 0 || tx_size > sizeof(tx_buffer)) fail_session();
+      if (tx_size == 0 || tx_size > sizeof(tx_buffer))
+        fail_session();
     }
 
     void handle_data_packet(const uint8_t *packet, size_t size)
     {
-      if (size < 3) { fail_session(); return; }
+      if (size < 3)
+      {
+        fail_session();
+        return;
+      }
       const bool chained = (packet[0] & 0x10) != 0;
       const uint8_t connection = static_cast<uint8_t>(packet[0] & 0x0f);
       const size_t length = packet[2];
       if (size != 3 + length || packet[1] != 0 || connection != 0 ||
           length == 0 || tx_size != 0)
-      { fail_session(); return; }
+      {
+        fail_session();
+        return;
+      }
       if (apdu_size + length > sizeof(apdu_buffer))
       {
         fail_session();
         return;
       }
-      if (apdu_size == 0) transfer_started = millis();
+      if (apdu_size == 0)
+        transfer_started = millis();
       memcpy(apdu_buffer + apdu_size, packet + 3, length);
       apdu_size += length;
       apdu_chained = chained;
@@ -390,25 +388,40 @@ namespace hexwallet
 
     void handle_notification(const uint8_t *packet, size_t size)
     {
-      if (size < 3) { fail_session(); return; }
+      if (size < 3)
+      {
+        fail_session();
+        return;
+      }
       const uint8_t group = packet[0] & 0x0f;
       const uint8_t oid = packet[1];
       const size_t length = packet[2];
       if (size != 3 + length || (packet[0] & 0x10) != 0)
-      { fail_session(); return; }
+      {
+        fail_session();
+        return;
+      }
       const uint8_t *payload = packet + 3;
 
       if (group == kGidCore && oid == 0x06) // CORE_CONN_CREDITS_NTF
       {
         if (length < 1 || length != 1 + 2 * static_cast<size_t>(payload[0]))
-        { fail_session(); return; }
+        {
+          fail_session();
+          return;
+        }
         for (size_t i = 1; i < length; i += 2)
         {
-          if (payload[i] != 0 || state != NfcPortState::Activated) continue;
+          if (payload[i] != 0 || state != NfcPortState::Activated)
+            continue;
           if (tx_credits != 0xff)
           {
             const unsigned total = tx_credits + payload[i + 1];
-            if (total >= 0xff) { fail_session(); return; }
+            if (total >= 0xff)
+            {
+              fail_session();
+              return;
+            }
             tx_credits = static_cast<uint8_t>(total);
           }
         }
@@ -422,11 +435,17 @@ namespace hexwallet
         if (length < 11 || payload[1] != kRfInterfaceIsoDep ||
             payload[2] != kRfProtocolIsoDep || payload[3] != kRfNfcAPassiveListen ||
             payload[4] == 0)
-        { fail_session(); return; }
+        {
+          fail_session();
+          return;
+        }
         const size_t tail = 7 + static_cast<size_t>(payload[6]);
         if (tail + 4 > length || payload[tail] != kRfNfcAPassiveListen ||
             tail + 4 + payload[tail + 3] != length)
-        { fail_session(); return; }
+        {
+          fail_session();
+          return;
+        }
         connection_id = 0;
         tx_limit = payload[4] < kMaxApduChunk ? payload[4] : kMaxApduChunk;
         tx_credits = payload[5];
@@ -438,12 +457,12 @@ namespace hexwallet
         nfc_port_end_session();
         // Discovery and sleep can await another activation. Idle needs re-init.
         state = length == 2 && payload[0] >= 1 && payload[0] <= 3
-                    ? NfcPortState::Ready : NfcPortState::Error;
+                    ? NfcPortState::Ready
+                    : NfcPortState::Error;
         return;
       }
       if (group == kGidCore && (oid == 0x00 || oid == 0x07 || oid == 0x08))
         fail_session();
-
     }
 
 #endif // HEXWALLET_NFC_PORT_AVAILABLE
@@ -540,7 +559,10 @@ namespace hexwallet
       return;
     last_poll_ms = now_ms;
     if ((apdu_size != 0 || tx_size != 0) && millis() - transfer_started >= 2000UL)
-    { fail_session(); return; }
+    {
+      fail_session();
+      return;
+    }
     if (!irq_asserted())
     {
       flush_response();
@@ -550,7 +572,10 @@ namespace hexwallet
     uint8_t packet[kNciMaxPacket];
     size_t size = 0;
     if (!spi_read_packet(packet, sizeof(packet), &size, 0) || size < 3)
-    { fail_session(); return; }
+    {
+      fail_session();
+      return;
+    }
     const uint8_t type = packet[0] & 0xe0;
     if (type == kDataPacket)
     {

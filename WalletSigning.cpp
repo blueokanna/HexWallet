@@ -224,6 +224,8 @@ WalletSigningError map_chain_error(ChainError error) {
     case ChainError::FeePolicy: return WalletSigningError::FeePolicy;
     case ChainError::CryptoFailure: return WalletSigningError::CryptoFailure;
     case ChainError::BufferTooSmall: return WalletSigningError::BufferTooSmall;
+    case ChainError::StorageUnavailable: return WalletSigningError::CryptoFailure;
+    case ChainError::RuntimeMismatch: return WalletSigningError::Unsupported;
     case ChainError::InvalidArgument:
     case ChainError::InvalidAmount: return WalletSigningError::InvalidArgument;
     case ChainError::Malformed: return WalletSigningError::ParseFailed;
@@ -477,7 +479,8 @@ bool show_evm_review(const EvmSigningRequest &request) {
                               ? request.remote_address_text
                               : request.recipient_address;
   output = { 0, amount, recipient,
-             request.has_call ? evm_token_standard_name(request.call.standard) : "NATIVE" };
+             request.opaque ? evm_operation_text(request) :
+             (request.has_call ? evm_token_standard_name(request.call.standard) : "NATIVE") };
   char details[kEvmReviewTextSize];
   if (!evm_review_details(request, details, sizeof(details))) return false;
   output.details = details;
@@ -485,7 +488,8 @@ bool show_evm_review(const EvmSigningRequest &request) {
   snprintf(fee, sizeof(fee), "%s %s", request.maximum_fee_text,
            request.network == nullptr ? "?" : request.network->symbol);
   show_review(request.network == nullptr ? "EVM" : request.network->symbol,
-              request.maximum_fee, 0, fee, &output, 1);
+              request.maximum_fee, 0, fee, &output, 1, nullptr,
+              request.opaque ? "UNDECODED CODE. The amount is native call value only. Code may move other assets or grant permissions. Approve only after independently verifying the target and every data byte." : nullptr);
   return true;
 }
 
@@ -549,13 +553,14 @@ bool show_tron_review(const TronTransaction &request) {
   } else if (token) {
     written = snprintf(
         details, sizeof(details),
-        "CONTRACT\n%s\nMETHOD\n%s\nFEE LIMIT\n%llu.%06llu TRX\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x%s",
+        "CONTRACT\n%s\nMETHOD\n%s\nFEE LIMIT\n%llu.%06llu TRX\nEXPIRES (ms)\n%lld\nTXID\n%02x%02x%02x%02x%02x%02x%02x%02x%s%s",
         review.token_contract_text, method,
         static_cast<unsigned long long>(review.fee_limit_sun / kTronSunPerTrx),
         static_cast<unsigned long long>(review.fee_limit_sun % kTronSunPerTrx),
         static_cast<long long>(review.expiration_ms),
         review.tx_id[0], review.tx_id[1], review.tx_id[2], review.tx_id[3],
-        review.tx_id[4], review.tx_id[5], review.tx_id[6], review.tx_id[7], memo);
+        review.tx_id[4], review.tx_id[5], review.tx_id[6], review.tx_id[7],
+        review.token_user_declared ? "\nTOKEN NOT VERIFIED" : "", memo);
   } else {
     written = snprintf(
         details, sizeof(details),
@@ -581,7 +586,9 @@ bool show_tron_review(const TronTransaction &request) {
       : trc10 ? (review.asset_registered
                      ? "Offline review. The TRC-10 id and precision are pinned to the on-chain issuance record in firmware; recipient and amount are re-derived from the signed bytes."
                      : "Unregistered TRC-10 asset. The issuer chose this identifier and defines its precision, so the amount is the exact base-unit count the chain will move. Verify the asset id before approving.")
-              : "Offline review. Expiration, ref block and energy/bandwidth state are checked by the phone. Token identity and decimals come from the registered contract.";
+              : review.token_user_declared
+                    ? "Offline review. This TRC-20 contract was declared on this device; its symbol and decimals are unverified claims. Verify the contract address with the issuer before approving."
+                    : "Offline review. Expiration, ref block and energy/bandwidth state are checked by the phone. Token identity and decimals come from the registered contract.";
   show_review("TRON", charges_fee_limit ? review.fee_limit_sun : 0, 0,
               charges_fee_limit ? fee : nullptr, &output, 1, nullptr, note,
               charges_fee_limit ? "FEE LIMIT" : nullptr);
@@ -654,11 +661,18 @@ bool show_stellar_review(const StellarTransaction &request) {
   static_assert(kStellarMaxOperations <= kWalletUiMaxTransactionOutputs, "XLM review must show all operations");
   const StellarReview &v = request.review;
   WalletUiTransactionOutput outputs[kStellarMaxOperations] = {};
-  char details[kStellarMaxOperations][96] = {};
+  char details[kStellarMaxOperations][136] = {};
+  bool has_declared = false;
   for (size_t i = 0; i < v.operation_count; ++i) {
     const StellarOperation &op = v.operations[i];
-    const int n = snprintf(details[i], sizeof(details[i]), "%s%s",
-        op.issuer[0] ? "ISSUED ASSET / ISSUER\n" : "NATIVE XLM", op.issuer);
+    has_declared = has_declared || op.asset_user_declared;
+    const int n = op.asset_user_declared
+        ? snprintf(details[i], sizeof(details[i]),
+                   "USER-DECLARED ASSET: %s\nISSUER\n%s", op.asset_symbol,
+                   op.issuer)
+        : snprintf(details[i], sizeof(details[i]), "%s%s",
+                   op.issuer[0] ? "ISSUED ASSET / ISSUER\n" : "NATIVE XLM",
+                   op.issuer);
     if (n < 0 || static_cast<size_t>(n) >= sizeof(details[i])) return false;
     outputs[i] = {op.amount, op.amount_text, op.destination,
                   op.type == 0 ? "CREATE ACCOUNT" : "PAYMENT", details[i]};
@@ -670,10 +684,11 @@ bool show_stellar_review(const StellarTransaction &request) {
       "STELLAR PUBLIC NETWORK\nFROM\n%s\nPATH\nm/44'/148'/%lu'\nSEQUENCE\n%llu\n"
       "VALIDITY (UNIX SECONDS)\n%llu - %llu\nMEMO %s\n%s\n"
       "Offline: balances, reserves, trustlines and recipient memo requirements are not verified. "
-      "Issued asset identity is its code AND issuer; a familiar code does not authenticate an issuer.",
+      "Issued asset identity is its code AND issuer; a familiar code does not authenticate an issuer.%s",
       v.source, static_cast<unsigned long>(request.address_index),
       static_cast<unsigned long long>(v.sequence), static_cast<unsigned long long>(v.min_time),
-      static_cast<unsigned long long>(v.max_time), memo_names[v.memo_type], v.memo);
+      static_cast<unsigned long long>(v.max_time), memo_names[v.memo_type], v.memo,
+      has_declared ? " A locally declared label is not an issuer record; verify the code and issuer." : "");
   if (n < 0 || static_cast<size_t>(n) >= sizeof(note)) return false;
   snprintf(fee, sizeof(fee), "%lu.%07lu XLM", static_cast<unsigned long>(v.fee / kStellarStroops),
            static_cast<unsigned long>(v.fee % kStellarStroops));
@@ -829,20 +844,53 @@ bool show_xrp_review(const XrpTransaction &request) {
 }
 
 bool show_chain_review(const ChainTransaction &request) {
-  char note[512] = {};
+  // One row per reviewed call for the adapters that can carry several (a
+  // Starknet `execute` batch); every other family keeps the single row. Lives in
+  // static storage because four full addresses plus the note would cost most of
+  // the UI task's stack.
+  static char details[kChainMaxCalls][kChainCallAddressSize + 12];
+  static char note[512];
+  WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
+  const size_t calls = request.review.call_count > kChainMaxCalls
+                           ? kChainMaxCalls
+                           : request.review.call_count;
+  bool declared_token = false;
+  if (calls == 0) {
+    outputs[0] = {0, request.review.amount, request.review.recipient, "NATIVE",
+                  request.review.extra};
+  } else {
+    for (size_t index = 0; index < calls; ++index) {
+      const ChainCallSummary &call = request.review.calls[index];
+      declared_token = declared_token || call.declared;
+      const int written = snprintf(
+          details[index], sizeof(details[index]), "%sTOKEN\n%s",
+          call.declared ? "USER-DECLARED " : "", call.target);
+      if (written < 0 || static_cast<size_t>(written) >= sizeof(details[index])) {
+        return false;
+      }
+      outputs[index] = {0, call.amount, call.recipient,
+                        call.declared ? "TOKEN (UNVERIFIED)" : "CONTRACT CALL",
+                        details[index]};
+    }
+  }
   snprintf(note, sizeof(note),
            "FROM %s\nADDRESS INDEX %lu\nOffline review. Verify the destination, "
            "amount and fees. Node state and network selection must be checked "
            "before broadcast. Some protocols do not bind a chain ID in their "
-           "signed bytes; see the transaction details.",
-           request.review.sender, static_cast<unsigned long>(request.address_index));
-  WalletUiTransactionOutput output = {};
-  output = {0, request.review.amount, request.review.recipient, "NATIVE",
-            request.review.extra};
-  show_review(request.review.symbol, 0, 0, request.review.fee, &output, 1,
-              nullptr,
-              note,
-              "FEE");
+           "signed bytes; see the transaction details.%s",
+           request.review.sender, static_cast<unsigned long>(request.address_index),
+           calls > 1 ? "\nMULTI CALL: each row is one call, in execution order."
+                     : "");
+  if (calls > 0 && declared_token) {
+    const size_t used = strlen(note);
+    const char *warning =
+        "\nA token label came from a record you added on this device, not from "
+        "the issuer.";
+    if (used + strlen(warning) + 1 >= sizeof(note)) return false;
+    memcpy(note + used, warning, strlen(warning) + 1);
+  }
+  show_review(request.review.symbol, 0, 0, request.review.fee, outputs,
+              calls == 0 ? 1 : calls, nullptr, note, "FEE");
   return true;
 }
 
@@ -1034,6 +1082,7 @@ bool show_solana_review(const SolanaTransaction &request) {
   auto &details = scratch.details;
   bool has_tokens = false;
   bool has_token_2022 = false;
+  bool has_user_declared = false;
   const auto amount_text = [](uint64_t value, char *out, size_t size) {
     snprintf(out, size, "%llu.%09llu SOL",
         static_cast<unsigned long long>(value / 1000000000ULL),
@@ -1050,17 +1099,23 @@ bool show_solana_review(const SolanaTransaction &request) {
       has_tokens = true;
       const bool token_2022 = transfer.kind == SolanaTransferKind::SplToken2022;
       has_token_2022 = has_token_2022 || token_2022;
+      has_user_declared = has_user_declared || transfer.token_user_declared;
       char mint[45], source[45];
       size_t mint_size = sizeof(mint), source_size = sizeof(source);
       if (address_solana(transfer.mint, mint, &mint_size) != WalletError::Ok ||
           address_solana(transfer.source, source, &source_size) != WalletError::Ok) return false;
       const int length = snprintf(details[i], sizeof(details[i]),
-          "%s MINT\n%s\nFROM TOKEN ACCOUNT\n%s\nRAW UNITS: %llu\nDECIMALS: %u",
+          "%s%s\n%s MINT\n%s\nFROM TOKEN ACCOUNT\n%s\nRAW UNITS: %llu\nDECIMALS: %u",
+          transfer.token_user_declared ? "USER-DECLARED TOKEN: " : "",
+          transfer.token_user_declared ? transfer.token_symbol : "",
           token_2022 ? "TOKEN-2022" : "SPL TOKEN", mint, source,
           static_cast<unsigned long long>(transfer.amount), unsigned(transfer.decimals));
       if (length < 0 || static_cast<size_t>(length) >= sizeof(details[i])) return false;
-      outputs[i].ownership = token_2022 ? "TO TOKEN-2022 ACCOUNT (not wallet address)"
-                                        : "TO TOKEN ACCOUNT (not wallet address)";
+      outputs[i].ownership =
+          transfer.token_user_declared
+              ? "TO TOKEN ACCOUNT (UNVERIFIED TOKEN)"
+              : token_2022 ? "TO TOKEN-2022 ACCOUNT (not wallet address)"
+                           : "TO TOKEN ACCOUNT (not wallet address)";
       outputs[i].details = details[i];
     }
   }
@@ -1071,6 +1126,8 @@ bool show_solana_review(const SolanaTransaction &request) {
   show_review("SOLANA", request.estimated_fee, 0, fee, outputs, request.transfer_count,
       total, has_token_2022
           ? "TOKEN-2022 mint extensions (transfer fee, hook) cannot be verified offline: the recipient may receive less than shown. Verify the mint with the issuer. Instructions requiring extra hook accounts are rejected. Token names/owners are not authenticated; decimals are checked on-chain."
+          : has_user_declared
+          ? "One or more mints use a token you declared on this device. The symbol is a local label, not an issuer record; verify the full mint before approving. Account owners are not authenticated offline; decimals are checked on-chain. SOL fee is estimated; phone checks blockhash and cluster."
           : has_tokens
           ? "Verify the full mint and destination TOKEN ACCOUNT. Token names and account owners are not authenticated offline. Decimals are checked on-chain. SOL fee is estimated; phone checks blockhash and cluster."
           : "Offline fee estimate. Blockhash freshness and cluster require phone-side verification.", "EST. FEE");
@@ -1255,7 +1312,7 @@ WalletSigningError wallet_signing_begin_evm(const char *network_id,
   HdPrivateNode master;
   if (!load_master(&master)) return WalletSigningError::NoWallet;
   wallet_signing_clear();
-  const EvmTransactionError error = evm_parse_transaction(
+  const EvmTransactionError error = evm_parse_for_review(
       transaction, transaction_size, *network, master, address_index,
       &active.request.evm);
   secure_zero(&master, sizeof(master));
@@ -1732,6 +1789,12 @@ static WalletSigningError sign_approved_transaction(uint8_t *out, size_t *in_out
     wallet_signing_clear();
     wallet_ui_set_status("Trusted boot required. Signing refused.");
     return WalletSigningError::Unsupported;
+  }
+  // QRL spends a one-time leaf: the tree traversal takes seconds on the MCU,
+  // so the screen says what it is waiting for instead of looking frozen.
+  if (active.kind == WalletSigningKind::Chain &&
+      active.request.chain.family == ChainFamily::Qrl) {
+    wallet_ui_set_status("Reserving one-time key...");
   }
   // Consume before key access. An invalid output buffer, failed unseal, or
   // failed signing operation must never leave a reusable approval behind.

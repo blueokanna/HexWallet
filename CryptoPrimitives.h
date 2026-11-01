@@ -40,6 +40,8 @@ bool crypto_keccak256(const uint8_t *data, size_t size, uint8_t out[kKeccak256Si
 bool crypto_keccak512(const uint8_t *data, size_t size, uint8_t out[kKeccak512Size]);
 // FIPS 202 SHAKE-256 (0x1F padding), arbitrary output length.
 bool crypto_shake256(const uint8_t *data, size_t size, uint8_t *out, size_t out_size);
+// FIPS 202 SHAKE-128 (rate 168), used by ML-DSA's ExpandA.
+bool crypto_shake128(const uint8_t *data, size_t size, uint8_t *out, size_t out_size);
 bool crypto_constant_time_equal(const uint8_t *left, const uint8_t *right, size_t size);
 bool run_crypto_self_tests();
 

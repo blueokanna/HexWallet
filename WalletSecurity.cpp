@@ -22,8 +22,6 @@ constexpr size_t kMaxPassphraseSize = 128;
 constexpr size_t kExtendedKeyPayloadSize = 78;
 constexpr size_t kExtendedKeyCheckedSize = 82;
 
-// Covers early returns as well as success paths. In particular, BIP32 child
-// nodes and reconstructed BIP39 entropy must not remain in worker stack RAM.
 class WipeOnExit {
  public:
   WipeOnExit(void *data, size_t size) : data_(data), size_(size) {}

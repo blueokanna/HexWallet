@@ -244,6 +244,10 @@ bool crypto_shake256(const uint8_t *data, size_t size, uint8_t *out, size_t out_
   return keccak_sponge(data, size, 136, 0x1F, out, out_size);
 }
 
+bool crypto_shake128(const uint8_t *data, size_t size, uint8_t *out, size_t out_size) {
+  return keccak_sponge(data, size, 168, 0x1F, out, out_size);
+}
+
 bool crypto_constant_time_equal(const uint8_t *left, const uint8_t *right, size_t size) {
   if (left == nullptr || right == nullptr) return false;
   uint8_t difference = 0;

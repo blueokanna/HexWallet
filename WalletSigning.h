@@ -135,9 +135,8 @@ WalletSigningError wallet_signing_begin_tezos(const char *network_id,
 WalletSigningError wallet_signing_begin_xrp(const char *network_id,
     uint32_t address_index, const uint8_t *payload, size_t size, uint32_t now_ms);
 
-// Account-model adapters that share the ChainTransaction envelope (currently
-// VET and ICX). The payload carries its own chain magic and is parsed by the
-// adapter, never signed blindly.
+// Account-model adapters that share the ChainTransaction envelope. The payload
+// carries its own chain magic and is parsed by the adapter, never signed blindly.
 WalletSigningError wallet_signing_begin_chain(const char *network_id,
     uint32_t address_index, const uint8_t *payload, size_t size,
     uint32_t now_ms);

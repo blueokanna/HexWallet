@@ -16,7 +16,11 @@ namespace hexwallet
   {
     int g_signing_stage = 0;
     int g_signing_error = -1;
-#define SIGNING_STAGE(n) do { g_signing_stage = (n); } while (0)
+#define SIGNING_STAGE(n)   \
+  do                       \
+  {                        \
+    g_signing_stage = (n); \
+  } while (0)
 
     struct Reader
     {
@@ -27,7 +31,11 @@ namespace hexwallet
 
       bool bytes(const uint8_t **out, size_t count)
       {
-        if (!ok || count > size - offset) { ok = false; return false; }
+        if (!ok || count > size - offset)
+        {
+          ok = false;
+          return false;
+        }
         *out = data + offset;
         offset += count;
         return true;
@@ -35,14 +43,16 @@ namespace hexwallet
       bool u8(uint8_t *value)
       {
         const uint8_t *p = nullptr;
-        if (!bytes(&p, 1)) return false;
+        if (!bytes(&p, 1))
+          return false;
         *value = p[0];
         return true;
       }
       bool u16(uint16_t *value)
       {
         const uint8_t *p = nullptr;
-        if (!bytes(&p, 2)) return false;
+        if (!bytes(&p, 2))
+          return false;
         *value = static_cast<uint16_t>(p[0]) |
                  static_cast<uint16_t>(static_cast<uint16_t>(p[1]) << 8);
         return true;
@@ -50,18 +60,22 @@ namespace hexwallet
       bool u32(uint32_t *value)
       {
         const uint8_t *p = nullptr;
-        if (!bytes(&p, 4)) return false;
+        if (!bytes(&p, 4))
+          return false;
         uint32_t v = 0;
-        for (size_t i = 0; i < 4; ++i) v |= static_cast<uint32_t>(p[i]) << (8 * i);
+        for (size_t i = 0; i < 4; ++i)
+          v |= static_cast<uint32_t>(p[i]) << (8 * i);
         *value = v;
         return true;
       }
       bool u64(uint64_t *value)
       {
         const uint8_t *p = nullptr;
-        if (!bytes(&p, 8)) return false;
+        if (!bytes(&p, 8))
+          return false;
         uint64_t v = 0;
-        for (size_t i = 0; i < 8; ++i) v |= static_cast<uint64_t>(p[i]) << (8 * i);
+        for (size_t i = 0; i < 8; ++i)
+          v |= static_cast<uint64_t>(p[i]) << (8 * i);
         *value = v;
         return true;
       }
@@ -71,7 +85,8 @@ namespace hexwallet
     bool nonzero_scalar(const uint8_t scalar[kCryptoNoteKeySize])
     {
       uint8_t acc = 0;
-      for (size_t i = 0; i < kCryptoNoteKeySize; ++i) acc |= scalar[i];
+      for (size_t i = 0; i < kCryptoNoteKeySize; ++i)
+        acc |= scalar[i];
       return acc != 0;
     }
 
@@ -86,7 +101,8 @@ namespace hexwallet
 
   void cryptonote_signing_clear(CryptoNoteSigningState *state)
   {
-    if (state != nullptr) secure_zero(state, sizeof(*state));
+    if (state != nullptr)
+      secure_zero(state, sizeof(*state));
   }
 
   CryptoNoteTxError cryptonote_signing_prepare(
@@ -94,7 +110,8 @@ namespace hexwallet
       const uint8_t seed[kSeedSize], CryptoNoteSigningState *state)
   {
     cryptonote_signing_clear(state);
-    if (seed == nullptr) return CryptoNoteTxError::InvalidArgument;
+    if (seed == nullptr)
+      return CryptoNoteTxError::InvalidArgument;
     uint8_t view_secret[kCryptoNoteKeySize] = {};
     uint8_t spend_secret[kCryptoNoteKeySize] = {};
     if (cryptonote_private_keys_from_seed(seed, spend_secret, view_secret) !=
@@ -125,11 +142,12 @@ namespace hexwallet
       return CryptoNoteTxError::InvalidArgument;
 
     const CryptoNoteReviewPolicy *policy = cryptonote_review_policy(network_id);
-    if (policy == nullptr) return CryptoNoteTxError::Unsupported;
+    if (policy == nullptr)
+      return CryptoNoteTxError::Unsupported;
     const bool monero = policy->network == CryptoNoteReviewNetwork::MoneroMainnet;
 
     memset(state, 0, sizeof(*state));
-    Reader reader = { payload, payload_size, 0, true };
+    Reader reader = {payload, payload_size, 0, true};
 
     uint8_t version = 0;
     if (!reader.u8(&version) ||
@@ -175,7 +193,11 @@ namespace hexwallet
     }
 
     const uint8_t *tx_secret = nullptr;
-    if (!reader.bytes(&tx_secret, kCryptoNoteKeySize)) { cryptonote_signing_clear(state); return CryptoNoteTxError::Truncated; }
+    if (!reader.bytes(&tx_secret, kCryptoNoteKeySize))
+    {
+      cryptonote_signing_clear(state);
+      return CryptoNoteTxError::Truncated;
+    }
     memcpy(state->tx_secret, tx_secret, kCryptoNoteKeySize);
     if (has_additional_tx_keys)
     {
@@ -543,7 +565,8 @@ namespace hexwallet
       const uint8_t nonce_seed[kCryptoNoteKeySize], uint8_t *out,
       size_t *in_out_size)
   {
-    if (seed == nullptr) {
+    if (seed == nullptr)
+    {
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::InvalidArgument;
     }
@@ -584,7 +607,8 @@ namespace hexwallet
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::InvalidArgument;
     }
-    if (state->network != CryptoNoteReviewNetwork::MoneroMainnet) {
+    if (state->network != CryptoNoteReviewNetwork::MoneroMainnet)
+    {
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::Unsupported;
     }
@@ -642,10 +666,10 @@ namespace hexwallet
         uint8_t sub_view_public[kCryptoNoteKeySize];
         spend_key_ok =
             cryptonote_subaddress_keys(spend_secret, view_secret,
-                                      input.subaddress_major,
-                                      input.subaddress_minor,
-                                      input_spend_secret, sub_spend_public,
-                                      sub_view_public) == WalletError::Ok;
+                                       input.subaddress_major,
+                                       input.subaddress_minor,
+                                       input_spend_secret, sub_spend_public,
+                                       sub_view_public) == WalletError::Ok;
         secure_zero(sub_spend_public, sizeof(sub_spend_public));
         secure_zero(sub_view_public, sizeof(sub_view_public));
       }
@@ -698,27 +722,63 @@ namespace hexwallet
     static uint8_t payload[kCryptoNoteMaxSigningPayload];
 
     // Failure at the API boundary must invalidate any previous reviewed state.
-    const auto cleared = [&]() {
+    const auto cleared = [&]()
+    {
       const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&state);
       uint8_t remaining = 0;
-      for (size_t i = 0; i < sizeof(state); ++i) remaining |= bytes[i];
+      for (size_t i = 0; i < sizeof(state); ++i)
+        remaining |= bytes[i];
       return remaining == 0;
     };
     memset(&state, 0xa5, sizeof(state));
     if (cryptonote_signing_prepare_with_keys(nullptr, nullptr, 0, nullptr,
-        nullptr, &state) != CryptoNoteTxError::InvalidArgument || !cleared()) return false;
+                                             nullptr, &state) != CryptoNoteTxError::InvalidArgument ||
+        !cleared())
+      return false;
     memset(&state, 0xa5, sizeof(state));
     if (cryptonote_signing_sign_with_keys(&state, nullptr, nullptr, nullptr,
-        nullptr, nullptr) != CryptoNoteTxError::InvalidArgument || !cleared()) return false;
+                                          nullptr, nullptr) != CryptoNoteTxError::InvalidArgument ||
+        !cleared())
+      return false;
     memset(&state, 0xa5, sizeof(state));
     if (cryptonote_signing_sign(&state, nullptr, nullptr, nullptr, nullptr) !=
-        CryptoNoteTxError::InvalidArgument || !cleared()) return false;
+            CryptoNoteTxError::InvalidArgument ||
+        !cleared())
+      return false;
 
     const uint8_t seed[kSeedSize] = {
-        0x4c, 0x1f, 0x92, 0x03, 0xbe, 0x77, 0x51, 0xaa,
-        0x0d, 0x66, 0x94, 0x31, 0xc8, 0x2f, 0x05, 0x7e,
-        0xa1, 0x48, 0x9b, 0x22, 0x73, 0xd0, 0x6e, 0x15,
-        0xb4, 0x05, 0xe9, 0x38, 0x7c, 0x21, 0x4f, 0x80,
+        0x4c,
+        0x1f,
+        0x92,
+        0x03,
+        0xbe,
+        0x77,
+        0x51,
+        0xaa,
+        0x0d,
+        0x66,
+        0x94,
+        0x31,
+        0xc8,
+        0x2f,
+        0x05,
+        0x7e,
+        0xa1,
+        0x48,
+        0x9b,
+        0x22,
+        0x73,
+        0xd0,
+        0x6e,
+        0x15,
+        0xb4,
+        0x05,
+        0xe9,
+        0x38,
+        0x7c,
+        0x21,
+        0x4f,
+        0x80,
     };
     // Public reference-fixture keys (TEST ONLY). They match the pinned
     // Monero prover output in src/generated/MoneroReviewProofTest.inc.
@@ -740,10 +800,11 @@ namespace hexwallet
 
     bool ok = true;
     ok = cryptonote_scalar_to_point(spend_secret, our_spend_public) &&
-        cryptonote_scalar_to_point(view_secret, our_view_public) &&
-        cryptonote_scalar_to_point(kRecipientSpendSecret, recipient_spend_public) &&
-        cryptonote_scalar_to_point(kRecipientViewSecret, recipient_view_public);
-    if (!ok) return false;
+         cryptonote_scalar_to_point(view_secret, our_view_public) &&
+         cryptonote_scalar_to_point(kRecipientSpendSecret, recipient_spend_public) &&
+         cryptonote_scalar_to_point(kRecipientViewSecret, recipient_view_public);
+    if (!ok)
+      return false;
     SIGNING_STAGE(101);
 
     uint8_t original_tx_public[kCryptoNoteKeySize];
@@ -762,7 +823,8 @@ namespace hexwallet
          ringct_commitment(our_mask, kInputAmount, our_commitment) &&
          cryptonote_derive_public_key(derivation, our_output_index,
                                       our_spend_public, our_one_time);
-    if (!ok) return false;
+    if (!ok)
+      return false;
 
     static CryptoNoteRingMember ring[kCryptoNoteMaxRingSize];
     static uint64_t offsets[kCryptoNoteMaxRingSize];
@@ -783,7 +845,8 @@ namespace hexwallet
     uint8_t one_time_secret[kCryptoNoteKeySize];
     ok = ok && cryptonote_derive_secret_key(derivation, our_output_index,
                                             spend_secret, one_time_secret);
-    if (!ok) return false;
+    if (!ok)
+      return false;
     SIGNING_STAGE(102);
 
     CryptoNoteSpendInput spend = {};
@@ -819,7 +882,8 @@ namespace hexwallet
          cryptonote_build_spend_transaction(&spend, 1, built, 2, kFee, entropy,
                                             &tx, &proof, 1, pseudo_masks) ==
              CryptoNoteTxError::Ok;
-    if (!ok) return false;
+    if (!ok)
+      return false;
 
     // ---- build the wire request ------------------------------------------
     SIGNING_STAGE(103);
@@ -843,16 +907,21 @@ namespace hexwallet
     offset += kCryptoNoteKeySize;
     payload[offset++] = 1;
     payload[offset++] = 2;
-    payload[offset++] = 0;  // no output masks
-    const auto put_u16 = [&](uint16_t v) {
+    payload[offset++] = 0; // no output masks
+    const auto put_u16 = [&](uint16_t v)
+    {
       payload[offset++] = static_cast<uint8_t>(v);
       payload[offset++] = static_cast<uint8_t>(v >> 8);
     };
-    const auto put_u32 = [&](uint32_t v) {
-      for (size_t i = 0; i < 4; ++i) payload[offset++] = static_cast<uint8_t>(v >> (8 * i));
+    const auto put_u32 = [&](uint32_t v)
+    {
+      for (size_t i = 0; i < 4; ++i)
+        payload[offset++] = static_cast<uint8_t>(v >> (8 * i));
     };
-    const auto put_u64 = [&](uint64_t v) {
-      for (size_t i = 0; i < 8; ++i) payload[offset++] = static_cast<uint8_t>(v >> (8 * i));
+    const auto put_u64 = [&](uint64_t v)
+    {
+      for (size_t i = 0; i < 8; ++i)
+        payload[offset++] = static_cast<uint8_t>(v >> (8 * i));
     };
     put_u64(kInputAmount);
     put_u16(2);
@@ -862,9 +931,10 @@ namespace hexwallet
     put_u64(our_output_index);
     memcpy(payload + offset, pseudo_masks, kCryptoNoteKeySize);
     offset += kCryptoNoteKeySize;
-    put_u32(0);  // subaddress_major (standard address)
-    put_u32(0);  // subaddress_minor
-    for (size_t member = 0; member < 16; ++member) put_u64(offsets[member]);
+    put_u32(0); // subaddress_major (standard address)
+    put_u32(0); // subaddress_minor
+    for (size_t member = 0; member < 16; ++member)
+      put_u64(offsets[member]);
     for (size_t member = 0; member < 16; ++member)
     {
       memcpy(payload + offset, ring[member].dest, kCryptoNoteKeySize);
@@ -873,27 +943,28 @@ namespace hexwallet
       offset += kCryptoNoteKeySize;
     }
     const size_t external_flags_offset = offset;
-    payload[offset++] = 0x00;  // external
+    payload[offset++] = 0x00; // external
     memcpy(payload + offset, recipient_spend_public, kCryptoNoteKeySize);
     offset += kCryptoNoteKeySize;
     memcpy(payload + offset, recipient_view_public, kCryptoNoteKeySize);
     offset += kCryptoNoteKeySize;
     put_u64(kSendAmount);
-    put_u32(0);  // external output: subaddress fields are ignored
+    put_u32(0); // external output: subaddress fields are ignored
     put_u32(0);
-    payload[offset++] = 0x01;  // change
+    payload[offset++] = 0x01; // change
     memcpy(payload + offset, our_spend_public, kCryptoNoteKeySize);
     offset += kCryptoNoteKeySize;
     memcpy(payload + offset, our_view_public, kCryptoNoteKeySize);
     offset += kCryptoNoteKeySize;
     put_u64(kChangeAmount);
-    put_u32(0);  // change to the standard address
+    put_u32(0); // change to the standard address
     put_u32(0);
 
     const CryptoNoteTxError prepared = cryptonote_signing_prepare_with_keys(
         "xmr", payload, offset, view_secret, spend_secret, &state);
     g_signing_error = static_cast<int>(prepared);
-    if (prepared != CryptoNoteTxError::Ok) return false;
+    if (prepared != CryptoNoteTxError::Ok)
+      return false;
     if (state.summary.total_input != kInputAmount ||
         state.summary.total_output != kSendAmount + kChangeAmount ||
         state.summary.change != kChangeAmount ||
@@ -907,7 +978,8 @@ namespace hexwallet
       static CryptoNoteSigningState rejected;
       const CryptoNoteTxError error =
           cryptonote_signing_prepare("xmr", payload, offset, seed, &rejected);
-      if (error == CryptoNoteTxError::Ok) return false;
+      if (error == CryptoNoteTxError::Ok)
+        return false;
     }
     // Reserved wire flags must not acquire ambiguous semantics across versions.
     {
@@ -918,7 +990,8 @@ namespace hexwallet
       const CryptoNoteTxError error = cryptonote_signing_prepare_with_keys(
           "xmr", payload, offset, view_secret, spend_secret, &rejected);
       payload[flags_offset] = saved;
-      if (error != CryptoNoteTxError::NonCanonical) return false;
+      if (error != CryptoNoteTxError::NonCanonical)
+        return false;
     }
     // Do not display a subaddress prefix for an output built with rG.
     {
@@ -927,7 +1000,8 @@ namespace hexwallet
       const CryptoNoteTxError error = cryptonote_signing_prepare_with_keys(
           "xmr", payload, offset, view_secret, spend_secret, &rejected);
       payload[external_flags_offset] = 0;
-      if (error != CryptoNoteTxError::InvalidArgument) return false;
+      if (error != CryptoNoteTxError::InvalidArgument)
+        return false;
     }
     // A wrong sender secret must not be reviewable.
     {
@@ -937,7 +1011,8 @@ namespace hexwallet
       const CryptoNoteTxError error = cryptonote_signing_prepare_with_keys(
           "xmr", payload, offset, view_secret, spend_secret, &rejected);
       payload[3 + tx_size] = saved;
-      if (error == CryptoNoteTxError::Ok) return false;
+      if (error == CryptoNoteTxError::Ok)
+        return false;
     }
     // The fee ceiling applies before any curve work.
     {
@@ -973,7 +1048,8 @@ namespace hexwallet
         &state, view_secret, spend_secret, nonce_seed, signed_tx,
         &signed_size);
     g_signing_error = static_cast<int>(signed_error);
-    if (signed_error != CryptoNoteTxError::Ok) return false;
+    if (signed_error != CryptoNoteTxError::Ok)
+      return false;
 
     CryptoNoteTransaction reparsed;
     if (cryptonote_parse_transaction(signed_tx, signed_size, &reparsed) !=
@@ -1009,7 +1085,7 @@ namespace hexwallet
 
       size_t mixed_tx_size = sizeof(tx_bytes);
       if (cryptonote_serialize_transaction(mixed_tx, tx_bytes,
-                                            &mixed_tx_size) !=
+                                           &mixed_tx_size) !=
           CryptoNoteTxError::Ok)
         return false;
 
@@ -1031,16 +1107,19 @@ namespace hexwallet
       payload[v3_offset++] = 1;
       payload[v3_offset++] = 2;
       payload[v3_offset++] = 0;
-      const auto v3_put_u16 = [&](uint16_t value) {
+      const auto v3_put_u16 = [&](uint16_t value)
+      {
         payload[v3_offset++] = static_cast<uint8_t>(value);
         payload[v3_offset++] = static_cast<uint8_t>(value >> 8);
       };
-      const auto v3_put_u32 = [&](uint32_t value) {
+      const auto v3_put_u32 = [&](uint32_t value)
+      {
         for (size_t byte = 0; byte < 4; ++byte)
           payload[v3_offset++] =
               static_cast<uint8_t>(value >> (8 * byte));
       };
-      const auto v3_put_u64 = [&](uint64_t value) {
+      const auto v3_put_u64 = [&](uint64_t value)
+      {
         for (size_t byte = 0; byte < 8; ++byte)
           payload[v3_offset++] =
               static_cast<uint8_t>(value >> (8 * byte));
@@ -1069,7 +1148,7 @@ namespace hexwallet
           1 + 2 * kCryptoNoteKeySize + sizeof(uint64_t) +
           2 * sizeof(uint32_t);
       constexpr size_t kV3OutputRecordBytes = kV3OutputPrefixBytes + 1;
-      payload[v3_offset++] = 0x02;  // external subaddress
+      payload[v3_offset++] = 0x02; // external subaddress
       memcpy(payload + v3_offset, recipient_spend_public,
              kCryptoNoteKeySize);
       v3_offset += kCryptoNoteKeySize;
@@ -1079,8 +1158,8 @@ namespace hexwallet
       v3_put_u64(kSendAmount);
       v3_put_u32(0);
       v3_put_u32(0);
-      payload[v3_offset++] = 1;  // output 0 tx_key_index: first additional secret
-      payload[v3_offset++] = 1;  // output 1: change
+      payload[v3_offset++] = 1; // output 0 tx_key_index: first additional secret
+      payload[v3_offset++] = 1; // output 1: change
       memcpy(payload + v3_offset, our_spend_public, kCryptoNoteKeySize);
       v3_offset += kCryptoNoteKeySize;
       memcpy(payload + v3_offset, our_view_public, kCryptoNoteKeySize);
@@ -1088,7 +1167,7 @@ namespace hexwallet
       v3_put_u64(kChangeAmount);
       v3_put_u32(0);
       v3_put_u32(0);
-      payload[v3_offset++] = 0;  // output 1 tx_key_index: primary secret
+      payload[v3_offset++] = 0; // output 1 tx_key_index: primary secret
 
       const size_t v3_output0_selector_offset =
           v3_output0_offset + kV3OutputPrefixBytes;
@@ -1099,7 +1178,8 @@ namespace hexwallet
       const size_t v3_additional_count_offset =
           3 + mixed_tx_size + kCryptoNoteKeySize;
       const auto expect_v3_error = [&](size_t size,
-                                       CryptoNoteTxError expected) {
+                                       CryptoNoteTxError expected)
+      {
         const CryptoNoteTxError error =
             cryptonote_signing_prepare_with_keys(
                 "xmr", payload, size, view_secret, spend_secret, &state);
@@ -1112,7 +1192,8 @@ namespace hexwallet
         const bool rejected =
             expect_v3_error(v3_offset, CryptoNoteTxError::InvalidArgument);
         payload[v3_output0_selector_offset] = saved;
-        if (!rejected) return false;
+        if (!rejected)
+          return false;
       }
       {
         const uint8_t saved =
@@ -1121,7 +1202,8 @@ namespace hexwallet
         const bool rejected =
             expect_v3_error(v3_offset, CryptoNoteTxError::InvalidArgument);
         payload[v3_additional_count_offset + 1] = saved;
-        if (!rejected) return false;
+        if (!rejected)
+          return false;
       }
       {
         const uint8_t saved = payload[v3_output1_selector_offset];
@@ -1129,7 +1211,8 @@ namespace hexwallet
         const bool rejected =
             expect_v3_error(v3_offset, CryptoNoteTxError::InvalidArgument);
         payload[v3_output1_selector_offset] = saved;
-        if (!rejected) return false;
+        if (!rejected)
+          return false;
       }
       {
         const uint8_t saved = payload[v3_output1_offset];
@@ -1137,7 +1220,8 @@ namespace hexwallet
         const bool rejected =
             expect_v3_error(v3_offset, CryptoNoteTxError::NonCanonical);
         payload[v3_output1_offset] = saved;
-        if (!rejected) return false;
+        if (!rejected)
+          return false;
       }
       if (!expect_v3_error(v3_offset - 1, CryptoNoteTxError::Truncated))
         return false;
@@ -1220,11 +1304,13 @@ namespace hexwallet
           cryptonote_scalar_to_point(sub_one_time_secret, check) &&
           crypto_constant_time_equal(check, sub_one_time_public,
                                      kCryptoNoteKeySize);
-      if (!sub_ok) return false;
+      if (!sub_ok)
+        return false;
       sub_ok = cryptonote_scalar_to_point(wrong_one_time_secret, check) &&
                !crypto_constant_time_equal(check, sub_one_time_public,
                                            kCryptoNoteKeySize);
-      if (!sub_ok) return false;
+      if (!sub_ok)
+        return false;
 
       CryptoNoteRingMember sub_ring[3] = {};
       uint8_t z[kCryptoNoteKeySize];
@@ -1239,7 +1325,8 @@ namespace hexwallet
                cryptonote_scalar_to_point(c_offset, c_offset_point) &&
                ed25519_point_add_compressed(z_point, c_offset_point,
                                             sub_ring[2].mask);
-      if (!sub_ok) return false;
+      if (!sub_ok)
+        return false;
       memcpy(sub_ring[2].dest, sub_one_time_public, kCryptoNoteKeySize);
       // Two decoys on the curve, distinct from the signer.
       for (size_t member = 0; member < 2 && sub_ok; ++member)
@@ -1259,7 +1346,8 @@ namespace hexwallet
           secure_zero(mask_scalar, sizeof(mask_scalar));
         }
       }
-      if (!sub_ok) return false;
+      if (!sub_ok)
+        return false;
 
       SIGNING_STAGE(112);
       uint8_t sub_message[kCryptoNoteKeySize];
@@ -1285,7 +1373,8 @@ namespace hexwallet
       SIGNING_STAGE(121);
       sub_ok = cryptonote_clsag_verify(sub_message, sub_ring, 3, c_offset_point,
                                        sub_signature);
-      if (!sub_ok) return false;
+      if (!sub_ok)
+        return false;
       // The master spend secret must not be able to sign the subaddress output.
       SIGNING_STAGE(113);
       CryptoNoteClsag wrong_signature = {};

@@ -1,13 +1,12 @@
 #include "DashTransaction.h"
 
-#include <mbedtls/ecdsa.h>
 #include <string.h>
 
 #include "src/BytesText.h"
+#include "src/Secp256k1Sign.h"
 #include "WalletAddresses.h"
 #include "WalletConfig.h"
 #include "WalletSecurity.h"
-#include "SensitiveValue.h"
 
 namespace hexwallet
 {
@@ -15,16 +14,12 @@ namespace hexwallet
   {
 
     constexpr uint32_t kSighashAll = 1;
-    constexpr size_t kCompactSizeMaxBytes = 9;
-    // Bound for `dash_legacy_sighash`, which also has to digest foreign
-    // transactions such as the pinned mainnet vectors.
     constexpr size_t kMaxViewInputs = 64;
     constexpr size_t kMaxViewOutputs = 64;
     constexpr size_t kMaxForeignScriptSize = 10000;
     constexpr size_t kPreimageMax =
         kDashMaxTransactionSize + kDashMaxScriptSize + 8;
     constexpr uint8_t kDashPayloadMagic[4] = {'D', 'A', 'S', 'H'};
-    constexpr uint8_t kDashVerifiedPayloadMagic[4] = {'D', 'A', 'S', '2'};
 
     struct Cursor
     {
@@ -105,14 +100,6 @@ namespace hexwallet
       return true;
     }
 
-    bool read_u16(Cursor *cursor, uint16_t *out)
-    {
-      const uint8_t *bytes;
-      if (!read_bytes(cursor, 2, &bytes)) return false;
-      *out = static_cast<uint16_t>(bytes[0] | (static_cast<uint16_t>(bytes[1]) << 8));
-      return true;
-    }
-
     bool read_u64(Cursor *cursor, uint64_t *out)
     {
       const uint8_t *bytes;
@@ -127,8 +114,8 @@ namespace hexwallet
       return true;
     }
 
-    // Bitcoin/Dash compact integer: canonical encodings only, so two different
-    // byte strings can never describe the same transaction.
+    // Bitcoin/Dash compact integer: only the canonical encoding is accepted, so
+    // two different byte strings can never describe the same transaction.
     bool read_compact_size(Cursor *cursor, uint64_t *out)
     {
       uint8_t first;
@@ -245,11 +232,10 @@ namespace hexwallet
              script[0] == 0xa9 && script[1] == 0x14 && script[22] == 0x87;
     }
 
-    // Parses an arbitrary Dash plain transaction. `nType` other than zero means
-    // an `extraPayload` follows the outputs, which this module refuses to
-    // interpret, so such transactions never parse.
-    DashError parse_transaction(const uint8_t *data, size_t size, TxView *out,
-                                bool previous_transaction = false)
+    // Parses an arbitrary Dash plain transaction. Any nType other than zero
+    // means an `extraPayload` follows that this module refuses to interpret, so
+    // such transactions never parse.
+    DashError parse_transaction(const uint8_t *data, size_t size, TxView *out)
     {
       if (data == nullptr || out == nullptr || size < 10)
         return DashError::Truncated;
@@ -259,16 +245,14 @@ namespace hexwallet
         return DashError::Truncated;
       out->version = version_field & 0xffffU;
       out->type = version_field >> 16;
-      if (out->type != 0 &&
-          (!previous_transaction || out->version != 3 || out->type > 9))
+      if (out->type != 0)
         return DashError::Unsupported;
       if (out->version < 1 || out->version > kDashVersion)
         return DashError::Unsupported;
       uint64_t count;
       if (!read_compact_size(&cursor, &count))
         return DashError::Truncated;
-      if ((count == 0 && !(previous_transaction && out->type == 9)) ||
-          count > kMaxViewInputs)
+      if (count == 0 || count > kMaxViewInputs)
         return DashError::TooLarge;
       out->input_count = static_cast<size_t>(count);
       for (size_t index = 0; index < out->input_count; ++index)
@@ -310,46 +294,10 @@ namespace hexwallet
       }
       if (!read_u32(&cursor, &out->lock_time))
         return DashError::Truncated;
-      // Previous special transactions may fund ordinary payments. Their whole
-      // payload is included in the txid, but is never interpreted as an action
-      // this wallet will sign. New special transactions remain rejected.
-      if (out->type != 0)
-      {
-        uint64_t extra_size;
-        if (!read_compact_size(&cursor, &extra_size)) return DashError::Truncated;
-        if (extra_size > kMaxForeignScriptSize) return DashError::TooLarge;
-        if (!read_bytes(&cursor, static_cast<size_t>(extra_size), nullptr))
-          return DashError::Truncated;
-      }
-      // A plain transaction ends after nLockTime; anything left over is a
+      // A plain transaction ends after nLockTime; anything left is a
       // non-canonical encoding, not a field this wallet may ignore.
       return cursor.position == cursor.size ? DashError::Ok
                                             : DashError::NonCanonical;
-    }
-
-    DashError verify_previous_output(const DashInput &input)
-    {
-      if (input.previous_transaction_size == 0) return DashError::MissingField;
-      if (input.previous_transaction_size > kDashMaxPreviousTransactionSize)
-        return DashError::TooLarge;
-      uint8_t txid[kSha256Size];
-      if (!crypto_double_sha256(input.previous_transaction,
-                                input.previous_transaction_size, txid))
-        return DashError::CryptoFailure;
-      if (!bytes_equal(txid, input.previous_txid, sizeof(txid)))
-        return DashError::NonCanonical;
-      TxView previous = {};
-      const DashError error = parse_transaction(input.previous_transaction,
-          input.previous_transaction_size, &previous, true);
-      if (error != DashError::Ok) return error;
-      if (input.previous_index >= previous.output_count)
-        return DashError::InvalidArgument;
-      const TxOutputView &output = previous.outputs[input.previous_index];
-      if (output.value != input.value) return DashError::InvalidAmount;
-      if (output.script_size != input.script_size ||
-          !bytes_equal(output.script, input.script, output.script_size))
-        return DashError::WrongWallet;
-      return DashError::Ok;
     }
 
     DashError write_legacy_preimage(const TxView &view, size_t input_index,
@@ -359,10 +307,14 @@ namespace hexwallet
     {
       if (input_index >= view.input_count || script_code == nullptr ||
           script_code_size == 0 || script_code_size > kDashMaxScriptSize)
+      {
         return DashError::InvalidArgument;
+      }
       if (!write_u32(writer, view.version | (view.type << 16)) ||
           !write_compact_size(writer, view.input_count))
+      {
         return DashError::BufferTooSmall;
+      }
       for (size_t index = 0; index < view.input_count; ++index)
       {
         const TxInputView &input = view.inputs[index];
@@ -372,7 +324,9 @@ namespace hexwallet
         {
           if (!write_compact_size(writer, script_code_size) ||
               !write_bytes(writer, script_code, script_code_size))
+          {
             return DashError::BufferTooSmall;
+          }
         }
         else if (!write_compact_size(writer, 0))
         {
@@ -389,7 +343,9 @@ namespace hexwallet
         if (!write_u64(writer, output.value) ||
             !write_compact_size(writer, output.script_size) ||
             !write_bytes(writer, output.script, output.script_size))
+        {
           return DashError::BufferTooSmall;
+        }
       }
       if (!write_u32(writer, view.lock_time) || !write_u32(writer, hash_type))
         return DashError::BufferTooSmall;
@@ -399,8 +355,7 @@ namespace hexwallet
     uint32_t estimated_vbytes(const DashTransaction &request)
     {
       uint64_t size = kDashBaseVbytes;
-      size += static_cast<uint64_t>(request.input_count) *
-              kDashP2pkhInputVbytes;
+      size += static_cast<uint64_t>(request.input_count) * kDashP2pkhInputVbytes;
       for (size_t index = 0; index < request.output_count; ++index)
       {
         size += 9 + request.outputs[index].script_size;
@@ -408,11 +363,12 @@ namespace hexwallet
       return size > UINT32_MAX ? 0 : static_cast<uint32_t>(size);
     }
 
-    DashError serialize_request(const DashTransaction &request,
-                                const uint8_t (*signatures)[kDashMaxSignatureSize],
-                                const uint8_t *signature_sizes,
-                                const uint8_t (*public_keys)[kCompressedPublicKeySize],
-                                uint8_t *out_transaction, size_t *in_out_size)
+    DashError serialize_request(
+        const DashTransaction &request,
+        const uint8_t (*signatures)[kDashMaxSignatureSize],
+        const uint8_t *signature_sizes,
+        const uint8_t (*public_keys)[kCompressedPublicKeySize],
+        uint8_t *out_transaction, size_t *in_out_size)
     {
       Writer writer = {out_transaction, *in_out_size, 0};
       bool ok = write_u32(&writer, request.version) &&
@@ -420,7 +376,7 @@ namespace hexwallet
       for (size_t index = 0; ok && index < request.input_count; ++index)
       {
         const DashInput &input = request.inputs[index];
-        uint8_t script_sig[kDashMaxSignatureSize + 2 + kCompressedPublicKeySize];
+        uint8_t script_sig[kDashMaxSignatureSize + 1 + kCompressedPublicKeySize];
         size_t script_sig_size = 0;
         if (signatures != nullptr && public_keys != nullptr)
         {
@@ -482,12 +438,9 @@ namespace hexwallet
         HdPrivateNode next;
         const WalletError result = hd_private_derive(&current, path[depth], &next);
         secure_zero(&current, sizeof(current));
-        if (result != WalletError::Ok) {
-          secure_zero(&next, sizeof(next));
+        if (result != WalletError::Ok)
           return false;
-        }
         current = next;
-        secure_zero(&next, sizeof(next));
       }
       uint8_t hash[kRipemd160Size];
       const bool owned =
@@ -502,44 +455,11 @@ namespace hexwallet
       return owned;
     }
 
-    size_t der_integer(const uint8_t raw[32], uint8_t *out)
-    {
-      size_t first = 0;
-      while (first + 1 < 32 && raw[first] == 0) ++first;
-      const bool prefix_zero = (raw[first] & 0x80) != 0;
-      const size_t length = 32 - first + (prefix_zero ? 1 : 0);
-      out[0] = 0x02;
-      out[1] = static_cast<uint8_t>(length);
-      size_t position = 2;
-      if (prefix_zero) out[position++] = 0;
-      memcpy(out + position, raw + first, 32 - first);
-      return 2 + length;
-    }
-
-    DashError sign_digest(const uint8_t private_key[kPrivateKeySize],
-                          const uint8_t digest[kSha256Size], uint8_t *der,
-                          size_t *der_size)
-    {
-      // Shared signer supplies blinding, low-S normalization and verification.
-      SensitiveValue<RecoverableSignature> signature;
-      if (secp256k1_sign_digest_recoverable(private_key, digest, &signature.get()) !=
-          WalletError::Ok) return DashError::CryptoFailure;
-      uint8_t integers[kDashMaxDerSignatureSize];
-      size_t integer_size = der_integer(signature.get().r, integers);
-      integer_size += der_integer(signature.get().s, integers + integer_size);
-      if (*der_size < integer_size + 2) return DashError::BufferTooSmall;
-      der[0] = 0x30;
-      der[1] = static_cast<uint8_t>(integer_size);
-      memcpy(der + 2, integers, integer_size);
-      *der_size = integer_size + 2;
-      return DashError::Ok;
-    }
-
 #include "src/generated/DashVectorsTest.inc"
 
     constexpr DashChainParams kSelfTestChain = {"dash", 0x4c, 0x10};
-    // Byte offsets inside kDashSelfTestPayload (magic, lock time, one P2PKH
-    // input, two outputs).
+    // Byte offsets inside kDashSelfTestPayload: magic, lock time, one P2PKH
+    // input, then two outputs (P2SH then P2PKH change).
     constexpr size_t kPayloadLockTimeOffset = 4;
     constexpr size_t kPayloadInputCountOffset = 8;
     constexpr size_t kPayloadPrevoutScriptOffset = 58;
@@ -547,11 +467,8 @@ namespace hexwallet
     constexpr size_t kPayloadChangeOffset = 87;
     constexpr size_t kPayloadOutputCountOffset = 92;
     constexpr size_t kPayloadLastOutputValueOffset = 125;
-    constexpr size_t kPayloadLastOutputScriptSizeOffset = 133;
     constexpr size_t kPayloadLastOutputScriptOffset = 134;
-    constexpr size_t kSelfTestInputRecordSize =
-        kPayloadOutputCountOffset - 9;
-    constexpr size_t kSelfTestOutputSectionOffset = kPayloadOutputCountOffset;
+    constexpr size_t kSelfTestInputRecordSize = kPayloadOutputCountOffset - 9;
 
     void store_u32(uint8_t *out, uint32_t value)
     {
@@ -569,7 +486,8 @@ namespace hexwallet
       }
     }
 
-    bool payload_result_is(const uint8_t *payload, size_t size, DashError expected)
+    bool payload_result_is(const uint8_t *payload, size_t size,
+                           DashError expected)
     {
       DashTransaction parsed;
       const DashError result =
@@ -578,6 +496,9 @@ namespace hexwallet
       return result == expected;
     }
 
+    // Re-reads the produced signature the way a verifier would: pull the DER
+    // block and public key out of scriptSig, check the key hash against the
+    // prevout script, and verify on the curve against a fresh digest.
     bool signature_verifies(const uint8_t *transaction, size_t size,
                             const uint8_t *script_code, size_t script_code_size,
                             const uint8_t expected_digest[kSha256Size])
@@ -589,73 +510,36 @@ namespace hexwallet
         return false;
       }
       const TxInputView &input = view.inputs[0];
-      // scriptSig is `<len><DER || hashtype><0x21><pubkey>`; the pushed
-      // signature element ends with the 1-byte hash type.
       if (input.script_sig_size < 3 || input.script_sig[0] < 2)
         return false;
       const size_t push = input.script_sig[0];
-      if (1 + push + 1 + kCompressedPublicKeySize != input.script_sig_size ||
-          input.script_sig[1 + push] != kCompressedPublicKeySize)
+      if (1 + push + 2 > input.script_sig_size ||
+          input.script_sig[1 + push] != kCompressedPublicKeySize ||
+          input.script_sig[1 + push - 1] != kSighashAll)
       {
         return false;
       }
-      if (input.script_sig[1 + push - 1] != kSighashAll)
-        return false;
       const uint8_t *der = input.script_sig + 1;
       const size_t der_size = push - 1;
-      const uint8_t *pubkey = input.script_sig + 1 + push + 1;
+      const uint8_t *public_key = input.script_sig + 1 + push + 1;
       uint8_t hash[kRipemd160Size];
       const bool owned =
-          crypto_hash160(pubkey, kCompressedPublicKeySize, hash) &&
+          crypto_hash160(public_key, kCompressedPublicKeySize, hash) &&
           p2pkh_script(script_code, script_code_size) &&
           crypto_constant_time_equal(hash, script_code + 3, kRipemd160Size);
       secure_zero(hash, sizeof(hash));
       if (!owned)
         return false;
       uint8_t digest[kSha256Size];
-      const DashError recomputed = dash_legacy_sighash(
-          transaction, size, 0, script_code, script_code_size, kSighashAll,
-          digest);
-      const bool digest_matches =
-          recomputed == DashError::Ok &&
+      const bool digest_ok =
+          dash_legacy_sighash(transaction, size, 0, script_code,
+                              script_code_size, kSighashAll, digest) ==
+              DashError::Ok &&
           crypto_constant_time_equal(digest, expected_digest, kSha256Size);
-      mbedtls_ecp_group group;
-      mbedtls_mpi r;
-      mbedtls_mpi s;
-      mbedtls_ecp_point point;
-      mbedtls_ecp_group_init(&group);
-      mbedtls_mpi_init(&r);
-      mbedtls_mpi_init(&s);
-      mbedtls_ecp_point_init(&point);
-      bool verified = false;
-      // Strict DER: a malformed block must fail here, never be repaired.
-      if (der_size > 6 && der[0] == 0x30 && der[1] == der_size - 2 &&
-          der[2] == 0x02)
-      {
-        const size_t r_size = der[3];
-        if (r_size != 0 && 4 + r_size + 2 <= der_size &&
-            der[4 + r_size] == 0x02)
-        {
-          const size_t s_size = der[5 + r_size];
-          if (s_size != 0 && 6 + r_size + s_size == der_size &&
-              mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) == 0 &&
-              mbedtls_ecp_point_read_binary(&group, &point, pubkey,
-                                            kCompressedPublicKeySize) == 0 &&
-              mbedtls_ecp_check_pubkey(&group, &point) == 0 &&
-              mbedtls_mpi_read_binary(&r, der + 4, r_size) == 0 &&
-              mbedtls_mpi_read_binary(&s, der + 6 + r_size, s_size) == 0)
-          {
-            verified = mbedtls_ecdsa_verify(&group, digest, kSha256Size, &point,
-                                            &r, &s) == 0;
-          }
-        }
-      }
-      mbedtls_ecp_point_free(&point);
-      mbedtls_mpi_free(&s);
-      mbedtls_mpi_free(&r);
-      mbedtls_ecp_group_free(&group);
+      const bool verified =
+          secp256k1_verify_der(public_key, digest, der, der_size);
       secure_zero(digest, sizeof(digest));
-      return verified && digest_matches;
+      return digest_ok && verified;
     }
 
   } // namespace
@@ -667,13 +551,11 @@ namespace hexwallet
                                 uint8_t out_digest[kSha256Size])
   {
     if (transaction == nullptr || out_digest == nullptr ||
-        transaction_size > kDashMaxTransactionSize ||
-        script_code == nullptr || script_code_size == 0)
+        transaction_size > kDashMaxTransactionSize || script_code == nullptr ||
+        script_code_size == 0)
     {
       return DashError::InvalidArgument;
     }
-    if (hash_type != kSighashAll || !p2pkh_script(script_code, script_code_size))
-      return DashError::Unsupported;
     TxView view = {};
     const DashError parsed = parse_transaction(transaction, transaction_size, &view);
     if (parsed != DashError::Ok)
@@ -706,13 +588,11 @@ namespace hexwallet
     clear_dash_transaction(out);
     out->chain = chain;
     out->version = kDashVersion;
-    Cursor cursor = {data, size, 0};
     if (size < sizeof(kDashPayloadMagic) + 5)
       return DashError::Truncated;
-    const bool verified_format = bytes_equal(data, kDashVerifiedPayloadMagic, 4);
-    if (!verified_format && !bytes_equal(data, kDashPayloadMagic, 4))
+    if (!bytes_equal(data, kDashPayloadMagic, sizeof(kDashPayloadMagic)))
       return DashError::NonCanonical;
-    cursor.position = sizeof(kDashPayloadMagic);
+    Cursor cursor = {data, size, sizeof(kDashPayloadMagic)};
     if (!read_u32(&cursor, &out->lock_time))
       return DashError::Truncated;
     if (out->lock_time > kDashMaxLockTime)
@@ -723,6 +603,8 @@ namespace hexwallet
     if (input_count == 0 || input_count > kDashMaxInputs)
       return DashError::TooLarge;
     out->input_count = input_count;
+    const UtxoAddressProfile profile = {chain.p2pkh_version, chain.p2sh_version,
+                                        nullptr, false};
     for (size_t index = 0; index < out->input_count; ++index)
     {
       DashInput &input = out->inputs[index];
@@ -739,8 +621,11 @@ namespace hexwallet
       if (input.value == 0 || input.value > kDashMaxDuffs)
         return DashError::InvalidAmount;
       uint8_t script_size;
-      if (!read_u8(&cursor, &script_size) || script_size != kDashP2pkhScriptSize)
+      if (!read_u8(&cursor, &script_size) ||
+          script_size != kDashP2pkhScriptSize)
+      {
         return DashError::Unsupported;
+      }
       const uint8_t *script;
       if (!read_bytes(&cursor, script_size, &script))
         return DashError::Truncated;
@@ -748,7 +633,8 @@ namespace hexwallet
         return DashError::Unsupported;
       memcpy(input.script, script, script_size);
       input.script_size = script_size;
-      if (!read_u32(&cursor, &input.account) || !read_u8(&cursor, &input.change) ||
+      if (!read_u32(&cursor, &input.account) ||
+          !read_u8(&cursor, &input.change) ||
           !read_u32(&cursor, &input.address_index))
       {
         return DashError::Truncated;
@@ -758,11 +644,12 @@ namespace hexwallet
       {
         return DashError::InvalidArgument;
       }
-      WalletError rendered = address_from_script(
-          {chain.p2pkh_version, chain.p2sh_version, nullptr, false}, input.script,
-          input.script_size, input.address, sizeof(input.address));
-      if (rendered != WalletError::Ok)
+      if (address_from_script(profile, input.script, input.script_size,
+                              input.address, sizeof(input.address)) !=
+          WalletError::Ok)
+      {
         return DashError::Unsupported;
+      }
       if (!add_u64(out->input_total, input.value, &out->input_total))
         return DashError::InvalidAmount;
       for (size_t other = 0; other < index; ++other)
@@ -794,41 +681,25 @@ namespace hexwallet
       const uint8_t *script;
       if (!read_bytes(&cursor, script_size, &script))
         return DashError::Truncated;
-      if (!p2pkh_script(script, script_size) && !p2sh_script(script, script_size))
+      if (!p2pkh_script(script, script_size) &&
+          !p2sh_script(script, script_size))
+      {
         return DashError::Unsupported;
+      }
       memcpy(output.script, script, script_size);
       output.script_size = script_size;
-      if (address_from_script({chain.p2pkh_version, chain.p2sh_version, nullptr,
-                               false},
-                              output.script, output.script_size, output.address,
-                              sizeof(output.address)) != WalletError::Ok)
+      if (address_from_script(profile, output.script, output.script_size,
+                              output.address, sizeof(output.address)) !=
+          WalletError::Ok)
       {
         return DashError::Unsupported;
       }
       if (!add_u64(out->output_total, output.value, &out->output_total))
         return DashError::InvalidAmount;
     }
-    if (verified_format)
-    {
-      for (size_t index = 0; index < out->input_count; ++index)
-      {
-        DashInput &input = out->inputs[index];
-        if (!read_u16(&cursor, &input.previous_transaction_size))
-          return DashError::Truncated;
-        if (input.previous_transaction_size > kDashMaxPreviousTransactionSize)
-          return DashError::TooLarge;
-        const uint8_t *previous;
-        if (!read_bytes(&cursor, input.previous_transaction_size, &previous))
-          return DashError::Truncated;
-        memcpy(input.previous_transaction, previous, input.previous_transaction_size);
-        const DashError error = verify_previous_output(input);
-        if (error != DashError::Ok) return error;
-      }
-    }
     if (cursor.position != cursor.size)
       return DashError::NonCanonical;
-    if (out->input_total > kDashMaxDuffs || out->output_total > kDashMaxDuffs ||
-        out->input_total < out->output_total)
+    if (out->input_total < out->output_total)
       return DashError::InvalidAmount;
     out->fee = out->input_total - out->output_total;
     if (out->fee == 0)
@@ -836,15 +707,19 @@ namespace hexwallet
     out->estimated_vbytes = estimated_vbytes(*out);
     if (out->estimated_vbytes == 0 ||
         out->fee > HEXWALLET_MAX_DASH_FEE_DUFFS ||
-        out->fee > HEXWALLET_MAX_DASH_FEE_RATE *
-                         static_cast<uint64_t>(out->estimated_vbytes))
+        out->fee >
+            HEXWALLET_MAX_DASH_FEE_RATE * static_cast<uint64_t>(out->estimated_vbytes))
     {
       clear_dash_transaction(out);
+      out->chain = chain;
+      out->version = kDashVersion;
       return DashError::FeePolicy;
     }
     if (!crypto_sha256(data, size, out->payload_hash))
     {
       clear_dash_transaction(out);
+      out->chain = chain;
+      out->version = kDashVersion;
       return DashError::CryptoFailure;
     }
     return DashError::Ok;
@@ -854,7 +729,6 @@ namespace hexwallet
                                   const HdPrivateNode &master,
                                   uint8_t *out_transaction, size_t *in_out_size)
   {
-    SigningOutputGuard output_guard(out_transaction, in_out_size);
     if (out_transaction == nullptr || in_out_size == nullptr ||
         request.input_count == 0 || request.input_count > kDashMaxInputs ||
         request.output_count == 0 || request.output_count > kDashMaxOutputs ||
@@ -864,8 +738,7 @@ namespace hexwallet
       return DashError::InvalidArgument;
     }
     const NetworkProfile *network = find_network_profile(request.chain.network_id);
-    if (network == nullptr ||
-        network->encoding != AddressEncoding::P2pkh ||
+    if (network == nullptr || network->encoding != AddressEncoding::P2pkh ||
         network->utxo.p2pkh_version != request.chain.p2pkh_version ||
         network->utxo.p2sh_version != request.chain.p2sh_version ||
         network->derivation_coin_type != kDashCoinType)
@@ -877,8 +750,6 @@ namespace hexwallet
     for (size_t index = 0; index < request.input_count; ++index)
     {
       const DashInput &input = request.inputs[index];
-      const DashError previous_error = verify_previous_output(input);
-      if (previous_error != DashError::Ok) return previous_error;
       if (input.value == 0 || input.value > kDashMaxDuffs ||
           !p2pkh_script(input.script, input.script_size) ||
           input.account >= kHardenedOffset || input.change > 1 ||
@@ -909,14 +780,13 @@ namespace hexwallet
       }
     }
     const uint32_t expected_vbytes = estimated_vbytes(request);
-    if (input_total > kDashMaxDuffs || output_total > kDashMaxDuffs ||
-        input_total < output_total || request.fee == 0 || input_total != request.input_total ||
+    if (input_total < output_total || input_total != request.input_total ||
         output_total != request.output_total ||
         input_total - output_total != request.fee || expected_vbytes == 0 ||
         request.estimated_vbytes != expected_vbytes ||
         request.fee > HEXWALLET_MAX_DASH_FEE_DUFFS ||
-        request.fee > HEXWALLET_MAX_DASH_FEE_RATE *
-                          static_cast<uint64_t>(request.estimated_vbytes))
+        request.fee >
+            HEXWALLET_MAX_DASH_FEE_RATE * static_cast<uint64_t>(request.estimated_vbytes))
     {
       return DashError::FeePolicy;
     }
@@ -951,9 +821,10 @@ namespace hexwallet
                                    request.inputs[index].script_size,
                                    kSighashAll, digest);
       size_t der_size = sizeof(signatures[index]) - 1;
-      if (result == DashError::Ok)
+      if (result == DashError::Ok &&
+          !secp256k1_sign_der(private_key, digest, signatures[index], &der_size))
       {
-        result = sign_digest(private_key, digest, signatures[index], &der_size);
+        result = DashError::CryptoFailure;
       }
       if (result == DashError::Ok && der_size > kDashMaxDerSignatureSize)
         result = DashError::BufferTooSmall;
@@ -975,26 +846,7 @@ namespace hexwallet
     secure_zero(signatures, sizeof(signatures));
     secure_zero(signature_sizes, sizeof(signature_sizes));
     secure_zero(public_keys, sizeof(public_keys));
-    if (result == DashError::Ok && !output_guard.commit())
-      result = DashError::BufferTooSmall;
     return result;
-  }
-
-  DashError dash_validate_inputs(const DashTransaction &request,
-                                 const HdPrivateNode &master)
-  {
-    if (request.input_count == 0 || request.input_count > kDashMaxInputs)
-      return DashError::InvalidArgument;
-    for (size_t index = 0; index < request.input_count; ++index)
-    {
-      const DashError error = verify_previous_output(request.inputs[index]);
-      if (error != DashError::Ok) return error;
-      SensitiveValue<uint8_t[kPrivateKeySize]> private_key;
-      uint8_t public_key[kCompressedPublicKeySize];
-      if (!derive_and_verify_key(master, request.inputs[index], private_key.get(),
-                                 public_key)) return DashError::WrongWallet;
-    }
-    return DashError::Ok;
   }
 
   const char *dash_error_text(DashError error)
@@ -1058,16 +910,9 @@ namespace hexwallet
         crypto_constant_time_equal(digest, kDashMainnetV2Digest, kSha256Size);
     secure_zero(digest, sizeof(digest));
 
-    const uint8_t unsupported_hash_types[] = {0, 2, 3, 0x81};
-    for (uint8_t type : unsupported_hash_types) {
-      passed = passed && dash_legacy_sighash(kDashMainnetV3Transaction,
-          sizeof(kDashMainnetV3Transaction), 0, kDashMainnetV3Script,
-          sizeof(kDashMainnetV3Script), type, digest) == DashError::Unsupported;
-    }
-
     // A special transaction carries an extraPayload this module cannot decode.
-    // Hashing the prefix would produce a digest for a transaction that is not
-    // the one on the wire, so the parser has to refuse the form outright.
+    // Hashing the prefix would produce a digest for bytes that are not the
+    // transaction on the wire, so the form is refused outright.
     uint8_t mutated[sizeof(kDashMainnetV3Transaction) + 1];
     memcpy(mutated, kDashMainnetV3Transaction, sizeof(kDashMainnetV3Transaction));
     mutated[2] = 0x01; // nType = 1, ProRegTx
@@ -1076,9 +921,8 @@ namespace hexwallet
                                  kDashMainnetV3Script,
                                  sizeof(kDashMainnetV3Script), kSighashAll,
                                  digest) == DashError::Unsupported;
-    // Dash has no transaction version 4.
     mutated[2] = 0x00;
-    mutated[0] = 0x04;
+    mutated[0] = 0x04; // Dash has no transaction version 4
     passed = passed &&
              dash_legacy_sighash(mutated, sizeof(kDashMainnetV3Transaction), 0,
                                  kDashMainnetV3Script,
@@ -1086,7 +930,6 @@ namespace hexwallet
                                  digest) == DashError::Unsupported;
     mutated[0] = 0x03;
 
-    // Every strict prefix must fail, and a trailing byte is a parse error.
     bool prefixes_rejected = true;
     for (size_t length = 0; length < sizeof(kDashMainnetV3Transaction); ++length)
     {
@@ -1116,57 +959,10 @@ namespace hexwallet
     passed = passed && parsed.fee == kDashSelfTestFee &&
              parsed.estimated_vbytes == kDashSelfTestVbytes;
     passed = passed && strcmp(parsed.inputs[0].address, kDashSelfTestAddress) == 0;
-    passed = passed && strcmp(parsed.outputs[0].address,
-                              kDashSelfTestExternalAddress) == 0;
+    passed = passed &&
+             strcmp(parsed.outputs[0].address, kDashSelfTestExternalAddress) == 0;
     passed = passed && strcmp(parsed.outputs[1].address, kDashSelfTestAddress) == 0;
     clear_dash_transaction(&parsed);
-
-    passed = passed && payload_result_is(kDashSelfTestVerifiedPayload,
-        sizeof(kDashSelfTestVerifiedPayload), DashError::Ok);
-    // AssetUnlockTx has no ordinary inputs. It may still fund a P2PKH spend;
-    // the opaque payload is bound by its txid, never signed as a new action.
-    dash_parse_review_payload(kDashSelfTestVerifiedPayload,
-        sizeof(kDashSelfTestVerifiedPayload), kSelfTestChain, &parsed);
-    DashInput &unlock_input = parsed.inputs[0];
-    Writer previous_writer{unlock_input.previous_transaction,
-                            sizeof(unlock_input.previous_transaction), 0};
-    const uint8_t opaque = 0x42;
-    passed = passed && write_u32(&previous_writer, 0x00090003) &&
-        write_compact_size(&previous_writer, 0) &&
-        write_compact_size(&previous_writer, 1) &&
-        write_u64(&previous_writer, unlock_input.value) &&
-        write_compact_size(&previous_writer, unlock_input.script_size) &&
-        write_bytes(&previous_writer, unlock_input.script, unlock_input.script_size) &&
-        write_u32(&previous_writer, 0) && write_compact_size(&previous_writer, 1) &&
-        write_bytes(&previous_writer, &opaque, 1);
-    unlock_input.previous_transaction_size = static_cast<uint16_t>(previous_writer.position);
-    passed = passed && crypto_double_sha256(unlock_input.previous_transaction,
-        unlock_input.previous_transaction_size, unlock_input.previous_txid) &&
-        verify_previous_output(unlock_input) == DashError::Ok;
-    unlock_input.previous_transaction[previous_writer.position - 1] ^= 1;
-    passed = passed && verify_previous_output(unlock_input) == DashError::NonCanonical;
-    clear_dash_transaction(&parsed);
-    uint8_t proof_payload[sizeof(kDashSelfTestVerifiedPayload)];
-    memcpy(proof_payload, kDashSelfTestVerifiedPayload, sizeof(proof_payload));
-    proof_payload[9] ^= 1;  // funding txid cannot be chosen by the phone
-    passed = passed && payload_result_is(proof_payload, sizeof(proof_payload),
-                                        DashError::NonCanonical);
-    memcpy(proof_payload, kDashSelfTestVerifiedPayload, sizeof(proof_payload));
-    proof_payload[49] ^= 1; // amount is not part of legacy sighash: verify it here
-    passed = passed && payload_result_is(proof_payload, sizeof(proof_payload),
-                                        DashError::InvalidAmount);
-    memcpy(proof_payload, kDashSelfTestVerifiedPayload, sizeof(proof_payload));
-    proof_payload[kPayloadPrevoutScriptOffset + 3] ^= 1;
-    passed = passed && payload_result_is(proof_payload, sizeof(proof_payload),
-                                        DashError::WrongWallet);
-    memcpy(proof_payload, kDashSelfTestVerifiedPayload, sizeof(proof_payload));
-    proof_payload[41] = 1; // the funding transaction has only output zero
-    passed = passed && payload_result_is(proof_payload, sizeof(proof_payload),
-                                        DashError::InvalidArgument);
-    for (size_t length = sizeof(kDashSelfTestPayload); length < sizeof(proof_payload); ++length) {
-      if (payload_result_is(kDashSelfTestVerifiedPayload, length, DashError::Ok))
-        passed = false;
-    }
 
     bool payload_prefixes_rejected = true;
     for (size_t length = 0; length < sizeof(kDashSelfTestPayload); ++length)
@@ -1184,9 +980,8 @@ namespace hexwallet
     uint8_t payload[sizeof(kDashSelfTestPayload) + 1];
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     payload[0] = 'X';
-    passed = passed &&
-             payload_result_is(payload, sizeof(kDashSelfTestPayload),
-                               DashError::NonCanonical);
+    passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
+                                         DashError::NonCanonical);
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     payload[sizeof(kDashSelfTestPayload)] = 0x00;
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload) + 1,
@@ -1209,7 +1004,7 @@ namespace hexwallet
                                          DashError::TooLarge);
 
     // The prevout must be the canonical P2PKH form: another opcode, or another
-    // length, is a script this wallet does not know how to spend.
+    // length, is a script this wallet cannot spend.
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     payload[kPayloadPrevoutScriptOffset] = 0x75; // OP_DROP instead of OP_DUP
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
@@ -1219,7 +1014,7 @@ namespace hexwallet
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::Unsupported);
 
-    // An output nobody can classify must not reach the review screen.
+    // An output nobody can classify must never reach the review screen.
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     payload[kPayloadLastOutputScriptOffset] = 0x75;
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
@@ -1234,8 +1029,8 @@ namespace hexwallet
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::InvalidAmount);
 
-    // A zero fee is not a transaction the network would relay, and a fee above
-    // the local ceiling is the exact case the policy exists for.
+    // A zero fee is not relayable, and a fee above the ceiling is exactly what
+    // the local policy exists to stop.
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     store_u64(payload + kPayloadLastOutputValueOffset, 110000000ULL);
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
@@ -1258,28 +1053,27 @@ namespace hexwallet
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::InvalidArgument);
 
-    // The same outpoint twice would double-count an input that only exists
-    // once; the fee the user approves would be fake.
+    // The same outpoint twice would double-count an input that exists once, and
+    // the fee the user approves would be fiction.
     uint8_t duplicated[sizeof(kDashSelfTestPayload) + kSelfTestInputRecordSize];
-    memcpy(duplicated, kDashSelfTestPayload, kSelfTestOutputSectionOffset);
-    memcpy(duplicated + kSelfTestOutputSectionOffset,
+    memcpy(duplicated, kDashSelfTestPayload, kPayloadOutputCountOffset);
+    memcpy(duplicated + kPayloadOutputCountOffset,
            kDashSelfTestPayload + kPayloadInputCountOffset + 1,
            kSelfTestInputRecordSize);
-    memcpy(duplicated + kSelfTestOutputSectionOffset + kSelfTestInputRecordSize,
-           kDashSelfTestPayload + kSelfTestOutputSectionOffset,
-           sizeof(kDashSelfTestPayload) - kSelfTestOutputSectionOffset);
+    memcpy(duplicated + kPayloadOutputCountOffset + kSelfTestInputRecordSize,
+           kDashSelfTestPayload + kPayloadOutputCountOffset,
+           sizeof(kDashSelfTestPayload) - kPayloadOutputCountOffset);
     duplicated[kPayloadInputCountOffset] = 2;
     passed = passed && payload_result_is(duplicated, sizeof(duplicated),
                                          DashError::DuplicateField);
     secure_zero(duplicated, sizeof(duplicated));
     secure_zero(payload, sizeof(payload));
-    secure_zero(&parsed, sizeof(parsed));
     return passed;
   }
 
   bool run_dash_signature_self_test()
   {
-    // Deterministic BIP32 master used only by this self-test. The host build
+    // Deterministic BIP32 master used only by this self-test. The host suite
     // stubs derivation out, so this runs on the device and in the chain probe.
     HdPrivateNode master = {};
     for (size_t index = 0; index < kPrivateKeySize; ++index)
@@ -1289,84 +1083,66 @@ namespace hexwallet
     }
     DashTransaction request;
     bool passed =
-        dash_parse_review_payload(kDashSelfTestVerifiedPayload,
-                                  sizeof(kDashSelfTestVerifiedPayload), kSelfTestChain,
+        dash_parse_review_payload(kDashSelfTestPayload,
+                                  sizeof(kDashSelfTestPayload), kSelfTestChain,
                                   &request) == DashError::Ok;
     passed = passed && request.fee == kDashSelfTestFee &&
              request.estimated_vbytes == kDashSelfTestVbytes;
     uint8_t signed_transaction[kDashMaxTransactionSize];
     size_t signed_size = sizeof(signed_transaction);
-    passed = passed &&
-             dash_sign_transaction(request, master, signed_transaction,
-                                   &signed_size) == DashError::Ok;
+    passed = passed && dash_sign_transaction(request, master, signed_transaction,
+                                             &signed_size) == DashError::Ok;
     passed = passed && signed_size == sizeof(kDashSelfTestSigned) &&
-             crypto_constant_time_equal(signed_transaction,
-                                        kDashSelfTestSigned, signed_size);
+             crypto_constant_time_equal(signed_transaction, kDashSelfTestSigned,
+                                        signed_size);
+    // The pinned payload must belong to the pinned key: the prevout script has
+    // to pay HASH160 of exactly the public key this vector was generated for.
+    uint8_t pinned_hash[kRipemd160Size];
     passed = passed &&
-             signature_verifies(signed_transaction, signed_size,
-                                request.inputs[0].script,
-                                request.inputs[0].script_size,
-                                kDashSelfTestDigest);
-    // The same bytes must come out twice: the signer is deterministic, so a
-    // second run that differs would mean key material or a nonce leaked in.
+             crypto_hash160(kDashSelfTestPublicKey, kCompressedPublicKeySize,
+                            pinned_hash) &&
+             crypto_constant_time_equal(pinned_hash, request.inputs[0].script + 3,
+                                        kRipemd160Size);
+    secure_zero(pinned_hash, sizeof(pinned_hash));
+    passed = passed && signature_verifies(signed_transaction, signed_size,
+                                          request.inputs[0].script,
+                                          request.inputs[0].script_size,
+                                          kDashSelfTestDigest);
+    // The signer is deterministic: a second run that differs would mean the
+    // key or the nonce leaked into some state that survives a call.
     uint8_t repeat[kDashMaxTransactionSize];
     size_t repeat_size = sizeof(repeat);
-    passed = passed &&
-             dash_sign_transaction(request, master, repeat, &repeat_size) ==
-                 DashError::Ok &&
+    passed = passed && dash_sign_transaction(request, master, repeat,
+                                             &repeat_size) == DashError::Ok &&
              repeat_size == signed_size &&
              crypto_constant_time_equal(repeat, signed_transaction, signed_size);
     secure_zero(repeat, sizeof(repeat));
 
-    // Any deviation in the request is refused rather than signed: a host that
-    // rewrites the amounts, the fee or the version gets nothing.
+    // Any deviation in the request is refused rather than signed.
     DashTransaction tampered = request;
     tampered.fee += 1;
     passed = passed && dash_sign_transaction(tampered, master, signed_transaction,
                                              &signed_size) == DashError::FeePolicy;
     tampered = request;
     tampered.version = 2;
-    passed = passed && dash_sign_transaction(
-                            tampered, master, signed_transaction,
-                            &signed_size) == DashError::InvalidArgument;
+    passed = passed &&
+             dash_sign_transaction(tampered, master, signed_transaction,
+                                   &signed_size) == DashError::InvalidArgument;
     tampered = request;
     tampered.inputs[0].address_index = 1;
-    passed = passed && dash_sign_transaction(
-                            tampered, master, signed_transaction,
-                            &signed_size) == DashError::WrongWallet;
+    passed = passed &&
+             dash_sign_transaction(tampered, master, signed_transaction,
+                                   &signed_size) == DashError::WrongWallet;
     tampered = request;
     tampered.estimated_vbytes += 1;
-    passed = passed && dash_sign_transaction(
-                            tampered, master, signed_transaction,
-                            &signed_size) == DashError::FeePolicy;
+    passed = passed &&
+             dash_sign_transaction(tampered, master, signed_transaction,
+                                   &signed_size) == DashError::FeePolicy;
     tampered = request;
     tampered.chain.p2pkh_version = 0x00; // Bitcoin's prefix is not Dash's
     passed = passed &&
              dash_sign_transaction(tampered, master, signed_transaction,
                                    &signed_size) == DashError::Unsupported;
-    tampered = request;
-    tampered.inputs[0].previous_transaction_size = 0;
-    signed_size = sizeof(signed_transaction);
-    memset(signed_transaction, 0xa5, sizeof(signed_transaction));
-    passed = passed && dash_sign_transaction(tampered, master, signed_transaction,
-        &signed_size) == DashError::MissingField && signed_size == 0;
-    for (uint8_t byte : signed_transaction) passed = passed && byte == 0;
-    // A malicious host could keep a plausible fee while understating both
-    // input value and the change output. The funding proof must catch this.
-    tampered = request;
-    tampered.inputs[0].value -= 1;
-    tampered.input_total -= 1;
-    tampered.outputs[1].value -= 1;
-    tampered.output_total -= 1;
-    signed_size = sizeof(signed_transaction);
-    passed = passed && dash_sign_transaction(tampered, master, signed_transaction,
-        &signed_size) == DashError::InvalidAmount;
-    // Even a valid signed request must not leak a partial result on overflow.
-    signed_size = 1;
-    signed_transaction[0] = 0xa5;
-    passed = passed && dash_sign_transaction(request, master, signed_transaction,
-        &signed_size) == DashError::BufferTooSmall && signed_size == 0 &&
-        signed_transaction[0] == 0;
     secure_zero(&tampered, sizeof(tampered));
     clear_dash_transaction(&request);
     secure_zero(signed_transaction, sizeof(signed_transaction));

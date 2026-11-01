@@ -3,7 +3,6 @@
 namespace hexwallet {
 
 namespace {
-
 struct MascotRuntime {
   MascotStore store;
   bool store_bound;
@@ -111,12 +110,10 @@ MascotReminder derive_reminder(const MascotInputs &inputs, uint8_t hunger) {
 }
 
 bool mood_animates(MascotMood mood) {
-  // Active wallet work suppresses decorative motion. Other poses combine the
-  // original artwork with bounded monochrome effects in MaidSprite.
   return mood != MascotMood::Working;
 }
 
-}  // namespace
+}
 
 const char *mascot_mood_name(MascotMood mood) {
   switch (mood) {

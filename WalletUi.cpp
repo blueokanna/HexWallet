@@ -21,9 +21,6 @@ namespace hexwallet
 {
   namespace
   {
-    // Review-seal state lives outside the LVGL guard: wallet_ui_review_authorize()
-    // and wallet_ui_review_seal_code() are compiled on every target, and a headless
-    // build must still be able to say that no review is armed.
     constexpr uint32_t kReviewSealWindowMs = 120UL * 1000UL;
 
     ReviewSeal review_seal = {};
@@ -155,7 +152,8 @@ namespace hexwallet
       search_field = nullptr;
       coin_list = nullptr;
       keyboard = nullptr;
-      if (screen_content != nullptr) lv_obj_clean(screen_content);
+      if (screen_content != nullptr)
+        lv_obj_clean(screen_content);
     }
 
     struct RenderedReviewLines
@@ -174,29 +172,29 @@ namespace hexwallet
       }
     };
 
-
     // Defined below the catalog view, which is the first screen to draw it.
     // The seal covers exactly the strings this screen renders, plus a fresh nonce, so
-// two reviews of the same transaction never share an authorization.
-void finish_review_seal(const RenderedReviewLines &lines)
-{
-  uint8_t nonce[kReviewSealNonceSize] = {};
-  random_fill(nonce, sizeof(nonce));
-  review_seal_valid = random_healthy() && lines.valid && lines.count != 0 &&
-      review_seal_build(&review_seal, nonce, lines.text, lines.count, millis(),
-                        kReviewSealWindowMs);
-  if (!review_seal_valid || screen_content == nullptr) return;
-  char code[9] = {};
-  review_seal_code(review_seal, code);
-  char text[24] = {};
-  snprintf(text, sizeof(text), "SEAL %s", code);
-  lv_obj_t *seal = lv_label_create(screen_content);
-  lv_label_set_text(seal, text);
-  lv_obj_set_style_text_color(seal, theme_accent(), 0);
-  lv_obj_set_style_text_letter_space(seal, sc(2), 0);
-}
+    // two reviews of the same transaction never share an authorization.
+    void finish_review_seal(const RenderedReviewLines &lines)
+    {
+      uint8_t nonce[kReviewSealNonceSize] = {};
+      random_fill(nonce, sizeof(nonce));
+      review_seal_valid = random_healthy() && lines.valid && lines.count != 0 &&
+                          review_seal_build(&review_seal, nonce, lines.text, lines.count, millis(),
+                                            kReviewSealWindowMs);
+      if (!review_seal_valid || screen_content == nullptr)
+        return;
+      char code[9] = {};
+      review_seal_code(review_seal, code);
+      char text[24] = {};
+      snprintf(text, sizeof(text), "SEAL %s", code);
+      lv_obj_t *seal = lv_label_create(screen_content);
+      lv_label_set_text(seal, text);
+      lv_obj_set_style_text_color(seal, theme_accent(), 0);
+      lv_obj_set_style_text_letter_space(seal, sc(2), 0);
+    }
 
-void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot);
+    void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot);
 
     void create_catalog_view();
 
@@ -286,7 +284,8 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot);
     {
       if (parent == nullptr || text == nullptr)
         return nullptr;
-      if (level_name != nullptr) *level_name = "M";
+      if (level_name != nullptr)
+        *level_name = "M";
       const size_t length = strlen(text);
       if (length == 0)
         return nullptr;
@@ -300,7 +299,8 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot);
       {
         return nullptr;
       }
-      if (level_name != nullptr) *level_name = qr_ecc_name(chosen);
+      if (level_name != nullptr)
+        *level_name = qr_ecc_name(chosen);
       const lv_coord_t side = static_cast<lv_coord_t>(code.size);
       const uint32_t stride = lv_draw_buf_width_to_stride(side, LV_COLOR_FORMAT_I1);
       const size_t bytes = static_cast<size_t>(stride) * code.size;
@@ -488,180 +488,192 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot);
       populate_catalog("");
     }
 
-void create_catalog_view();
+    void create_catalog_view();
 
-// FEED / PET / PLAY. Plain widgets, so they work with a touch panel and, through
-// the keypad input device, with four physical buttons.
-void companion_action_event(lv_event_t *event)
-{
-  const intptr_t action = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
-  const uint32_t now = millis();
-  if (action == 0) mascot_feed(now);
-  else if (action == 1) mascot_pet(now);
-  else mascot_play(now);
-  mascot_note_activity(now);
-  create_catalog_view();
-}
-
-void companion_parts(lv_obj_t *stage, const MascotSnapshot &snapshot)
-{
-  // I1 buffers begin with two ARGB8888 palette entries, followed by aligned rows.
-  const uint32_t stride = lv_draw_buf_width_to_stride(64, LV_COLOR_FORMAT_I1);
-  if (stride < 8 || stride > 16) return;
-  memset(companion_pixels, 0, sizeof(companion_pixels));
-  if (!maid_sprite_render(snapshot.mood, snapshot.frame, companion_pixels + 8,
-                          sizeof(companion_pixels) - 8, stride)) return;
-  lv_obj_t *canvas = lv_canvas_create(stage);
-  if (canvas == nullptr) return;
-  static lv_draw_buf_t draw_buffer;
-  if (lv_draw_buf_init(&draw_buffer, 64, 64, LV_COLOR_FORMAT_I1, stride,
-                       companion_pixels, 8 + 64 * stride) != LV_RESULT_OK)
-  {
-    lv_obj_delete(canvas);
-    return;
-  }
-  lv_canvas_set_draw_buf(canvas, &draw_buffer);
-  lv_canvas_set_palette(canvas, 0, to_color32(theme_bg()));
-  lv_canvas_set_palette(canvas, 1, to_color32(theme_fg()));
-  lv_obj_center(canvas);
-  companion_canvas = canvas;
-  companion_rendered = snapshot;
-  companion_has_frame = true;
-}
-void render_companion(const MascotSnapshot &snapshot)
-{
-  if (companion_stage == nullptr || companion_canvas == nullptr || review_seal_valid) return;
-  const bool changed = !companion_has_frame || snapshot.mood != companion_rendered.mood ||
-                       (snapshot.animating && snapshot.frame != companion_rendered.frame);
-  if (changed)
-  {
-    const size_t stride = lv_draw_buf_width_to_stride(64, LV_COLOR_FORMAT_I1);
-    if (stride > 16 || !maid_sprite_render(snapshot.mood, snapshot.frame,
-          companion_pixels + 8, sizeof(companion_pixels) - 8, stride)) return;
-    lv_obj_invalidate(companion_canvas);
-  }
-  if (companion_mood_label != nullptr && snapshot.mood != companion_rendered.mood)
-    lv_label_set_text(companion_mood_label, mascot_mood_name(snapshot.mood));
-  if (companion_hint_label != nullptr && snapshot.reminder != companion_rendered.reminder)
-    lv_label_set_text(companion_hint_label, mascot_reminder_text(snapshot.reminder));
-  companion_rendered = snapshot;
-  companion_has_frame = true;
-}
-
-void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
-{
-  const bool narrow = board_display_width() <= 160;
-  lv_obj_t *row = lv_obj_create(parent);
-  set_clean_container(row);
-  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow(row, narrow ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_column(row, sc(6), 0);
-
-  companion_stage = lv_obj_create(row);
-  lv_obj_add_event_cb(companion_stage, companion_deleted, LV_EVENT_DELETE, nullptr);
-  set_clean_container(companion_stage);
-  lv_obj_clear_flag(companion_stage, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_size(companion_stage, 68, 68);
-  companion_parts(companion_stage, snapshot);
-
-  lv_obj_t *info = lv_obj_create(row);
-  set_clean_container(info);
-  lv_obj_clear_flag(info, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_height(info, LV_SIZE_CONTENT);
-  if (narrow) lv_obj_set_width(info, LV_PCT(100));
-  else lv_obj_set_flex_grow(info, 1);
-  lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_row(info, sc(3), 0);
-
-  char line[64];
-  snprintf(line, sizeof(line), "%s  LV%d", kMascotDisplayName, snapshot.level);
-  lv_obj_t *headline = lv_label_create(info);
-  lv_label_set_text(headline, line);
-  lv_obj_set_style_text_color(headline, theme_accent(), 0);
-  lv_obj_set_style_text_letter_space(headline, sc(1), 0);
-
-  lv_obj_t *mood = lv_label_create(info);
-  companion_mood_label = mood;
-  lv_label_set_text(mood, mascot_mood_name(snapshot.mood));
-  lv_obj_set_style_text_color(mood, theme_fg(), 0);
-
-  // Bond as a segmented meter: filled blocks are progress inside this level.
-  lv_obj_t *meter = lv_obj_create(info);
-  if (narrow) lv_obj_add_flag(meter, LV_OBJ_FLAG_HIDDEN);
-  set_clean_container(meter);
-  lv_obj_clear_flag(meter, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_size(meter, LV_PCT(100), sc(4));
-  lv_obj_set_flex_flow(meter, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_column(meter, sc(2), 0);
-  const uint8_t segments = 8;
-  const uint8_t filled = static_cast<uint8_t>(
-      (static_cast<uint32_t>(snapshot.bond) * segments) / snapshot.bond_max);
-  for (uint8_t index = 0; index < segments; ++index)
-  {
-    lv_obj_t *segment = lv_obj_create(meter);
-    set_clean_container(segment);
-    lv_obj_clear_flag(segment, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(segment, sc(4), sc(4));
-    lv_obj_set_style_bg_color(segment, theme_fg(), 0);
-    if (index < filled)
+    // FEED / PET / PLAY. Plain widgets, so they work with a touch panel and, through
+    // the keypad input device, with four physical buttons.
+    void companion_action_event(lv_event_t *event)
     {
-      lv_obj_set_style_bg_opa(segment, LV_OPA_COVER, 0);
+      const intptr_t action = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
+      const uint32_t now = millis();
+      if (action == 0)
+        mascot_feed(now);
+      else if (action == 1)
+        mascot_pet(now);
+      else
+        mascot_play(now);
+      mascot_note_activity(now);
+      create_catalog_view();
     }
-    else
+
+    void companion_parts(lv_obj_t *stage, const MascotSnapshot &snapshot)
     {
-      lv_obj_set_style_bg_opa(segment, LV_OPA_TRANSP, 0);
-      lv_obj_set_style_border_width(segment, 1, 0);
-      lv_obj_set_style_border_color(segment, theme_fg(), 0);
+      // I1 buffers begin with two ARGB8888 palette entries, followed by aligned rows.
+      const uint32_t stride = lv_draw_buf_width_to_stride(64, LV_COLOR_FORMAT_I1);
+      if (stride < 8 || stride > 16)
+        return;
+      memset(companion_pixels, 0, sizeof(companion_pixels));
+      if (!maid_sprite_render(snapshot.mood, snapshot.frame, companion_pixels + 8,
+                              sizeof(companion_pixels) - 8, stride))
+        return;
+      lv_obj_t *canvas = lv_canvas_create(stage);
+      if (canvas == nullptr)
+        return;
+      static lv_draw_buf_t draw_buffer;
+      if (lv_draw_buf_init(&draw_buffer, 64, 64, LV_COLOR_FORMAT_I1, stride,
+                           companion_pixels, 8 + 64 * stride) != LV_RESULT_OK)
+      {
+        lv_obj_delete(canvas);
+        return;
+      }
+      lv_canvas_set_draw_buf(canvas, &draw_buffer);
+      lv_canvas_set_palette(canvas, 0, to_color32(theme_bg()));
+      lv_canvas_set_palette(canvas, 1, to_color32(theme_fg()));
+      lv_obj_center(canvas);
+      companion_canvas = canvas;
+      companion_rendered = snapshot;
+      companion_has_frame = true;
     }
-  }
+    void render_companion(const MascotSnapshot &snapshot)
+    {
+      if (companion_stage == nullptr || companion_canvas == nullptr || review_seal_valid)
+        return;
+      const bool changed = !companion_has_frame || snapshot.mood != companion_rendered.mood ||
+                           (snapshot.animating && snapshot.frame != companion_rendered.frame);
+      if (changed)
+      {
+        const size_t stride = lv_draw_buf_width_to_stride(64, LV_COLOR_FORMAT_I1);
+        if (stride > 16 || !maid_sprite_render(snapshot.mood, snapshot.frame,
+                                               companion_pixels + 8, sizeof(companion_pixels) - 8, stride))
+          return;
+        lv_obj_invalidate(companion_canvas);
+      }
+      if (companion_mood_label != nullptr && snapshot.mood != companion_rendered.mood)
+        lv_label_set_text(companion_mood_label, mascot_mood_name(snapshot.mood));
+      if (companion_hint_label != nullptr && snapshot.reminder != companion_rendered.reminder)
+        lv_label_set_text(companion_hint_label, mascot_reminder_text(snapshot.reminder));
+      companion_rendered = snapshot;
+      companion_has_frame = true;
+    }
 
-  // FEED / PET / PLAY. Plain widgets, so they work with a touch panel and,
-  // through the keypad input device, with four physical buttons.
-  lv_obj_t *actions = lv_obj_create(info);
-  set_clean_container(actions);
-  lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_size(actions, LV_PCT(100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_column(actions, sc(3), 0);
-  static const char *const kActionLabels[3] = {"FEED", "PET", "PLAY"};
-  for (intptr_t index = 0; index < 3; ++index)
-  {
-    lv_obj_t *button = lv_button_create(actions);
-    lv_obj_set_height(button, 28);
-    lv_obj_set_style_pad_all(button, 1, 0);
-    lv_obj_set_flex_grow(button, 1);
-    lv_obj_set_style_radius(button, sc(4), 0);
-    lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_set_style_border_color(button, theme_fg(), 0);
-    lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
-    lv_obj_add_event_cb(button, companion_action_event, LV_EVENT_CLICKED,
-                        reinterpret_cast<void *>(index));
-    lv_obj_t *text = lv_label_create(button);
-    lv_label_set_text(text, kActionLabels[index]);
-    lv_obj_set_style_text_letter_space(text, 0, 0);
-    lv_obj_center(text);
-  }
+    void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
+    {
+      const bool narrow = board_display_width() <= 160;
+      lv_obj_t *row = lv_obj_create(parent);
+      set_clean_container(row);
+      lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+      lv_obj_set_flex_flow(row, narrow ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+      lv_obj_set_style_pad_column(row, sc(6), 0);
 
-  snprintf(line, sizeof(line), "approved %u\nrejected %u",
-           static_cast<unsigned>(snapshot.stats.approvals),
-           static_cast<unsigned>(snapshot.stats.rejections));
-  lv_obj_t *stats = lv_label_create(info);
-  if (narrow) lv_obj_add_flag(stats, LV_OBJ_FLAG_HIDDEN);
-  lv_label_set_text(stats, line);
-  lv_obj_set_style_text_color(stats, theme_fg(), 0);
+      companion_stage = lv_obj_create(row);
+      lv_obj_add_event_cb(companion_stage, companion_deleted, LV_EVENT_DELETE, nullptr);
+      set_clean_container(companion_stage);
+      lv_obj_clear_flag(companion_stage, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_size(companion_stage, 68, 68);
+      companion_parts(companion_stage, snapshot);
 
-  const char *reminder = mascot_reminder_text(snapshot.reminder);
-  if (reminder != nullptr)
-  {
-    lv_obj_t *hint = lv_label_create(info);
-    companion_hint_label = hint;
-    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(hint, LV_PCT(100));
-    lv_label_set_text(hint, reminder);
-    lv_obj_set_style_text_color(hint, theme_accent(), 0);
-  }
-}
+      lv_obj_t *info = lv_obj_create(row);
+      set_clean_container(info);
+      lv_obj_clear_flag(info, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_height(info, LV_SIZE_CONTENT);
+      if (narrow)
+        lv_obj_set_width(info, LV_PCT(100));
+      else
+        lv_obj_set_flex_grow(info, 1);
+      lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
+      lv_obj_set_style_pad_row(info, sc(3), 0);
+
+      char line[64];
+      snprintf(line, sizeof(line), "%s  LV%d", kMascotDisplayName, snapshot.level);
+      lv_obj_t *headline = lv_label_create(info);
+      lv_label_set_text(headline, line);
+      lv_obj_set_style_text_color(headline, theme_accent(), 0);
+      lv_obj_set_style_text_letter_space(headline, sc(1), 0);
+
+      lv_obj_t *mood = lv_label_create(info);
+      companion_mood_label = mood;
+      lv_label_set_text(mood, mascot_mood_name(snapshot.mood));
+      lv_obj_set_style_text_color(mood, theme_fg(), 0);
+
+      // Bond as a segmented meter: filled blocks are progress inside this level.
+      lv_obj_t *meter = lv_obj_create(info);
+      if (narrow)
+        lv_obj_add_flag(meter, LV_OBJ_FLAG_HIDDEN);
+      set_clean_container(meter);
+      lv_obj_clear_flag(meter, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_size(meter, LV_PCT(100), sc(4));
+      lv_obj_set_flex_flow(meter, LV_FLEX_FLOW_ROW);
+      lv_obj_set_style_pad_column(meter, sc(2), 0);
+      const uint8_t segments = 8;
+      const uint8_t filled = static_cast<uint8_t>(
+          (static_cast<uint32_t>(snapshot.bond) * segments) / snapshot.bond_max);
+      for (uint8_t index = 0; index < segments; ++index)
+      {
+        lv_obj_t *segment = lv_obj_create(meter);
+        set_clean_container(segment);
+        lv_obj_clear_flag(segment, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_size(segment, sc(4), sc(4));
+        lv_obj_set_style_bg_color(segment, theme_fg(), 0);
+        if (index < filled)
+        {
+          lv_obj_set_style_bg_opa(segment, LV_OPA_COVER, 0);
+        }
+        else
+        {
+          lv_obj_set_style_bg_opa(segment, LV_OPA_TRANSP, 0);
+          lv_obj_set_style_border_width(segment, 1, 0);
+          lv_obj_set_style_border_color(segment, theme_fg(), 0);
+        }
+      }
+
+      // FEED / PET / PLAY. Plain widgets, so they work with a touch panel and,
+      // through the keypad input device, with four physical buttons.
+      lv_obj_t *actions = lv_obj_create(info);
+      set_clean_container(actions);
+      lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_size(actions, LV_PCT(100), LV_SIZE_CONTENT);
+      lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+      lv_obj_set_style_pad_column(actions, sc(3), 0);
+      static const char *const kActionLabels[3] = {"FEED", "PET", "PLAY"};
+      for (intptr_t index = 0; index < 3; ++index)
+      {
+        lv_obj_t *button = lv_button_create(actions);
+        lv_obj_set_height(button, 28);
+        lv_obj_set_style_pad_all(button, 1, 0);
+        lv_obj_set_flex_grow(button, 1);
+        lv_obj_set_style_radius(button, sc(4), 0);
+        lv_obj_set_style_border_width(button, 1, 0);
+        lv_obj_set_style_border_color(button, theme_fg(), 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+        lv_obj_add_event_cb(button, companion_action_event, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(index));
+        lv_obj_t *text = lv_label_create(button);
+        lv_label_set_text(text, kActionLabels[index]);
+        lv_obj_set_style_text_letter_space(text, 0, 0);
+        lv_obj_center(text);
+      }
+
+      snprintf(line, sizeof(line), "approved %u\nrejected %u",
+               static_cast<unsigned>(snapshot.stats.approvals),
+               static_cast<unsigned>(snapshot.stats.rejections));
+      lv_obj_t *stats = lv_label_create(info);
+      if (narrow)
+        lv_obj_add_flag(stats, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text(stats, line);
+      lv_obj_set_style_text_color(stats, theme_fg(), 0);
+
+      const char *reminder = mascot_reminder_text(snapshot.reminder);
+      if (reminder != nullptr)
+      {
+        lv_obj_t *hint = lv_label_create(info);
+        companion_hint_label = hint;
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(hint, LV_PCT(100));
+        lv_label_set_text(hint, reminder);
+        lv_obj_set_style_text_color(hint, theme_accent(), 0);
+      }
+    }
 #endif
   }
 
@@ -807,7 +819,7 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
 
   void wallet_ui_show_catalog()
   {
-  review_seal_valid = false;
+    review_seal_valid = false;
 #if HEXWALLET_ENABLE_LVGL
     if (!initialized)
       return;
@@ -955,12 +967,12 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
       if (output.amount_text != nullptr)
       {
         formatted = snprintf(line, sizeof(line), "%u  %s", static_cast<unsigned>(index + 1),
-                 output.amount_text);
+                             output.amount_text);
       }
       else
       {
         formatted = snprintf(line, sizeof(line), "%u  %llu sat", static_cast<unsigned>(index + 1),
-                 static_cast<unsigned long long>(output.value));
+                             static_cast<unsigned long long>(output.value));
       }
       lines.valid = lines.valid && formatted >= 0 && static_cast<size_t>(formatted) < sizeof(line);
       lv_obj_t *label = lv_label_create(screen_content);
@@ -997,8 +1009,8 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
     else
     {
       formatted = snprintf(line, sizeof(line), "FEE  %llu sat  |  %llu sat/vB",
-               static_cast<unsigned long long>(review.fee),
-               static_cast<unsigned long long>(review.fee_rate));
+                           static_cast<unsigned long long>(review.fee),
+                           static_cast<unsigned long long>(review.fee_rate));
     }
     lv_obj_t *fee = lv_label_create(screen_content);
     lines.valid = lines.valid && formatted >= 0 && static_cast<size_t>(formatted) < sizeof(line);
@@ -1069,7 +1081,8 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
       lv_obj_center(approve_label);
     }
     finish_review_seal(lines);
-    if (!review_seal_valid) decision_callback = nullptr;
+    if (!review_seal_valid)
+      decision_callback = nullptr;
     wallet_ui_set_status(review_seal_valid ? "Transaction review active" : "REVIEW ERROR - cannot authorize");
 #else
     (void)review;
@@ -1178,24 +1191,26 @@ void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot)
 #endif
   }
 
-
-bool wallet_ui_review_seal_code(char out[9])
-{
-  if (out == nullptr || !review_seal_valid) return false;
-  review_seal_code(review_seal, out);
-  return true;
-}
-
-bool wallet_ui_review_authorize()
-{
-  if (!review_seal_valid) return false;
-  // The panel must have committed this exact screen before it can authorize.
-  if (!review_seal.displayed)
+  bool wallet_ui_review_seal_code(char out[9])
   {
-    if (!board_display_review_ready()) return false;
-    review_seal_mark_displayed(&review_seal);
+    if (out == nullptr || !review_seal_valid)
+      return false;
+    review_seal_code(review_seal, out);
+    return true;
   }
-  return review_seal_authorize_rendered(&review_seal, millis());
-}
+
+  bool wallet_ui_review_authorize()
+  {
+    if (!review_seal_valid)
+      return false;
+    // The panel must have committed this exact screen before it can authorize.
+    if (!review_seal.displayed)
+    {
+      if (!board_display_review_ready())
+        return false;
+      review_seal_mark_displayed(&review_seal);
+    }
+    return review_seal_authorize_rendered(&review_seal, millis());
+  }
 
 }

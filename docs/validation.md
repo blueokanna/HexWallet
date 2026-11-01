@@ -1,5 +1,133 @@
 # HexWallet - validation
 
+最新本地回归及未验收边界见 [2026-10-31 生产签名补齐记录](hardening-2026-10-31.md) 与 [2026-10-31 代币登记与自定义代币](hardening-2026-10-31-tokens.md)。历史记录保留当时运行范围，不代表后续修改自动通过。
+
+## 2026-11-02：Starknet 批量调用与跨链自定义代币
+
+- `StarknetTransaction.cpp` 从"恰一笔 transfer"扩到 1–4 笔：calldata 布局改成
+  `[N, (token, transfer, 3, recipient, low, high)*, 3N, span...]`，设备重算 `2+9N` 与载荷长度、
+  要求每笔 span 为 3、行内数组与尾部 span 逐 felt 相同；第 5 笔起 `unsupported`。
+  每笔一行写进 `ChainReview.calls`（target/recipient/amount/declared），
+  `WalletSigning::show_chain_review` 按行渲染，不再把多笔压成一句摘要。
+- 两笔批量的 v3 摘要与 r/s 签名由独立 Python 参考实现产出并钉死在 `chain.starknet`：
+  `0x6cf464fb…b673b` / `0x74c2bcca…f0a2` / `0x13b96249…dc059`。
+- 代币元数据：`custom_token_add("stark", <32 字节合约>, …, decimals)` 后同一笔交易的金额按记录换算
+  （`1.5 USDC`），记录移除后回到 `1500000 raw`；两次的 v3 摘要逐字节相同——标签不参与签名。
+- `WalletCustomTokens` 的 `standard_for_network()` 接受 `AddressEncoding::StarknetKey`，键宽固定 32 字节；
+  自检里补了"20 字节的以太坊式地址塞进 Starknet 记录必须 `InvalidArgument`"。
+- 拒绝路径从 14 条扩到 17 条（新增零代币地址、零调用、超过四笔）；`zero_amount` 一例改为同时清零
+  行内与尾部两份拷贝，否则先命中的是 span 不一致而不是金额为零。
+- 回归：`build.ps1` 输出 `chain=pass`、`custom-tokens=pass`；`build_chain_native.ps1` 输出
+  `stark-derivation=pass`、`production_policy=pass`；UBSan 与 esp32p4 编译通过。
+
+## 2026-11-02：Starknet（STRK）密码学核心与 v3 交易适配器
+
+- `StarknetCrypto.cpp`：Stark 曲线（`p = 2^251 + 17·2^192 + 1`，`y² = x³ + x + β`）的
+  8×32-bit limb Montgomery 域运算（CIOS 乘法、模幂逆元）、仿射点加/倍、固定 252 轮
+  double-and-add-always 标量乘、Pedersen（SHIFT + low248/high4 四点组合与链式多元素）、
+  Poseidon（Hades，8 全轮 + 83 部分轮、立方 S-box、[[3,1,1],[1,-1,1],[1,1,-2]] MDS、
+  `SHA-256("Hades" + i)` 轮常数）、RFC 6979 Stark ECDSA（`r,w < 2^251−256`，不做 low-S
+  归一，签名前自验）、`grindKey`、SNIP-5 合约地址、Cairo v3 `invoke`/`deploy_account` 摘要。
+- 公开向量锚定：StarkWare `pedersen_params.json`（506 个常量点）的 Pedersen 向量、
+  `@scure/starknet` 的 Stark key 与 ECDSA 签名向量（`0x5f49…`/`0x4e86…`）、`@scure`
+  的 `hashOnElements([1,2,3])`、`starknet-rs` 的 Poseidon pair/single 向量。以上全部在
+  `run_starknet_crypto_self_tests()` 内逐字节比对，`build.ps1` 输出 `starknet-crypto=pass`。
+- `StarknetTransaction.cpp`：只准入 Cairo v3 `deploy_account` 与「账户 `execute` 入口 +
+  单笔 ERC-20 `transfer`」两种 `invoke`。账户地址由设备按
+  `pedersen_many([0x5354…4553, 0, salt, class_hash, pedersen_many([pubkey])]) mod (2^251−256)`
+  现算；构造参数只接受单公钥且必须等于本机 Stark 公钥；链 ID 钉死 `SN_MAIN`。
+  `invoke` 的编译 calldata 按 Cairo 序列化解析（调用数组长度=1、span=3、行内数组与尾部
+  span 逐 felt 相同），因此屏上收方/金额就是摘要覆盖的 felt。
+- `chain.starknet` 自检钉死：`execute` 与 `transfer` 选择子
+  （`0x240060cd…c44` / `0x83afd3f4…d12e`）、账户地址、两种 v3 摘要、r/s 签名，全部由独立
+  Python 参考实现（Pedersen/Poseidon/keccak 均为独立代码，且先通过公开向量）产出；
+  另覆盖 14 条拒绝路径：伪造构造参数（`WrongWallet`）、未知 kind / 多公钥构造 / 非法 DA /
+  错误入口 / 错误选择子（`Unsupported`）、span 不一致 / 截断 / 错误魔数（`Malformed`）、
+  零金额 / 零收方（`InvalidAmount`）、零 gas 上限（`FeePolicy`）、错误钱包（`WrongWallet`
+  且输出长度归零）、缓冲区不足（`BufferTooSmall`）。
+- 目录/网络：`WalletNetworks.cpp` 新增 `stark` profile（BIP44、coin type 9004、
+  `AddressEncoding::StarknetKey`），`WalletCustody.cpp` 新增 `StarkEcdsa` 托管方案
+  （SE050/SE051 无 Stark 曲线能力，密钥留在 MCU RAM 并如实标注），`WalletCatalog.cpp`
+  新增 `stark` 行，`ChainTransaction` 增加 `ChainFamily::Starknet` 审阅/签名分派。
+- 金额显示策略：任意 ERC-20 的小数位无法由设备证明，因此代币金额按 base unit 原样显示并
+  标注 `raw`；最大费用 `tip + Σ max_amount×max_price` 用 256 位精确十进制显示为 STRK，
+  不做浮点近似。
+- 派生：`tests/host/chain/chain_probe.cpp` 新增 `stark-selftest`，在真实 Mbed TLS 上按
+  `m/44'/9004'/0'/0/0` 派生，校验 profile→编码器映射与 SNIP-5 地址随 class hash/salt 变化；
+  `build_chain_native.ps1` 输出 `stark-derivation=pass`。主机套件的 `mbedtls_host.c` 不含
+  secp256k1 曲线运算，因此 `derive_address` 在 `build.ps1` 里对任何 BIP32 链都返回
+  `CryptoFailure`（ETH 同样如此），这是既有主机限制，不是本次改动引入的回归。
+- 回归：`tests/host/build.ps1` 输出 `starknet-crypto=pass`、`chain=pass`
+  （内含 `chain.starknet=pass`）、`catalog=pass`、`networks=pass`；
+  `build_chain_native.ps1` 输出 `stark-derivation=pass`、`production_policy=pass`。
+
+## 2026-11-01：多链自定义代币（TRON / Solana / Stellar）
+
+- `WalletCustomTokens` 升级到 v2 记录：`network_id + standard + identifier(≤32) + issuer(32) +
+  code(13) + symbol + name + decimals`。EVM 20 字节合约、TRON 21 字节账户地址（含 0x41）、
+  Solana 32 字节 mint、Stellar 32 字节 issuer + 资产代码各有固定宽度，`custom_token_add`
+  按网络派生标准并拒绝宽度不符的键。v1（EVM-only）blob 在加载时按原布局解析并升级，
+  不需要用户重新录入。
+- **TRON TRC-20**：`find_trc20()` 未命中注册表时查询自定义表；命中后 `TronTransferReview.
+  token_user_declared = true`，屏上额外显示 `TOKEN NOT VERIFIED`，签名前重解析仍要求同一
+  记录。自检把一条真实 TRC-20 主网向量的合约字段替换成未登记地址：无记录时
+  `UnknownToken`，录入后 review 通过且 symbol/decimals 来自记录，删除后再次拒绝。
+- **Solana SPL**：`solana_review_message()` 在解析 `TransferChecked` 后按 mint 查询自定义表，
+  只填充分显示标签；签名仍绑定消息里的 mint/decimals。新增 `run_solana_self_tests()`：
+  手工构造 legacy 消息（5 个账户、1 条 TransferChecked），校验金额/精度/mint、录入后
+  `token_user_declared` 与符号、签名输出可由 Ed25519 验证、篡改金额返回 `Malformed`、
+  每个截断前缀被拒绝、外部 payer 返回 `WrongWallet`。
+- **Stellar 发行资产**：`stellar_review_request()` 用 issuer 原始 32 字节 + 资产代码查询
+  自定义表；XDR 里的 issuer/code 仍是签名对象。自检构造一条 USDC/4 字符资产的 Payment
+  XDR：未录入时可审阅且 `asset_user_declared=false`，录入后标记与标签生效，签名成功。
+- 设备侧入口：`token custom-list`、`token custom-add <network> <id-hex> <symbol> <name>
+  <decimals>`、`token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals>`、
+  `token custom-remove` / `token custom-remove-stellar`。
+- 回归：`build.ps1` 输出 `tron=pass`、`stellar=pass`、`solana=pass`、`custom-tokens=pass`；
+  `build_clang_ubsan.ps1` 与 `build_chain_native.ps1` 通过；`device_compile_check.ps1
+  -Target esp32p4` 通过。
+
+## 2026-11-01：QRL v2（ML-DSA-87）账户与动态费信封
+
+- `MlDsa87.cpp`：FIPS 204 ML-DSA-87 的 keygen / sign / verify 全部在仓库内实现，
+  只用 SHAKE-128、SHAKE-256 与普通模运算；没有 `third_party`，也没有外部 PQC 库。
+- KAT：`run_ml_dsa_87_self_tests()` 用 NIST ACVP 的 keyGen tc51 校验 `pk`/`sk`
+  逐字节一致，用 sigGen tc61 校验签名逐字节一致，再从签名私钥反推公钥验证 ACVP
+  签名，并拒绝篡改签名与错误消息。`build.ps1` 输出 `ml-dsa-87=pass`。
+- UBSan：`build_clang_ubsan.ps1` 发现并修复了 keygen 中 `t1` 借用 `y`（长度 `kL`）
+  导致的越界写；修复后整套 UBSan 通过。
+- `QrlV2Transaction.cpp`：严格 RLP（规范整数、无尾随字节、11 个字段）、
+  `chain_id == 1`、`descriptor == 01 00 00`、空 `extra_params`、`fee_cap >= tip_cap`、
+  64 字节或空的 `to`；`keccak256` 只对收到的原始字节计算，签名消息为
+  `00 08 "ZOND" 01 01 00 00 ‖ digest`；签名前重建账户并拒绝不是屏上发送方的请求。
+- 地址：BIP32 子私钥 → ML-DSA 种子 → `SHAKE256(01 00 00‖pk)` → `Q`+128 hex。
+  两组校验和向量由独立 Python `hashlib.shake_256` 生成后在自检中钉死。
+- `build_chain_native.ps1`：`chain=pass` 覆盖带真实 BIP32 的完整签名路径；
+  `production_policy=pass` 现在要求 Chia 派生成功（仓内 BLS 已常时化，旧的手动禁用
+  已删除）。
+- 以上均为宿主机与交叉编译验证，没有连接实体钱包或广播 QRL v2 交易。
+
+## 2026-10-31：QRL / Chia / DOT-KSM / Aptos 生产签名，EVM 任意 calldata
+
+- `tests/host/qrl_oracle_check.ps1`：本仓库的 `qrl_xmss_sign_digest()` 与 qrllib
+  `xmss_alt` 的 `xmss_Signmsg()` 在 h=4/6/10、索引 0/1/末叶逐字节相同；同一测试还验证
+  了预留失败必须不产出签名、高水位只会前进。oracle 固定在同一 qrllib 提交
+  （`2492c60788b47055994e5d123b02482202f38262`），`diff --exit-code` 保证没被本地改过。
+- `build.ps1`：`chain.qrl` 用真实种子走完整路径——派生账户、重建 QRL 转账预映像、
+  预留叶、签名、自检验签，并验证第二次签名使用下一片叶、写入失败时不释放签名。
+- `chain.aptos`：地址、`RawTransaction` BCS 摘要与 Ed25519 authenticator 与
+  Python `hashlib.sha3_256` + libsodium 独立实现逐字节一致；零金额、错误 chain id、
+  未准入 EntryFunction、零收款、截断与“密钥不拥有该地址”全部拒绝。
+- `chain.polkadot`：`DOT2` 摘要用独立 Python `blake2b` 复现；`spec_version` 不在钉死
+  表内时返回 `RuntimeMismatch`。
+- `device_compile_check.ps1 -Target esp32p4`：全部固件源文件（含仓内
+  `Bls12381.cpp`）在 riscv32 工具链下编译通过；`QrlOtsStore.cpp` 另以 `-DARDUINO`
+  的真实 Arduino 包含集编译，证明 NVS 分支可构建。
+- `p4_runtime_compile_check.ps1`：WalletSigning / LinkService / CLI / 草图对真实 P4
+  头文件编译通过。
+- 以上都是主机编译与自检通过，**没有**连接实体钱包、没有广播交易，也没有对主网
+  runtime 做在线校验。
+
 ## 2026-10-29：access list、安全托管边界与显示修正
 
 - `evm_access_list_check.ps1`：201 项检查通过。六组有效交易与 ethers 6.15.0

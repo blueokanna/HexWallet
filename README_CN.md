@@ -37,8 +37,11 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 生成和校验英文 BIP39 助记词。
 - 使用 PBKDF2-HMAC-SHA512 派生 BIP39 seed。
 - 使用 BIP32 派生私钥、公钥和扩展密钥。
-- 为 Bitcoin 系、54 个 EVM 网络、TRON、Cosmos（ATOM/OSMO/TIA）、Algorand、NEAR、Tezos、XRP、Stellar、Solana、Kaspa、Zcash、Monero、Cardano、Ergo、VeChain、ICON、Sui、Filecoin、TON、Decred、Nervos CKB、Hive、Internet Computer、Aeternity、RyoCurrency 和 Zano 生成地址；只有同时具备地址、审查与签名的链才会标记为可签名。DOT/KSM、Chia、QRL、Aeternity、RyoCurrency、Zano 只登记地址，签名入口关闭。
-- BEP-20（BSC）已登记 WBNB、CAKE、FDUSD、TUSD、LINK、DOT、ADA、XRP、DOGE、SHIB、UNI、AAVE、ATOM、XVS、BSW、ANKR、COMP、BETH、AVAX、PENDLE 等合约；所有 decimals/symbol 均通过 BSC RPC `eth_call` 核对，未登记合约仍拒绝盲签。
+- 目录里共 205 条钱包记录：105 条 Bitcoin 系 UTXO、61 条 EVM、39 条原生适配器（TRON、Cosmos、Algorand、NEAR、Tezos、XRP、Stellar、Solana、Kaspa、Zcash、Monero、Cardano、Ergo、VeChain、ICON、Sui、Filecoin、TON、Decred、Nervos CKB、Hive、Internet Computer、Polkadot、Kusama、Chia、QRL v1/v2、Aptos、Starknet、Aeternity、RyoCurrency、Zano）。其中 201 条同时具备地址、审查与签名；Aeternity、RyoCurrency、Zano 只登记地址（签名入口关闭），Hive 只给出 `STM` 公钥身份而不是收款地址。
+- 目录条数不等于验收范围：每条链的准入交易类型、拒绝清单和证据都写在 [chain-gates](docs/chain-gates.md)；硬件与节点验收尚未完成。
+- 已登记代币共 79 条，覆盖 61 个 EVM 网络（其中 BSC 27 条，含 WBNB、CAKE、FDUSD、TUSD、LINK、DOT、ADA、XRP、DOGE、SHIB、UNI、AAVE、ATOM、XVS、BSW、ANKR、COMP、BETH、AVAX、PENDLE、SFP）；`tools/token_audit.ps1` 会把每一条 EVM 代币行拿去链上核对 `symbol()`/`decimals()`/`name()`：位数不符即失败，标签漂移只告警（Arbitrum 上的 USDT 合约已被 Tether 原地升级成 USD-T0，地址与 6 位小数不变）。未登记合约仍拒绝盲签。
+- 自定义代币（`WalletCustomTokens`）：最多 8 条，覆盖 EVM ERC-20（20 字节合约）、TRON TRC-20（21 字节账户地址）、Solana SPL（32 字节 mint）、Stellar 发行资产（32 字节 issuer + 资产代码）、Starknet ERC-20（32 字节合约地址）。键宽由网络决定，调用方无法把 20 字节的以太坊式地址塞进 Starknet 记录；整表是一块带 SHA-256 的 blob，半写或改动一律整表拒绝，旧版 EVM-only v1 blob 在加载时自动升级。
+- 自定义记录只是标签，不是授权：真正签名的永远是链上携带的 base unit 整数，设备只做显示换算；用记录换算出的金额会标 `USER-DECLARED`/`UNVERIFIED`，并在提示里说明标签来自本机而不是发行方。已登记代币优先，用户记录绝不遮蔽它们。没有记录时显示原文（`1500000 raw`），不猜小数位。设备侧命令：`token custom-list`、`token custom-add <network> <id-hex> <symbol> <name> <decimals>`、`token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals>`、对应的 `custom-remove`。
 - 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 目标只声明 secp256k1 + ECDSA + seed 封装能力（SCP03/applet 驱动尚未实现）；Kaspa Schnorr 和 Ed25519/BLS/XMSS 私钥保留在 MCU RAM。
 - 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
 - 审查并签名受限的 Bitcoin PSBT v0。
@@ -54,11 +57,17 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 离线 TOTP（RFC 6238，SHA-1/256/512）已实现并通过 RFC 6238/2202/4648 向量；认证后的 CLI 用 `totp time <unix>` 锚定时钟，`totp <base32>` 生成验证码，密钥不落盘、不回显。时钟与硬件 RTC 的边界见 [totp.md](docs/totp.md)。
 - Tezos（XTZ）manager operation 已接入 `BEGIN_SIGN kind=12`：可选 Ed25519 reveal、1–16 笔 tz1–tz4 原生转账、BLAKE2b-256(0x03 || forged) 摘要与 Ed25519 签名；不支持 KT1、Michelson、委托或 FA token，见 [tezos-signing.md](docs/chain-protocols.md)。
 - XRP 原生 Payment 已接入 `BEGIN_SIGN kind=13`：设备从 50 字节紧凑结构构建规范 XRPL 二进制，使用 SHA-512Half 与 secp256k1 DER 签名；classic r-address 使用 Ripple base58 + hash160。不支持 issued currency、path、memo、partial payment 或多签名，见 [xrp-signing.md](docs/chain-protocols.md)。
+- QRL v1（XMSS/SHAKE-256）原生转账已接入 Chain 适配器：设备自建 `master ‖ fee ‖ message ‖ (addr ‖ amount)*` 预映像并对其 `sha256` 摘要签名；签名前把一次性叶写入 NVS 双槽记录并回读证明，签名后立即用独立验证器重建根自检。与 qrllib `xmss_Signmsg` 在 h=4/6/10 逐字节一致。
+- QRL v2（Zond，ML-DSA-87）账户与动态费信封已接入：`qrl2` 走 BIP44 `m/44'/238'/account'/change/index`，子私钥作 ML-DSA-87 种子，地址为 `SHAKE256(01 00 00‖pk)` 的 `Q`+128 hex 校验和格式；设备只签 `0x02` 信封的 keccak-256 摘要（`M' = 00 08 "ZOND" 01 01 00 00‖digest`），主网 chain id 固定为 1，`descriptor` 必须是 `01 00 00`、`extra_params` 必须为空。keygen/sign 与 NIST ACVP 向量逐字节一致。
+- Chia（XCH）标准 coin 花费：设备自建 `(q . conditions)`、自算 `sha256tree`、自组 AGG_SIG_ME 消息，用仓库内 BLS12-381 后端（`Bls12381.cpp`）的 G2 签名；CAT/NFT/offer 拒绝。
+- Polkadot / Kusama 已接入 `balances.transfer` 与 `transferKeepAlive`：mortal era、tip、`CheckMetadataHash`（mode 0）全部进入签名载荷，signed extensions 与 `spec_version`/`transaction_version` 在构建期钉死（DOT 2005002/26、KSM 2005001/26），不符者返回 `RuntimeMismatch`。
+- Aptos 原生 APT 转账：`0x1::aptos_account::transfer` 的 BCS `RawTransaction` 由设备自建，签名 `sha3-256("APTOS::RawTransaction" ‖ BCS)`，返回 `0x00 ‖ sig ‖ pk` authenticator；仅原生 APT，无 EntryFunction 任意调用。
+- Starknet（STRK）：Stark 曲线、Pedersen/Poseidon、Stark ECDSA、SNIP-5 地址与 Cairo v3 哈希全部在仓库内实现（`StarknetCrypto.cpp`），只签 `deploy_account` 与账户 `execute` 里的 1–4 笔 ERC-20 `transfer`。账户地址不是路径直出的：设备用 payload 里的 class hash、salt 和单公钥构造参数现算 SNIP-5 地址，并要求构造参数等于本机 Stark 公钥，所以手机无法把别人的账户塞进交易。`invoke` 的编译 calldata 按 Cairo 序列化逐 felt 解析：调用数组长度、每笔 span 长度、行内数组与尾部 span 必须完全一致，屏上每一行就是摘要覆盖的那一笔。链 ID 钉死 `SN_MAIN`；`declare`、paymaster、多签/会话密钥账户、超过四笔的批量与非主网一律拒绝（五笔在屏上放不下，宁可不签）。金额默认按 base unit 原文显示，只有用户登记过该代币才换算并标注未核验。
 
 以下能力明确不可用，或仍受严格协议边界限制，也不会被伪装成完整支持：
 
 - XMR 子地址输出只开放严格验证的形式：单一子地址目的地使用 `R=rD`，混合/多目的地使用 payload v3 的 additional transaction-key 绑定；设备会逐项核对 `tx_extra`、输出索引、金额密文、view tag 和 commitment。未绑定、畸形或 MSR 子地址输出仍拒绝。
-- Chia、QRL、DOT/KSM、Aeternity、RyoCurrency 与 Zano 的交易签名：Chia 需要常数时间 BLS 标量路径，QRL 没有一次性签名预留，Substrate 需要可信 runtime metadata；Aeternity/Ryo/Zano 只完成了地址编码与向量验证，没有可审计的交易格式、费用策略和签名路径。
+- THETA 与 PRL（Pearl）需要各自链的原生签名（Theta 的 EVM 只能搬 TFUEL），Beam 需要 Mimblewimble 的 slate 交换；三者均未准入，详见 [能力门槛台账](docs/chain-gates.md)。
 - Beam、Grin、MimbleWimbleCoin、Epic Cash：交互式 Mimblewimble 链没有静态 UTXO 地址，花费需要多轮 slate/transaction 交换；base58 字符串是 slatepack/BBS 端点，不是普通钱包地址，因此不登记。
 - Super Zero（SERO）：64/96 字节身份是 superzk 公钥包，不是单密钥地址；本仓库没有经过审计的编码与签名路径。
 - Swap（XWP）、Evolution（EVOX）、VeriBlock（VBK）：当前 SLIP-0044 注册表没有对应 coin type；复用 Bitcoin 或其它链的 coin type 会让同一份密钥材料跨域复用。上游 coin type 与向量验证完成前不进入目录。
@@ -69,7 +78,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - Zcash shielded、JoinSplit、v3/v5，以及 redeem script 不是单公钥 `CHECKSIG` 的 t3 P2SH 花费（P2SH-P2PK 已可签）。
 - Peercoin 交易签名：PPC v<3 交易在版本号后序列化 `nTime`，Bitcoin legacy 签名器会构造无效交易；在独立的 Peercoin sighash 模块和向量完成前，PPC 只作为内部地址原语，不进入钱包目录。
 - Kaspa v1 计算预算/covenant 交易；v0 的 `kaspa inspect` / `kaspa sign` 已实现。
-- 任意 EVM calldata、合约创建、未知 Token、非标准 typed transaction。Type-2 的非空 access list 已支持，长度、审阅与向量见 [access list 策略](docs/evm-access-lists.md)。
+- 按地址盲签未知 Token。任何 calldata 不是已登记 Token 调用的 EVM 交易都会以**原始字节**审阅：屏上显示信封字段、完整 data hex、它的 keccak-256、准确的 call value，以及合约创建时的预期部署地址。这是明确的"你在签代码而不是转账"模式，不是解码后的转账。见 [access list 策略](docs/evm-access-lists.md)。
 - 默认配置下的助记词、seed、私钥和 xprv 导出。
 
 严格规则：只有同时具备地址、审查、签名、官方/独立向量和失败路径的链才会进入 `WalletCatalog`。仅地址 profile 只作为内部测试数据存在，不是钱包。
@@ -583,7 +592,7 @@ wallet address eth 1
 wallet address btc 1
 ```
 
-钱包目录只暴露具备真实路径的条目：DOT/KSM、Chia（XCH）、Aeternity（AE）、RyoCurrency（RYO）与 Zano（ZANO）只登记地址、不声明签名；QRL 与 Peercoin 仅作为内部 profile 存在，不出现在 `coin list` / `wallet address` 中。仅地址 profile 不表示该链可发送，尤其不要向只能生成地址、不能签名的链转入资产。
+钱包目录只暴露具备真实路径的条目：Aeternity（AE）、RyoCurrency（RYO）与 Zano（ZANO）只登记地址、不声明签名；Hive 给出的是 `STM` 公钥身份（账户名归链上所有，离线无法证明归属）；Peercoin 仅作为内部 profile 存在，不出现在 `coin list` / `wallet address` 中。QRL 以 `qrl`（v1 XMSS）和 `qrl2`（v2 ML-DSA-87）两个 ID 出现，ticker 相同，脚本按 ID 查找；Starknet 的 `stark` 行显示的是账户公钥，真正的合约地址随 class hash 变化，由适配器在每笔交易里现算。仅地址 profile 不表示该链可发送，尤其不要向只能生成地址、不能签名的链转入资产。
 
 当前账户和 change 固定为 `0`，一般路径为：
 
@@ -663,7 +672,7 @@ ERR trusted-display-required-for-signing
 
 ## EVM 交易审查和签名
 
-当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 的 `safeTransferFrom` 唯一 selector 在空回调数据时可在没有 NFT 合约注册记录的情况下审阅，设备显示合约地址、标准与未登记警告，但无法离线验证合约身份或元数据；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。53 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 保持 legacy-only。合约创建、未知选择器、非规范 ABI 偏移、未登记的 ERC-20 合约、超出容量限制的 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
+当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 的 `safeTransferFrom` 唯一 selector 在空回调数据时可在没有 NFT 合约注册记录的情况下审阅，设备显示合约地址、标准与未登记警告，但无法离线验证合约身份或元数据；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。66 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 以及新增的 Robinhood Chain、Flare、XinFin、Horizen EON、Oasis Sapphire、Merlin、Bitlayer 保持 legacy-only。合约创建与未知选择器在 opaque 审阅模式下不会被静默放行：设备单列 `CONTRACT CREATION` 或 `UNDECODED CONTRACT CALL`，显示目标地址（创建交易则显示设备自算的预期合约地址）、完整 calldata、calldata 的 keccak-256 与原生币金额，并明确标注“效果与权限未验证”。非规范 ABI 偏移、超出容量限制的 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 仍会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
 
 审查 unsigned RLP：
 
@@ -835,6 +844,12 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `DashTransaction` | type-0 普通支付；legacy 摘要用真实主网签名钉死；P2PKH/P2SH 输出 |
 | `CoinIcons` | 审阅页 32×32 I1 币种图徽，CC0 源图打包，固件内无解码器 |
 | `QrlOtsJournal` | XMSS 一次性索引的持久化预留：双槽冗余、回读证明、半写跳过、状态未知即拒签 |
+| `MlDsa87` | FIPS 204 ML-DSA-87 的 keygen/sign/verify，供 QRL v2 使用 |
+| `QrlV2Transaction` | QRL v2 动态费信封：keccak-256 摘要 + ML-DSA-87 hedged 签名 |
+| `AptosTransaction` | BCS `RawTransaction`、`APTOS::RawTransaction` 域分隔哈希、Ed25519 authenticator |
+| `StarknetCrypto` | Stark 曲线域运算、Pedersen、Poseidon、Stark ECDSA、SNIP-5 地址、Cairo v3 摘要 |
+| `StarknetTransaction` | v3 `deploy_account`/`execute` 审阅：地址现算、逐笔调用行、ERC-20 解码 |
+| `WalletCustomTokens` | 跨链自定义代币：EVM/TRON/Solana/Stellar/Starknet，按键宽绑定网络 |
 | `CryptoNoteRingCt` | Monero hash-to-scalar、key derivation、一次性公钥、key image、view tag、CLSAG 签名/验证；key 层官方向量固定 |
 | `CryptoNoteOutputScan` | 用 view secret 在设备内判定输出归属，不导出查看密钥 |
 | `CryptoNoteTransaction` | RCT type-6 严格解析/逐字节重写 + 承诺平衡校验 + CLSAG 签名接入（`cryptonote_sign_input`） |
