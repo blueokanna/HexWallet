@@ -615,3 +615,125 @@ ADA、DOT、FIL、CHIA、DCR、FIRO、FLUX 等交易适配器尚未补齐。当�
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
 ```
+
+## 2026-11-02（五）：GRS 签名解封、双曲线 ECDSA、X25519、THETA CLI 与 SE051 APDU
+
+这一轮的每一项都对得上外部来源：链上数据、NXP 公开源码、或两个互不相关的库。
+
+### GRS 的 legacy sighash 解开了，而且上一轮的"证伪"是错的
+
+结论：**预映像就是 Bitcoin 的 `CTransactionSignatureSerializer`，一个字节都不差；摘要只做
+一次 SHA-256**。依据是 Groestlcoin Core 的 `src/hash.h` —— `HashWriter::GetHash()` 里第二次
+`ctx.Reset().Write(...).Finalize(...)` 被注释掉了，只剩一次 `ctx.Finalize()`；`src/script/
+interpreter.cpp` 的 `SignatureHash()` 最后就是 `ss << nHashType; return ss.GetHash();`。同一条
+链上 `CTransaction::GetHash()` 也是这条路径，所以 txid = `SHA256(raw)` 而不是 `SHA256d(raw)`
+—— 这与上一轮量到的 txid 事实其实是同一个原因，只是当时没往这一步想。该链
+`git grep -i forkid -- src/` 为 0 命中，没有 SIGHASH_FORKID。
+
+判定用的是链上签名，不是"看起来对"：块 6324419 的交易
+`b566ddf7ae1374d13081bc01ddee3d5a1f2390773c6c910b4414063ba95f6c92`，1 入 2 出，
+`8d6026d9…:0`、`0xfffffffd`、`SIGHASH_ALL`、`nLockTime` 6324417。用它 scriptSig 里的 DER 签名
+和压缩公钥：
+
+| 摘要 | 结果 |
+| --- | --- |
+| 单次 SHA-256 = `df00bdc1…11b3be` | **验签通过** |
+| 双 SHA-256 = `eb2479aa…a79f0d` | 验签失败 |
+
+先用 libsecp256k1（`coincurve`）独立复核同一结论，再在固件里用新写的 in-tree 验签器复现。
+`run_groestlcoin_sighash_self_tests()` 现在钉死四件事：预映像→单次摘要、该摘要验签通过、
+改成 `SighashFamily::Bitcoin` 后摘要变成 `eb2479aa…`、同一签名对它必须**失败**，以及
+`SIGHASH_FORKID` 位在 GRS 上返回 `InvalidArgument` 而不是被悄悄改走 BIP143。
+
+落地方式：新增 `SighashFamily::GroestlLegacy`（不是给 Bitcoin 分支加 if，而是让 family 决定
+最后一次哈希），`legacy_digest()` 里只有终止哈希不同；`kNetworkSigningPolicies` 增加
+`{"grs", GroestlLegacy, 0}`，`grs` 因此获得 `TransactionReview | Signing`。网络自检增加双向
+约束：`GroestlLegacy` 只能配 `P2pkhGroestl`，非 `GroestlLegacy` 不能配 `P2pkhGroestl`。
+
+顺带补了一个会露馅的地方：`review` 里渲染收款地址原来走 `address_from_script()`（SHA-256
+校验和），GRS 必须走新的 `address_from_script_groestl()`，否则屏上显示的是一条链上不存在的
+地址。自检把这个也钉住了：同一笔交易的 P2WPKH 输出必须渲染成
+`grs1q94gj9xhh0kgfkwe7ca9f8jertlm56es75xlrpg`（bech32 只依赖 program 与 hrp，可以独立复算），
+而 P2PKH 输出在两种校验和下必须得到不同字符串。
+
+### 双曲线 ECDSA：`src/EcdsaCurve.h`
+
+secp256k1 一直只经 mbedtls 签名，而主机链接的是**桩版 mbedtls**，所以"产出的签名是否正确"
+在主机上从来没被验证过，也没法验签链上数据。新引擎把两条 256 位素数曲线放进同一个实现：
+
+- 8×32 位 Montgomery 域、全宽乘积 + REDC、Jacobian 点运算，`a` 作为曲线参数
+  （P-256 `a = -3` 用 `3(X-Z²)(X+Z²)`，secp256k1 `a = 0` 只剩 `3X²`）；
+- RFC 6979 §3.2 确定性 nonce、low-S、严格 DER（最小长度、非负、单字节补零、无尾随字节）；
+- 最容易抄错的两个常量不抄：`n0 = -p⁻¹ mod 2³²` 用牛顿迭代从模数算，`R² = 2⁵¹² mod p` 用
+  512 次模加倍算。算出来的 `n0`/`R²` 与 libsecp256k1 和本仓库 P-256 的既有常量逐字节一致。
+
+自检不用自己的输出当期望值：G 在曲线上、`n·G = ∞`、`(n-1)·G` 的 x 等于 Gx 且 y 等于 -Gy；
+P-256 复现 RFC 6979 A.2.5 的 r 与 low-S 化的 s；secp256k1 用同一把钥匙和同一条消息，r/s 取自
+libsecp256k1 与 python-ecdsa（两者互相一致）；再验一遍上面那条 GRS 主网签名。拒绝路径覆盖
+篡改、零 r/s、错摘要、坐标 ≥ p、曲线外压缩公钥、零私钥、私钥 = n、DER 截断/尾随/非最小补零。
+
+### X25519 与 Ed25519↔Curve25519
+
+原树只有 Edwards 群上的 `ed25519_ecdh`，说 "x25519" 的对手方（HPKE、age 一类）用不了。新增
+`x25519_scalar_mult` / `x25519_public_key` / `x25519_ecdh`（常数时间 Montgomery ladder，a24 走
+真正的域乘而不是裸标量乘 —— 后者会把 limb 撑到 43 位、下一次乘直接溢出 int64）、
+`ed25519_public_to_x25519`（`u = (1+y)/(1-y)`，把 Ed25519 基点映到 u=9）与
+`ed25519_seed_to_x25519`。没有提供 x25519→ed25519：那个方向恢复不出 x 的符号，编一个"某个"
+符号等于给上层埋一个会产生不同公钥的坑。
+
+自检：RFC 7748 §5.2 两条向量、§6.1 Alice/Bob 双向共享密钥、迭代 1 次与 1000 次、
+`ed25519_public_key(RFC8032 种子1)` 的 Curve25519 对应值（`d85e07ec…f6b62e`）、以及
+小阶点（全零、u=1）必须被 `x25519_ecdh` 拒绝而不是返回全零。
+
+### THETA 的主机侧入口
+
+`wallet_signing_begin_chain()` 已经在手机链路（`kTxChain = 14`）上工作，缺的是串口侧。新增：
+
+```text
+chain begin <network> <index> <payload-hex>    # THETA 原生 SendTx 载荷是 46 字节
+chain sign <code>
+chain reject
+```
+
+走的是和 `tx` / `zec` 相同的流程：`SigningRequest` 传输策略先要求可信显示、六位批准码、
+两分钟过期、失败即清、`clear_pending_transaction()` 一并擦掉新的 `pending_chain_transaction`。
+链适配器自己重算发送方与摘要，主机不能指定发送方。
+
+**顺带发现一个真实的死路**：`wallet_signing_begin_chain()` 会先问
+`catalog_can_sign(network_id)`，而目录里 `theta` 一项只有
+`Address | TokenAccount`——也就是说 46 字节载荷在手机链路（`kTxChain = 14`）和串口上都会在
+进适配器之前被拒，"`wallet_signing_begin_chain` 已经能用"只对代码成立、对 `theta` 不成立。
+现在补上 `TransactionReview | Signing` 两个位，并在 `run_chain_self_tests()` 里加了断言：
+只测 `chain_family_for_network("theta")` 是不够的，目录能力必须同时为真，否则这条链会再次
+静默变成"能编不能点"。目录自检里"声明签名必须有适配器背书"的规则本来就把
+`chain_family_for_network` 认作合法来源，所以这不是绕过规则。
+
+同时把 `WalletCli.cpp` 纳入了本地目标编译检查：此前它只在 CI 的 arduino-cli 构建里被编译，
+而 `tests/host/device_compile_check.ps1` 的 arduino-parity 段已经证明可以本地复现——现在它直接
+读 SDK 自带的 `flags/includes` 生成包含路径（经响应文件传入，避免 Windows 命令行长度限制），
+`WalletCli.cpp` 因此进入该段，P4 与 ESP32 两个目标都 rc=0。
+
+### SE051：命令字节有了，出处可核对
+
+见 [se051-integration.md](se051-integration.md)。`Se051Apdu.h/.cpp` 按 NXP plug-and-trust 的
+`se05x_tlv.h` / `se05x_enums.h` / `se05x_APDU_impl.h` / `se05x_tlv.c` / `sm_const.h` 逐项实现：
+CLA 0x80、INS 位域、P1/P2 表、TLV 标签、AID、曲线 id 与曲线参数类型。
+`CreateECCurve`、`SetECCurveParam`、`ReadECCurveList`、`Sign`、`ECDH`、单次 HMAC、会话创建/策略/
+`VerifySessionUserID`、`GetRandom` 都能生成完整帧，主机自检把每条帧逐字节钉死。
+仍然没有实卡互验；空命令（`GetVersion`/`ReadECCurveList`）的 Le 编码是按 ISO 7816-4 case 2
+推出的，第一次上卡应先复核这两帧。
+
+### 结果
+
+`build.ps1` 全项 pass（新增 `ecdsa-curve`、`x25519`、`se051-apdu`；`sighash` 现在同时包含
+GRS 用例）；`device_compile_check.ps1 -Target esp32p4` 与不带参数的 ESP32 目标全源通过；
+`policy_check.ps1` 通过。
+
+### 仍未做
+
+- GRS：只开了 P2PKH legacy 输入的单笔转账；P2SH/bech32 花费、多输入费策略、实机与节点接收未验收。
+- 曲线：secp256k1 的**生产**签名仍走 mbedtls（有 RNG 盲化）；in-tree 引擎目前用于验签与
+  主机可测性，没有替换生产签名路径。Ed25519 PKCS#8/SPKI 导入、P-256 密钥协商（ECDH）未做。
+- `WalletLinkCrypto` 仍用 Ed25519 群上的 ECDH，没有切到 X25519：改握手要同时改手机端，
+  这一轮只补了原语。
+- SE051：实卡、曲线参数块、PIN 会话接续、托管门。

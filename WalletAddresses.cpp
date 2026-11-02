@@ -225,6 +225,38 @@ WalletError address_from_script(const UtxoAddressProfile &profile,
   return result;
 }
 
+// Groestlcoin's variant of the same routine: identical scripts and version
+// bytes, but the 4-byte base58 checksum is double Groestl-512. Reviewing a GRS
+// output with the SHA-256 checksum would print an address that does not exist
+// on that chain, so the sighash family and this encoder have to agree.
+WalletError address_from_script_groestl(const UtxoAddressProfile &profile,
+                                        const uint8_t *script, size_t script_size,
+                                        char *out, size_t out_size) {
+  if (script == nullptr || out == nullptr || out_size == 0) return WalletError::InvalidArgument;
+  if (script_size == 22 && script[0] == 0x00 && script[1] == 0x14 && profile.bech32_hrp != nullptr) {
+    const std::vector<uint8_t> program(script + 2, script + 22);
+    const std::string address = segwit_address::encode(profile.bech32_hrp, 0, program);
+    if (address.empty()) return WalletError::CryptoFailure;
+    if (address.size() + 1 > out_size) return WalletError::BufferTooSmall;
+    memcpy(out, address.c_str(), address.size() + 1);
+    return WalletError::Ok;
+  }
+  uint8_t payload[kVersionedHash160Size];
+  if (script_size == 25 && script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 && script[23] == 0x88 && script[24] == 0xac) {
+    payload[0] = profile.p2pkh_version;
+    memcpy(payload + 1, script + 3, kRipemd160Size);
+  } else if (script_size == 23 && script[0] == 0xa9 && script[1] == 0x14 && script[22] == 0x87) {
+    payload[0] = profile.p2sh_version;
+    memcpy(payload + 1, script + 2, kRipemd160Size);
+  } else {
+    return WalletError::InvalidArgument;
+  }
+  size_t encoded_size = out_size;
+  const WalletError result = base58check_groestl(payload, sizeof(payload), out, &encoded_size);
+  secure_zero(payload, sizeof(payload));
+  return result;
+}
+
 bool run_groestl_address_self_tests() {
   // Payload of the mainnet address Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W:
   // version 0x24 and the hash160 of a real P2PKH output. If the checksum hash,

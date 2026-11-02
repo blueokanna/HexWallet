@@ -24,8 +24,10 @@
 #include "../../SolanaTransaction.h"
 #include "../../StarknetCrypto.h"
 #include "../../src/P256Sign.h"
+#include "../../src/EcdsaCurve.h"
 #include "../../AirgapFrame.h"
 #include "../../Se051Provisioning.h"
+#include "../../Se051Apdu.h"
 #include "../../Se051Scp03.h"
 #include "../../TokenCalldata.h"
 #include "../../TronTransaction.h"
@@ -85,6 +87,7 @@ int main()
   const bool secure_element = hexwallet::run_secure_element_self_tests();
   const bool scp03 = hexwallet::run_scp03_self_tests();
   const bool se051_provisioning = hexwallet::run_se051_provisioning_self_tests();
+  const bool se051_apdu = hexwallet::run_se051_apdu_self_tests();
   const bool airgap = hexwallet::run_airgap_self_tests();
   const bool random_source = hexwallet::run_random_source_self_tests();
   const bool eink_panel = hexwallet::run_eink_panel_self_tests();
@@ -95,7 +98,7 @@ int main()
   const bool networks = hexwallet::run_network_profile_self_tests();
   const bool peercoin = hexwallet::run_peercoin_sighash_self_tests();
   printf("peercoin-sighash=%s\n", peercoin ? "pass" : "FAIL");
-  const bool sighash = hexwallet::run_bitcoin_sighash_self_tests() && peercoin;
+  const bool sighash = hexwallet::run_bitcoin_sighash_self_tests() && peercoin && hexwallet::run_groestlcoin_sighash_self_tests();
   const bool kaspa = hexwallet::run_kaspa_self_tests();
   const bool blake2b = hexwallet::run_blake2b_self_tests();
   const bool groestl512 = hexwallet::run_groestl512_self_tests();
@@ -121,6 +124,8 @@ int main()
   const bool solana = hexwallet::run_solana_self_tests();
   const bool starknet = hexwallet::run_starknet_crypto_self_tests();
   const bool p256 = hexwallet::run_p256_self_tests();
+  const bool ecdsa_curve = hexwallet::run_ecdsa_curve_self_tests();
+  const bool x25519 = hexwallet::run_x25519_self_tests();
   const bool catalog = hexwallet::run_catalog_self_tests();
   const bool mining = hexwallet::run_mining_catalog_self_tests();
   const bool tokens = hexwallet::run_token_profile_self_tests();
@@ -156,6 +161,7 @@ int main()
   printf("secure-element=%s\n", secure_element ? "pass" : "FAIL");
   printf("scp03=%s\n", scp03 ? "pass" : "FAIL");
   printf("se051-provisioning=%s\n", se051_provisioning ? "pass" : "FAIL");
+  printf("se051-apdu=%s\n", se051_apdu ? "pass" : "FAIL");
   printf("airgap=%s\n", airgap ? "pass" : "FAIL");
   if (!airgap)
     printf("airgap-stage=%d\n", hexwallet::airgap_last_stage());
@@ -196,6 +202,8 @@ int main()
   printf("solana=%s\n", solana ? "pass" : "FAIL");
   printf("starknet-crypto=%s\n", starknet ? "pass" : "FAIL");
   printf("p256-ecdsa=%s\n", p256 ? "pass" : "FAIL");
+  printf("ecdsa-curve=%s\n", ecdsa_curve ? "pass" : "FAIL");
+  printf("x25519=%s\n", x25519 ? "pass" : "FAIL");
   printf("catalog=%s\n", catalog ? "pass" : "FAIL");
   printf("mining-catalog=%s\n", mining ? "pass" : "FAIL");
   printf("tokens=%s\n", tokens ? "pass" : "FAIL");
@@ -203,5 +211,5 @@ int main()
   printf("link-crypto=%s\n", link_crypto ? "pass" : "FAIL");
   printf("wallet-link=%s\n", wallet_link ? "pass" : "FAIL");
   printf("nfc-apdu=%s\n", nfc_apdu ? "pass" : "FAIL");
-  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && scp03 && se051_provisioning && airgap && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && groestl512 && grs_address && theta && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && ml_dsa && solana && starknet && p256 && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
+  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && scp03 && se051_provisioning && se051_apdu && airgap && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && groestl512 && grs_address && theta && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && ml_dsa && solana && starknet && p256 && ecdsa_curve && x25519 && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
 }

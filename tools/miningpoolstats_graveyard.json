@@ -1,7 +1,129 @@
 {
-  "source": "https://miningpoolstats.stream/data/coin_list.1792332829.min.js",
-  "checked_date": "2026-10-23",
+  "source": "https://miningpoolstats.stream/data/coin_list.1793562569.min.js",
+  "checked_date": "2026-11-02",
   "coins": {
+    "hawaiicoin": {
+      "n": "Hawaii Coin",
+      "s": "HWI"
+    },
+    "cpuchain": {
+      "n": "CPUchain",
+      "s": "CPU"
+    },
+    "nvolve": {
+      "n": "Nvolve",
+      "s": "NVOL"
+    },
+    "kusa": {
+      "n": "Kusa",
+      "s": "KUS"
+    },
+    "actinium": {
+      "n": "Actinium",
+      "s": "ACM"
+    },
+    "myscoin": {
+      "n": "MysCoin",
+      "s": "MYS"
+    },
+    "dogecoinev": {
+      "n": "Dogecoinev",
+      "s": "DEV"
+    },
+    "superzero": {
+      "n": "Super Zero",
+      "s": "SERO"
+    },
+    "diabase": {
+      "n": "Diabase",
+      "s": "DIAC"
+    },
+    "viceversachain": {
+      "n": "ViceversaChain",
+      "s": "VIVE"
+    },
+    "callisto": {
+      "n": "Callisto Network",
+      "s": "CLO"
+    },
+    "unitus-argon2d": {
+      "n": "Unitus",
+      "s": "UIS",
+      "a": "Argon2d",
+      "m": true
+    },
+    "unitus-x11": {
+      "n": "Unitus",
+      "s": "UIS",
+      "a": "X11",
+      "m": true
+    },
+    "unitus-lyra": {
+      "n": "Unitus",
+      "s": "UIS",
+      "a": "Lyra2REv2",
+      "m": true
+    },
+    "unitus-skein": {
+      "n": "Unitus",
+      "s": "UIS",
+      "a": "Skein",
+      "m": true
+    },
+    "unitus-yescrypt": {
+      "n": "Unitus",
+      "s": "UIS",
+      "a": "Yescrypt",
+      "m": true
+    },
+    "equilibria": {
+      "n": "Equilibria",
+      "s": "XEQ"
+    },
+    "mangonote": {
+      "n": "Mangonote",
+      "s": "MNN"
+    },
+    "worktips": {
+      "n": "Worktips",
+      "s": "WTIP"
+    },
+    "nexia": {
+      "n": "Nexia",
+      "s": "NXE"
+    },
+    "safex": {
+      "n": "Safex Cash",
+      "s": "SFX"
+    },
+    "ezcoin": {
+      "n": "EZCoin",
+      "s": "EZC"
+    },
+    "kawra": {
+      "n": "Kawra",
+      "s": "KWR"
+    },
+    "flapxcoin": {
+      "n": "FlapXCoin",
+      "s": "FLAPX"
+    },
+    "guus": {
+      "n": "Guus",
+      "s": "GUUS"
+    },
+    "aipowergrid": {
+      "n": "AIPowerGrid",
+      "s": "AIPG"
+    },
+    "napcoin": {
+      "n": "NapCoin",
+      "s": "NAP"
+    },
+    "safeminecoin": {
+      "n": "SafeMineCoin",
+      "s": "SMCN"
+    },
     "graft": {
       "n": "Graft",
       "s": "GRFT"
@@ -606,6 +728,5 @@
       "a": "SHA-256",
       "m": true
     }
-  },
-  "exceptions": []
+  }
 }

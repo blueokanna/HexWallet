@@ -101,6 +101,10 @@ bool run_bitcoin_transaction_self_test();
 // Digest-only vectors (legacy, BIP143 and SIGHASH_FORKID). Safe to run on the
 // host: no ECDSA, no key derivation.
 bool run_bitcoin_sighash_self_tests();
+// Groestlcoin: Bitcoin's legacy preimage with a single-SHA256 digest, pinned to
+// a real mainnet spend whose DER signature verifies against it and not against
+// the double-SHA256 digest.
+bool run_groestlcoin_sighash_self_tests();
 // Exposed so external tooling can audit the exact bytes an approval covers.
 TransactionError bitcoin_sighash_legacy(const BitcoinSigningRequest &request,
                                         size_t input_index, uint32_t sighash_type,

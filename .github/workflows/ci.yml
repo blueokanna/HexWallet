@@ -101,6 +101,16 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify pinned mining identities and compiled capabilities
+        shell: pwsh
+        run: |
+          ./tests/host/catalog_dump.exe --selftest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/host/mining_catalog_test.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/generate_mining_catalog.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: TOTP local approval and transport protocol regressions
         shell: pwsh
         run: |

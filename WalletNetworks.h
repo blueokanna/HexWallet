@@ -111,7 +111,22 @@ namespace hexwallet
     Bitcoin,     // legacy sighash for P2PKH inputs, BIP143 for witness inputs
     ForkId,      // BIP143 preimage with SIGHASH_FORKID (0x41) plus fork id bits
     ZcashZip243, // Zcash Overwinter/Sapling v4 BLAKE2b-256 with branch id
+    // Groestlcoin: the Bitcoin legacy preimage byte for byte, but the digest is
+    // a SINGLE SHA-256. Groestlcoin Core's HashWriter::GetHash() finalises once
+    // (the second round is commented out in src/hash.h), which is also why a
+    // transaction id there is SHA256(raw) rather than SHA256d(raw). There is no
+    // SIGHASH_FORKID on this chain. Groestl-512 is used for the address
+    // checksum and the block hash, NOT for the signature hash.
+    GroestlLegacy,
   };
+
+  // True for the families whose signature hash is the pre-BIP143 transaction
+  // serialisation. Their only difference is the final hash function.
+  inline bool sighash_family_is_legacy(SighashFamily family)
+  {
+    return family == SighashFamily::Bitcoin ||
+           family == SighashFamily::GroestlLegacy;
+  }
 
   struct NetworkSigningPolicy
   {

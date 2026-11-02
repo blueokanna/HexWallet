@@ -72,11 +72,13 @@ BitcoinSigningRequest pending_transaction;
 EvmSigningRequest pending_evm_transaction;
 KaspaTransaction pending_kaspa_transaction;
 ZcashSigningRequest pending_zcash_transaction;
+ChainTransaction pending_chain_transaction;
 enum class PendingTransactionKind : uint8_t { None,
                                               Bitcoin,
                                               Evm,
                                               Kaspa,
-                                              Zcash };
+                                              Zcash,
+                                              Chain };
 PendingTransactionKind pending_transaction_kind = PendingTransactionKind::None;
 bool transaction_pending = false;
 uint32_t transaction_approval = 0;
@@ -165,6 +167,7 @@ void clear_pending_transaction() {
   clear_evm_request(&pending_evm_transaction);
   clear_kaspa_transaction(&pending_kaspa_transaction);
   clear_zcash_request(&pending_zcash_transaction);
+  secure_zero(&pending_chain_transaction, sizeof(pending_chain_transaction));
   pending_transaction_kind = PendingTransactionKind::None;
   transaction_pending = false;
   transaction_approval = 0;
@@ -235,12 +238,13 @@ uint32_t parse_index(const char *text, bool *ok) {
 }
 
 void show_help() {
-  Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD] [offset] | mining show <symbol> | token list [network] | token show <id>");
+  Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD|MERGED] [offset] | mining show <source-id-or-symbol> | token list [network] | token show <id>");
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
   Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
   Serial.println("OK totp: totp time [unix] | totp add <otpauth-uri> | totp list | totp show <slot> | totp remove <slot>");
   Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
+  Serial.println("OK chain: chain begin <network> <index> <payload-hex> | chain sign <code> | chain reject  (native Theta SendTx payload is 46 bytes)");
   Serial.println("OK link: link status | link pair confirm | link pair reject");
   Serial.println("OK security: secret export and host mnemonic import unavailable | selftest");
 }
@@ -411,6 +415,7 @@ bool parse_mining_type(const char *text, MiningCoinType *out) {
   else if (strcmp(text, "GPU") == 0) *out = MiningCoinType::Gpu;
   else if (strcmp(text, "CPU") == 0) *out = MiningCoinType::Cpu;
   else if (strcmp(text, "HDD") == 0) *out = MiningCoinType::Hdd;
+  else if (strcmp(text, "MERGED") == 0) *out = MiningCoinType::Merged;
   else return false;
   return true;
 }
@@ -423,10 +428,12 @@ void print_mining_support(const MiningCoinEntry &coin) {
 void show_mining_coin(const char *symbol) {
   const MiningCoinEntry *coin = mining_coin_find(symbol);
   if (coin == nullptr) {
-    Serial.println("ERR unknown-mining-coin");
+    Serial.println("ERR unknown-or-ambiguous-mining-coin-use-source-id");
     return;
   }
-  Serial.print("OK symbol=");
+  Serial.print("OK source=");
+  Serial.print(coin->source_id);
+  Serial.print(" symbol=");
   Serial.print(coin->symbol);
   Serial.print(" name=\"");
   Serial.print(coin->name);
@@ -449,7 +456,7 @@ void show_mining_list(bool has_type, MiningCoinType type, size_t offset) {
     if (has_type && coin.type != type) continue;
     ++matches;
   }
-  const size_t end = offset + 25 > matches ? matches : offset + 25;
+  const size_t end = offset >= matches ? matches : offset + (matches - offset < 25 ? matches - offset : 25);
   Serial.print("BEGIN MINING total=");
   Serial.print(static_cast<unsigned long>(matches));
   Serial.print(" offset=");
@@ -462,6 +469,8 @@ void show_mining_list(bool has_type, MiningCoinType type, size_t offset) {
     if (!mining_coin_at(index, &coin)) continue;
     if (has_type && coin.type != type) continue;
     if (position++ < offset) continue;
+    Serial.print(coin.source_id);
+    Serial.print(' ');
     Serial.print(coin.symbol);
     Serial.print(' ');
     Serial.print(mining_coin_type_name(coin.type));
@@ -477,19 +486,38 @@ void show_mining_list(bool has_type, MiningCoinType type, size_t offset) {
 
 void show_mining_stats() {
   size_t signable = 0;
+  size_t profiles = 0;
+  size_t signing_profiles = 0;
   for (size_t index = 0; index < mining_coin_count(); ++index) {
     MiningCoinEntry coin;
     if (!mining_coin_at(index, &coin)) continue;
     WalletCatalogEntry entry;
-    if (mining_coin_lookup(coin, &entry) &&
-        wallet_catalog_has(entry, WalletCapabilitySigning)) {
+    const bool signs = mining_coin_lookup(coin, &entry) &&
+                       wallet_catalog_has(entry, WalletCapabilitySigning);
+    if (signs) {
       ++signable;
     }
+    bool first = true;
+    for (size_t earlier = 0; earlier < index; ++earlier) {
+      MiningCoinEntry previous;
+      if (mining_coin_at(earlier, &previous) && strcmp(previous.catalog_id, coin.catalog_id) == 0) {
+        first = false;
+        break;
+      }
+    }
+    if (first) {
+      ++profiles;
+      if (signs) ++signing_profiles;
+    }
   }
-  Serial.print("OK mining total=");
+  Serial.print("OK mining entries=");
   Serial.print(static_cast<unsigned long>(mining_coin_count()));
-  Serial.print(" signable=");
-  Serial.println(static_cast<unsigned long>(signable));
+  Serial.print(" signing-entries=");
+  Serial.print(static_cast<unsigned long>(signable));
+  Serial.print(" profiles=");
+  Serial.print(static_cast<unsigned long>(profiles));
+  Serial.print(" signing-profiles=");
+  Serial.println(static_cast<unsigned long>(signing_profiles));
 }
 
 void handle_mining(char *command) {
@@ -1091,7 +1119,7 @@ void inspect_transaction(char *arguments) {
   const NetworkSigningPolicy *policy = network == nullptr ? nullptr : find_network_signing_policy(network->id);
   WalletCatalogEntry signing_entry;
   if (network == nullptr || policy == nullptr ||
-      (policy->family != SighashFamily::Bitcoin &&
+      (!sighash_family_is_legacy(policy->family) &&
        policy->family != SighashFamily::ForkId) ||
       !wallet_catalog_find(network->id, &signing_entry) ||
       !wallet_catalog_has(signing_entry, WalletCapabilitySigning) ||
@@ -2004,6 +2032,239 @@ void handle_link(char *command) {
   Serial.println("ERR invalid-link-command");
 }
 
+// Account-model adapters that share the ChainTransaction envelope (native
+// Theta SendTx today). The host sends the adapter payload; the device derives
+// the sender, rebuilds the digest from it and shows the review. The 46-byte
+// Theta request is therefore reachable over the serial CLI and, through
+// `kTxChain = 14`, over the phone link without either one being able to name a
+// sender other than this wallet's own address.
+void print_chain_review(const ChainTransaction &transaction) {
+  Serial.println("BEGIN TRANSACTION REVIEW");
+  Serial.print("network=");
+  Serial.print(chain_family_network_id(transaction.family));
+  Serial.print(" type=");
+  Serial.print(chain_family_name(transaction.family));
+  Serial.print(" index=");
+  Serial.println(static_cast<unsigned long>(transaction.address_index));
+  Serial.print("sender=");
+  Serial.println(transaction.review.sender);
+  Serial.print("recipient=");
+  Serial.println(transaction.review.recipient);
+  Serial.print("amount=");
+  Serial.print(transaction.review.amount);
+  Serial.print(' ');
+  Serial.println(transaction.review.symbol);
+  Serial.print("fee=");
+  Serial.print(transaction.review.fee);
+  Serial.print(' ');
+  Serial.println(transaction.review.symbol);
+  if (transaction.review.extra[0] != '\0') {
+    Serial.print("extra=");
+    Serial.println(transaction.review.extra);
+  }
+  for (uint8_t index = 0; index < transaction.review.call_count; ++index) {
+    const ChainCallSummary &call = transaction.review.calls[index];
+    Serial.print("call=");
+    Serial.print(static_cast<unsigned long>(index));
+    Serial.print(" target=");
+    Serial.print(call.target);
+    if (call.recipient[0] != '\0') {
+      Serial.print(" recipient=");
+      Serial.print(call.recipient);
+    }
+    Serial.print(" amount=");
+    Serial.println(call.amount);
+  }
+  Serial.print("digest=");
+  print_hex(transaction.digest, sizeof(transaction.digest));
+  Serial.println();
+}
+
+void inspect_chain_transaction(char *arguments) {
+  if (!require_authentication()) return;
+  const WalletTransportState transport_state = { true, false, display_is_available };
+  if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                               WalletTransportOperation::SigningRequest, transport_state)) {
+    Serial.println("ERR trusted-display-required-for-signing");
+    return;
+  }
+  // Any earlier review is dropped before this one is parsed: a failed parse
+  // must not leave a stale, still-approvable request behind.
+  clear_pending_transaction();
+  // chain begin <network> <address-index> <payload-hex>
+  char *network_id = arguments;
+  char *index_text = strchr(network_id, ' ');
+  if (index_text == nullptr) {
+    Serial.println("ERR chain-usage <network> <index> <payload-hex>");
+    return;
+  }
+  *index_text++ = '\0';
+  char *payload_hex = strchr(index_text, ' ');
+  if (payload_hex == nullptr) {
+    Serial.println("ERR chain-usage <network> <index> <payload-hex>");
+    return;
+  }
+  *payload_hex++ = '\0';
+  ChainFamily family = ChainFamily::None;
+  WalletCatalogEntry entry;
+  if (!chain_family_for_network(network_id, &family) || family == ChainFamily::None ||
+      !wallet_catalog_find(network_id, &entry) ||
+      !wallet_catalog_has(entry, WalletCapabilityTransactionReview) ||
+      !wallet_catalog_has(entry, WalletCapabilitySigning)) {
+    Serial.println("ERR chain-signing-unsupported");
+    return;
+  }
+  uint32_t address_index = 0;
+  if (*index_text == '\0' || strlen(index_text) > 6) {
+    Serial.println("ERR invalid-address-index");
+    return;
+  }
+  for (const char *digit = index_text; *digit != '\0'; ++digit) {
+    if (*digit < '0' || *digit > '9') {
+      Serial.println("ERR invalid-address-index");
+      return;
+    }
+    address_index = address_index * 10U + static_cast<uint32_t>(*digit - '0');
+    if (address_index > 1000000U) {
+      Serial.println("ERR invalid-address-index");
+      return;
+    }
+  }
+  // The payload is small by design (46 bytes for Theta); the adapter buffers
+  // are far larger, but nothing here should accept a multi-kilobyte blob.
+  uint8_t payload[kChainMaxPayload];
+  size_t payload_size = 0;
+  if (!decode_hex(payload_hex, payload, sizeof(payload), &payload_size)) {
+    secure_zero(payload, sizeof(payload));
+    Serial.println("ERR invalid-chain-payload-hex");
+    return;
+  }
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
+  if (!load_master(&master)) {
+    secure_zero(payload, sizeof(payload));
+    return;
+  }
+  uint8_t seed[kSeedSize] = {};
+  if (wallet_session_load_seed(seed) != WalletError::Ok) {
+    secure_zero(&master, sizeof(master));
+    secure_zero(seed, sizeof(seed));
+    secure_zero(payload, sizeof(payload));
+    Serial.println("ERR wallet-seed-unavailable");
+    return;
+  }
+  const ChainError error = chain_review_transaction(
+      family, payload, payload_size, master, seed, address_index,
+      &pending_chain_transaction);
+  secure_zero(&master, sizeof(master));
+  secure_zero(seed, sizeof(seed));
+  secure_zero(payload, sizeof(payload));
+  if (error != ChainError::Ok) {
+    clear_pending_transaction();
+    Serial.print("ERR chain-inspect ");
+    Serial.println(chain_error_text(error));
+    return;
+  }
+  uint32_t random_value;
+  random_fill(&random_value, sizeof(random_value));
+  transaction_approval = random_value % 1000000U;
+  transaction_expires_at = millis() + kTransactionApprovalMs;
+  transaction_pending = true;
+  pending_transaction_kind = PendingTransactionKind::Chain;
+  print_chain_review(pending_chain_transaction);
+  char approval[7];
+  snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+  if (display_is_available) {
+    wallet_ui_set_status("Confirm the amount and address on screen");
+    Serial.println("OK review-on-device compare the serial review with the display");
+    return;
+  }
+  Serial.print("approval-code=");
+  Serial.println(approval);
+  secure_zero(approval, sizeof(approval));
+}
+
+void sign_chain_transaction(char *arguments) {
+  if (!require_authentication()) return;
+  if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Chain) {
+    Serial.println("ERR no-pending-chain-transaction");
+    return;
+  }
+  if (deadline_reached(millis(), transaction_expires_at)) {
+    clear_pending_transaction();
+    wallet_ui_show_catalog();
+    Serial.println("ERR review-expired; review-cleared");
+    return;
+  }
+  uint32_t supplied = 0;
+  const size_t length = strlen(arguments);
+  if (length != 6) {
+    Serial.println("ERR invalid-approval-code");
+    return;
+  }
+  for (size_t index = 0; index < length; ++index) {
+    if (arguments[index] < '0' || arguments[index] > '9') {
+      Serial.println("ERR invalid-approval-code");
+      return;
+    }
+    supplied = supplied * 10U + static_cast<uint32_t>(arguments[index] - '0');
+  }
+  if (supplied != transaction_approval) {
+    clear_pending_transaction();
+    Serial.println("ERR confirmation-mismatch; review-cleared");
+    return;
+  }
+  SensitiveValue<HdPrivateNode> master_storage;
+  auto &master = master_storage.get();
+  if (!load_master(&master)) {
+    clear_pending_transaction();
+    return;
+  }
+  uint8_t seed[kSeedSize] = {};
+  if (wallet_session_load_seed(seed) != WalletError::Ok) {
+    secure_zero(&master, sizeof(master));
+    Serial.println("ERR wallet-seed-unavailable");
+    clear_pending_transaction();
+    return;
+  }
+  // kChainMaxPayload is the largest adapter payload, but the signed result can
+  // be a full transaction; 512 bytes covers every adapter in this family.
+  uint8_t signed_transaction[512];
+  size_t signed_size = sizeof(signed_transaction);
+  const ChainError error = chain_sign_transaction(
+      pending_chain_transaction, master, seed, signed_transaction, &signed_size);
+  secure_zero(&master, sizeof(master));
+  secure_zero(seed, sizeof(seed));
+  clear_pending_transaction();
+  if (error != ChainError::Ok) {
+    secure_zero(signed_transaction, sizeof(signed_transaction));
+    Serial.print("ERR chain-sign ");
+    Serial.println(chain_error_text(error));
+    return;
+  }
+  Serial.print("OK signed-transaction=");
+  print_hex(signed_transaction, signed_size);
+  Serial.println();
+  secure_zero(signed_transaction, sizeof(signed_transaction));
+  wallet_ui_show_catalog();
+}
+
+void handle_chain(char *command) {
+  constexpr char kBeginPrefix[] = "chain begin ";
+  constexpr char kSignPrefix[] = "chain sign ";
+  if (strncmp(command, kBeginPrefix, sizeof(kBeginPrefix) - 1) == 0) {
+    inspect_chain_transaction(command + sizeof(kBeginPrefix) - 1);
+  } else if (strncmp(command, kSignPrefix, sizeof(kSignPrefix) - 1) == 0) {
+    sign_chain_transaction(command + sizeof(kSignPrefix) - 1);
+  } else if (strcmp(command, "chain reject") == 0) {
+    clear_pending_transaction();
+    wallet_ui_show_catalog();
+    Serial.println("OK chain-transaction-rejected-and-cleared");
+  } else {
+    Serial.println("ERR invalid-chain-command");
+  }
+}
+
 void handle_transaction(char *command) {
   constexpr char kInspectPrefix[] = "tx inspect ";
   constexpr char kSignPrefix[] = "tx sign ";
@@ -2158,6 +2419,7 @@ void handle_line(char *command) {
   else if (strncmp(command, "zec ", 4) == 0) handle_zcash(command);
   else if (strncmp(command, "link ", 5) == 0) handle_link(command);
   else if (strncmp(command, "tx ", 3) == 0) handle_transaction(command);
+else if (strncmp(command, "chain ", 6) == 0) handle_chain(command);
   else if (strncmp(command, "totp", 4) == 0) handle_totp(command);
   else Serial.println("ERR unknown-command; use help");
 }

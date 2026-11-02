@@ -18,6 +18,10 @@ namespace hexwallet
 
   constexpr UtxoAddressProfile kBitcoinMainnet = {0x00, 0x05, "bc", false};
   constexpr UtxoAddressProfile kBitcoinTestnet = {0x6f, 0xc4, "tb", false};
+  // Groestlcoin mainnet (SLIP-44 17): p2pkh 0x24, p2sh 0x05, bech32 "grs".
+  // The base58 checksum is double Groestl-512, so a profile alone is not enough
+  // to render an address - see address_from_script_groestl().
+  constexpr UtxoAddressProfile kGroestlcoinMainnet = {0x24, 0x05, "grs", false};
 
   WalletError address_p2pkh(const UtxoAddressProfile &profile,
                             const uint8_t public_key[kCompressedPublicKeySize],
@@ -42,6 +46,12 @@ namespace hexwallet
   WalletError address_from_script(const UtxoAddressProfile &profile,
                                   const uint8_t *script, size_t script_size,
                                   char *out, size_t out_size);
+  // Same, but with Groestlcoin's double-Groestl-512 base58 checksum. The
+  // segwit branch is unchanged because bech32 keeps its own checksum.
+  WalletError address_from_script_groestl(const UtxoAddressProfile &profile,
+                                          const uint8_t *script,
+                                          size_t script_size, char *out,
+                                          size_t out_size);
 
 }
 

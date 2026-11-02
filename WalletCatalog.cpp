@@ -68,7 +68,7 @@ const CatalogSeed kCatalog[] = {
   { "metis", "METIS", "Metis Andromeda", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "metis", "EVM address and token account support; EIP-155 signing" },
   { "kaia", "KAIA", "Kaia", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "kaia", "EVM address and token account support; EIP-155 signing" },
   { "ronin", "RON", "Ronin", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "ronin", "EVM address and token account support; EIP-155 signing" },
-  { "theta", "TFUEL", "Theta", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "theta", "EVM address and token account support; EIP-155 signing" },
+  { "theta", "TFUEL", "Theta", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount | WalletCapabilityTransactionReview | WalletCapabilitySigning, "theta", "EVM address and token account support; EIP-155 signing for EVM transfers, plus the native SendTx adapter (46-byte review payload, RLP envelope, keccak-256, TFUEL fee and sequence) selected by the payload format" },
   { "acalaevm", "ACA", "Acala EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "acalaevm", "EVM address and token account support; EIP-155 signing" },
   { "astar", "ASTR", "Astar", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "astar", "EVM address and token account support; EIP-155 signing" },
   { "canto", "CANTO", "Canto", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "canto", "EVM address and token account support; EIP-155 signing" },
@@ -79,7 +79,6 @@ const CatalogSeed kCatalog[] = {
   { "telos", "TLOS", "Telos EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "telos", "EVM address and token account support; EIP-155 signing" },
   { "seievm", "SEI", "Sei EVM", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "seievm", "EVM address and token account support; EIP-155 signing" },
   { "ethw", "ETHW", "EthereumPoW", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "ethw", "EVM address and token account support; EIP-155 signing" },
-  { "clo", "CLO", "Callisto Network", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "clo", "EVM address and token account support; EIP-155 signing" },
   { "etho", "ETHO", "Etho Protocol", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "etho", "EVM address and token account support; EIP-155 signing" },
   { "octa", "OCTA", "OctaSpace", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "octa", "EVM address and token account support; EIP-155 signing" },
   { "egaz", "EGAZ", "Etica", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "egaz", "EVM address and token account support; EIP-155 signing" },
@@ -129,7 +128,9 @@ const CatalogSeed kCatalog[] = {
   { "vtc49", "VTC", "Vertcoin Nested SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc49", "P2SH-P2WPKH address and BIP143 signing" },
   { "vtc84", "VTC", "Vertcoin Native SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc84", "P2WPKH address and Bitcoin-sighash signing" },
   { "axe", "AXE", "Axe", 4242, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "axe", "P2PKH address and Bitcoin-sighash signing" },
-  { "grs", "GRS", "Groestlcoin", 17, WalletCapabilityAddress, "grs", "Base58 P2PKH with Groestl-512 checksum; receive only - the legacy sighash is not reproduced yet, so signing stays off" },
+  { "grs", "GRS", "Groestlcoin", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs", "P2PKH spends signed over Bitcoin's legacy preimage with a single SHA-256 digest, which is what Groestlcoin Core finalises; the base58 checksum is double Groestl-512. Use grs49/grs84 for the segwit accounts" },
+  { "grs49", "GRS", "Groestlcoin Nested SegWit", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs49", "P2SH-P2WPKH spends; BIP143 preimage with Groestlcoin's single-finalise writer on all four hashes" },
+  { "grs84", "GRS", "Groestlcoin Native SegWit", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs84", "P2WPKH spends with grs1 bech32 addresses; BIP143 preimage with Groestlcoin's single-finalise writer on all four hashes" },
   { "xmr", "XMR", "Monero", 128, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xmr", "RingCT type-6 review and CLSAG signing; fully offline, host supplies decoys" },
   { "ryo", "RYO", "RyoCurrency", 382, WalletCapabilityAddress, "ryo", "CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled" },
   { "zano", "ZANO", "Zano", 1018, WalletCapabilityAddress, "zano", "CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled" },
@@ -182,12 +183,18 @@ WalletCatalogEntry resolved_entry(size_t index) {
   if (policy != nullptr) {
     capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
     if (network != nullptr && network->encoding == AddressEncoding::P2wpkh) {
-      status = "BIP84 native SegWit PSBT signing (BIP143)";
+      status = policy->family == SighashFamily::GroestlLegacy
+                   ? "BIP84 native SegWit PSBT signing (BIP143) with Groestlcoin's single SHA-256 on every hash"
+                   : "BIP84 native SegWit PSBT signing (BIP143)";
     } else if (network != nullptr &&
                network->encoding == AddressEncoding::P2shP2wpkh) {
-      status = "BIP49 nested SegWit PSBT signing (BIP143)";
+      status = policy->family == SighashFamily::GroestlLegacy
+                   ? "BIP49 nested SegWit PSBT signing (BIP143) with Groestlcoin's single SHA-256 on every hash"
+                   : "BIP49 nested SegWit PSBT signing (BIP143)";
     } else if (policy->family == SighashFamily::ZcashZip243) {
       status = "Zcash v4 transparent ZIP-243 review and signing (NU6.2)";
+    } else if (policy->family == SighashFamily::GroestlLegacy) {
+      status = "P2PKH legacy sighash signed with a single SHA-256 digest, as Groestlcoin does; Groestl-512 is used only for the address checksum";
     } else {
       status = policy->family == SighashFamily::ForkId
                    ? "P2PKH PSBT signing, BIP143 + SIGHASH_FORKID"

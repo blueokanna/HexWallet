@@ -27,6 +27,8 @@ try {
   cmake --build build/chain-native --config Release --parallel 4
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  & 'build/chain-native/Release/chain_probe.exe' wallet-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'wallet self-test failed' }
   & 'build/chain-native/Release/chain_probe.exe' chain-selftest
   if ($LASTEXITCODE -ne 0) { throw 'chain_probe self-test failed' }
   # Real BIP32/ECDSA is linked here, so this runs the device-only Zcash signer

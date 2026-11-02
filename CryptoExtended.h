@@ -95,6 +95,34 @@ namespace hexwallet
     bool ed25519_ecdh(const uint8_t seed[32], const uint8_t peer_public[32],
                       uint8_t out_shared[32]);
 
+    // -------------------------------------------------------------------------
+    // X25519 (RFC 7748) - Curve25519 in Montgomery form. A different group
+    // primitive from ed25519_ecdh above: peers that speak "x25519" (HPKE, age,
+    // WireGuard-style handshakes) expect these u-coordinates, and an
+    // Edwards25519 point encoding is not one.
+    // -------------------------------------------------------------------------
+
+    // The RFC 7748 X25519 function. The scalar is clamped and the high bit of
+    // the u-coordinate masked internally, as the RFC specifies, so any 32-byte
+    // string is a valid input. The ladder is constant time.
+    bool x25519_scalar_mult(const uint8_t scalar[32], const uint8_t point[32],
+                            uint8_t out[32]);
+    // x25519_scalar_mult(scalar, 9).
+    bool x25519_public_key(const uint8_t scalar[32], uint8_t out[32]);
+    // Same, but refuses an all-zero result: RFC 7748 section 6.1 requires
+    // rejecting a peer that sent a small-order point, which would make the
+    // "shared" secret public.
+    bool x25519_ecdh(const uint8_t scalar[32], const uint8_t peer_public[32],
+                     uint8_t out[32]);
+    // u = (1 + y) / (1 - y). The only well-defined direction of the birational
+    // map; x25519 -> ed25519 cannot recover the sign of x, so it is not
+    // offered and callers must not invent one.
+    bool ed25519_public_to_x25519(const uint8_t ed_public[32], uint8_t out[32]);
+    // SHA-512(seed)[0..31] - the unclamped pre-key Ed25519 uses for its own
+    // scalar, and exactly what a peer library derives from the same seed.
+    // Clamping happens inside the X25519 call.
+    bool ed25519_seed_to_x25519(const uint8_t seed[32], uint8_t out[32]);
+
     bool ed25519_point_add_compressed(const uint8_t left[32],
                                       const uint8_t right[32], uint8_t out[32]);
     bool ed25519_point_mul_compressed(const uint8_t point[32],
@@ -176,6 +204,11 @@ namespace hexwallet
     // ---------------------------------------------------------------------------
 
     bool run_crypto_extended_self_tests();
+
+    // RFC 7748 X25519, the iterated test, and the Ed25519 -> Curve25519 map.
+    // Separate from run_crypto_extended_self_tests() so a failure names the
+    // primitive instead of the whole extended bundle.
+    bool run_x25519_self_tests();
 
 } // namespace hexwallet
 

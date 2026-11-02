@@ -35,10 +35,10 @@ namespace hexwallet {
 //   Stellar    asset    32-byte issuer key + up to 12-byte asset code
 //   Starknet   ERC-20   32-byte contract address (felt-width, not 20 bytes)
 //
-// Bounds are deliberately small: eight tokens of twelve bytes of symbol. A
-// bigger table would need a different storage model, and eight covers the
-// "my token is not listed" case without turning the device into a token wallet.
-constexpr size_t kCustomTokenMax = 8;
+// Fixed resource budget: 64 user-declared assets, in addition to the shipped
+// registry. Persistence buffers are allocated off the ESP task stack.
+constexpr size_t kCustomTokenMax = 64;
+static_assert(kCustomTokenMax <= 255, "The serialized record count is one byte");
 constexpr size_t kCustomTokenNetworkSize = 16;
 constexpr size_t kCustomTokenSymbolSize = 12;
 constexpr size_t kCustomTokenNameSize = 24;
@@ -77,9 +77,9 @@ constexpr size_t kCustomTokenBlobMax =
                            kCustomTokenSymbolSize + kCustomTokenNameSize + 1) +
     8;
 
-// Blob codec. The trailing digest covers every byte before it, so a torn write
-// or an edited blob is rejected instead of being half-applied. Version 1 blobs
-// (EVM-only records) are upgraded on load.
+// Blob codec. The trailing digest detects corruption, not malicious edits by
+// someone able to recompute it. Every load also revalidates network binding and
+// uniqueness. Version 1 blobs (EVM-only records) are upgraded on load.
 bool custom_token_serialize(uint8_t *out, size_t capacity, size_t *out_size);
 bool custom_token_deserialize(const uint8_t *blob, size_t size,
                               CustomTokenRecord *records, size_t capacity,
@@ -141,8 +141,9 @@ CustomTokenError custom_token_add(const char *network_id,
                                   const uint8_t *identifier,
                                   size_t identifier_size, const char *symbol,
                                   const char *name, uint8_t decimals);
-// Stellar issued assets: issuer ed25519 key + asset code (1..12 printable ASCII
-// characters, no NUL). `symbol`/`name` are the display labels.
+// Stellar classic assets: issuer ed25519 key + 1..12 alphanumeric asset code.
+// Decimals must be 7, as required by the classic asset amount representation.
+// `symbol`/`name` are display labels.
 CustomTokenError custom_token_add_stellar(const char *network_id,
                                           const uint8_t issuer[32],
                                           const char *code, const char *symbol,

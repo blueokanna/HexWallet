@@ -2,8 +2,6 @@
 
 #include <Arduino.h>
 #include <esp_system.h>
-#include <mbedtls/ecp.h>
-#include <mbedtls/ecdsa.h>
 #include <mbedtls/platform_util.h>
 #include <mbedtls/pkcs5.h>
 #include <string.h>
@@ -11,6 +9,7 @@
 #include "base58.h"
 #include "CryptoPrimitives.h"
 #include "RandomSource.h"
+#include "src/EcdsaCurve.h"
 #include "WalletAddresses.h"
 #include "word_list.h"
 
@@ -34,21 +33,8 @@ class WipeOnExit {
   size_t size_;
 };
 
-int random_callback(void *, unsigned char *output, size_t length) {
-  random_fill(output, length);
-  return 0;
-}
-
 bool valid_private_key(const uint8_t key[kPrivateKeySize]) {
-  mbedtls_ecp_group group;
-  mbedtls_mpi scalar;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_mpi_init(&scalar);
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&scalar, key, kPrivateKeySize);
-  const bool valid = result == 0 && mbedtls_mpi_cmp_int(&scalar, 0) > 0 && mbedtls_mpi_cmp_mpi(&scalar, &group.N) < 0;
-  mbedtls_mpi_free(&scalar);
-  mbedtls_ecp_group_free(&group);
-  return valid;
+  return ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, key);
 }
 
 bool hash160(const uint8_t *data, size_t length, uint8_t out[20]) {
@@ -429,18 +415,9 @@ WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
   if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidKey;
   }
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point point;
-  mbedtls_mpi scalar;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&point);
-  mbedtls_mpi_init(&scalar);
-  size_t length = kCompressedPublicKeySize;
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize) || mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr) || mbedtls_ecp_point_write_binary(&group, &point, MBEDTLS_ECP_PF_COMPRESSED, &length, out_public_key, kCompressedPublicKeySize);
-  mbedtls_mpi_free(&scalar);
-  mbedtls_ecp_point_free(&point);
-  mbedtls_ecp_group_free(&group);
-  return result == 0 && length == kCompressedPublicKeySize ? WalletError::Ok : WalletError::CryptoFailure;
+  return ecdsa_public_key_compressed(EcdsaCurve::Secp256k1, private_key, out_public_key)
+             ? WalletError::Ok
+             : WalletError::CryptoFailure;
 }
 
 WalletError uncompressed_public_key_from_private(
@@ -449,106 +426,46 @@ WalletError uncompressed_public_key_from_private(
   if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidKey;
   }
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point point;
-  mbedtls_mpi scalar;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&point);
-  mbedtls_mpi_init(&scalar);
-  size_t length = kUncompressedPublicKeySize;
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize) || mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr) || mbedtls_ecp_point_write_binary(&group, &point, MBEDTLS_ECP_PF_UNCOMPRESSED, &length, out_public_key, kUncompressedPublicKeySize);
-  mbedtls_mpi_free(&scalar);
-  mbedtls_ecp_point_free(&point);
-  mbedtls_ecp_group_free(&group);
-  return result == 0 && length == kUncompressedPublicKeySize ? WalletError::Ok
-                                                             : WalletError::CryptoFailure;
+  uint8_t point[kEcdsaPointSize];
+  if (!ecdsa_public_key(EcdsaCurve::Secp256k1, private_key, point)) {
+    secure_zero(point, sizeof(point));
+    return WalletError::CryptoFailure;
+  }
+  out_public_key[0] = 0x04;
+  memcpy(out_public_key + 1, point, sizeof(point));
+  secure_zero(point, sizeof(point));
+  return WalletError::Ok;
 }
 
 WalletError secp256k1_sign_digest_recoverable(
   const uint8_t private_key[kPrivateKeySize],
   const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature) {
   WipeOnExit output_on_failure(out_signature, sizeof(RecoverableSignature));
-  if (private_key == nullptr || digest == nullptr || out_signature == nullptr || !valid_private_key(private_key)) {
+  if (private_key == nullptr || digest == nullptr || out_signature == nullptr ||
+      !valid_private_key(private_key)) {
     return WalletError::InvalidArgument;
   }
   memset(out_signature, 0, sizeof(*out_signature));
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point public_key;
-  mbedtls_ecp_point recovery_point;
-  mbedtls_mpi private_scalar, r, s, half_order, z, inverse_s, u1, u2, reduced_x;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&public_key);
-  mbedtls_ecp_point_init(&recovery_point);
-  mbedtls_mpi_init(&private_scalar);
-  mbedtls_mpi_init(&r);
-  mbedtls_mpi_init(&s);
-  mbedtls_mpi_init(&half_order);
-  mbedtls_mpi_init(&z);
-  mbedtls_mpi_init(&inverse_s);
-  mbedtls_mpi_init(&u1);
-  mbedtls_mpi_init(&u2);
-  mbedtls_mpi_init(&reduced_x);
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
-  if (result == 0) result = mbedtls_mpi_read_binary(&private_scalar, private_key, kPrivateKeySize);
-  if (result == 0) {
-    result = mbedtls_ecdsa_sign_det_ext(&group, &r, &s, &private_scalar,
-                                        digest, kSha256Size, MBEDTLS_MD_SHA256,
-                                        random_callback, nullptr);
+  EcdsaRecoverableSignature signature;
+  memset(&signature, 0, sizeof(signature));
+  if (!ecdsa_sign_digest_recoverable(EcdsaCurve::Secp256k1, private_key, digest,
+                                     &signature)) {
+    secure_zero(&signature, sizeof(signature));
+    return WalletError::CryptoFailure;
   }
-  if (result == 0) result = mbedtls_mpi_copy(&half_order, &group.N);
-  if (result == 0) result = mbedtls_mpi_shift_r(&half_order, 1);
-  if (result == 0 && mbedtls_mpi_cmp_mpi(&s, &half_order) > 0) {
-    result = mbedtls_mpi_sub_mpi(&s, &group.N, &s);
+  // Bit 1 means R.x overflowed the group order. That case has no representation
+  // in the 65-byte r || s || v form Ethereum and Tron use, so it is refused
+  // rather than signed with a v that recovers the wrong key.
+  if ((signature.recovery_id & 2) != 0) {
+    secure_zero(&signature, sizeof(signature));
+    return WalletError::CryptoFailure;
   }
-  if (result == 0) {
-    result = mbedtls_ecp_mul(&group, &public_key, &private_scalar, &group.G,
-                             random_callback, nullptr);
-  }
-  if (result == 0) {
-    result = mbedtls_ecdsa_verify(&group, digest, kSha256Size, &public_key, &r, &s);
-  }
-
-  // The verification point equals the ECDSA nonce point for the normalized
-  // low-S signature. Its Y parity is the recovery bit used by Ethereum.
-  if (result == 0) result = mbedtls_mpi_read_binary(&z, digest, kSha256Size);
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&z, &z, &group.N);
-  if (result == 0) result = mbedtls_mpi_inv_mod(&inverse_s, &s, &group.N);
-  if (result == 0) result = mbedtls_mpi_mul_mpi(&u1, &z, &inverse_s);
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&u1, &u1, &group.N);
-  if (result == 0) result = mbedtls_mpi_mul_mpi(&u2, &r, &inverse_s);
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&u2, &u2, &group.N);
-  if (result == 0) {
-    result = mbedtls_ecp_muladd(&group, &recovery_point, &u1, &group.G, &u2, &public_key);
-  }
-  if (result == 0) {
-    result = mbedtls_mpi_copy(&reduced_x, &recovery_point.MBEDTLS_PRIVATE(X));
-  }
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&reduced_x, &reduced_x, &group.N);
-  if (result == 0 && (mbedtls_mpi_cmp_mpi(&reduced_x, &r) != 0 || mbedtls_mpi_cmp_mpi(&recovery_point.MBEDTLS_PRIVATE(X), &group.N) >= 0)) {
-    result = MBEDTLS_ERR_ECP_VERIFY_FAILED;
-  }
-  if (result == 0) result = mbedtls_mpi_write_binary(&r, out_signature->r, kPrivateKeySize);
-  if (result == 0) result = mbedtls_mpi_write_binary(&s, out_signature->s, kPrivateKeySize);
-  if (result == 0) {
-    out_signature->y_parity = static_cast<uint8_t>(
-      mbedtls_mpi_get_bit(&recovery_point.MBEDTLS_PRIVATE(Y), 0));
-  }
-
-  mbedtls_mpi_free(&reduced_x);
-  mbedtls_mpi_free(&u2);
-  mbedtls_mpi_free(&u1);
-  mbedtls_mpi_free(&inverse_s);
-  mbedtls_mpi_free(&z);
-  mbedtls_mpi_free(&half_order);
-  mbedtls_mpi_free(&s);
-  mbedtls_mpi_free(&r);
-  mbedtls_mpi_free(&private_scalar);
-  mbedtls_ecp_point_free(&recovery_point);
-  mbedtls_ecp_point_free(&public_key);
-  mbedtls_ecp_group_free(&group);
-  if (result != 0) secure_zero(out_signature, sizeof(*out_signature));
-  if (result == 0) output_on_failure.release();
-  return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
+  memcpy(out_signature->r, signature.signature, kPrivateKeySize);
+  memcpy(out_signature->s, signature.signature + kPrivateKeySize, kPrivateKeySize);
+  out_signature->y_parity = static_cast<uint8_t>(signature.recovery_id & 1);
+  secure_zero(&signature, sizeof(signature));
+  output_on_failure.release();
+  return WalletError::Ok;
 }
 
 WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize],
@@ -557,28 +474,15 @@ WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize
   if (private_key == nullptr || out_xonly == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidArgument;
   }
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point point;
-  mbedtls_mpi scalar;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&point);
-  mbedtls_mpi_init(&scalar);
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
-  if (result == 0) result = mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize);
-  if (result == 0) {
-    result = mbedtls_ecp_mul(&group, &point, &scalar, &group.G, random_callback, nullptr);
+  uint8_t parity = 0;
+  if (!ecdsa_xonly_public_key(EcdsaCurve::Secp256k1, private_key, out_xonly,
+                              &parity)) {
+    secure_zero(out_xonly, kPrivateKeySize);
+    return WalletError::CryptoFailure;
   }
-  if (result == 0) {
-    result = mbedtls_mpi_write_binary(&point.MBEDTLS_PRIVATE(X), out_xonly, kPrivateKeySize);
-  }
-  if (result == 0 && out_parity != nullptr) {
-    *out_parity = static_cast<uint8_t>(mbedtls_mpi_get_bit(&point.MBEDTLS_PRIVATE(Y), 0));
-  }
-  mbedtls_mpi_free(&scalar);
-  mbedtls_ecp_point_free(&point);
-  mbedtls_ecp_group_free(&group);
-  if (result != 0) secure_zero(out_xonly, kPrivateKeySize);
-  return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
+  if (out_parity != nullptr)
+    *out_parity = parity;
+  return WalletError::Ok;
 }
 
 WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
@@ -589,125 +493,9 @@ WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
       out_signature == nullptr || !valid_private_key(private_key)) {
     return WalletError::InvalidArgument;
   }
-  memset(out_signature, 0, 64);
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point public_point;
-  mbedtls_ecp_point nonce_point;
-  mbedtls_mpi scalar, adjusted, nonce, k, challenge, product, sum;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&public_point);
-  mbedtls_ecp_point_init(&nonce_point);
-  mbedtls_mpi_init(&scalar);
-  mbedtls_mpi_init(&adjusted);
-  mbedtls_mpi_init(&nonce);
-  mbedtls_mpi_init(&k);
-  mbedtls_mpi_init(&challenge);
-  mbedtls_mpi_init(&product);
-  mbedtls_mpi_init(&sum);
-
-  uint8_t public_x[kPrivateKeySize];
-  uint8_t nonce_hash[kSha256Size];
-  uint8_t aux_hash[kSha256Size];
-  uint8_t adjusted_bytes[kPrivateKeySize];
-  uint8_t nonce_input[3 * kPrivateKeySize];
-  uint8_t challenge_input[3 * kPrivateKeySize];
-  uint8_t nonce_x[kPrivateKeySize];
-  uint8_t signature_s[kPrivateKeySize];
-
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
-  if (result == 0) result = mbedtls_mpi_read_binary(&scalar, private_key, kPrivateKeySize);
-  if (result == 0) {
-    result = mbedtls_ecp_mul(&group, &public_point, &scalar, &group.G,
-                             random_callback, nullptr);
-  }
-  if (result == 0) {
-    result = mbedtls_mpi_write_binary(&public_point.MBEDTLS_PRIVATE(X), public_x,
-                                      kPrivateKeySize);
-  }
-  if (result == 0) {
-    if (mbedtls_mpi_get_bit(&public_point.MBEDTLS_PRIVATE(Y), 0) != 0) {
-      result = mbedtls_mpi_sub_mpi(&adjusted, &group.N, &scalar);
-    } else {
-      result = mbedtls_mpi_copy(&adjusted, &scalar);
-    }
-  }
-  if (result == 0) {
-    result = mbedtls_mpi_write_binary(&adjusted, adjusted_bytes, kPrivateKeySize);
-  }
-  if (result == 0) {
-    result = bip340_tagged_hash("BIP0340/aux", aux_rand, kPrivateKeySize, aux_hash)
-               ? 0 : -1;
-  }
-  for (size_t index = 0; index < kPrivateKeySize && result == 0; ++index) {
-    nonce_input[index] = adjusted_bytes[index] ^ aux_hash[index];
-  }
-  if (result == 0) {
-    memcpy(nonce_input + kPrivateKeySize, public_x, kPrivateKeySize);
-    memcpy(nonce_input + 2 * kPrivateKeySize, message, kPrivateKeySize);
-    result = bip340_tagged_hash("BIP0340/nonce", nonce_input, sizeof(nonce_input),
-                                nonce_hash) ? 0 : -1;
-  }
-  if (result == 0) result = mbedtls_mpi_read_binary(&nonce, nonce_hash, kSha256Size);
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&nonce, &nonce, &group.N);
-  if (result == 0 && mbedtls_mpi_cmp_int(&nonce, 0) == 0) result = -1;
-  if (result == 0) {
-    result = mbedtls_ecp_mul(&group, &nonce_point, &nonce, &group.G,
-                             random_callback, nullptr);
-  }
-  if (result == 0) {
-    result = mbedtls_mpi_write_binary(&nonce_point.MBEDTLS_PRIVATE(X), nonce_x,
-                                      kPrivateKeySize);
-  }
-  if (result == 0) {
-    if (mbedtls_mpi_get_bit(&nonce_point.MBEDTLS_PRIVATE(Y), 0) != 0) {
-      result = mbedtls_mpi_sub_mpi(&k, &group.N, &nonce);
-    } else {
-      result = mbedtls_mpi_copy(&k, &nonce);
-    }
-  }
-  if (result == 0) {
-    memcpy(challenge_input, nonce_x, kPrivateKeySize);
-    memcpy(challenge_input + kPrivateKeySize, public_x, kPrivateKeySize);
-    memcpy(challenge_input + 2 * kPrivateKeySize, message, kPrivateKeySize);
-    uint8_t challenge_hash[kSha256Size];
-    result = bip340_tagged_hash("BIP0340/challenge", challenge_input,
-                                sizeof(challenge_input), challenge_hash)
-               ? 0 : -1;
-    if (result == 0) {
-      result = mbedtls_mpi_read_binary(&challenge, challenge_hash, kSha256Size);
-    }
-    secure_zero(challenge_hash, sizeof(challenge_hash));
-  }
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&challenge, &challenge, &group.N);
-  if (result == 0) result = mbedtls_mpi_mul_mpi(&product, &challenge, &adjusted);
-  if (result == 0) result = mbedtls_mpi_add_mpi(&sum, &product, &k);
-  if (result == 0) result = mbedtls_mpi_mod_mpi(&sum, &sum, &group.N);
-  if (result == 0) result = mbedtls_mpi_write_binary(&sum, signature_s, kPrivateKeySize);
-  if (result == 0) {
-    memcpy(out_signature, nonce_x, kPrivateKeySize);
-    memcpy(out_signature + kPrivateKeySize, signature_s, kPrivateKeySize);
-  }
-
-  secure_zero(public_x, sizeof(public_x));
-  secure_zero(nonce_hash, sizeof(nonce_hash));
-  secure_zero(aux_hash, sizeof(aux_hash));
-  secure_zero(adjusted_bytes, sizeof(adjusted_bytes));
-  secure_zero(nonce_input, sizeof(nonce_input));
-  secure_zero(challenge_input, sizeof(challenge_input));
-  secure_zero(nonce_x, sizeof(nonce_x));
-  secure_zero(signature_s, sizeof(signature_s));
-  mbedtls_mpi_free(&sum);
-  mbedtls_mpi_free(&product);
-  mbedtls_mpi_free(&challenge);
-  mbedtls_mpi_free(&k);
-  mbedtls_mpi_free(&nonce);
-  mbedtls_mpi_free(&adjusted);
-  mbedtls_mpi_free(&scalar);
-  mbedtls_ecp_point_free(&nonce_point);
-  mbedtls_ecp_point_free(&public_point);
-  mbedtls_ecp_group_free(&group);
-  if (result != 0) {
-    secure_zero(out_signature, 64);
+  if (!ecdsa_bip340_sign(EcdsaCurve::Secp256k1, private_key, message, aux_rand,
+                         out_signature)) {
+    memset(out_signature, 0, 64);
     return WalletError::CryptoFailure;
   }
   return WalletError::Ok;
@@ -716,88 +504,8 @@ WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
 bool secp256k1_schnorr_verify(const uint8_t xonly_public_key[kPrivateKeySize],
                               const uint8_t message[kPrivateKeySize],
                               const uint8_t signature[64]) {
-  if (xonly_public_key == nullptr || message == nullptr || signature == nullptr) {
-    return false;
-  }
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point public_point, nonce_point, check_point;
-  mbedtls_mpi s, e, neg_e;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&public_point);
-  mbedtls_ecp_point_init(&nonce_point);
-  mbedtls_ecp_point_init(&check_point);
-  mbedtls_mpi_init(&s);
-  mbedtls_mpi_init(&e);
-  mbedtls_mpi_init(&neg_e);
-  uint8_t compressed[33];
-  uint8_t challenge_input[3 * kPrivateKeySize];
-  uint8_t challenge_hash[kSha256Size];
-  uint8_t expected[33];
-  uint8_t actual[33];
-  size_t actual_size = 0;
-  bool ok = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) == 0;
-  if (ok) ok = mbedtls_mpi_read_binary(&s, signature + kPrivateKeySize,
-                                       kPrivateKeySize) == 0 &&
-               mbedtls_mpi_cmp_mpi(&s, &group.N) < 0;
-  if (ok) {
-    compressed[0] = 0x02;
-    memcpy(compressed + 1, xonly_public_key, kPrivateKeySize);
-    ok = mbedtls_ecp_point_read_binary(&group, &public_point, compressed,
-                                       sizeof(compressed)) == 0 &&
-         mbedtls_ecp_check_pubkey(&group, &public_point) == 0;
-  }
-  if (ok) {
-    compressed[0] = 0x02;
-    memcpy(compressed + 1, signature, kPrivateKeySize);
-    ok = mbedtls_ecp_point_read_binary(&group, &nonce_point, compressed,
-                                       sizeof(compressed)) == 0 &&
-         mbedtls_ecp_check_pubkey(&group, &nonce_point) == 0;
-  }
-  if (ok) {
-    memcpy(challenge_input, signature, kPrivateKeySize);
-    memcpy(challenge_input + kPrivateKeySize, xonly_public_key, kPrivateKeySize);
-    memcpy(challenge_input + 2 * kPrivateKeySize, message, kPrivateKeySize);
-    ok = bip340_tagged_hash("BIP0340/challenge", challenge_input,
-                            sizeof(challenge_input), challenge_hash);
-  }
-  if (ok) {
-    ok = mbedtls_mpi_read_binary(&e, challenge_hash, kSha256Size) == 0 &&
-         mbedtls_mpi_mod_mpi(&e, &e, &group.N) == 0;
-  }
-  if (ok) {
-    if (mbedtls_mpi_cmp_int(&e, 0) == 0) {
-      ok = mbedtls_ecp_mul(&group, &check_point, &s, &group.G,
-                           random_callback, nullptr) == 0;
-    } else {
-      ok = mbedtls_mpi_sub_mpi(&neg_e, &group.N, &e) == 0 &&
-           mbedtls_ecp_muladd(&group, &check_point, &s, &group.G, &neg_e,
-                              &public_point) == 0;
-    }
-  }
-  if (ok) {
-    ok = mbedtls_ecp_point_write_binary(&group, &check_point,
-                                        MBEDTLS_ECP_PF_COMPRESSED, &actual_size,
-                                        actual, sizeof(actual)) == 0 &&
-         actual_size == sizeof(actual);
-  }
-  if (ok) {
-    expected[0] = 0x02;
-    memcpy(expected + 1, signature, kPrivateKeySize);
-    ok = crypto_constant_time_equal(actual, expected, sizeof(expected));
-  }
-  secure_zero(compressed, sizeof(compressed));
-  secure_zero(challenge_input, sizeof(challenge_input));
-  secure_zero(challenge_hash, sizeof(challenge_hash));
-  secure_zero(expected, sizeof(expected));
-  secure_zero(actual, sizeof(actual));
-  mbedtls_mpi_free(&neg_e);
-  mbedtls_mpi_free(&e);
-  mbedtls_mpi_free(&s);
-  mbedtls_ecp_point_free(&check_point);
-  mbedtls_ecp_point_free(&nonce_point);
-  mbedtls_ecp_point_free(&public_point);
-  mbedtls_ecp_group_free(&group);
-  return ok;
+  return ecdsa_bip340_verify(EcdsaCurve::Secp256k1, xonly_public_key, message,
+                             signature);
 }
 
 WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivateNode *out_node) {
@@ -857,27 +565,17 @@ WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPri
     secure_zero(parent_public, sizeof(parent_public));
     return WalletError::CryptoFailure;
   }
-  mbedtls_ecp_group group;
-  mbedtls_mpi left;
-  mbedtls_mpi parent_key;
-  mbedtls_mpi child_key;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_mpi_init(&left);
-  mbedtls_mpi_init(&parent_key);
-  mbedtls_mpi_init(&child_key);
-  const int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_mpi_read_binary(&left, material, kPrivateKeySize) || mbedtls_mpi_read_binary(&parent_key, parent->private_key, kPrivateKeySize) || mbedtls_mpi_add_mpi(&child_key, &left, &parent_key) || mbedtls_mpi_mod_mpi(&child_key, &child_key, &group.N);
-  bool valid = result == 0 && mbedtls_mpi_cmp_int(&left, 0) >= 0 && mbedtls_mpi_cmp_mpi(&left, &group.N) < 0 && mbedtls_mpi_cmp_int(&child_key, 0) != 0;
+  // BIP32 private child: k_child = (IL + k_par) mod n. A zero result, or an IL
+  // that is not a valid scalar, means this index is unusable and the caller has
+  // to move on rather than invent a key.
+  bool valid = ecdsa_scalar_add(EcdsaCurve::Secp256k1, material,
+                                parent->private_key, out_node->private_key);
   if (valid) {
-    valid = mbedtls_mpi_write_binary(&child_key, out_node->private_key, kPrivateKeySize) == 0;
     memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
     out_node->depth = parent->depth + 1;
     out_node->parent_fingerprint = parent_fingerprint;
     out_node->child_number = index;
   }
-  mbedtls_mpi_free(&child_key);
-  mbedtls_mpi_free(&parent_key);
-  mbedtls_mpi_free(&left);
-  mbedtls_ecp_group_free(&group);
   secure_zero(data, sizeof(data));
   secure_zero(material, sizeof(material));
   secure_zero(parent_public, sizeof(parent_public));
@@ -915,48 +613,29 @@ WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPubli
   if (!crypto_hmac_sha512(parent->chain_code, kChainCodeSize, data, sizeof(data), material)) {
     return WalletError::CryptoFailure;
   }
-  mbedtls_ecp_group group;
-  mbedtls_ecp_point parent_point;
-  mbedtls_ecp_point child_point;
-  mbedtls_mpi left;
-  mbedtls_mpi one;
-  mbedtls_ecp_group_init(&group);
-  mbedtls_ecp_point_init(&parent_point);
-  mbedtls_ecp_point_init(&child_point);
-  mbedtls_mpi_init(&left);
-  mbedtls_mpi_init(&one);
-  size_t public_size = kCompressedPublicKeySize;
-  int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1) || mbedtls_ecp_point_read_binary(&group, &parent_point, parent->public_key, kCompressedPublicKeySize);
-  if (result == 0) result = mbedtls_ecp_check_pubkey(&group, &parent_point);
-  if (result == 0) result = mbedtls_mpi_read_binary(&left, material, kPrivateKeySize);
-  const bool valid_offset = result == 0 && mbedtls_mpi_cmp_int(&left, 0) > 0 && mbedtls_mpi_cmp_mpi(&left, &group.N) < 0;
-  if (result == 0 && !valid_offset) result = MBEDTLS_ERR_ECP_INVALID_KEY;
-  if (result == 0) result = mbedtls_mpi_lset(&one, 1);
-  if (result == 0) {
-    // mbedTLS exposes point addition through muladd: R = left * G + 1 * parent.
-    result = mbedtls_ecp_muladd(&group, &child_point, &left, &group.G,
-                                &one, &parent_point);
-  }
-  if (result == 0) {
-    result = mbedtls_ecp_check_pubkey(&group, &child_point);
-  }
-  if (result == 0) {
-    result = mbedtls_ecp_point_write_binary(&group, &child_point, MBEDTLS_ECP_PF_COMPRESSED,
-                                            &public_size, out_node->public_key,
-                                            kCompressedPublicKeySize);
-  }
-  const bool valid = result == 0 && valid_offset && !mbedtls_ecp_is_zero(&child_point) && public_size == kCompressedPublicKeySize;
+  // BIP32 public child: K_child = point(IL) + K_par. Both operands are public,
+  // so the point helpers are the variable-time ones; what matters is that an
+  // out-of-range offset or a point at infinity is refused instead of encoded.
+  uint8_t offset_point[kEcdsaPointSize];
+  uint8_t parent_point[kEcdsaPointSize];
+  uint8_t child_point[kEcdsaPointSize];
+  bool valid = ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, material) &&
+               ecdsa_public_key(EcdsaCurve::Secp256k1, material, offset_point) &&
+               ecdsa_parse_public_key(EcdsaCurve::Secp256k1, parent->public_key,
+                                      kCompressedPublicKeySize, parent_point) &&
+               ecdsa_point_add(EcdsaCurve::Secp256k1, offset_point, parent_point,
+                               child_point) &&
+               ecdsa_encode_compressed(EcdsaCurve::Secp256k1, child_point,
+                                       out_node->public_key);
   if (valid) {
     memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
     out_node->depth = parent->depth + 1;
     out_node->parent_fingerprint = parent_fingerprint;
     out_node->child_number = index;
   }
-  mbedtls_mpi_free(&left);
-  mbedtls_mpi_free(&one);
-  mbedtls_ecp_point_free(&child_point);
-  mbedtls_ecp_point_free(&parent_point);
-  mbedtls_ecp_group_free(&group);
+  secure_zero(offset_point, sizeof(offset_point));
+  secure_zero(parent_point, sizeof(parent_point));
+  secure_zero(child_point, sizeof(child_point));
   secure_zero(data, sizeof(data));
   secure_zero(material, sizeof(material));
   return valid ? WalletError::Ok : WalletError::InvalidChild;

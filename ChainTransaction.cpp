@@ -1,10 +1,11 @@
-﻿#include "ChainTransaction.h"
+#include "ChainTransaction.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #include "AptosTransaction.h"
 #include "ChainCommon.h"
+#include "WalletCatalog.h"
 #include "CryptoExtended.h"
 #include "CardanoTransaction.h"
 #include "BlsG2.h"
@@ -476,6 +477,14 @@ bool run_chain_self_tests() {
       chain_family_for_network("apt", &family) && family == ChainFamily::Aptos &&
       chain_family_for_network("stark", &family) && family == ChainFamily::Starknet &&
       chain_family_for_network("theta", &family) && family == ChainFamily::Theta;
+  // The family mapping alone is not enough: wallet_signing_begin_chain() also
+  // asks the catalog whether this network may review and sign. Without the two
+  // capability bits on the `theta` entry the 46-byte payload would be refused
+  // before it ever reached the adapter, over the CLI and the phone link alike.
+  WalletCatalogEntry theta_entry;
+  admission = admission && wallet_catalog_find("theta", &theta_entry) &&
+              wallet_catalog_has(theta_entry, WalletCapabilityTransactionReview) &&
+              wallet_catalog_has(theta_entry, WalletCapabilitySigning);
   return ada && vet && icx && dot && ton && sui && fil && dcr && ckb && hive &&
          erg && bls && clvm && chia && qrl && qrl_v2 && apt && stark &&
          admission;

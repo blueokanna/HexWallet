@@ -5,7 +5,11 @@
 #include <stdint.h>
 
 namespace hexwallet {
-constexpr size_t kLinkProtocolVersion = 1;
+// Bumped from 1 to 2 when the handshake moved from Ed25519-group ECDH to
+// X25519 (RFC 7748). The ephemeral public keys on the wire are now Curve25519
+// u-coordinates, so a phone and a device that disagree must refuse to talk
+// rather than derive two different shared secrets from the same transcript.
+constexpr size_t kLinkProtocolVersion = 2;
 // CryptoNote review payloads carry the serialized transaction plus a 16-member
 // ring for each input, so the frame budget is larger than the UTXO/EVM paths.
 constexpr size_t kLinkMaxPayload = 16384;

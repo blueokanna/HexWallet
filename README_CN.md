@@ -1,5 +1,7 @@
 # HexWallet CLI 使用与构建指南
 
+网络与 token 的登记规则、64 条自定义资产容量见 [网络登记说明](docs/network-registry.md)；MiningPoolStats 全部非 GRAVEYARD 条目的真实映射状态见 [逐项覆盖表](docs/miningpoolstats-coverage.md)。未映射项目不计入钱包支持数量。
+
 > 当前版本尚未完成生产验收，XMR 已能在设备上走通完整签名流程，但尚未获得全节点接收验收。Arduino 目录说明见 [docs/display.md](docs/display.md)。
 
 HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供 BIP39/BIP32 密钥派生、地址生成、受限的 Bitcoin PSBT 审查、受限的 EVM 交易审查，以及经过认证的 USB 串口 CLI。
@@ -849,6 +851,10 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `QrlOtsJournal` | XMSS 一次性索引的持久化预留：双槽冗余、回读证明、半写跳过、状态未知即拒签 |
 | `MlDsa87` | FIPS 204 ML-DSA-87 的 keygen/sign/verify，供 QRL v2 使用 |
 | `P256Sign` | NIST P-256 ECDSA：RFC 6979 确定性 nonce、low-S 归一、严格 DER；CTAP2 认证器需要的 ES256 原语 |
+| `src/EcdsaCurve.h` | 本钱包要签的两条 256 位素数曲线共用一个 ECDSA 引擎：secp256k1（`a = 0`）与 secp256r1（`a = -3`），含 RFC 6979、low-S、严格 DER 与验签。主机上可跑，所以产出的签名不需要 mbedtls 就能被独立复核；Montgomery 因子由模数推导而不是照抄常量表 |
+| `src/Secp256k1Sign.h` | 经 mbedtls 的 secp256k1 ECDSA 签名/验签，RFC 6979 确定性、low-S，并在曲线上自检 |
+| `Ed25519` / X25519 | RFC 8032 Ed25519（签名、验签、Edwards 点/标量运算）与 RFC 7748 X25519、迭代测试，以及 Ed25519 身份到 Curve25519 公钥的双有理映射 |
+| `Se051Apdu` | SE05x/SE051 applet 命令编码：CLA/INS/P1/P2/TLV 表按 NXP plug-and-trust 逐项核对，含 `CreateECCurve`/`SetECCurveParam`/`ReadECCurveList`、ECDSA/EdDSA 签名、ECDH、卡内 BIP32 需要的单次 HMAC 与会话命令 |
 | `QrlV2Transaction` | QRL v2 动态费信封：keccak-256 摘要 + ML-DSA-87 hedged 签名 |
 | `AptosTransaction` | BCS `RawTransaction`、`APTOS::RawTransaction` 域分隔哈希、Ed25519 authenticator |
 | `StarknetCrypto` | Stark 曲线域运算、Pedersen、Poseidon、Stark ECDSA、SNIP-5 地址、Cairo v3 摘要 |

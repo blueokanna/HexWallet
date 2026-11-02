@@ -2,8 +2,23 @@
 #include <string.h>
 
 #include "../../WalletCatalog.h"
+#include "../../WalletMiningCatalog.h"
+#include "../../WalletTokens.h"
+#include "../../WalletCustomTokens.h"
 
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "--selftest") == 0) {
+    const bool catalog = hexwallet::run_catalog_self_tests();
+    const bool mining = hexwallet::run_mining_catalog_self_tests();
+    const bool tokens = hexwallet::run_token_profile_self_tests();
+    const bool custom = hexwallet::run_custom_token_self_tests();
+    printf("catalog=%s mining=%s tokens=%s custom-tokens=%s\n",
+           catalog ? "pass" : "FAIL", mining ? "pass" : "FAIL",
+           tokens ? "pass" : "FAIL", custom ? "pass" : "FAIL");
+    printf("native-profiles=%zu token-deployments=%zu custom-token-capacity=%zu\n",
+           hexwallet::wallet_catalog_count(), hexwallet::kTokenProfileCount, hexwallet::kCustomTokenMax);
+    return catalog && mining && tokens && custom ? 0 : 1;
+  }
   const bool detailed = argc == 2 && strcmp(argv[1], "--native") == 0;
   if (argc > 1 && !detailed) return 2;
   for (size_t index = 0; index < hexwallet::wallet_catalog_count(); ++index) {

@@ -1,5 +1,4 @@
 #include "DashTransaction.h"
-
 #include <string.h>
 
 #include "src/BytesText.h"
@@ -455,8 +454,106 @@ namespace hexwallet
       return owned;
     }
 
-#include "src/generated/DashVectorsTest.inc"
+    DashError validate_request(const DashTransaction &request,
+                               const HdPrivateNode &master,
+                               uint8_t (*private_keys)[kPrivateKeySize],
+                               uint8_t (*public_keys)[kCompressedPublicKeySize])
+    {
+      if (request.input_count == 0 || request.input_count > kDashMaxInputs ||
+          request.output_count == 0 || request.output_count > kDashMaxOutputs ||
+          request.version != kDashVersion ||
+          request.lock_time > kDashMaxLockTime)
+      {
+        return DashError::InvalidArgument;
+      }
+      const NetworkProfile *network = find_network_profile(request.chain.network_id);
+      if (network == nullptr || network->encoding != AddressEncoding::P2pkh ||
+          network->utxo.p2pkh_version != request.chain.p2pkh_version ||
+          network->utxo.p2sh_version != request.chain.p2sh_version ||
+          network->derivation_coin_type != kDashCoinType)
+      {
+        return DashError::Unsupported;
+      }
+      uint64_t input_total = 0;
+      uint64_t output_total = 0;
+      for (size_t index = 0; index < request.input_count; ++index)
+      {
+        const DashInput &input = request.inputs[index];
+        if (input.value == 0 || input.value > kDashMaxDuffs ||
+            !p2pkh_script(input.script, input.script_size) ||
+            input.account >= kHardenedOffset || input.change > 1 ||
+            input.address_index >= kHardenedOffset ||
+            !add_u64(input_total, input.value, &input_total))
+        {
+          return DashError::WrongWallet;
+        }
+        for (size_t other = index + 1; other < request.input_count; ++other)
+        {
+          if (request.inputs[other].previous_index == input.previous_index &&
+              bytes_equal(request.inputs[other].previous_txid,
+                          input.previous_txid, 32))
+          {
+            return DashError::NonCanonical;
+          }
+        }
+      }
+      for (size_t index = 0; index < request.output_count; ++index)
+      {
+        const DashOutput &output = request.outputs[index];
+        if (output.value == 0 || output.value > kDashMaxDuffs ||
+            (!p2pkh_script(output.script, output.script_size) &&
+             !p2sh_script(output.script, output.script_size)) ||
+            !add_u64(output_total, output.value, &output_total))
+        {
+          return DashError::Unsupported;
+        }
+      }
+      // Policy is checked before any key work: a request whose fee is already
+      // out of bounds must cost nothing and must not touch the seed.
+      const uint32_t expected_vbytes = estimated_vbytes(request);
+      if (input_total < output_total || input_total != request.input_total ||
+          output_total != request.output_total ||
+          input_total - output_total != request.fee || expected_vbytes == 0 ||
+          request.estimated_vbytes != expected_vbytes ||
+          request.fee > HEXWALLET_MAX_DASH_FEE_DUFFS ||
+          request.fee > HEXWALLET_MAX_DASH_FEE_RATE *
+                            static_cast<uint64_t>(request.estimated_vbytes))
+      {
+        return DashError::FeePolicy;
+      }
+      // Every input must be spendable by this wallet's key at the path it
+      // claims; that is what makes the review's sender line true.
+      DashError result = DashError::Ok;
+      for (size_t index = 0; index < request.input_count; ++index)
+      {
+        uint8_t private_key[kPrivateKeySize];
+        uint8_t public_key[kCompressedPublicKeySize];
+        if (!derive_and_verify_key(master, request.inputs[index], private_key,
+                                   public_key))
+        {
+          secure_zero(private_key, sizeof(private_key));
+          secure_zero(public_key, sizeof(public_key));
+          result = DashError::WrongWallet;
+          break;
+        }
+        if (private_keys != nullptr)
+          memcpy(private_keys[index], private_key, kPrivateKeySize);
+        if (public_keys != nullptr)
+          memcpy(public_keys[index], public_key, kCompressedPublicKeySize);
+        secure_zero(private_key, sizeof(private_key));
+        secure_zero(public_key, sizeof(public_key));
+      }
+      if (result != DashError::Ok)
+      {
+        if (private_keys != nullptr)
+          secure_zero(private_keys, kDashMaxInputs * kPrivateKeySize);
+        if (public_keys != nullptr)
+          secure_zero(public_keys, kDashMaxInputs * kCompressedPublicKeySize);
+      }
+      return result;
+    }
 
+#include "src/generated/DashVectorsTest.inc"
     constexpr DashChainParams kSelfTestChain = {"dash", 0x4c, 0x10};
     // Byte offsets inside kDashSelfTestPayload: magic, lock time, one P2PKH
     // input, then two outputs (P2SH then P2PKH change).
@@ -496,9 +593,6 @@ namespace hexwallet
       return result == expected;
     }
 
-    // Re-reads the produced signature the way a verifier would: pull the DER
-    // block and public key out of scriptSig, check the key hash against the
-    // prevout script, and verify on the curve against a fresh digest.
     bool signature_verifies(const uint8_t *transaction, size_t size,
                             const uint8_t *script_code, size_t script_code_size,
                             const uint8_t expected_digest[kSha256Size])
@@ -729,91 +823,33 @@ namespace hexwallet
                                   const HdPrivateNode &master,
                                   uint8_t *out_transaction, size_t *in_out_size)
   {
-    if (out_transaction == nullptr || in_out_size == nullptr ||
-        request.input_count == 0 || request.input_count > kDashMaxInputs ||
-        request.output_count == 0 || request.output_count > kDashMaxOutputs ||
-        request.version != kDashVersion ||
-        request.lock_time > kDashMaxLockTime)
-    {
+    if (out_transaction == nullptr || in_out_size == nullptr)
       return DashError::InvalidArgument;
-    }
-    const NetworkProfile *network = find_network_profile(request.chain.network_id);
-    if (network == nullptr || network->encoding != AddressEncoding::P2pkh ||
-        network->utxo.p2pkh_version != request.chain.p2pkh_version ||
-        network->utxo.p2sh_version != request.chain.p2sh_version ||
-        network->derivation_coin_type != kDashCoinType)
+    uint8_t private_keys[kDashMaxInputs][kPrivateKeySize] = {};
+    uint8_t public_keys[kDashMaxInputs][kCompressedPublicKeySize] = {};
+    DashError result =
+        validate_request(request, master, private_keys, public_keys);
+    if (result != DashError::Ok)
     {
-      return DashError::Unsupported;
-    }
-    uint64_t input_total = 0;
-    uint64_t output_total = 0;
-    for (size_t index = 0; index < request.input_count; ++index)
-    {
-      const DashInput &input = request.inputs[index];
-      if (input.value == 0 || input.value > kDashMaxDuffs ||
-          !p2pkh_script(input.script, input.script_size) ||
-          input.account >= kHardenedOffset || input.change > 1 ||
-          input.address_index >= kHardenedOffset ||
-          !add_u64(input_total, input.value, &input_total))
-      {
-        return DashError::WrongWallet;
-      }
-      for (size_t other = index + 1; other < request.input_count; ++other)
-      {
-        if (request.inputs[other].previous_index == input.previous_index &&
-            bytes_equal(request.inputs[other].previous_txid,
-                        input.previous_txid, 32))
-        {
-          return DashError::NonCanonical;
-        }
-      }
-    }
-    for (size_t index = 0; index < request.output_count; ++index)
-    {
-      const DashOutput &output = request.outputs[index];
-      if (output.value == 0 || output.value > kDashMaxDuffs ||
-          (!p2pkh_script(output.script, output.script_size) &&
-           !p2sh_script(output.script, output.script_size)) ||
-          !add_u64(output_total, output.value, &output_total))
-      {
-        return DashError::Unsupported;
-      }
-    }
-    const uint32_t expected_vbytes = estimated_vbytes(request);
-    if (input_total < output_total || input_total != request.input_total ||
-        output_total != request.output_total ||
-        input_total - output_total != request.fee || expected_vbytes == 0 ||
-        request.estimated_vbytes != expected_vbytes ||
-        request.fee > HEXWALLET_MAX_DASH_FEE_DUFFS ||
-        request.fee >
-            HEXWALLET_MAX_DASH_FEE_RATE * static_cast<uint64_t>(request.estimated_vbytes))
-    {
-      return DashError::FeePolicy;
+      secure_zero(private_keys, sizeof(private_keys));
+      secure_zero(public_keys, sizeof(public_keys));
+      return result;
     }
     uint8_t unsigned_transaction[kDashMaxTransactionSize];
     size_t unsigned_size = sizeof(unsigned_transaction);
-    DashError result = serialize_request(request, nullptr, nullptr, nullptr,
-                                         unsigned_transaction, &unsigned_size);
+    result = serialize_request(request, nullptr, nullptr, nullptr,
+                               unsigned_transaction, &unsigned_size);
     if (result != DashError::Ok)
     {
       secure_zero(unsigned_transaction, sizeof(unsigned_transaction));
+      secure_zero(private_keys, sizeof(private_keys));
+      secure_zero(public_keys, sizeof(public_keys));
       return result;
     }
     uint8_t signatures[kDashMaxInputs][kDashMaxSignatureSize] = {};
     uint8_t signature_sizes[kDashMaxInputs] = {};
-    uint8_t public_keys[kDashMaxInputs][kCompressedPublicKeySize] = {};
     for (size_t index = 0; index < request.input_count; ++index)
     {
-      uint8_t private_key[kPrivateKeySize];
-      if (!derive_and_verify_key(master, request.inputs[index], private_key,
-                                 public_keys[index]))
-      {
-        secure_zero(private_key, sizeof(private_key));
-        secure_zero(signatures, sizeof(signatures));
-        secure_zero(public_keys, sizeof(public_keys));
-        secure_zero(unsigned_transaction, sizeof(unsigned_transaction));
-        return DashError::WrongWallet;
-      }
       // A P2PKH input commits its own prevout script as the scriptCode.
       uint8_t digest[kSha256Size];
       result = dash_legacy_sighash(unsigned_transaction, unsigned_size, index,
@@ -822,18 +858,19 @@ namespace hexwallet
                                    kSighashAll, digest);
       size_t der_size = sizeof(signatures[index]) - 1;
       if (result == DashError::Ok &&
-          !secp256k1_sign_der(private_key, digest, signatures[index], &der_size))
+          !secp256k1_sign_der(private_keys[index], digest, signatures[index],
+                              &der_size))
       {
         result = DashError::CryptoFailure;
       }
       if (result == DashError::Ok && der_size > kDashMaxDerSignatureSize)
         result = DashError::BufferTooSmall;
-      secure_zero(private_key, sizeof(private_key));
       secure_zero(digest, sizeof(digest));
       if (result != DashError::Ok || der_size + 1 > sizeof(signatures[index]))
       {
         secure_zero(signatures, sizeof(signatures));
         secure_zero(public_keys, sizeof(public_keys));
+        secure_zero(private_keys, sizeof(private_keys));
         secure_zero(unsigned_transaction, sizeof(unsigned_transaction));
         return result == DashError::Ok ? DashError::BufferTooSmall : result;
       }
@@ -841,12 +878,19 @@ namespace hexwallet
       signature_sizes[index] = static_cast<uint8_t>(der_size + 1);
     }
     secure_zero(unsigned_transaction, sizeof(unsigned_transaction));
+    secure_zero(private_keys, sizeof(private_keys));
     result = serialize_request(request, signatures, signature_sizes, public_keys,
                                out_transaction, in_out_size);
     secure_zero(signatures, sizeof(signatures));
     secure_zero(signature_sizes, sizeof(signature_sizes));
     secure_zero(public_keys, sizeof(public_keys));
     return result;
+  }
+
+  DashError dash_validate_inputs(const DashTransaction &request,
+                                 const HdPrivateNode &master)
+  {
+    return validate_request(request, master, nullptr, nullptr);
   }
 
   const char *dash_error_text(DashError error)
@@ -943,9 +987,9 @@ namespace hexwallet
     passed = passed && prefixes_rejected;
     mutated[sizeof(kDashMainnetV3Transaction)] = 0x00;
     passed = passed && dash_legacy_sighash(
-                            mutated, sizeof(kDashMainnetV3Transaction) + 1, 0,
-                            kDashMainnetV3Script, sizeof(kDashMainnetV3Script),
-                            kSighashAll, digest) == DashError::NonCanonical;
+                           mutated, sizeof(kDashMainnetV3Transaction) + 1, 0,
+                           kDashMainnetV3Script, sizeof(kDashMainnetV3Script),
+                           kSighashAll, digest) == DashError::NonCanonical;
     secure_zero(mutated, sizeof(mutated));
     secure_zero(digest, sizeof(digest));
 
@@ -1002,9 +1046,6 @@ namespace hexwallet
     payload[kPayloadOutputCountOffset] = kDashMaxOutputs + 1;
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::TooLarge);
-
-    // The prevout must be the canonical P2PKH form: another opcode, or another
-    // length, is a script this wallet cannot spend.
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     payload[kPayloadPrevoutScriptOffset] = 0x75; // OP_DROP instead of OP_DUP
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
@@ -1014,7 +1055,6 @@ namespace hexwallet
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::Unsupported);
 
-    // An output nobody can classify must never reach the review screen.
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     payload[kPayloadLastOutputScriptOffset] = 0x75;
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
@@ -1029,8 +1069,6 @@ namespace hexwallet
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::InvalidAmount);
 
-    // A zero fee is not relayable, and a fee above the ceiling is exactly what
-    // the local policy exists to stop.
     memcpy(payload, kDashSelfTestPayload, sizeof(kDashSelfTestPayload));
     store_u64(payload + kPayloadLastOutputValueOffset, 110000000ULL);
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
@@ -1053,8 +1091,6 @@ namespace hexwallet
     passed = passed && payload_result_is(payload, sizeof(kDashSelfTestPayload),
                                          DashError::InvalidArgument);
 
-    // The same outpoint twice would double-count an input that exists once, and
-    // the fee the user approves would be fiction.
     uint8_t duplicated[sizeof(kDashSelfTestPayload) + kSelfTestInputRecordSize];
     memcpy(duplicated, kDashSelfTestPayload, kPayloadOutputCountOffset);
     memcpy(duplicated + kPayloadOutputCountOffset,
@@ -1073,8 +1109,6 @@ namespace hexwallet
 
   bool run_dash_signature_self_test()
   {
-    // Deterministic BIP32 master used only by this self-test. The host suite
-    // stubs derivation out, so this runs on the device and in the chain probe.
     HdPrivateNode master = {};
     for (size_t index = 0; index < kPrivateKeySize; ++index)
     {
@@ -1112,8 +1146,7 @@ namespace hexwallet
     // key or the nonce leaked into some state that survives a call.
     uint8_t repeat[kDashMaxTransactionSize];
     size_t repeat_size = sizeof(repeat);
-    passed = passed && dash_sign_transaction(request, master, repeat,
-                                             &repeat_size) == DashError::Ok &&
+    passed = passed && dash_sign_transaction(request, master, repeat, &repeat_size) == DashError::Ok &&
              repeat_size == signed_size &&
              crypto_constant_time_equal(repeat, signed_transaction, signed_size);
     secure_zero(repeat, sizeof(repeat));

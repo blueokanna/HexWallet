@@ -1,6 +1,8 @@
 #include "WalletCustomTokens.h"
 
 #include <string.h>
+#include <memory>
+#include <new>
 
 #include "CryptoPrimitives.h"
 
@@ -67,10 +69,22 @@ void clear_table() {
 
 // Every record that is stored must also satisfy the rules a fresh one does,
 // otherwise an old blob could reintroduce something this build refuses.
+bool zero_bytes(const uint8_t *data, size_t size);
+bool stellar_code_valid(const char *code) {
+  size_t length = 0;
+  if (!printable(code, kCustomTokenCodeSize, &length)) return false;
+  for (size_t index = 0; index < length; ++index) {
+    const char c = code[index];
+    if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')))
+      return false;
+  }
+  return true;
+}
 bool record_valid(const CustomTokenRecord &record) {
+  size_t length = 0;
   if (!text_fits(record.network_id, kCustomTokenNetworkSize) ||
-      !text_fits(record.symbol, kCustomTokenSymbolSize) ||
-      !text_fits(record.name, kCustomTokenNameSize) ||
+      !printable(record.symbol, kCustomTokenSymbolSize, &length) ||
+      !printable(record.name, kCustomTokenNameSize, &length) ||
       !text_fits(record.code, kCustomTokenCodeSize) ||
       record.decimals > kCustomTokenMaxDecimals) {
     return false;
@@ -80,21 +94,27 @@ bool record_valid(const CustomTokenRecord &record) {
       (record.issuer_size != 0 && record.issuer_size != kCustomTokenIssuerSize)) {
     return false;
   }
+  const NetworkProfile *network = find_network_profile(record.network_id);
+  if (network == nullptr || zero_bytes(record.identifier, record.identifier_size)) return false;
   switch (record.standard) {
     case CustomTokenStandard::EvmErc20:
-      return record.identifier_size == kCustomTokenContractSize &&
+      return network->encoding == AddressEncoding::Evm && record.identifier_size == kCustomTokenContractSize &&
              record.issuer_size == 0 && record.code[0] == '\0';
     case CustomTokenStandard::TronTrc20:
-      return record.identifier_size == 21 && record.issuer_size == 0 &&
+      return network->encoding == AddressEncoding::Tron && record.identifier_size == 21 &&
+             record.identifier[0] == 0x41 && !zero_bytes(record.identifier + 1, 20) && record.issuer_size == 0 &&
              record.code[0] == '\0';
     case CustomTokenStandard::SolanaSpl:
-      return record.identifier_size == kCustomTokenIdentifierSize &&
+      return strcmp(network->id, "sol") == 0 && record.identifier_size == kCustomTokenIdentifierSize &&
              record.issuer_size == 0 && record.code[0] == '\0';
     case CustomTokenStandard::StellarAsset:
-      return record.issuer_size == kCustomTokenIssuerSize &&
-             record.code[0] != '\0';
+      return network->encoding == AddressEncoding::StellarStrKey &&
+             record.identifier_size == kCustomTokenIssuerSize && record.issuer_size == kCustomTokenIssuerSize &&
+             !zero_bytes(record.issuer, kCustomTokenIssuerSize) &&
+             memcmp(record.identifier, record.issuer, kCustomTokenIssuerSize) == 0 &&
+             stellar_code_valid(record.code) && record.decimals == 7;
     case CustomTokenStandard::StarknetErc20:
-      return record.identifier_size == kCustomTokenIdentifierSize &&
+      return network->encoding == AddressEncoding::StarknetKey && record.identifier_size == kCustomTokenIdentifierSize &&
              record.issuer_size == 0 && record.code[0] == '\0';
   }
   return false;
@@ -104,6 +124,23 @@ bool zero_bytes(const uint8_t *data, size_t size) {
   uint8_t accumulator = 0;
   for (size_t index = 0; index < size; ++index) accumulator |= data[index];
   return accumulator == 0;
+}
+
+bool table_valid(const CustomTokenRecord *records, size_t count) {
+  if (count > kCustomTokenMax) return false;
+  for (size_t index = 0; index < count; ++index) {
+    const CustomTokenRecord &record = records[index];
+    if (!record_valid(record)) return false;
+    for (size_t earlier = 0; earlier < index; ++earlier) {
+      const CustomTokenRecord &other = records[earlier];
+      if (strcmp(record.network_id, other.network_id) == 0 &&
+          record.identifier_size == other.identifier_size &&
+          memcmp(record.identifier, other.identifier, record.identifier_size) == 0 &&
+          (record.standard != CustomTokenStandard::StellarAsset || strcmp(record.code, other.code) == 0))
+        return false;
+    }
+  }
+  return true;
 }
 
 // The standard and key width follow the network: there is exactly one shape a
@@ -367,6 +404,7 @@ bool custom_token_deserialize(const uint8_t *blob, size_t size,
     record.decimals = blob[offset++];
     if (!record_valid(record)) return false;
   }
+  if (!table_valid(records, stored)) return false;
   *count = stored;
   return true;
 }
@@ -378,10 +416,11 @@ bool custom_tokens_bind_store(const CustomTokenStore &store) {
   if (!g_bound) return true;
   size_t count = 0;
   if (store.load(store.context, g_records, kCustomTokenMax, &count) &&
-      count <= kCustomTokenMax) {
+      table_valid(g_records, count)) {
     g_count = count;
   } else {
     clear_table();
+    return false;
   }
   return true;
 }
@@ -512,7 +551,10 @@ bool run_custom_token_self_tests() {
     size_t size;
     bool present;
     bool fail;
-  } store = {{}, 0, false, false};
+  };
+  std::unique_ptr<TestStore> allocation(new (std::nothrow) TestStore{});
+  if (!allocation) return false;
+  TestStore &store = *allocation;
   const CustomTokenStore persistence = {
     &store,
     [](void *context, CustomTokenRecord *records, size_t capacity, size_t *count) {
@@ -658,6 +700,14 @@ bool run_custom_token_self_tests() {
                          CustomTokenError::InvalidArgument;
   passed = passed && custom_token_add_stellar("xlm", issuer, "", "X", "X", 7) ==
                          CustomTokenError::InvalidArgument;
+  passed = passed && custom_token_add_stellar("xlm", issuer, "BAD/CODE", "X", "X", 7) ==
+                         CustomTokenError::InvalidArgument &&
+           custom_token_add_stellar("xlm", issuer, "USDC", "X", "X", 6) ==
+                         CustomTokenError::InvalidArgument;
+  tron_contract[0] = 0x42;
+  passed = passed && custom_token_add("trx", tron_contract, sizeof(tron_contract), "X", "X", 6) ==
+                         CustomTokenError::InvalidArgument;
+  tron_contract[0] = 0x41;
 
   // A failed write must not change what the device believes it has.
   store.fail = true;
@@ -671,7 +721,7 @@ bool run_custom_token_self_tests() {
            custom_token_count() == 4;
   store.fail = false;
 
-  // Fill the table, then refuse the ninth.
+  // Fill the entire configured capacity, then refuse one more.
   uint8_t other[kCustomTokenContractSize];
   memcpy(other, contract, sizeof(other));
   for (size_t slot = custom_token_count(); slot < kCustomTokenMax; ++slot) {
@@ -679,7 +729,7 @@ bool run_custom_token_self_tests() {
     passed = passed && custom_token_add("eth", other, sizeof(other), "T",
                                         "Token", 18) == CustomTokenError::Ok;
   }
-  other[0] = 0xAA;
+  other[0] = 0xFF;
   passed = passed && custom_token_add("eth", other, sizeof(other), "T", "Token",
                                       18) == CustomTokenError::Full &&
            custom_token_count() == kCustomTokenMax;
@@ -695,6 +745,28 @@ bool run_custom_token_self_tests() {
   const size_t stored_count = custom_token_count();
   custom_tokens_bind_store(persistence);
   passed = passed && custom_token_count() == stored_count;
+  // A valid digest does not authorize records. Reject a rehashed cross-network
+  // binding, and reject duplicate identities before exposing a loaded table.
+  const auto rehash_store = [&store]() {
+    uint8_t digest[kSha256Size];
+    const bool ok = crypto_sha256(store.blob, store.size - kDigestSize, digest);
+    if (ok) memcpy(store.blob + store.size - kDigestSize, digest, kDigestSize);
+    secure_zero(digest, sizeof(digest));
+    return ok;
+  };
+  uint8_t saved_network[kCustomTokenNetworkSize];
+  memcpy(saved_network, store.blob + kHeaderSize, sizeof(saved_network));
+  memset(store.blob + kHeaderSize, 0, sizeof(saved_network));
+  memcpy(store.blob + kHeaderSize, "btc", 3);
+  passed = passed && rehash_store() && !custom_tokens_bind_store(persistence) && custom_token_count() == 0;
+  memcpy(store.blob + kHeaderSize, saved_network, sizeof(saved_network));
+  passed = passed && rehash_store() && custom_tokens_bind_store(persistence) && custom_token_count() == stored_count;
+  uint8_t saved_second[kRecordSize];
+  memcpy(saved_second, store.blob + kHeaderSize + kRecordSize, sizeof(saved_second));
+  memcpy(store.blob + kHeaderSize + kRecordSize, store.blob + kHeaderSize, kRecordSize);
+  passed = passed && rehash_store() && !custom_tokens_bind_store(persistence) && custom_token_count() == 0;
+  memcpy(store.blob + kHeaderSize + kRecordSize, saved_second, sizeof(saved_second));
+  passed = passed && rehash_store() && custom_tokens_bind_store(persistence) && custom_token_count() == stored_count;
   store.blob[kHeaderSize + 3] ^= 0x01;
   custom_tokens_bind_store(persistence);
   passed = passed && custom_token_count() == 0;
@@ -709,17 +781,19 @@ bool run_custom_token_self_tests() {
          sizeof(contract));
   memcpy(legacy + kHeaderSize + kCustomTokenNetworkSize + kCustomTokenContractSize,
          "LEGACY", 6);
+  memcpy(legacy + kHeaderSize + kCustomTokenNetworkSize + kCustomTokenContractSize + kCustomTokenSymbolSize,
+         "Legacy token", 12);
   legacy[kHeaderSize + kLegacyRecordSize - 1] = 18;
   uint8_t legacy_digest[kSha256Size];
   passed = passed && crypto_sha256(legacy, sizeof(legacy) - kDigestSize,
                                    legacy_digest);
   memcpy(legacy + sizeof(legacy) - kDigestSize, legacy_digest, kDigestSize);
   secure_zero(legacy_digest, sizeof(legacy_digest));
-  CustomTokenRecord upgraded[kCustomTokenMax];
+  CustomTokenRecord upgraded[1];
   size_t upgraded_count = 0;
   passed = passed &&
            custom_token_deserialize(legacy, sizeof(legacy), upgraded,
-                                    kCustomTokenMax, &upgraded_count) &&
+                                    1, &upgraded_count) &&
            upgraded_count == 1 &&
            upgraded[0].standard == CustomTokenStandard::EvmErc20 &&
            upgraded[0].identifier_size == kCustomTokenContractSize &&

@@ -64,7 +64,7 @@ $sources = @(
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
+  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
   "WalletSecurity.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",
   "WalletEngine.cpp", "EvmTransaction.cpp", "BitcoinTransaction.cpp", "KaspaTransaction.cpp", "TokenCalldata.cpp", "ZcashTransaction.cpp", "DashTransaction.cpp", "CoinIcons.cpp", "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "QrlV2Transaction.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp", "TronTransaction.cpp", "CosmosTransaction.cpp", "StellarTransaction.cpp", "AlgorandTransaction.cpp", "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletSigning.cpp", "NearTransaction.cpp", "TezosTransaction.cpp", "XrpTransaction.cpp", "Totp.cpp", "EinkFrame.cpp"
@@ -103,7 +103,7 @@ foreach ($s in $sources) {
 # which the Arduino core does not ship, and nothing here compiled that branch.
 # These sources are therefore also compiled exactly the way arduino-cli does it:
 # every component include directory plus -DARDUINO.
-$paritySources = @("TrustAnchor.cpp", "QrlOtsStore.cpp", "WalletCustomTokensNvs.cpp")
+$paritySources = @("TrustAnchor.cpp", "QrlOtsStore.cpp", "WalletCustomTokensNvs.cpp", "WalletCli.cpp")
 # arduino-cli builds its include path from the SDK's flags/includes file, which
 # is a list of "-iprefix + iwithprefixbefore" pairs. Reproducing that exact
 # mechanism here turned out to be fragile, so this step spells the same directory
@@ -115,6 +115,29 @@ $parityArgs += "-I" + (Join-Path $core "cores\esp32")
 $parityArgs += "-I" + $root
 $parityArgs += "-I" + $mbedtlsInclude
 $parityArgs += "-I" + $mbedtlsPort
+# WalletCli.cpp is part of this list now, and it includes <Preferences.h> from
+# the core's bundled library, so that directory has to be on the path too.
+$parityArgs += "-I" + (Join-Path $core "libraries\Preferences\src")
+# pins_arduino.h comes from the board variant, which arduino-cli adds for the
+# selected board.
+$variant = if ($Target -eq "esp32p4") { "esp32p4" } else { "esp32" }
+$parityArgs += "-I" + (Join-Path $core "variants\$variant")
+
+# The SDK ships its own include list (flags/includes) as a series of
+# "-iwithprefixbefore <dir>" pairs relative to <libs>/include. Reading it beats
+# guessing: every earlier attempt to hand-assemble this set missed a component
+# (esp_rom, freertos/config, newlib/platform_include, ...) and produced errors
+# that had nothing to do with the source under test.
+$sdkIncludes = Join-Path $libs "flags\includes"
+if (Test-Path $sdkIncludes) {
+  $tokens = (Get-Content $sdkIncludes -Raw) -split '\s+'
+  for ($tokenIndex = 0; $tokenIndex -lt $tokens.Count; ++$tokenIndex) {
+    if ($tokens[$tokenIndex] -eq "-iwithprefixbefore" -and ($tokenIndex + 1) -lt $tokens.Count) {
+      $parityArgs += "-I" + (Join-Path (Join-Path $libs "include") $tokens[$tokenIndex + 1])
+      $tokenIndex++
+    }
+  }
+}
 
 foreach ($dir in Get-ChildItem (Join-Path $libs "include") -Directory -Recurse -ErrorAction SilentlyContinue) {
   # Component includes sit at include/<component>/include and, for per-chip
@@ -129,6 +152,14 @@ foreach ($mode in @("dio_qspi", "qio_qspi")) {
   $modeInclude = Join-Path $libs "$mode\include"
   if (Test-Path $modeInclude) { $parityArgs += "-I" + $modeInclude }
 }
+# The SDK include list is ~300 directories, which is well past the Windows
+# command-line limit, so the flags go through a response file. g++ (libiberty)
+# treats a backslash inside @file as an escape, so the paths are written with
+# forward slashes - the same reason the curated list above avoids @file.
+$parityRsp = Join-Path $objDir "parity-includes.rsp"
+($parityArgs | ForEach-Object { $_ -replace '\\', '/' }) |
+    Set-Content $parityRsp -Encoding ASCII
+$parityRspArg = "@" + ($parityRsp -replace '\\', '/')
 foreach ($s in $paritySources) {
   $src = Join-Path $root $s
   $obj = Join-Path $objDir ($s -replace '\.cpp$', '.arduino.o')
@@ -139,7 +170,7 @@ foreach ($s in $paritySources) {
   # branches, so the UI is switched off instead of pointing at a missing header.
   & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter `
       -DARDUINO=10819 -DARDUINO_ARCH_ESP32 -DESP_PLATFORM -DHEXWALLET_ENABLE_LVGL=0 `
-      -DMBEDTLS_ALLOW_PRIVATE_ACCESS @parityArgs -c $src -o $obj *> $log
+      -DMBEDTLS_ALLOW_PRIVATE_ACCESS $parityRspArg -c $src -o $obj *> $log
   $rc = $global:LASTEXITCODE
   $ErrorActionPreference = "Stop"
   Write-Output ("  [arduino-parity] {0} => rc={1}" -f $s, $rc)

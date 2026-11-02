@@ -1,6 +1,7 @@
 #include "WalletMiningCatalog.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace hexwallet
@@ -101,18 +102,32 @@ namespace hexwallet
     {
       if (coin.symbol == nullptr || coin.name == nullptr ||
           coin.algorithm == nullptr || coin.catalog_id == nullptr ||
-          *coin.symbol == '\0' || *coin.name == '\0' ||
-          *coin.algorithm == '\0' || *coin.catalog_id == '\0')
+          coin.source_id == nullptr || *coin.symbol == '\0' || *coin.name == '\0' ||
+          *coin.algorithm == '\0' || *coin.catalog_id == '\0' ||
+          *coin.source_id == '\0')
       {
         return false;
       }
-      if (static_cast<uint8_t>(coin.type) > static_cast<uint8_t>(MiningCoinType::Hdd))
+      // A coin may appear once per mining algorithm, and a merged-mining row is
+      // a real listing rather than a placeholder, so the type bound is Merged.
+      if (static_cast<uint8_t>(coin.type) > static_cast<uint8_t>(MiningCoinType::Merged))
       {
         return false;
       }
+      // Every row must resolve to a catalog coin of the same symbol. That is
+      // also what rules out an orphan listing for a chain the catalog withdrew:
+      // without this join the mining screen would offer something the wallet
+      // cannot address.
       WalletCatalogEntry entry;
-      if (!mining_coin_lookup(coin, &entry))
+      if (!mining_coin_lookup(coin, &entry) || strcmp(coin.symbol, entry.symbol) != 0)
         return false;
+      // source_id is the pool-listing key, so a duplicate would make one of the
+      // two rows unreachable. Symbols repeat by design; this must not.
+      for (const MiningCoinEntry &other : kMiningCoins)
+      {
+        if (&other != &coin && strcmp(other.source_id, coin.source_id) == 0)
+          return false;
+      }
     }
     const MiningCoinEntry *btc = mining_coin_find("BTC");
     WalletCatalogEntry entry;
@@ -121,7 +136,13 @@ namespace hexwallet
     {
       return false;
     }
-    return mining_coin_find("XMR") == nullptr;
+    // The name lookup has to keep working for the two coins whose catalog id
+    // does not match their symbol.
+    const MiningCoinEntry *xmr = mining_coin_find("monero");
+    const MiningCoinEntry *chia = mining_coin_find("chia");
+    return xmr != nullptr && strcmp(xmr->catalog_id, "xmr") == 0 &&
+           chia != nullptr && strcmp(chia->catalog_id, "xch") == 0;
   }
+
 
 }

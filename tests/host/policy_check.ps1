@@ -61,6 +61,11 @@ $registries = @(
 )
 
 $catalogIds = @{}
+function Registry-Identity([string]$name, [string]$symbol) {
+  # Address forms do not revive a retired chain under a suffixed display name.
+  $base = $name.Trim() -replace '\s+(Native SegWit|Nested SegWit|Legacy)$', ''
+  return $base.ToLowerInvariant() + '|' + $symbol.ToUpperInvariant()
+}
 foreach ($registry in $registries) {
   $text = Read-Text $registry.File
   foreach ($line in ($text -split "`n")) {
@@ -68,7 +73,7 @@ foreach ($registry in $registries) {
     if (-not $trimmed.StartsWith("{")) { continue }
     $fields = [regex]::Matches($line, '"([^"]*)"') | ForEach-Object { $_.Groups[1].Value }
     if ($fields.Count -le [Math]::Max($registry.Name, $registry.Symbol)) { continue }
-    $identity = $fields[$registry.Name].Trim().ToLowerInvariant() + "|" + $fields[$registry.Symbol].ToUpperInvariant()
+    $identity = Registry-Identity $fields[$registry.Name] $fields[$registry.Symbol]
     if ($graveyard.ContainsKey($identity)) {
       Fail "$($registry.File): graveyard identity listed -> $($line.Trim())"
     }

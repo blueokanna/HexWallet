@@ -2,6 +2,8 @@
 
 Display, TOTP, USB/NFC and FIDO2 implementation boundaries are tracked in [authentication status](docs/authentication-status.md). CTAPHID transport alone is not a working passkey authenticator.
 
+MiningPoolStats identity mappings, exact capability scope and the 64-entry custom token store are documented in [network registry](docs/network-registry.md). The [complete snapshot report](docs/miningpoolstats-coverage.md) includes unmapped projects; a website listing is not a wallet-support claim.
+
 > Every chain in the table below has a signing path in this tree; none of them has
 > completed hardware or node acceptance. Latest additions: Starknet (Cairo v3
 > `deploy_account`, and `execute` with 1-4 ERC-20 `transfer` calls), QRL v2
@@ -165,6 +167,10 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `WalletCustomTokens` | User-declared tokens for EVM, TRON, Solana, Stellar and Starknet: one digest-checked blob, per-network key widths |
 | `MlDsa87` | FIPS 204 ML-DSA-87 keygen/sign/verify, used by QRL v2 |
 | `P256Sign` | NIST P-256 ECDSA with RFC 6979 nonces, low-S and strict DER; the ES256 primitive a CTAP2 authenticator needs |
+| `src/EcdsaCurve.h` | One ECDSA engine for both 256-bit curves the wallet signs on — secp256k1 (`a = 0`) and secp256r1 (`a = -3`) — with RFC 6979, low-S, strict DER and a verifier. Runs on the host, so a produced signature can be checked without mbedtls; the Montgomery factors are derived from the modulus instead of being transcribed |
+| `src/Secp256k1Sign.h` | secp256k1 ECDSA sign/verify through mbedtls, with RFC 6979 determinism, low-S and a self-check on the curve |
+| `Ed25519` / X25519 | RFC 8032 Ed25519 (sign, verify, Edwards point/scalar arithmetic) plus RFC 7748 X25519, the iterated test, and the birational map from an Ed25519 identity to its Curve25519 public key |
+| `Se051Apdu` | SE05x/SE051 applet command encoding: CLA/INS/P1/P2/TLV tables transcribed from NXP plug-and-trust, `CreateECCurve`/`SetECCurveParam`/`ReadECCurveList`, ECDSA/EdDSA signing, ECDH, the one-shot HMAC the in-card BIP32 design needs, and session commands |
 | `QrlV2Transaction` | QRL v2 dynamic-fee envelope, keccak-256 digest, ML-DSA-87 signature |
 | `AptosTransaction` | BCS `RawTransaction`, `APTOS::RawTransaction` domain hash, Ed25519 authenticator |
 | `StarknetCrypto` | Stark curve field/point arithmetic, Pedersen, Poseidon, Stark ECDSA, SNIP-5 address, Cairo v3 hashes |

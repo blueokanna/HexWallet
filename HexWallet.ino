@@ -15,6 +15,8 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 #include "Totp.h"
 #include "XrpTransaction.h"
 #include "CryptoExtended.h"
+#include "src/EcdsaCurve.h"
+#include "Se051Apdu.h"
 #include "WalletCatalog.h"
 #include "WalletCli.h"
 #include "WalletConfig.h"
@@ -89,6 +91,9 @@ namespace
     kTezos,
     kTotp,
     kXrp,
+    kEcdsaCurve,
+    kX25519,
+    kSe051Apdu,
     kSelfTestCount
   };
 
@@ -131,6 +136,9 @@ namespace
       "tezos",
       "totp",
       "xrp",
+      "ecdsa-curve",
+      "x25519",
+      "se051-apdu",
   };
 
   struct SelfTestReport
@@ -169,7 +177,8 @@ namespace
     report->passed[kBip340] = hexwallet::run_bip340_self_test();
     report->passed[kAddress] = hexwallet::run_address_self_tests();
     report->passed[kNetworks] = hexwallet::run_network_profile_self_tests();
-    report->passed[kSighash] = hexwallet::run_bitcoin_sighash_self_tests();
+    report->passed[kSighash] = hexwallet::run_bitcoin_sighash_self_tests() &&
+                               hexwallet::run_groestlcoin_sighash_self_tests();
     report->passed[kKaspa] = hexwallet::run_kaspa_self_tests();
     report->passed[kCalldata] = hexwallet::run_token_calldata_self_tests();
     report->passed[kTokens] = hexwallet::run_token_profile_self_tests();
@@ -189,6 +198,9 @@ namespace
     report->passed[kTezos] = hexwallet::run_tezos_self_tests();
     report->passed[kTotp] = hexwallet::run_totp_self_tests();
     report->passed[kXrp] = hexwallet::run_xrp_self_tests();
+    report->passed[kEcdsaCurve] = hexwallet::run_ecdsa_curve_self_tests();
+    report->passed[kX25519] = hexwallet::run_x25519_self_tests();
+    report->passed[kSe051Apdu] = hexwallet::run_se051_apdu_self_tests();
   }
 
   void print_self_test_report(const SelfTestReport &report)

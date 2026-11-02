@@ -15,12 +15,8 @@ namespace hexwallet
     constexpr UtxoAddressProfile kUtxoBitcoinGold = {0x26, 0x17, "btg", false};
     constexpr UtxoAddressProfile kUtxoRavencoin = {0x3c, 0x7a, nullptr, false};
     constexpr UtxoAddressProfile kUtxoVertcoin = {0x47, 0x05, "vtc", false};
-    constexpr UtxoAddressProfile kUtxoGroestlcoin = {0x24, 0x05, "grs", false};
+    constexpr UtxoAddressProfile kUtxoGroestlcoin = kGroestlcoinMainnet;
     constexpr UtxoAddressProfile kUtxoAxe = {0x8c, 0x13, "axe", false};
-
-    // CryptoNote prefixes are varints, not one-byte version fields. The
-    // 64-bit profiles live in CryptoNoteAddress.h so the address encoder and
-    // the network table cannot drift apart.
 
 #if defined(HEXWALLET_HOST_TEST)
     struct ForkAddressVector
@@ -55,6 +51,10 @@ namespace hexwallet
       {"axe", "AXE", "Axe", 4242, 4242, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoAxe, 0, 0, 0, 0, nullptr},
       // Groestlcoin: SLIP-44 17, Bitcoin address layout, Groestl-512 checksum.
       {"grs", "GRS", "Groestlcoin", 17, 17, 44, DerivationStyle::Bip44, AddressEncoding::P2pkhGroestl, kUtxoGroestlcoin, 0, 0, 0, 0, nullptr},
+      // Groestlcoin's segwit accounts. The sighash family is the same; only the
+      // spend type and address encoding change, exactly as for btc/btc49.
+      {"grs49", "GRS", "Groestlcoin Nested SegWit", 17, 17, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoGroestlcoin, 0, 0, 0, 0, nullptr},
+      {"grs84", "GRS", "Groestlcoin Native SegWit", 17, 17, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoGroestlcoin, 0, 0, 0, 0, nullptr},
       // --- EVM networks ------------------------------------------------------
       // Official network references and supported envelopes: docs/chain-protocols.md.
       {"xlayer", "OKB", "X Layer", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 196, 0, 0, nullptr},
@@ -103,7 +103,6 @@ namespace hexwallet
       {"telos", "TLOS", "Telos EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 40, 0, 0, nullptr},
       {"seievm", "SEI", "Sei EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1329, 0, 0, nullptr},
       {"ethw", "ETHW", "EthereumPoW", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 10001, 0, 0, nullptr},
-      {"clo", "CLO", "Callisto Network", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 820, 0, 0, nullptr},
       {"etho", "ETHO", "Etho Protocol", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1313114, 0, 0, nullptr},
       {"octa", "OCTA", "OctaSpace", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 800001, 0, 0, nullptr},
       {"egaz", "EGAZ", "Etica", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 61803, 0, 0, nullptr},
@@ -167,7 +166,7 @@ namespace hexwallet
       // Flow EVM is a distinct address/transaction domain from Cadence accounts.
       {"flow-evm", "FLOW", "Flow EVM Mainnet", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 747, 0, 0, nullptr},
       {"sui", "SUI", "Sui", 784, 784, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::SuiEd25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
-    {"apt", "APT", "Aptos", 637, 637, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::AptosEd25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"apt", "APT", "Aptos", 637, 637, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::AptosEd25519, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"icx", "ICX", "ICON", 74, 74, 44, DerivationStyle::Bip44, AddressEncoding::IconAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       // Substrate ed25519 accounts. Ledger seed/path recovery equivalence has
       // not been established by these SS58 encoding tests. The
@@ -257,6 +256,12 @@ namespace hexwallet
       {"xec", SighashFamily::ForkId, 0},
       {"bsv", SighashFamily::ForkId, 0},
       {"zec", SighashFamily::ZcashZip243, 0},
+      // Groestlcoin: Bitcoin's legacy preimage, single SHA-256 digest. The
+      // address checksum uses double Groestl-512 (AddressEncoding::P2pkhGroestl
+      // in the profile above) and is unrelated to the signature hash.
+      {"grs", SighashFamily::GroestlLegacy, 0},
+      {"grs49", SighashFamily::GroestlLegacy, 0},
+      {"grs84", SighashFamily::GroestlLegacy, 0},
       {"firo", SighashFamily::Bitcoin, 0},
       {"qtum", SighashFamily::Bitcoin, 0},
 #include "src/generated/WalletForkSigningPolicies.inc"
@@ -318,8 +323,6 @@ namespace hexwallet
 
   bool network_supports_eip2930(const NetworkProfile &network)
   {
-    // Explicit admission: EVM compatibility alone does not establish support
-    // for every EIP-2718 envelope on every network.
     return network.encoding == AddressEncoding::Evm && network.id != nullptr &&
            strcmp(network.id, "eth") == 0 && network.evm_chain_id == 1;
   }
@@ -701,7 +704,8 @@ namespace hexwallet
         return false;
       const bool utxo_family = network->encoding == AddressEncoding::P2pkh ||
                                network->encoding == AddressEncoding::P2shP2wpkh ||
-                               network->encoding == AddressEncoding::P2wpkh;
+                               network->encoding == AddressEncoding::P2wpkh ||
+                               network->encoding == AddressEncoding::P2pkhGroestl;
       const bool cashaddr_family = network->encoding == AddressEncoding::CashAddr &&
                                    network->alt_hrp != nullptr;
       if (policy.family == SighashFamily::ZcashZip243)
@@ -723,6 +727,21 @@ namespace hexwallet
             return false;
         }
         else if (cashaddr_family)
+        {
+          return false;
+        }
+        // Groestlcoin's spine is its address encoding, not its spend type: all
+        // three accounts (legacy, nested, native) share 0x24/0x05/"grs" and
+        // differ only in derivation and address form. A policy row must not be
+        // able to point another chain at that encoding, and a Groestlcoin
+        // profile must not be signable under Bitcoin rules - that combination
+        // would render a GRS address and sign a Bitcoin digest.
+        const bool groestl_profile =
+            network->utxo.p2pkh_version == kGroestlcoinMainnet.p2pkh_version &&
+            network->utxo.p2sh_version == kGroestlcoinMainnet.p2sh_version &&
+            network->utxo.bech32_hrp != nullptr &&
+            strcmp(network->utxo.bech32_hrp, kGroestlcoinMainnet.bech32_hrp) == 0;
+        if ((policy.family == SighashFamily::GroestlLegacy) != groestl_profile)
         {
           return false;
         }

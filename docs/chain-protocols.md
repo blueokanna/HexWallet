@@ -16,6 +16,40 @@ Link transaction kind: `14` (`kTxChain`). The `coin_id` selects the adapter and
 the payload starts with the adapter's own magic. Firo and Qtum do **not** use
 this path: they are served by the Bitcoin engine, and ZEC by the Zcash engine.
 
+The serial CLI reaches the same entry point, which is how the 46-byte native
+Theta payload gets in from a host without a phone:
+
+```text
+chain begin <network> <index> <payload-hex>
+chain sign <code>
+chain reject
+```
+
+`chain begin` runs the same gate as `tx inspect`/`zec inspect`: the serial
+transport policy must allow a signing request (that means a trusted display is
+present), the adapter re-derives the sender from the wallet, and a fresh
+six-digit approval code is issued with a two-minute deadline. The digest the
+review prints is the digest that gets signed.
+
+### Groestlcoin (GRS)
+
+The signing policy is `SighashFamily::GroestlLegacy`: the preimage is Bitcoin's
+legacy `CTransactionSignatureSerializer` output byte for byte, and the digest is
+a **single** SHA-256. Groestlcoin Core's `HashWriter::GetHash()` finalises once
+(the second round is commented out in `src/hash.h`), which is the same reason a
+GRS transaction id is `SHA256(raw)` and not `SHA256d(raw)`. There is no
+`SIGHASH_FORKID` on this chain, so the 0x40 bit is refused rather than routed to
+BIP143.
+
+Groestl-512 appears in two other places and neither is the sighash: the block
+hash and the base58 address checksum. The checksum is double Groestl-512
+truncated to four bytes, which is why `chain_address_from_script()` switches to
+`address_from_script_groestl()` for this family — rendering a GRS output with
+the SHA-256 checksum would print an address that does not exist on that chain.
+
+Scope: P2PKH legacy inputs, one transaction at a time. P2SH and bech32 spends
+are not admitted.
+
 ### VeChain (VET)
 
 Payload (80 bytes, integers little-endian unless noted):

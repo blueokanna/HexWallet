@@ -1252,6 +1252,189 @@ bool ed25519_ecdh(const uint8_t seed[32], const uint8_t peer_public[32],
   return ok;
 }
 
+// ---------------------------------------------------------------------------
+// X25519 (RFC 7748) on the Montgomery form of Curve25519.
+//
+// The Edwards25519 arithmetic above already has the field; this adds the
+// Montgomery ladder and the birational map that turns an Ed25519 identity into
+// the Curve25519 public key other implementations expect. Without it the
+// firmware can do Ed25519-group ECDH but cannot speak RFC 7748 at all, which is
+// what HPKE, age and most "x25519" interop actually asks for.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Constant-time conditional swap of two field elements.
+void fe_cswap(fe a, fe b, int swap) {
+  const int64_t mask = -static_cast<int64_t>(swap != 0);
+  for (int index = 0; index < 10; ++index) {
+    const int64_t delta = (a[index] ^ b[index]) & mask;
+    a[index] ^= delta;
+    b[index] ^= delta;
+  }
+}
+
+}  // namespace
+
+bool x25519_scalar_mult(const uint8_t scalar[32], const uint8_t point[32],
+                        uint8_t out[32]) {
+  if (scalar == nullptr || point == nullptr || out == nullptr) {
+    return false;
+  }
+  // RFC 7748 section 5: clamp the scalar, and mask the unusable high bit of the
+  // u-coordinate so every 32-byte string is a valid input.
+  uint8_t k[32];
+  memcpy(k, scalar, sizeof(k));
+  k[0] &= 248;
+  k[31] &= 127;
+  k[31] |= 64;
+  uint8_t u[32];
+  memcpy(u, point, sizeof(u));
+  u[31] &= 127;
+
+  // a24 = (486662 - 2) / 4 for Curve25519, held as a field element so the
+  // product goes through the reducing multiply. Scaling the limbs by 121665
+  // directly would leave a 43-bit limb that the next multiply overflows.
+  fe a24;
+  fe_0(a24);
+  a24[0] = 121665;
+
+  fe x1, x2, z2, x3, z3;
+  fe_frombytes_full(x1, u);
+  fe_1(x2);
+  fe_0(z2);
+  fe_copy(x3, x1);
+  fe_1(z3);
+
+  fe a, aa, b, bb, e, c, d, da, cb, t0, t1, t2;
+  int swap = 0;
+  for (int bit = 254; bit >= 0; --bit) {
+    const int kt = (k[bit / 8] >> (bit % 8)) & 1;
+    swap ^= kt;
+    fe_cswap(x2, x3, swap);
+    fe_cswap(z2, z3, swap);
+    swap = kt;
+
+    fe_add(a, x2, z2);
+    fe_sq(aa, a);
+    fe_sub(b, x2, z2);
+    fe_sq(bb, b);
+    fe_sub(e, aa, bb);
+    fe_add(c, x3, z3);
+    fe_sub(d, x3, z3);
+    fe_mul(da, d, a);
+    fe_mul(cb, c, b);
+    fe_add(t0, da, cb);
+    fe_sq(x3, t0);
+    fe_sub(t1, da, cb);
+    fe_sq(t1, t1);
+    fe_mul(z3, x1, t1);
+    fe_mul(x2, aa, bb);
+    // z2 = E * (AA + a24 * E)
+    fe_mul(t2, e, a24);
+    fe_add(t2, aa, t2);
+    fe_mul(z2, e, t2);
+  }
+  fe_cswap(x2, x3, swap);
+  fe_cswap(z2, z3, swap);
+
+  fe inverse;
+  fe_invert(inverse, z2);
+  fe result;
+  fe_mul(result, x2, inverse);
+  fe_tobytes(out, result);
+
+  secure_zero(k, sizeof(k));
+  secure_zero(u, sizeof(u));
+  secure_zero(x1, sizeof(x1));
+  secure_zero(x2, sizeof(x2));
+  secure_zero(z2, sizeof(z2));
+  secure_zero(x3, sizeof(x3));
+  secure_zero(z3, sizeof(z3));
+  secure_zero(a, sizeof(a));
+  secure_zero(aa, sizeof(aa));
+  secure_zero(b, sizeof(b));
+  secure_zero(bb, sizeof(bb));
+  secure_zero(e, sizeof(e));
+  secure_zero(c, sizeof(c));
+  secure_zero(d, sizeof(d));
+  secure_zero(da, sizeof(da));
+  secure_zero(cb, sizeof(cb));
+  secure_zero(t0, sizeof(t0));
+  secure_zero(t1, sizeof(t1));
+  secure_zero(t2, sizeof(t2));
+  secure_zero(inverse, sizeof(inverse));
+  secure_zero(result, sizeof(result));
+  return true;
+}
+
+bool x25519_public_key(const uint8_t scalar[32], uint8_t out[32]) {
+  static const uint8_t kBasePoint[32] = { 9 };
+  return x25519_scalar_mult(scalar, kBasePoint, out);
+}
+
+bool x25519_ecdh(const uint8_t scalar[32], const uint8_t peer_public[32],
+                 uint8_t out[32]) {
+  if (out == nullptr) return false;
+  uint8_t shared[32];
+  if (!x25519_scalar_mult(scalar, peer_public, shared)) {
+    return false;
+  }
+  // RFC 7748 section 6.1: a zero shared secret means the peer sent a
+  // small-order point, which would make the "shared" key public.
+  uint8_t combined = 0;
+  for (uint8_t byte : shared) combined |= byte;
+  const bool ok = combined != 0;
+  if (ok) {
+    memcpy(out, shared, sizeof(shared));
+  } else {
+    memset(out, 0, 32);
+  }
+  secure_zero(shared, sizeof(shared));
+  return ok;
+}
+
+bool ed25519_public_to_x25519(const uint8_t ed_public[32], uint8_t out[32]) {
+  if (ed_public == nullptr || out == nullptr) return false;
+  fe y, one, numerator, denominator;
+  fe_frombytes(y, ed_public);  // the sign bit is not part of y
+  fe_1(one);
+  // u = (1 + y) / (1 - y); it maps the Ed25519 base point (y = 4/5) onto
+  // u = 9, the Curve25519 base point.
+  fe_add(numerator, one, y);
+  fe_sub(denominator, one, y);
+  if (fe_iszero(denominator)) {
+    secure_zero(y, sizeof(y));
+    return false;
+  }
+  fe inverse;
+  fe_invert(inverse, denominator);
+  fe u;
+  fe_mul(u, numerator, inverse);
+  fe_tobytes(out, u);
+  secure_zero(y, sizeof(y));
+  secure_zero(numerator, sizeof(numerator));
+  secure_zero(denominator, sizeof(denominator));
+  secure_zero(inverse, sizeof(inverse));
+  secure_zero(u, sizeof(u));
+  return true;
+}
+
+bool ed25519_seed_to_x25519(const uint8_t seed[32], uint8_t out[32]) {
+  if (seed == nullptr || out == nullptr) return false;
+  uint8_t hash[64];
+  if (!sha512(seed, 32, hash)) {
+    secure_zero(hash, sizeof(hash));
+    return false;
+  }
+  // The same hashed pre-key Ed25519 uses for its own scalar. Clamping is left
+  // to the X25519 call so the returned bytes are exactly the ones a peer
+  // library derives from the same seed.
+  memcpy(out, hash, 32);
+  secure_zero(hash, sizeof(hash));
+  return true;
+}
+
 bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
                            const uint32_t *path, size_t path_size,
                            uint8_t out_private[32]) {

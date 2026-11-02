@@ -70,20 +70,6 @@
       "fork_id": 0
     },
     {
-      "network": "cpuchain",
-      "symbol": "CPU",
-      "name": "CPUchain",
-      "slip44": 363,
-      "p2pkh": 28,
-      "p2sh": 30,
-      "sighash": "legacy",
-      "fork_id": 0,
-      "signing": true,
-      "source_verified": true,
-      "source": "https://github.com/cpuchain/cpuchain/blob/HEAD/src/kernel/chainparams.cpp",
-      "sighash_source": "https://raw.githubusercontent.com/cpuchain/cpuchain/HEAD/src/script/interpreter.cpp"
-    },
-    {
       "network": "deeponion",
       "symbol": "ONION",
       "name": "DeepOnion",
@@ -531,20 +517,6 @@
       "sighash_source": "https://raw.githubusercontent.com/cyberyen/cyberyen/HEAD/src/script/interpreter.cpp"
     },
     {
-      "network": "utxo_dogecoinev",
-      "symbol": "DEV",
-      "name": "Dogecoinev",
-      "slip44": 1420,
-      "p2pkh": 30,
-      "p2sh": 22,
-      "sighash": "legacy",
-      "fork_id": 0,
-      "source": "https://github.com/DogecoinEV-Foundation/DogecoinEV/blob/HEAD/src/chainparams.cpp",
-      "source_verified": true,
-      "signing": true,
-      "sighash_source": "https://raw.githubusercontent.com/DogecoinEV-Foundation/DogecoinEV/HEAD/src/script/interpreter.cpp"
-    },
-    {
       "network": "utxo_doriancoin",
       "symbol": "DSV",
       "name": "Doriancoin",
@@ -769,36 +741,6 @@
       "bech32": "wj",
       "segwit": "native",
       "sighash_source": "https://raw.githubusercontent.com/WojakCoinProj/wojakcore/HEAD/src/script/interpreter.cpp"
-    },
-    {
-      "network": "utxo_actinium",
-      "symbol": "ACM",
-      "name": "Actinium",
-      "slip44": 228,
-      "p2pkh": 53,
-      "p2sh": 5,
-      "sighash": "legacy",
-      "fork_id": 0,
-      "source": "https://github.com/Actinium-project/Actinium-ng/blob/HEAD/src/chainparams.cpp",
-      "source_verified": true,
-      "signing": true,
-      "bech32": "acm",
-      "segwit": "native",
-      "sighash_source": "https://raw.githubusercontent.com/Actinium-project/Actinium-ng/HEAD/src/script/interpreter.cpp"
-    },
-    {
-      "network": "utxo_aipowergrid",
-      "symbol": "AIPG",
-      "name": "AIPowerGrid",
-      "slip44": 2686,
-      "p2pkh": 23,
-      "p2sh": 23,
-      "sighash": "legacy",
-      "fork_id": 0,
-      "source": "https://github.com/AIPowerGrid/AI-Power-Grid-Core/blob/HEAD/src/chainparams.cpp",
-      "source_verified": true,
-      "signing": true,
-      "sighash_source": "https://raw.githubusercontent.com/AIPowerGrid/AI-Power-Grid-Core/HEAD/src/script/interpreter.cpp"
     },
     {
       "network": "utxo_bitcoinx",

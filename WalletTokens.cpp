@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "base58.h"
+#include "WalletCatalog.h"
 
 namespace hexwallet {
 namespace {
@@ -18,10 +19,54 @@ bool is_hex(char value) {
 
 bool valid_evm_contract(const char *contract) {
   if (contract == nullptr || strlen(contract) != 42 || contract[0] != '0' || contract[1] != 'x') return false;
+  bool nonzero = false;
   for (size_t index = 2; index < 42; ++index) {
     if (!is_hex(contract[index])) return false;
+    nonzero |= contract[index] != '0';
   }
-  return true;
+  return nonzero;
+}
+
+bool token_binding_valid(const TokenProfile &token, const NetworkProfile *network) {
+  if (network == nullptr || token.contract_or_mint == nullptr || token.decimals > 36)
+    return false;
+  if (token.standard == TokenStandard::Trc20) {
+    uint8_t decoded[32] = {};
+    size_t size = sizeof(decoded);
+    if (network->encoding != AddressEncoding::Tron ||
+        !b58check_dec(decoded, &size, token.contract_or_mint) || size != 21 || decoded[0] != 0x41)
+      return false;
+    uint8_t nonzero = 0;
+    for (size_t index = 1; index < size; ++index) nonzero |= decoded[index];
+    return nonzero != 0;
+  }
+  if (token.standard == TokenStandard::Trc10) {
+    if (network->encoding != AddressEncoding::Tron) return false;
+    const size_t size = strlen(token.contract_or_mint);
+    if (size == 0 || size > kTrc10IdMaxLength || token.contract_or_mint[0] == '0') return false;
+    for (size_t index = 0; index < size; ++index)
+      if (token.contract_or_mint[index] < '0' || token.contract_or_mint[index] > '9') return false;
+    return true;
+  }
+  return network->encoding == AddressEncoding::Evm &&
+         token_evm_standard(token.standard) != EvmTokenStandard::Unknown &&
+         valid_evm_contract(token.contract_or_mint);
+}
+
+bool same_contract(const TokenProfile &left, const TokenProfile &right) {
+  if (strcmp(left.network_id, right.network_id) != 0) return false;
+  const char *a = left.contract_or_mint;
+  const char *b = right.contract_or_mint;
+  const bool evm = token_evm_standard(left.standard) != EvmTokenStandard::Unknown &&
+                   token_evm_standard(right.standard) != EvmTokenStandard::Unknown;
+  while (*a != '\0' && *b != '\0') {
+    const char ac = evm && *a >= 'A' && *a <= 'F' ? *a + ('a' - 'A') : *a;
+    const char bc = evm && *b >= 'A' && *b <= 'F' ? *b + ('a' - 'A') : *b;
+    if (ac != bc) return false;
+    ++a;
+    ++b;
+  }
+  return *a == *b;
 }
 
 }  // namespace
@@ -295,11 +340,17 @@ const NetworkProfile *token_network(const TokenProfile &token) {
 bool token_supports_account_address(const TokenProfile &token) {
   const NetworkProfile *network = token_network(token);
   return (token.capabilities & TokenCapabilityAccountAddress) != 0 && network != nullptr &&
-         network_supports_token_accounts(*network);
+         network_supports_token_accounts(*network) && token_binding_valid(token, network);
 }
 
 bool token_supports_transfer_signing(const TokenProfile &token) {
-  return (token.capabilities & TokenCapabilityTransferSigning) != 0;
+  const NetworkProfile *network = token_network(token);
+  WalletCatalogEntry entry = {};
+  return (token.capabilities & TokenCapabilityTransferSigning) != 0 &&
+         token_binding_valid(token, network) &&
+         wallet_catalog_find(token.network_id, &entry) && entry.network == network &&
+         wallet_catalog_has(entry, WalletCapabilityTransactionReview) &&
+         wallet_catalog_has(entry, WalletCapabilitySigning);
 }
 
 const char *token_standard_text(TokenStandard standard) {
@@ -382,10 +433,32 @@ bool run_token_profile_self_tests() {
       return false;
     }
     for (size_t right = left + 1; right < kTokenProfileCount; ++right) {
-      if (strcmp(token.id, kTokenProfiles[right].id) == 0) return false;
+      if (strcmp(token.id, kTokenProfiles[right].id) == 0 ||
+          same_contract(token, kTokenProfiles[right])) return false;
     }
   }
   const TokenProfile *usdc = find_token_profile("eth-usdc");
+  if (usdc == nullptr) return false;
+  TokenProfile invalid = *usdc;
+  invalid.network_id = "btc";
+  if (token_supports_transfer_signing(invalid) || token_supports_account_address(invalid)) return false;
+  invalid.network_id = "unknown-network";
+  if (token_supports_transfer_signing(invalid)) return false;
+  invalid = *usdc;
+  invalid.standard = TokenStandard::Trc20;
+  if (token_supports_transfer_signing(invalid)) return false;
+  invalid.standard = static_cast<TokenStandard>(255);
+  if (token_supports_transfer_signing(invalid)) return false;
+  invalid = *usdc;
+  invalid.contract_or_mint = "0x0000000000000000000000000000000000000000";
+  if (token_supports_transfer_signing(invalid)) return false;
+  invalid.contract_or_mint = nullptr;
+  if (token_supports_transfer_signing(invalid)) return false;
+  invalid = *usdc;
+  invalid.contract_or_mint = "0xa0B86991C6218b36c1D19D4a2E9eb0cE3606eb48";
+  if (!same_contract(*usdc, invalid)) return false;
+  invalid.network_id = "arb1";
+  if (same_contract(*usdc, invalid)) return false;
   return usdc != nullptr && token_supports_account_address(*usdc) &&
          token_supports_transfer_signing(*usdc);
 }

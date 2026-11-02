@@ -73,7 +73,7 @@ $cppSources = @(
   "CryptoNoteSigning.cpp",
   "CryptoNoteMasari.cpp",
   "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp",
+  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "BitcoinTransaction.cpp",
   "KaspaTransaction.cpp",
   "TronTransaction.cpp",
@@ -160,6 +160,7 @@ $catalogSources = @(
   "CryptoPrimitives.cpp",
   "Bls12381.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "QrlV2Transaction.cpp", "Blake2b.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
   "BlsG1.cpp", "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
+  "WalletMiningCatalog.cpp", "WalletCustomTokens.cpp",
   "CosmosTransaction.cpp", "StellarTransaction.cpp",
   "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp",
   "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp",
@@ -168,7 +169,7 @@ $catalogSources = @(
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
   "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
   "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp", "host_security.cpp"
+  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp", "host_security.cpp"
 )
 $catalogSources = @($catalogSources | Select-Object -Unique)
 $catalogObjs = @()

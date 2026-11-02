@@ -122,8 +122,15 @@ bool derive_session_keys(const uint8_t local_ephemeral_seed[32],
   uint8_t transcript_hash[32];
   uint8_t shared[32];
   uint8_t keys[64];
+  // X25519, not the Ed25519 group. The two are different groups on the same
+  // curve: an Ed25519 point encoding is not a valid u-coordinate, so the peer
+  // list has to agree on one. RFC 7748 is what every phone-side library exposes
+  // as "curve25519"/"x25519", and it is also what makes the shared secret a
+  // plain u-coordinate rather than a compressed Edwards point.
+  uint8_t scalar[32];
   bool ok = crypto_sha256(transcript, offset, transcript_hash) &&
-            ed25519_ecdh(local_ephemeral_seed, peer_ephemeral, shared) &&
+            ed25519_seed_to_x25519(local_ephemeral_seed, scalar) &&
+            x25519_ecdh(scalar, peer_ephemeral, shared) &&
             link_hkdf_sha256(shared, sizeof(shared), transcript_hash,
                              sizeof(transcript_hash), kKeyInfo,
                              sizeof(kKeyInfo) - 1, keys, sizeof(keys));
@@ -134,6 +141,7 @@ bool derive_session_keys(const uint8_t local_ephemeral_seed[32],
   }
   secure_zero(transcript, sizeof(transcript));
   secure_zero(transcript_hash, sizeof(transcript_hash));
+  secure_zero(scalar, sizeof(scalar));
   secure_zero(shared, sizeof(shared));
   secure_zero(keys, sizeof(keys));
   return ok;
@@ -394,7 +402,9 @@ WalletLinkStatus WalletLinkDevice::handle_hello_request(
   uint8_t device_nonce[32];
   random_fill(device_ephemeral_seed, sizeof(device_ephemeral_seed));
   random_fill(device_nonce, sizeof(device_nonce));
-  bool ok = ed25519_public_key(device_ephemeral_seed, device_ephemeral);
+  uint8_t device_ephemeral_scalar[32];
+  bool ok = ed25519_seed_to_x25519(device_ephemeral_seed, device_ephemeral_scalar) &&
+            x25519_public_key(device_ephemeral_scalar, device_ephemeral);
 
   uint8_t response_fields[32 * 6];
   memcpy(response_fields, phone_public, 32);
@@ -434,6 +444,7 @@ WalletLinkStatus WalletLinkDevice::handle_hello_request(
                            sizeof(payload), response, response_capacity,
                            response_size) == WalletLinkStatus::Ok;
   }
+  secure_zero(device_ephemeral_scalar, sizeof(device_ephemeral_scalar));
   secure_zero(device_ephemeral_seed, sizeof(device_ephemeral_seed));
   secure_zero(device_ephemeral, sizeof(device_ephemeral));
   secure_zero(device_nonce, sizeof(device_nonce));
@@ -619,9 +630,11 @@ bool run_wallet_link_self_test() {
   uint8_t device_public[32];
   uint8_t phone_public[32];
   uint8_t phone_ephemeral[32];
+  uint8_t phone_scalar[32];
   bool ok = ed25519_public_key(kDeviceSeed, device_public) &&
             ed25519_public_key(kPhoneSeed, phone_public) &&
-            ed25519_public_key(kPhoneEphemeralSeed, phone_ephemeral);
+            ed25519_seed_to_x25519(kPhoneEphemeralSeed, phone_scalar) &&
+            x25519_public_key(phone_scalar, phone_ephemeral);
 
   // Pairing state is kept in a tiny local emulation of the device NVS.
   struct PairStore {

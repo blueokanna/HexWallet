@@ -6,6 +6,7 @@
 #include "CosmosTransaction.h"
 #include "WalletAltAddresses.h"
 #include "WalletEngine.h"
+#include "WalletSecurity.h"
 #include "PolkadotTransaction.h"
 #include "BlsG2.h"
 #include "WalletNetworks.h"
@@ -19,6 +20,23 @@ static void hex(const char *key, const uint8_t *p, size_t n) {
   printf("%s=", key); for (size_t i = 0; i < n; ++i) printf("%02x", p[i]); puts("");
 }
 int main(int argc, char **argv) {
+  // BIP39/BIP32/BIP84/secp256k1/BIP340 against the real curve code. The host
+  // suite links a stub, so this is the only place those pinned vectors actually
+  // execute; it is also what proves the in-tree ECDSA/BIP340 engine matches the
+  // published answers instead of merely compiling.
+  if (argc == 2 && !strcmp(argv[1], "wallet-selftest")) {
+    const bool bip39 = run_bip39_self_test();
+    const bool bip32 = run_bip32_self_test();
+    const bool bip84 = run_bip84_self_test();
+    const bool evm_derive = run_evm_derivation_self_test();
+    const bool secp256k1 = run_secp256k1_self_test();
+    const bool bip340 = run_bip340_self_test();
+    printf("wallet bip39=%s bip32=%s bip84=%s evm-derive=%s secp256k1=%s bip340=%s\n",
+           bip39 ? "pass" : "FAIL", bip32 ? "pass" : "FAIL",
+           bip84 ? "pass" : "FAIL", evm_derive ? "pass" : "FAIL",
+           secp256k1 ? "pass" : "FAIL", bip340 ? "pass" : "FAIL");
+    return bip39 && bip32 && bip84 && evm_derive && secp256k1 && bip340 ? 0 : 1;
+  }
   if (argc == 2 && !strcmp(argv[1], "dash-sign-selftest")) {
     const bool ok = run_dash_self_tests() && run_dash_signature_self_test();
     printf("dash-sign=%s\n", ok ? "pass" : "FAIL");

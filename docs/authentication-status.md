@@ -23,6 +23,14 @@ DER 编码。验收用 RFC 6979 A.2.5 逐字节钉死 `r`/`s`，并验证 RFC �
 零 `s`、错误摘要、私钥 `0` 与私钥 `n` 的拒绝路径。这套 KAT 曾抓出两个真 bug（模加进位分支、
 `s = (e+rd)/k` 写成了乘法），因此不能把它当成“写过就算”的模块。
 
+曲线覆盖面见 [src/EcdsaCurve.h](../src/EcdsaCurve.h)：它把 secp256k1（`a = 0`）与 secp256r1
+（`a = -3`）放进同一个引擎，主机上可跑，因此主机测试第一次能对“产出的签名”本身做独立验签，
+而不是只验证拒绝路径。它的 KAT 一半来自外部（RFC 6979 A.2.5、libsecp256k1 与 python-ecdsa
+互相一致的一对 `r`/`s`、一条 GRS 主网交易的链上签名），一半来自自证（`n·G` 等于无穷远点）。
+X25519 与 Ed25519→Curve25519 的双有理映射在 `Ed25519.cpp` 里实现了 RFC 7748 全套向量，
+包括 1000 次迭代那条。secp256k1 的**生产**签名仍走 mbedtls（有 RNG 盲化），in-tree 引擎用于
+验签与主机可测性。
+
 回归入口：`tests/host/build.ps1`（含 `p256-ecdsa=pass`、`eink-panel=pass`），以及
 `cmake -S tests/host/auth -B build/auth-native -A x64 && cmake --build build/auth-native
 --config Release && build/auth-native/Release/auth_test.exe`（TOTP 生命周期、传输冲突、

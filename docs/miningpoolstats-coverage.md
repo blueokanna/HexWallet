@@ -1,0 +1,532 @@
+# MiningPoolStats coverage
+
+Snapshot: [2026-11-02](https://miningpoolstats.stream/data/coin_list.1793562569.min.js).
+
+Active mining entries: 520; mapped entries: 115; unmapped entries: 405.
+Distinct mapped wallet profiles: 94; profiles declaring a signing path: 91.
+
+Mining entries include algorithm variants. Neither entries nor profiles are a count of fully supported blockchains.
+SIGN is the compiled catalog's code capability, not node acceptance, complete protocol coverage or hardware certification. ADDRESS has no admitted signing path. UNMAPPED is not supported by this directory. No inference is made from a shared ticker, mining algorithm or EVM-compatible address.
+
+| Source ID | Native asset | Wallet profile | Code capability | Implemented scope |
+| --- | --- | --- | --- | --- |
+| 0xbitcoin | 0xBTC / 0xBitcoin | — | UNMAPPED | No explicit native-network mapping |
+| 42coin | 42 / 42-coin | — | UNMAPPED | No explicit native-network mapping |
+| 5gcash | VGC / 5G-CASH | — | UNMAPPED | No explicit native-network mapping |
+| abelian | ABEL / Abelian | — | UNMAPPED | No explicit native-network mapping |
+| adventurecoin | ADVC / AdventureCoin | — | UNMAPPED | No explicit native-network mapping |
+| aegisum | AEGS / Aegisum | fork_utxo_aegisum | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| aeon | AEON / Aeon | — | UNMAPPED | No explicit native-network mapping |
+| aeternity | AE / Aeternity | ae | ADDRESS | Ed25519 ak_ address at m/44'/457'/0'/0'/i'; receive/address verification only - native spend signing is not enabled |
+| aion | AION / Aion | — | UNMAPPED | No explicit native-network mapping |
+| aleo | ALEO / Aleo | — | UNMAPPED | No explicit native-network mapping |
+| alephium | ALPH / Alephium | — | UNMAPPED | No explicit native-network mapping |
+| alterdot | ADOT / Alterdot | — | UNMAPPED | No explicit native-network mapping |
+| animecoin | ANI / Animecoin | — | UNMAPPED | No explicit native-network mapping |
+| anonymous | ANON / ANONymous | — | UNMAPPED | No explicit native-network mapping |
+| aquachain | AQUA / Aquachain | — | UNMAPPED | No explicit native-network mapping |
+| arielcoin | ARL / Arielcoin | — | UNMAPPED | No explicit native-network mapping |
+| arionum-cpu | ARO / Arionum | — | UNMAPPED | No explicit native-network mapping |
+| arionum-gpu | ARO / Arionum | — | UNMAPPED | No explicit native-network mapping |
+| arqma | ARQ / ArQmA | — | UNMAPPED | No explicit native-network mapping |
+| arsagility | ARGY / Arsagility | — | UNMAPPED | No explicit native-network mapping |
+| artbyte | ABY / ArtByte | — | UNMAPPED | No explicit native-network mapping |
+| arto | RTO / Arto | — | UNMAPPED | No explicit native-network mapping |
+| arweave | AR / Arweave | — | UNMAPPED | No explicit native-network mapping |
+| aureus | AURE / Aureus | — | UNMAPPED | No explicit native-network mapping |
+| aurora | ABRS / Aurora Borealis Coin | — | UNMAPPED | No explicit native-network mapping |
+| auroracoin-groestl | AUR / Auroracoin | fork_auroracoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| auroracoin-qubit | AUR / Auroracoin | fork_auroracoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| auroracoin-scrypt | AUR / Auroracoin | fork_auroracoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| auroracoin-sha | AUR / Auroracoin | fork_auroracoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| auroracoin-skein | AUR / Auroracoin | fork_auroracoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| aurumcrypto | ACG / Aurum Crypto Gold | — | UNMAPPED | No explicit native-network mapping |
+| australiacash | AUS / Australia Cash | — | UNMAPPED | No explicit native-network mapping |
+| aves | AVS / Aves | avs | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| avian-minotaurx | AVN / Avian | — | UNMAPPED | No explicit native-network mapping |
+| avian-x16rt | AVN / Avian | — | UNMAPPED | No explicit native-network mapping |
+| axerunners | AXE / Axe | axe | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| babacoin | BBC / Babacoin | fork_utxo_babacoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bbqcoin | BQC / BBQCoin | — | UNMAPPED | No explicit native-network mapping |
+| bbscoin | BBS / BBSCoin | — | UNMAPPED | No explicit native-network mapping |
+| beam | BEAM / Beam | — | UNMAPPED | No explicit native-network mapping |
+| beerscoin | BRC / BeersCoin | — | UNMAPPED | No explicit native-network mapping |
+| bellcoin | BELL / Bellcoin | fork_utxo_bellcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bellscoin | BELLS / Bellscoin | — | UNMAPPED | No explicit native-network mapping |
+| biblepay | BBP / BiblePay | fork_utxo_biblepay | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bismuth | BIS / Bismuth | — | UNMAPPED | No explicit native-network mapping |
+| bit | B1T / Bit | fork_utxo_bit | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bitbar | BTB / BitBar | — | UNMAPPED | No explicit native-network mapping |
+| bitcoin | BTC / Bitcoin | btc | SIGN | BIP84 native SegWit PSBT signing (BIP143) |
+| bitcoin3 | BC3 / Bitcoin III | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinatom | BCA / Bitcoin Atom | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinblu | BBLU / Bitcoin-Blu | — | UNMAPPED | No explicit native-network mapping |
+| bitcoincandy | CDY / Bitcoin Candy | — | UNMAPPED | No explicit native-network mapping |
+| bitcoincash | BCH / Bitcoin Cash | bch | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
+| bitcoincash2 | BCH2 / BitcoinCash II | — | UNMAPPED | No explicit native-network mapping |
+| bitcoingold | BTG / Bitcoin Gold | btg | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bitcoinii | BC2 / Bitcoin II | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinknots | BTCB2 / Bitcoin Knots | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinknotscash | XBTC / Bitcoin Knots Cash | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinoil | BTCO / Bitcoin Oil | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinpurity | BTC1 / Bitcoin Purity | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinpurple | BTCP / BitcoinPurple | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinsilver | BTCS / Bitcoin Silver | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinsubsidium | XBTX / BitcoinSubsidium | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinsv | BSV / Bitcoin SV | bsv | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
+| bitcoinvalue | BTCV / BitcoinValue | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinx | BCX / BitcoinX | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinz | BTCZ / BitcoinZ | — | UNMAPPED | No explicit native-network mapping |
+| bitcoinzero | BZX / Bitcoin Zero | — | UNMAPPED | No explicit native-network mapping |
+| bitcore | BTX / Bitcore | fork_bitcore | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bitfishcoin | BTSC / Bitfishcoin | — | UNMAPPED | No explicit native-network mapping |
+| bitgem | BTG / BitGem | — | UNMAPPED | No explicit native-network mapping |
+| bitgesell | BGL / Bitgesell | — | UNMAPPED | No explicit native-network mapping |
+| bitmark-equihash | MARKS / BitMark | — | UNMAPPED | No explicit native-network mapping |
+| bitmark-lyra | MARKS / BitMark | — | UNMAPPED | No explicit native-network mapping |
+| bitmark-scrypt | MARKS / BitMark | — | UNMAPPED | No explicit native-network mapping |
+| bitmark-sha | MARKS / BitMark | — | UNMAPPED | No explicit native-network mapping |
+| bitmark-x17 | MARKS / BitMark | — | UNMAPPED | No explicit native-network mapping |
+| bitmark-yescrypt | MARKS / BitMark | — | UNMAPPED | No explicit native-network mapping |
+| bitmeme | BTM / Bitmeme | — | UNMAPPED | No explicit native-network mapping |
+| bitnet | BIT / BitNet | — | UNMAPPED | No explicit native-network mapping |
+| bitnetmoney | BTN / Bitnet Money | btn | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| bitoreum | BTRM / Bitoreum | — | UNMAPPED | No explicit native-network mapping |
+| bitrae | BTRE / Bitrae | — | UNMAPPED | No explicit native-network mapping |
+| bitweb | BTE / Bitweb | — | UNMAPPED | No explicit native-network mapping |
+| bitzeny | ZNY / BitZeny | — | UNMAPPED | No explicit native-network mapping |
+| blackgoldcoin | BGCO / Black Gold Coin | — | UNMAPPED | No explicit native-network mapping |
+| bnbitcoin | BNBTC / BNbitcoin | — | UNMAPPED | No explicit native-network mapping |
+| bolivarcoin | BOLI / Bolivarcoin | — | UNMAPPED | No explicit native-network mapping |
+| bonero | SEXT / Bonero | — | UNMAPPED | No explicit native-network mapping |
+| bonkcoin | BONC / Bonkcoin | — | UNMAPPED | No explicit native-network mapping |
+| boskacoin | BOSKA / BoskaCoin | — | UNMAPPED | No explicit native-network mapping |
+| brics | BRICS / Brics | — | UNMAPPED | No explicit native-network mapping |
+| briskcoin | BKC / Briskcoin | — | UNMAPPED | No explicit native-network mapping |
+| btcturquoise | BTCQ / BTCturquoise | — | UNMAPPED | No explicit native-network mapping |
+| btgscoin | BTGS / BTGS Coin | — | UNMAPPED | No explicit native-network mapping |
+| btxchain | BTX / BTX Chain | — | UNMAPPED | No explicit native-network mapping |
+| buck | BUCK / Buck | — | UNMAPPED | No explicit native-network mapping |
+| butterfly | BTFC / Butterfly | — | UNMAPPED | No explicit native-network mapping |
+| bytecoin | BCN / Bytecoin | — | UNMAPPED | No explicit native-network mapping |
+| c64chain | C64 / C64 Chain | — | UNMAPPED | No explicit native-network mapping |
+| canxium | CAU / Canxium | cau | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| capstash | CAP / CapStash | — | UNMAPPED | No explicit native-network mapping |
+| cascoin-minotaurx | CAS / Cascoin | — | UNMAPPED | No explicit native-network mapping |
+| cascoin-sha | CAS / Cascoin | — | UNMAPPED | No explicit native-network mapping |
+| catcoin | CAT / CatCoin | — | UNMAPPED | No explicit native-network mapping |
+| cereblix | CRB / Cereblix | — | UNMAPPED | No explicit native-network mapping |
+| chaincoin | CHC / Chaincoin | fork_utxo_chaincoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| chaucha | CHA / Chaucha | — | UNMAPPED | No explicit native-network mapping |
+| cheetahcoin | CHTA / Cheetahcoin | fork_utxo_cheetahcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| chia | XCH / Chia | xch | SIGN | Standard-coin spends: the device rebuilds the delegated puzzle and the AGG_SIG_ME message from the conditions it displays, then signs in G2 with the in-tree BLS12-381 backend (no variable-time MPI on the secret scalar). CAT/NFT, plot-NFT and offer spends are not admitted |
+| cmusicai | CMS / CmusicAI | — | UNMAPPED | No explicit native-network mapping |
+| cointaft | TAFT / CoinTAFT | fork_utxo_cointaft | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| conceal | CCX / Conceal | — | UNMAPPED | No explicit native-network mapping |
+| conflux | CFX / Conflux | — | UNMAPPED | No explicit native-network mapping |
+| corecoin | XCB / Core Coin | — | UNMAPPED | No explicit native-network mapping |
+| cortex | CTXC / Cortex | — | UNMAPPED | No explicit native-network mapping |
+| cosanta | COSA / Cosanta | fork_utxo_cosanta | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| craftcoin | CRC / CraftCoin | — | UNMAPPED | No explicit native-network mapping |
+| crionic | CRNC / Crionic | — | UNMAPPED | No explicit native-network mapping |
+| cryptix | CPAY / Cryptix | — | UNMAPPED | No explicit native-network mapping |
+| cyberchain | XCC / CyberChain | — | UNMAPPED | No explicit native-network mapping |
+| cyberyen | CY / Cyberyen | fork_utxo_cyberyen | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| dagger | XDAG / Dagger | — | UNMAPPED | No explicit native-network mapping |
+| dash | DASH / Dash | dash | SIGN | P2PKH plain payments (type 0) through the Dash adapter; special transaction types refused; InstantSend lock state is node-side |
+| debitmydata | DMD / DebitMyData | — | UNMAPPED | No explicit native-network mapping |
+| decred | DCR / Decred | dcr | SIGN | transparent P2PKH single-input transfer; no stake tickets, treasury or mix transactions |
+| deeponion | ONION / DeepOnion | — | UNMAPPED | No explicit native-network mapping |
+| depinc | DEPC / DePINC | — | UNMAPPED | No explicit native-network mapping |
+| dero | DERO / Dero | — | UNMAPPED | No explicit native-network mapping |
+| derogold | DEGO / DeroGold | — | UNMAPPED | No explicit native-network mapping |
+| deutscheemark | DEM / Deutsche eMark | — | UNMAPPED | No explicit native-network mapping |
+| devault | DVT / DeVault | — | UNMAPPED | No explicit native-network mapping |
+| digibyte-odocrypt | DGB / DigiByte | dgb | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digibyte-qubit | DGB / DigiByte | dgb | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digibyte-scrypt | DGB / DigiByte | dgb | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digibyte-sha | DGB / DigiByte | dgb | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digibyte-skein | DGB / DigiByte | dgb | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digitalcoin-scrypt | DGC / DigitalCoin | fork_digitalcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digitalcoin-sha | DGC / DigitalCoin | fork_digitalcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digitalcoin-x11 | DGC / DigitalCoin | fork_digitalcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| digitalnote | XDN / DigitalNote | — | UNMAPPED | No explicit native-network mapping |
+| dimecoin | DIME / DimeCoin | — | UNMAPPED | No explicit native-network mapping |
+| diminutivecoin | DIMI / Diminutive Coin | — | UNMAPPED | No explicit native-network mapping |
+| dinastycoin | DCY / Dinastycoin | — | UNMAPPED | No explicit native-network mapping |
+| dingocoin | DINGO / Dingocoin | — | UNMAPPED | No explicit native-network mapping |
+| documentchain | DMS / Documentchain | — | UNMAPPED | No explicit native-network mapping |
+| dogecoin | DOGE / Dogecoin | doge | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| dogecoin2 | DC2 / Dogecoin-II | — | UNMAPPED | No explicit native-network mapping |
+| dogegpu | DOGPU / DogeGPU | — | UNMAPPED | No explicit native-network mapping |
+| dogmcoin | DOGM / Dogmcoin | — | UNMAPPED | No explicit native-network mapping |
+| doichain | DOI / Doichain | — | UNMAPPED | No explicit native-network mapping |
+| doriancoin | DSV / Doriancoin | fork_utxo_doriancoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| dpowcoin | DPC / Dpowcoin | — | UNMAPPED | No explicit native-network mapping |
+| dynamic | DYN / Dynamic | fork_utxo_dynamic | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| dynexcoin | DNX / Dynexcoin | — | UNMAPPED | No explicit native-network mapping |
+| earthcoin | EAC / EarthCoin | — | UNMAPPED | No explicit native-network mapping |
+| ecash | XEC / eCash | xec | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
+| egulden | EFL / e-Gulden | fork_egulden | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| einsteinium | EMC2 / Einsteinium | fork_einsteinium | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| elastos | ELA / Elastos | — | UNMAPPED | No explicit native-network mapping |
+| elevenseventyfive | ESF / ElevenSeventyFive | — | UNMAPPED | No explicit native-network mapping |
+| emerald | EMD / Emerald Crypto | — | UNMAPPED | No explicit native-network mapping |
+| emercoin | EMC / Emercoin | — | UNMAPPED | No explicit native-network mapping |
+| enigcoin | ENIG / Enig Coin | — | UNMAPPED | No explicit native-network mapping |
+| epiccash-cuckoo | EPIC / Epic Cash | — | UNMAPPED | No explicit native-network mapping |
+| epiccash-progpow | EPIC / Epic Cash | — | UNMAPPED | No explicit native-network mapping |
+| epiccash-randomx | EPIC / Epic Cash | — | UNMAPPED | No explicit native-network mapping |
+| ergo | ERG / Ergo | erg | SIGN | P2PK (ProveDlog) transfers: device rebuilds the tx-id preimage, signs the Schnorr proof and returns the signed transaction. Review displays the single external output plus every token it carries and refuses a second external output or an undisplayable token list; only inputs owned by this key are signed |
+| ergon | XRG / Ergon | — | UNMAPPED | No explicit native-network mapping |
+| ethereumclassic | ETC / Ethereum Classic | etc | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| ethereumpow | ETHW / EthereumPOW | ethw | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| etho | ETHO / Etho Protocol | etho | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| etica | EGAZ / Etica | egaz | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| etica_eti | ETI / Etica | — | UNMAPPED | No explicit native-network mapping |
+| evolution | EVOX / Evolution | — | UNMAPPED | No explicit native-network mapping |
+| evrmorecoin | EVR / Evrmore | — | UNMAPPED | No explicit native-network mapping |
+| exchangecoin | EXCC / ExchangeCoin | — | UNMAPPED | No explicit native-network mapping |
+| fairbrix | FBX / Fairbrix | — | UNMAPPED | No explicit native-network mapping |
+| feathercoin | FTC / Feathercoin | fork_feathercoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fedoracoin | TIPS / Fedoracoin | — | UNMAPPED | No explicit native-network mapping |
+| fennec | FNNC / Fennec | — | UNMAPPED | No explicit native-network mapping |
+| ferrite | FEC / Ferrite | — | UNMAPPED | No explicit native-network mapping |
+| fewbit | FBIT / FewBit | — | UNMAPPED | No explicit native-network mapping |
+| fireants | ANTS / FireAnts | — | UNMAPPED | No explicit native-network mapping |
+| firo | FIRO / Firo | — | UNMAPPED | No explicit native-network mapping |
+| fixedcoin | FIX / FixedCoin | — | UNMAPPED | No explicit native-network mapping |
+| fjarcode | FJAR / Fjarcode | — | UNMAPPED | No explicit native-network mapping |
+| flincoin | FLIN / Flincoin | — | UNMAPPED | No explicit native-network mapping |
+| floofychain | FLOOF / FloofyChain | — | UNMAPPED | No explicit native-network mapping |
+| flopcoin | FLOP / Flopcoin | — | UNMAPPED | No explicit native-network mapping |
+| florincoin | FLO / FlorinCoin | fork_utxo_florincoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fortuneblock | FTB / FortuneBlock | — | UNMAPPED | No explicit native-network mapping |
+| fractalbitcoin-mergedsha | FB / Fractal Bitcoin | — | UNMAPPED | No explicit native-network mapping |
+| fractalbitcoin-sha | FB / Fractal Bitcoin | — | UNMAPPED | No explicit native-network mapping |
+| freecash | FCH / FreeCash | — | UNMAPPED | No explicit native-network mapping |
+| frencoin | FREN / Frencoin | — | UNMAPPED | No explicit native-network mapping |
+| friotaioch | FRIO / Friotaioch | — | UNMAPPED | No explicit native-network mapping |
+| frogcoin | FROG / FrogCoin | — | UNMAPPED | No explicit native-network mapping |
+| fsociety | FSC / Fsociety | fork_utxo_fsociety | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fuego | XFG / Fuego | — | UNMAPPED | No explicit native-network mapping |
+| fuertecoin | FUEC / FuerteCoin | — | UNMAPPED | No explicit native-network mapping |
+| fujicoin | FJC / FujiCoin | — | UNMAPPED | No explicit native-network mapping |
+| fxtc-lyra2z | FXTC / FxTC | fork_utxo_fxtc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fxtc-scrypt | FXTC / FxTC | fork_utxo_fxtc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fxtc-sha | FXTC / FxTC | fork_utxo_fxtc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fxtc-x11 | FXTC / FxTC | fork_utxo_fxtc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| fxtc-x16r | FXTC / FxTC | fork_utxo_fxtc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| gaelium | GAEL / Gaelium | fork_utxo_gaelium | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| gainprox | GPRX / GainProX | — | UNMAPPED | No explicit native-network mapping |
+| galleoncoin | GALE / Galleoncoin | — | UNMAPPED | No explicit native-network mapping |
+| garlicoin | GRLC / Garlicoin | fork_utxo_garlicoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| gateviacoin | GVIA / Gateviacoin | — | UNMAPPED | No explicit native-network mapping |
+| geckocoin | GEC / GeckoCoin | — | UNMAPPED | No explicit native-network mapping |
+| gemlink | GLINK / Gemlink | — | UNMAPPED | No explicit native-network mapping |
+| genix | GENIX / Genix | — | UNMAPPED | No explicit native-network mapping |
+| ghostridercoin | GRR / GhostRiderCoin | — | UNMAPPED | No explicit native-network mapping |
+| globalboost | BSTY / GlobalBoost-Y | fork_utxo_globalboost-y | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| gntlcoin | GNTL / GNTL Coin | — | UNMAPPED | No explicit native-network mapping |
+| gobyte | GBX / GoByte | fork_gobyte | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| goldcash | GOLD / Gold Cash | — | UNMAPPED | No explicit native-network mapping |
+| goldcoin | GLC / GoldCoin | — | UNMAPPED | No explicit native-network mapping |
+| gorbaniov | GOR / Gorbaniov | — | UNMAPPED | No explicit native-network mapping |
+| gostcoin | GST / GOSTCoin | — | UNMAPPED | No explicit native-network mapping |
+| gravitycoin | GXX / GravityCoin | — | UNMAPPED | No explicit native-network mapping |
+| grin | GRIN / Grin | — | UNMAPPED | No explicit native-network mapping |
+| groestlcoin | GRS / Groestlcoin | — | UNMAPPED | No explicit native-network mapping |
+| gspcoin | GSPC / GSP Coin | — | UNMAPPED | No explicit native-network mapping |
+| guncoin | GUN / Guncoin | — | UNMAPPED | No explicit native-network mapping |
+| hacash | HAC / Hacash | — | UNMAPPED | No explicit native-network mapping |
+| halcyon | HAL / Halcyon | — | UNMAPPED | No explicit native-network mapping |
+| handshake | HNS / Handshake | — | UNMAPPED | No explicit native-network mapping |
+| haroldcoin | HRLD / HaroldCoin | — | UNMAPPED | No explicit native-network mapping |
+| hathor | HTR / Hathor | — | UNMAPPED | No explicit native-network mapping |
+| historia | HTA / Historia | — | UNMAPPED | No explicit native-network mapping |
+| hoosat | HTN / Hoosat | — | UNMAPPED | No explicit native-network mapping |
+| hootchain | HOOT / HootChain | — | UNMAPPED | No explicit native-network mapping |
+| hthcoin | HTH / HelpTheHomeless | fork_utxo_helpthehomeless | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| hush | HUSH / Hush | — | UNMAPPED | No explicit native-network mapping |
+| hypercoin | HRC / Hypercoin | — | UNMAPPED | No explicit native-network mapping |
+| ibithub | IBH / iBitHub | — | UNMAPPED | No explicit native-network mapping |
+| indexchain | IDX / IndexChain | — | UNMAPPED | No explicit native-network mapping |
+| infinitecoin | IFC / Infinitecoin | — | UNMAPPED | No explicit native-network mapping |
+| infinium | INF / Infinium | — | UNMAPPED | No explicit native-network mapping |
+| innova | INN / Innova | — | UNMAPPED | No explicit native-network mapping |
+| irishcoin | IRL / IrishCoin | — | UNMAPPED | No explicit native-network mapping |
+| ironfish | IRON / Iron Fish | — | UNMAPPED | No explicit native-network mapping |
+| ixian | IXI / Ixian | — | UNMAPPED | No explicit native-network mapping |
+| jagoancoin | JGC / JagoanCoin | fork_utxo_jagoancoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| junkcoin | JKC / Junkcoin | fork_utxo_junkcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| kadena | KDA / Kadena | — | UNMAPPED | No explicit native-network mapping |
+| karlsen | KLS / Karlsen | — | UNMAPPED | No explicit native-network mapping |
+| kaspa | KAS / Kaspa | kas | SIGN | Kaspa bech32 address; BIP340 Schnorr v0 transaction review and signing |
+| kerrigan-equihash | KRGN / Kerrigan | — | UNMAPPED | No explicit native-network mapping |
+| kerrigan-equihash192 | KRGN / Kerrigan | — | UNMAPPED | No explicit native-network mapping |
+| kerrigan-kawpow | KRGN / Kerrigan | — | UNMAPPED | No explicit native-network mapping |
+| kerrigan-x11 | KRGN / Kerrigan | — | UNMAPPED | No explicit native-network mapping |
+| kevacoin | KVA / Kevacoin | — | UNMAPPED | No explicit native-network mapping |
+| kiirocoin | KIIRO / Kiiro Coin | — | UNMAPPED | No explicit native-network mapping |
+| kindcoin | KCCC / Kindcoin | — | UNMAPPED | No explicit native-network mapping |
+| komodo | KMD / Komodo | — | UNMAPPED | No explicit native-network mapping |
+| koto | KOTO / Koto | — | UNMAPPED | No explicit native-network mapping |
+| kpowbit | KPOW / KpowBIT | — | UNMAPPED | No explicit native-network mapping |
+| kryptokrona | XKR / Kryptokrona | — | UNMAPPED | No explicit native-network mapping |
+| krypton | KYP / Krypton | — | UNMAPPED | No explicit native-network mapping |
+| kylacoin | KCN / Kylacoin | — | UNMAPPED | No explicit native-network mapping |
+| lambda | LMC / Lambda | — | UNMAPPED | No explicit native-network mapping |
+| lamby | LAMBY / Lamby Crypto | — | UNMAPPED | No explicit native-network mapping |
+| larissa | LRS / Larissa Coin | lrs | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| lbry | LBC / LBRY Credits | fork_lbry | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| lebowskiscoin | LBW / Lebowskiscoin | — | UNMAPPED | No explicit native-network mapping |
+| linkcoin | LNC / Linkcoin | — | UNMAPPED | No explicit native-network mapping |
+| litecoin | LTC / Litecoin | ltc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| litecoin2 | LC2 / Litecoin II | — | UNMAPPED | No explicit native-network mapping |
+| litecoincash-minotaurx | LCC / Litecoin Cash | — | UNMAPPED | No explicit native-network mapping |
+| litecoincash-sha | LCC / Litecoin Cash | — | UNMAPPED | No explicit native-network mapping |
+| litecoinz | LTZ / LitecoinZ | — | UNMAPPED | No explicit native-network mapping |
+| litoreum | LTRM / Litoreum | — | UNMAPPED | No explicit native-network mapping |
+| lkscoin | LKS / LKS Coin | — | UNMAPPED | No explicit native-network mapping |
+| luckycoin | LKY / LuckyCoin | — | UNMAPPED | No explicit native-network mapping |
+| luckypepe | LPEPE / LuckyPepe | — | UNMAPPED | No explicit native-network mapping |
+| lyncoin | LCN / Lyncoin | — | UNMAPPED | No explicit native-network mapping |
+| machinecoin | MAC / Machinecoin | — | UNMAPPED | No explicit native-network mapping |
+| magi | XMG / Magi | — | UNMAPPED | No explicit native-network mapping |
+| magpiecoin | MGPC / MagPieCoin | — | UNMAPPED | No explicit native-network mapping |
+| marmara | MCL / Marmara | — | UNMAPPED | No explicit native-network mapping |
+| marscoin | MARS / Marscoin | — | UNMAPPED | No explicit native-network mapping |
+| mateablecoin-balloon | MTBC / MateableCoin | — | UNMAPPED | No explicit native-network mapping |
+| mateablecoin-ghostrider | MTBC / MateableCoin | — | UNMAPPED | No explicit native-network mapping |
+| mateablecoin-scrypt | MTBC / MateableCoin | — | UNMAPPED | No explicit native-network mapping |
+| mateablecoin-whirlpool | MTBC / MateableCoin | — | UNMAPPED | No explicit native-network mapping |
+| mateablecoin-yescryptr8 | MTBC / MateableCoin | — | UNMAPPED | No explicit native-network mapping |
+| maxcoin | MAX / Maxcoin | — | UNMAPPED | No explicit native-network mapping |
+| maxeter | MAXE / Maxeter | — | UNMAPPED | No explicit native-network mapping |
+| maximus | MAXI / Maximus | — | UNMAPPED | No explicit native-network mapping |
+| mazacoin-minotaurx | MAZA / MazaCoin | fork_maza | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| mazacoin-sha | MAZA / MazaCoin | fork_maza | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| mecuai | MECU / MecuAI | — | UNMAPPED | No explicit native-network mapping |
+| menelikcoin | MENEL / Menelikcoin | — | UNMAPPED | No explicit native-network mapping |
+| meowcoin-meowpow | MEWC / MeowCoin | — | UNMAPPED | No explicit native-network mapping |
+| meowcoin-scrypt | MEWC / MeowCoin | — | UNMAPPED | No explicit native-network mapping |
+| microbitcoin | MBC / MicroBitcoin | — | UNMAPPED | No explicit native-network mapping |
+| microvisionchain | SPACE / MicroVisionChain | — | UNMAPPED | No explicit native-network mapping |
+| mimblewimble | MWC / MimbleWimble | — | UNMAPPED | No explicit native-network mapping |
+| mintmecoin | MINTME / MintMe.com Coin | — | UNMAPPED | No explicit native-network mapping |
+| modelos | MDL / ModelOS | — | UNMAPPED | No explicit native-network mapping |
+| monacoin | MONA / Monacoin | fork_monacoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| monero | XMR / Monero | xmr | SIGN | RingCT type-6 review and CLSAG signing; fully offline, host supplies decoys |
+| mooncoin | MOON / MoonCoin | fork_utxo_mooncoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| morelo | MRL / Morelo | — | UNMAPPED | No explicit native-network mapping |
+| mundoteam | MNT / MundoTeam | — | UNMAPPED | No explicit native-network mapping |
+| mydogecoin | MYDOGE / Mydogecoin | fork_utxo_mydogecoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| myriad-argon2d | XMY / Myriad | fork_myriadcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| myriad-groestl | XMY / Myriad | fork_myriadcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| myriad-scrypt | XMY / Myriad | fork_myriadcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| myriad-sha | XMY / Myriad | fork_myriadcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| myriad-yescrypt | XMY / Myriad | fork_myriadcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| mytcoin | MYT / MYT Coin | — | UNMAPPED | No explicit native-network mapping |
+| mytherra | MYT / Mytherra | fork_utxo_mytherra | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| namecoin | NMC / Namecoin | nmc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| neobytes | NBY / Neobytes | fork_utxo_neobytes | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| neoxa | NEOX / Neoxa | fork_utxo_neoxa | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| nervos | CKB / Nervos Network | ckb | SIGN | native CKB single-input transfer to SECP256K1/blake160 locks; no type scripts or DAO operations |
+| netm | NTM / Netm | — | UNMAPPED | No explicit native-network mapping |
+| neurai | XNA / Neurai | fork_utxo_neurai | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| newenglandcoin | NENG / NewEnglandCoin | fork_utxo_newenglandcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| newyorkcoin | NYC / NewYorkCoin | fork_newyorkc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| nexa | NEXA / Nexa | — | UNMAPPED | No explicit native-network mapping |
+| nexus | NXS / Nexus | — | UNMAPPED | No explicit native-network mapping |
+| nikitonium | NIKI / Nikitonium | — | UNMAPPED | No explicit native-network mapping |
+| nirmata | NIR / NiRmata | — | UNMAPPED | No explicit native-network mapping |
+| nitocoin | NITO / NitoCoin | — | UNMAPPED | No explicit native-network mapping |
+| nockchain | NOCK / Nockchain | — | UNMAPPED | No explicit native-network mapping |
+| novacoin | NVC / Novacoin | — | UNMAPPED | No explicit native-network mapping |
+| noxcoin | NXC / Noxcoin | — | UNMAPPED | No explicit native-network mapping |
+| numen | NUMN / Numen Network | — | UNMAPPED | No explicit native-network mapping |
+| nusacoin | NUX / Nusacoin | — | UNMAPPED | No explicit native-network mapping |
+| obidoge | OBD / ObiDoge | — | UNMAPPED | No explicit native-network mapping |
+| ocprotocol | OCP / OC Protocol | — | UNMAPPED | No explicit native-network mapping |
+| octaspace | OCTA / OctaSpace | octa | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| ocvcoin | OCV / Ocvcoin | — | UNMAPPED | No explicit native-network mapping |
+| oggcoin | OGG / Oggchain | — | UNMAPPED | No explicit native-network mapping |
+| omegacoin | OMEGA / Omega Coin | — | UNMAPPED | No explicit native-network mapping |
+| onecoin | ONECN / Onecoin | — | UNMAPPED | No explicit native-network mapping |
+| opticalbitcoin | OBTC / Optical Bitcoin | — | UNMAPPED | No explicit native-network mapping |
+| orbitcoin | ORB / Orbitcoin | — | UNMAPPED | No explicit native-network mapping |
+| ordexcoin | OXC / OrdexCoin | — | UNMAPPED | No explicit native-network mapping |
+| ordexgold | OXG / OrdexGold | — | UNMAPPED | No explicit native-network mapping |
+| osinpay | OSN / Osinpay | — | UNMAPPED | No explicit native-network mapping |
+| osmium | OSMI / Osmium | fork_utxo_osmium | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| palladium | PLM / Palladium | fork_utxo_palladium | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| parallax | LAX / Parallax | — | UNMAPPED | No explicit native-network mapping |
+| pascalcoin | PASC / PascalCoin | — | UNMAPPED | No explicit native-network mapping |
+| pearl | PRL / Pearl | — | UNMAPPED | No explicit native-network mapping |
+| peercoin | PPC / Peercoin | — | UNMAPPED | No explicit native-network mapping |
+| pepecoin | PEP / Pepecoin | — | UNMAPPED | No explicit native-network mapping |
+| pepepow | PEPEW / PePePow | — | UNMAPPED | No explicit native-network mapping |
+| peppapow | PPPW / Peppapow | — | UNMAPPED | No explicit native-network mapping |
+| pepperscore | EPPE / PeppersCore | — | UNMAPPED | No explicit native-network mapping |
+| phicoin | PHI / Phicoin | — | UNMAPPED | No explicit native-network mapping |
+| phoenixcoin | PXC / Phoenixcoin | — | UNMAPPED | No explicit native-network mapping |
+| pigeoncoin | PGN / Pigeoncoin | — | UNMAPPED | No explicit native-network mapping |
+| piratechain | ARRR / Pirate Chain | — | UNMAPPED | No explicit native-network mapping |
+| plexhive-minotaurx | PLHV / PlexHive | — | UNMAPPED | No explicit native-network mapping |
+| plexhive-sha | PLHV / PlexHive | — | UNMAPPED | No explicit native-network mapping |
+| plusonecoin | PLUS1 / PlusOneCoin | — | UNMAPPED | No explicit native-network mapping |
+| polcoin | PLC / Polcoin | — | UNMAPPED | No explicit native-network mapping |
+| privcy | PRIV / PRiVCY | — | UNMAPPED | No explicit native-network mapping |
+| pulsarcoin-curvehash | PLSR / PulsarCoin | — | UNMAPPED | No explicit native-network mapping |
+| pulsarcoin-minotaurx | PLSR / PulsarCoin | — | UNMAPPED | No explicit native-network mapping |
+| qitmeer-keccak | MEER / Qitmeer | — | UNMAPPED | No explicit native-network mapping |
+| qogecoin | QOGE / Qogecoin | — | UNMAPPED | No explicit native-network mapping |
+| quai-kawpow | QUAI / Quai | — | UNMAPPED | No explicit native-network mapping |
+| quai-scrypt | QUAI / Quai | — | UNMAPPED | No explicit native-network mapping |
+| quai-sha | QUAI / Quai | — | UNMAPPED | No explicit native-network mapping |
+| quantumrl | QRL / Quantum R L | qrl | SIGN | QRL v1 XMSS/SHAKE-256 tree height 10: native transfers only, the one-time leaf is reserved in durable storage before the WOTS+ signature exists and the device verifies its own signature before releasing it. Use the qrl2 entry for v2 accounts |
+| quantus | QTC / Quantus | — | UNMAPPED | No explicit native-network mapping |
+| quarkchain | QKC / QuarkChain | — | UNMAPPED | No explicit native-network mapping |
+| quarkcoin | QRK / QuarkCoin | fork_utxo_quarkcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| qubic | QUBIC / Qubic | — | UNMAPPED | No explicit native-network mapping |
+| qubitcoin | QTC / Qubitcoin | — | UNMAPPED | No explicit native-network mapping |
+| questchain | QCH / QuestChain | — | UNMAPPED | No explicit native-network mapping |
+| qwertycoin | QWC / Qwertycoin | — | UNMAPPED | No explicit native-network mapping |
+| radiant | RXD / Radiant | — | UNMAPPED | No explicit native-network mapping |
+| raptoreum | RTM / Raptoreum | fork_utxo_raptoreum | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| ravencoin | RVN / Ravencoin | rvn | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| reaction | RTC / Reaction | — | UNMAPPED | No explicit native-network mapping |
+| rebelcoin | RBL / Rebelcoin | — | UNMAPPED | No explicit native-network mapping |
+| reservistencoin | RVC / ReservistenCoin | — | UNMAPPED | No explicit native-network mapping |
+| rheix | RHX / Rheix | — | UNMAPPED | No explicit native-network mapping |
+| riecoin | RIC / Riecoin | — | UNMAPPED | No explicit native-network mapping |
+| rincoin | RIN / RinCoin | fork_utxo_rincoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| ritocoin | RITO / Ritocoin | fork_ritocoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| ryo | RYO / Ryo Currency | ryo | ADDRESS | CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled |
+| salvium | SAL / Salvium | — | UNMAPPED | No explicit native-network mapping |
+| satoshe | SOSHE / Satoshe | — | UNMAPPED | No explicit native-network mapping |
+| satoshicash | SCASH / Satoshicash | — | UNMAPPED | No explicit native-network mapping |
+| satoxcoin | SATOX / SatoxCoin | fork_utxo_satoxcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| scala | XLA / Scala | — | UNMAPPED | No explicit native-network mapping |
+| scholarshipcoin | SCHO / Scholarship Coin | — | UNMAPPED | No explicit native-network mapping |
+| scprime | SCP / ScPrime | — | UNMAPPED | No explicit native-network mapping |
+| sedracoin | SDR / SedraCoin | — | UNMAPPED | No explicit native-network mapping |
+| shibacoin | SHIC / ShibaCoin | fork_utxo_shibacoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| siacoin | SC / Siacoin | sc | SIGN | v2 PolicyPublicKey single-input transfer; node must validate parent/proof/maturity; no contracts; wallet-specific SLIP10 seed derivation |
+| signa | SIGNA / Signa | — | UNMAPPED | No explicit native-network mapping |
+| skydoge | SKYDOGE / Skydoge | — | UNMAPPED | No explicit native-network mapping |
+| skytere | SKYT / Skytere | — | UNMAPPED | No explicit native-network mapping |
+| smartiecoin | SMT / SmartieCoin | — | UNMAPPED | No explicit native-network mapping |
+| smileycoin-groestl | SMLY / Smileycoin | — | UNMAPPED | No explicit native-network mapping |
+| smileycoin-qubit | SMLY / Smileycoin | — | UNMAPPED | No explicit native-network mapping |
+| smileycoin-scrypt | SMLY / Smileycoin | — | UNMAPPED | No explicit native-network mapping |
+| smileycoin-sha | SMLY / Smileycoin | — | UNMAPPED | No explicit native-network mapping |
+| smileycoin-skein | SMLY / Smileycoin | — | UNMAPPED | No explicit native-network mapping |
+| soqucoin | SOQ / Soqucoin | — | UNMAPPED | No explicit native-network mapping |
+| sorachancoin | SORA / SorachanCoin | — | UNMAPPED | No explicit native-network mapping |
+| spacecoin | SPACE / Spacecoin | — | UNMAPPED | No explicit native-network mapping |
+| spacexpanse-neoscrypt | ROD / SpaceXpanse | — | UNMAPPED | No explicit native-network mapping |
+| spacexpanse-sha | ROD / SpaceXpanse | — | UNMAPPED | No explicit native-network mapping |
+| sparkspay | SPK / SparksPay | — | UNMAPPED | No explicit native-network mapping |
+| spiderbyte | SPB / SpiderByte | — | UNMAPPED | No explicit native-network mapping |
+| sprintpay | SPRX / SprintPay | — | UNMAPPED | No explicit native-network mapping |
+| squishycoin | SQCN / Squishy Coin | — | UNMAPPED | No explicit native-network mapping |
+| stakecubecoin | SCC / StakeCubeCoin | fork_utxo_stakecubecoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| starcoin | STC / Starcoin | — | UNMAPPED | No explicit native-network mapping |
+| stohncoin | SOH / Stohn Coin | — | UNMAPPED | No explicit native-network mapping |
+| strayacoin | NAH / Strayacoin | — | UNMAPPED | No explicit native-network mapping |
+| stronghands | SHND / StrongHands | — | UNMAPPED | No explicit native-network mapping |
+| subinetwork | SUBI / Subi Network | — | UNMAPPED | No explicit native-network mapping |
+| sugarchain | SUGAR / Sugarchain | fork_sugarchain | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| sumokoin | SUMO / Sumokoin | — | UNMAPPED | No explicit native-network mapping |
+| susucoin | SUSU / Susucoin | — | UNMAPPED | No explicit native-network mapping |
+| swampcoin | SWAMP / SwampCoin | — | UNMAPPED | No explicit native-network mapping |
+| swap | XWP / Swap | — | UNMAPPED | No explicit native-network mapping |
+| syscoin | SYS / Syscoin | — | UNMAPPED | No explicit native-network mapping |
+| taichicoin | TCC / Taichicoin | — | UNMAPPED | No explicit native-network mapping |
+| tajcoin | TAJ / TajCoin | — | UNMAPPED | No explicit native-network mapping |
+| tarcoin | TAR / Tarcoin | — | UNMAPPED | No explicit native-network mapping |
+| tari-c29 | XTM / Tari | — | UNMAPPED | No explicit native-network mapping |
+| tari-monerorx | XTM / Tari | — | UNMAPPED | No explicit native-network mapping |
+| tari-randomx | XTM / Tari | — | UNMAPPED | No explicit native-network mapping |
+| tari-sha3x | XTM / Tari | — | UNMAPPED | No explicit native-network mapping |
+| telestai | TLS / Telestai | — | UNMAPPED | No explicit native-network mapping |
+| terracoin | TRC / TerraCoin | — | UNMAPPED | No explicit native-network mapping |
+| theholyroger | ROGER / TheHolyRogerCoin | fork_utxo_theholyrogercoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| theminerzcoin | TMC / TheMinerzCoin | — | UNMAPPED | No explicit native-network mapping |
+| thooneum | THOON / Thooneum | — | UNMAPPED | No explicit native-network mapping |
+| tidecoin | TDC / Tidecoin | — | UNMAPPED | No explicit native-network mapping |
+| titcoin | TIT / Titcoin | — | UNMAPPED | No explicit native-network mapping |
+| tokel | TKL / Tokel | — | UNMAPPED | No explicit native-network mapping |
+| trezarcoin | TZC / TrezarCoin | — | UNMAPPED | No explicit native-network mapping |
+| trumpow | TRMP / TrumPOW | fork_utxo_trumpow | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| tuxcoin | TUX / Tuxcoin | — | UNMAPPED | No explicit native-network mapping |
+| ubiq | UBQ / Ubiq | — | UNMAPPED | No explicit native-network mapping |
+| ufocoin | UFO / UFOCoin | fork_utxo_ufocoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| ukkeycoin | UKY / Ukkey Coin | — | UNMAPPED | No explicit native-network mapping |
+| ultranoteinfinity | XUNI / UltraNote Infinity | — | UNMAPPED | No explicit native-network mapping |
+| unobtanium | UNO / Unobtanium | — | UNMAPPED | No explicit native-network mapping |
+| uplexa | UPX / uPlexa | — | UNMAPPED | No explicit native-network mapping |
+| uraniumx | URX / UraniumX | — | UNMAPPED | No explicit native-network mapping |
+| ursula | URSA / Ursula | — | UNMAPPED | No explicit native-network mapping |
+| vanillacash | XVC / Vanillacash | — | UNMAPPED | No explicit native-network mapping |
+| vargamesh | VMESH / VargaMesh | — | UNMAPPED | No explicit native-network mapping |
+| varsechain | VARSE / VarseChain | — | UNMAPPED | No explicit native-network mapping |
+| vdimension | VOLLAR / V-Dimension | — | UNMAPPED | No explicit native-network mapping |
+| veco | VECO / Veco | — | UNMAPPED | No explicit native-network mapping |
+| veil-progpow | VEIL / Veil | fork_utxo_veil | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| veil-randomx | VEIL / Veil | fork_utxo_veil | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| veil-sha | VEIL / Veil | fork_utxo_veil | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| veles-lyra2z | VLS / Veles | — | UNMAPPED | No explicit native-network mapping |
+| veles-nist5 | VLS / Veles | — | UNMAPPED | No explicit native-network mapping |
+| veles-scrypt | VLS / Veles | — | UNMAPPED | No explicit native-network mapping |
+| veles-sha | VLS / Veles | — | UNMAPPED | No explicit native-network mapping |
+| veles-x11 | VLS / Veles | — | UNMAPPED | No explicit native-network mapping |
+| veles-x16r | VLS / Veles | — | UNMAPPED | No explicit native-network mapping |
+| verge-blake2s | XVG / Verge | — | UNMAPPED | No explicit native-network mapping |
+| verge-groestl | XVG / Verge | — | UNMAPPED | No explicit native-network mapping |
+| verge-lyra | XVG / Verge | — | UNMAPPED | No explicit native-network mapping |
+| verge-scrypt | XVG / Verge | — | UNMAPPED | No explicit native-network mapping |
+| verge-x17 | XVG / Verge | — | UNMAPPED | No explicit native-network mapping |
+| veriblock | VBK / VeriBlock | — | UNMAPPED | No explicit native-network mapping |
+| versacoin | VCN / Versacoin | — | UNMAPPED | No explicit native-network mapping |
+| vertcoin | VTC / Vertcoin | vtc | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| veruscoin | VRSC / VerusCoin | — | UNMAPPED | No explicit native-network mapping |
+| vexta-randomx | VTX / Vexta | — | UNMAPPED | No explicit native-network mapping |
+| vexta-sha | VTX / Vexta | — | UNMAPPED | No explicit native-network mapping |
+| vipstarcoin | VIPS / VipStarCoin | fork_utxo_vipstarcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| virbicoin | VBC / VirBiCoin | vbc | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| virel | VRL / Virel | — | UNMAPPED | No explicit native-network mapping |
+| virtacoinplus | XVP / VirtacoinPlus | — | UNMAPPED | No explicit native-network mapping |
+| vivo | VIVO / VIVO | fork_vivo | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| vkax | VKAX / Vkax | — | UNMAPPED | No explicit native-network mapping |
+| volkshash | VHH / Volkshash | — | UNMAPPED | No explicit native-network mapping |
+| waglayla | WALA / Waglayla | — | UNMAPPED | No explicit native-network mapping |
+| warthog | WART / Warthog | — | UNMAPPED | No explicit native-network mapping |
+| waywolfcoin | WW / WayaWolfCoin | — | UNMAPPED | No explicit native-network mapping |
+| whive | WHIVE / Whive | fork_utxo_whive | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| wojakcoin | WJK / Wojakcoin | fork_utxo_wojakcoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| woodcoin | LOG / WoodCoin | — | UNMAPPED | No explicit native-network mapping |
+| worldcoin | WDC / WorldCoin | — | UNMAPPED | No explicit native-network mapping |
+| wrkzcoin | WRKZ / WrkzCoin | — | UNMAPPED | No explicit native-network mapping |
+| xaya-neoscrypt | CHI / Xaya | — | UNMAPPED | No explicit native-network mapping |
+| xaya-sha | CHI / Xaya | — | UNMAPPED | No explicit native-network mapping |
+| xelis | XEL / Xelis | — | UNMAPPED | No explicit native-network mapping |
+| xerocoin | XRO / Xerocoin | — | UNMAPPED | No explicit native-network mapping |
+| yadacoin | YDA / YadaCoin | — | UNMAPPED | No explicit native-network mapping |
+| ycash | YEC / Ycash | — | UNMAPPED | No explicit native-network mapping |
+| yenten | YTN / Yenten | — | UNMAPPED | No explicit native-network mapping |
+| yerbas | YERB / Yerbas | — | UNMAPPED | No explicit native-network mapping |
+| zano | ZANO / Zano | zano | ADDRESS | CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled |
+| zcash | ZEC / Zcash | zec | SIGN | Zcash v4 transparent ZIP-243 review and signing (NU6.2) |
+| zclassic | ZCL / Zclassic | — | UNMAPPED | No explicit native-network mapping |
+| zenprotocol | ZP / Zen Protocol | — | UNMAPPED | No explicit native-network mapping |
+| zentcash | ZTC / Zent Cash | — | UNMAPPED | No explicit native-network mapping |
+| zephyr | ZEPH / Zephyr | — | UNMAPPED | No explicit native-network mapping |
+| zero | ZER / Zero | — | UNMAPPED | No explicit native-network mapping |
+| zeroclassic | ZERC / ZeroClassic | — | UNMAPPED | No explicit native-network mapping |
+| zeroonecoin | ZOC / ZeroOneCoin | fork_utxo_zeroonecoin | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| zerozed | X0Z / Zerozed | — | UNMAPPED | No explicit native-network mapping |
+| zetacoin | ZET / ZetaCoin | — | UNMAPPED | No explicit native-network mapping |
+| zettelkasten | ZTTL / Zettelkasten | — | UNMAPPED | No explicit native-network mapping |
+| zkas | ZKAS / ZKas | — | UNMAPPED | No explicit native-network mapping |

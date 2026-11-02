@@ -1,0 +1,577 @@
+{
+  "aegisum": {
+    "symbol": "AEGS",
+    "name": "Aegisum",
+    "catalog_id": "fork_utxo_aegisum"
+  },
+  "aeternity": {
+    "symbol": "AE",
+    "name": "Aeternity",
+    "catalog_id": "ae"
+  },
+  "auroracoin-groestl": {
+    "symbol": "AUR",
+    "name": "Auroracoin",
+    "catalog_id": "fork_auroracoin"
+  },
+  "auroracoin-qubit": {
+    "symbol": "AUR",
+    "name": "Auroracoin",
+    "catalog_id": "fork_auroracoin"
+  },
+  "auroracoin-scrypt": {
+    "symbol": "AUR",
+    "name": "Auroracoin",
+    "catalog_id": "fork_auroracoin"
+  },
+  "auroracoin-sha": {
+    "symbol": "AUR",
+    "name": "Auroracoin",
+    "catalog_id": "fork_auroracoin"
+  },
+  "auroracoin-skein": {
+    "symbol": "AUR",
+    "name": "Auroracoin",
+    "catalog_id": "fork_auroracoin"
+  },
+  "aves": {
+    "symbol": "AVS",
+    "name": "Aves",
+    "catalog_id": "avs"
+  },
+  "axerunners": {
+    "symbol": "AXE",
+    "name": "Axe",
+    "catalog_id": "axe"
+  },
+  "babacoin": {
+    "symbol": "BBC",
+    "name": "Babacoin",
+    "catalog_id": "fork_utxo_babacoin"
+  },
+  "bellcoin": {
+    "symbol": "BELL",
+    "name": "Bellcoin",
+    "catalog_id": "fork_utxo_bellcoin"
+  },
+  "biblepay": {
+    "symbol": "BBP",
+    "name": "BiblePay",
+    "catalog_id": "fork_utxo_biblepay"
+  },
+  "bit": {
+    "symbol": "B1T",
+    "name": "Bit",
+    "catalog_id": "fork_utxo_bit"
+  },
+  "bitcoin": {
+    "symbol": "BTC",
+    "name": "Bitcoin",
+    "catalog_id": "btc"
+  },
+  "bitcoincash": {
+    "symbol": "BCH",
+    "name": "Bitcoin Cash",
+    "catalog_id": "bch"
+  },
+  "bitcoingold": {
+    "symbol": "BTG",
+    "name": "Bitcoin Gold",
+    "catalog_id": "btg"
+  },
+  "bitcoinsv": {
+    "symbol": "BSV",
+    "name": "Bitcoin SV",
+    "catalog_id": "bsv"
+  },
+  "bitcore": {
+    "symbol": "BTX",
+    "name": "Bitcore",
+    "catalog_id": "fork_bitcore"
+  },
+  "bitnetmoney": {
+    "symbol": "BTN",
+    "name": "Bitnet Money",
+    "catalog_id": "btn"
+  },
+  "canxium": {
+    "symbol": "CAU",
+    "name": "Canxium",
+    "catalog_id": "cau"
+  },
+  "chaincoin": {
+    "symbol": "CHC",
+    "name": "Chaincoin",
+    "catalog_id": "fork_utxo_chaincoin"
+  },
+  "cheetahcoin": {
+    "symbol": "CHTA",
+    "name": "Cheetahcoin",
+    "catalog_id": "fork_utxo_cheetahcoin"
+  },
+  "chia": {
+    "symbol": "XCH",
+    "name": "Chia",
+    "catalog_id": "xch"
+  },
+  "cointaft": {
+    "symbol": "TAFT",
+    "name": "CoinTAFT",
+    "catalog_id": "fork_utxo_cointaft"
+  },
+  "cosanta": {
+    "symbol": "COSA",
+    "name": "Cosanta",
+    "catalog_id": "fork_utxo_cosanta"
+  },
+  "cyberyen": {
+    "symbol": "CY",
+    "name": "Cyberyen",
+    "catalog_id": "fork_utxo_cyberyen"
+  },
+  "dash": {
+    "symbol": "DASH",
+    "name": "Dash",
+    "catalog_id": "dash"
+  },
+  "decred": {
+    "symbol": "DCR",
+    "name": "Decred",
+    "catalog_id": "dcr"
+  },
+  "digibyte-odocrypt": {
+    "symbol": "DGB",
+    "name": "DigiByte",
+    "catalog_id": "dgb"
+  },
+  "digibyte-qubit": {
+    "symbol": "DGB",
+    "name": "DigiByte",
+    "catalog_id": "dgb"
+  },
+  "digibyte-scrypt": {
+    "symbol": "DGB",
+    "name": "DigiByte",
+    "catalog_id": "dgb"
+  },
+  "digibyte-sha": {
+    "symbol": "DGB",
+    "name": "DigiByte",
+    "catalog_id": "dgb"
+  },
+  "digibyte-skein": {
+    "symbol": "DGB",
+    "name": "DigiByte",
+    "catalog_id": "dgb"
+  },
+  "digitalcoin-scrypt": {
+    "symbol": "DGC",
+    "name": "DigitalCoin",
+    "catalog_id": "fork_digitalcoin"
+  },
+  "digitalcoin-sha": {
+    "symbol": "DGC",
+    "name": "DigitalCoin",
+    "catalog_id": "fork_digitalcoin"
+  },
+  "digitalcoin-x11": {
+    "symbol": "DGC",
+    "name": "DigitalCoin",
+    "catalog_id": "fork_digitalcoin"
+  },
+  "dogecoin": {
+    "symbol": "DOGE",
+    "name": "Dogecoin",
+    "catalog_id": "doge"
+  },
+  "doriancoin": {
+    "symbol": "DSV",
+    "name": "Doriancoin",
+    "catalog_id": "fork_utxo_doriancoin"
+  },
+  "dynamic": {
+    "symbol": "DYN",
+    "name": "Dynamic",
+    "catalog_id": "fork_utxo_dynamic"
+  },
+  "ecash": {
+    "symbol": "XEC",
+    "name": "eCash",
+    "catalog_id": "xec"
+  },
+  "egulden": {
+    "symbol": "EFL",
+    "name": "e-Gulden",
+    "catalog_id": "fork_egulden"
+  },
+  "einsteinium": {
+    "symbol": "EMC2",
+    "name": "Einsteinium",
+    "catalog_id": "fork_einsteinium"
+  },
+  "ergo": {
+    "symbol": "ERG",
+    "name": "Ergo",
+    "catalog_id": "erg"
+  },
+  "ethereumclassic": {
+    "symbol": "ETC",
+    "name": "Ethereum Classic",
+    "catalog_id": "etc"
+  },
+  "ethereumpow": {
+    "symbol": "ETHW",
+    "name": "EthereumPOW",
+    "catalog_id": "ethw"
+  },
+  "etho": {
+    "symbol": "ETHO",
+    "name": "Etho Protocol",
+    "catalog_id": "etho"
+  },
+  "etica": {
+    "symbol": "EGAZ",
+    "name": "Etica",
+    "catalog_id": "egaz"
+  },
+  "feathercoin": {
+    "symbol": "FTC",
+    "name": "Feathercoin",
+    "catalog_id": "fork_feathercoin"
+  },
+  "florincoin": {
+    "symbol": "FLO",
+    "name": "FlorinCoin",
+    "catalog_id": "fork_utxo_florincoin"
+  },
+  "fsociety": {
+    "symbol": "FSC",
+    "name": "Fsociety",
+    "catalog_id": "fork_utxo_fsociety"
+  },
+  "fxtc-lyra2z": {
+    "symbol": "FXTC",
+    "name": "FxTC",
+    "catalog_id": "fork_utxo_fxtc"
+  },
+  "fxtc-scrypt": {
+    "symbol": "FXTC",
+    "name": "FxTC",
+    "catalog_id": "fork_utxo_fxtc"
+  },
+  "fxtc-sha": {
+    "symbol": "FXTC",
+    "name": "FxTC",
+    "catalog_id": "fork_utxo_fxtc"
+  },
+  "fxtc-x11": {
+    "symbol": "FXTC",
+    "name": "FxTC",
+    "catalog_id": "fork_utxo_fxtc"
+  },
+  "fxtc-x16r": {
+    "symbol": "FXTC",
+    "name": "FxTC",
+    "catalog_id": "fork_utxo_fxtc"
+  },
+  "gaelium": {
+    "symbol": "GAEL",
+    "name": "Gaelium",
+    "catalog_id": "fork_utxo_gaelium"
+  },
+  "garlicoin": {
+    "symbol": "GRLC",
+    "name": "Garlicoin",
+    "catalog_id": "fork_utxo_garlicoin"
+  },
+  "globalboost": {
+    "symbol": "BSTY",
+    "name": "GlobalBoost-Y",
+    "catalog_id": "fork_utxo_globalboost-y"
+  },
+  "gobyte": {
+    "symbol": "GBX",
+    "name": "GoByte",
+    "catalog_id": "fork_gobyte"
+  },
+  "hthcoin": {
+    "symbol": "HTH",
+    "name": "HelpTheHomeless",
+    "catalog_id": "fork_utxo_helpthehomeless"
+  },
+  "jagoancoin": {
+    "symbol": "JGC",
+    "name": "JagoanCoin",
+    "catalog_id": "fork_utxo_jagoancoin"
+  },
+  "junkcoin": {
+    "symbol": "JKC",
+    "name": "Junkcoin",
+    "catalog_id": "fork_utxo_junkcoin"
+  },
+  "kaspa": {
+    "symbol": "KAS",
+    "name": "Kaspa",
+    "catalog_id": "kas"
+  },
+  "larissa": {
+    "symbol": "LRS",
+    "name": "Larissa Coin",
+    "catalog_id": "lrs"
+  },
+  "lbry": {
+    "symbol": "LBC",
+    "name": "LBRY Credits",
+    "catalog_id": "fork_lbry"
+  },
+  "litecoin": {
+    "symbol": "LTC",
+    "name": "Litecoin",
+    "catalog_id": "ltc"
+  },
+  "mazacoin-minotaurx": {
+    "symbol": "MAZA",
+    "name": "MazaCoin",
+    "catalog_id": "fork_maza"
+  },
+  "mazacoin-sha": {
+    "symbol": "MAZA",
+    "name": "MazaCoin",
+    "catalog_id": "fork_maza"
+  },
+  "monacoin": {
+    "symbol": "MONA",
+    "name": "Monacoin",
+    "catalog_id": "fork_monacoin"
+  },
+  "monero": {
+    "symbol": "XMR",
+    "name": "Monero",
+    "catalog_id": "xmr"
+  },
+  "mooncoin": {
+    "symbol": "MOON",
+    "name": "MoonCoin",
+    "catalog_id": "fork_utxo_mooncoin"
+  },
+  "mydogecoin": {
+    "symbol": "MYDOGE",
+    "name": "Mydogecoin",
+    "catalog_id": "fork_utxo_mydogecoin"
+  },
+  "myriad-argon2d": {
+    "symbol": "XMY",
+    "name": "Myriad",
+    "catalog_id": "fork_myriadcoin"
+  },
+  "myriad-groestl": {
+    "symbol": "XMY",
+    "name": "Myriad",
+    "catalog_id": "fork_myriadcoin"
+  },
+  "myriad-scrypt": {
+    "symbol": "XMY",
+    "name": "Myriad",
+    "catalog_id": "fork_myriadcoin"
+  },
+  "myriad-sha": {
+    "symbol": "XMY",
+    "name": "Myriad",
+    "catalog_id": "fork_myriadcoin"
+  },
+  "myriad-yescrypt": {
+    "symbol": "XMY",
+    "name": "Myriad",
+    "catalog_id": "fork_myriadcoin"
+  },
+  "mytherra": {
+    "symbol": "MYT",
+    "name": "Mytherra",
+    "catalog_id": "fork_utxo_mytherra"
+  },
+  "namecoin": {
+    "symbol": "NMC",
+    "name": "Namecoin",
+    "catalog_id": "nmc"
+  },
+  "neobytes": {
+    "symbol": "NBY",
+    "name": "Neobytes",
+    "catalog_id": "fork_utxo_neobytes"
+  },
+  "neoxa": {
+    "symbol": "NEOX",
+    "name": "Neoxa",
+    "catalog_id": "fork_utxo_neoxa"
+  },
+  "nervos": {
+    "symbol": "CKB",
+    "name": "Nervos Network",
+    "catalog_id": "ckb"
+  },
+  "neurai": {
+    "symbol": "XNA",
+    "name": "Neurai",
+    "catalog_id": "fork_utxo_neurai"
+  },
+  "newenglandcoin": {
+    "symbol": "NENG",
+    "name": "NewEnglandCoin",
+    "catalog_id": "fork_utxo_newenglandcoin"
+  },
+  "newyorkcoin": {
+    "symbol": "NYC",
+    "name": "NewYorkCoin",
+    "catalog_id": "fork_newyorkc"
+  },
+  "octaspace": {
+    "symbol": "OCTA",
+    "name": "OctaSpace",
+    "catalog_id": "octa"
+  },
+  "osmium": {
+    "symbol": "OSMI",
+    "name": "Osmium",
+    "catalog_id": "fork_utxo_osmium"
+  },
+  "palladium": {
+    "symbol": "PLM",
+    "name": "Palladium",
+    "catalog_id": "fork_utxo_palladium"
+  },
+  "quantumrl": {
+    "symbol": "QRL",
+    "name": "Quantum R L",
+    "catalog_id": "qrl"
+  },
+  "quarkcoin": {
+    "symbol": "QRK",
+    "name": "QuarkCoin",
+    "catalog_id": "fork_utxo_quarkcoin"
+  },
+  "raptoreum": {
+    "symbol": "RTM",
+    "name": "Raptoreum",
+    "catalog_id": "fork_utxo_raptoreum"
+  },
+  "ravencoin": {
+    "symbol": "RVN",
+    "name": "Ravencoin",
+    "catalog_id": "rvn"
+  },
+  "rincoin": {
+    "symbol": "RIN",
+    "name": "RinCoin",
+    "catalog_id": "fork_utxo_rincoin"
+  },
+  "ritocoin": {
+    "symbol": "RITO",
+    "name": "Ritocoin",
+    "catalog_id": "fork_ritocoin"
+  },
+  "ryo": {
+    "symbol": "RYO",
+    "name": "Ryo Currency",
+    "catalog_id": "ryo"
+  },
+  "satoxcoin": {
+    "symbol": "SATOX",
+    "name": "SatoxCoin",
+    "catalog_id": "fork_utxo_satoxcoin"
+  },
+  "shibacoin": {
+    "symbol": "SHIC",
+    "name": "ShibaCoin",
+    "catalog_id": "fork_utxo_shibacoin"
+  },
+  "siacoin": {
+    "symbol": "SC",
+    "name": "Siacoin",
+    "catalog_id": "sc"
+  },
+  "stakecubecoin": {
+    "symbol": "SCC",
+    "name": "StakeCubeCoin",
+    "catalog_id": "fork_utxo_stakecubecoin"
+  },
+  "sugarchain": {
+    "symbol": "SUGAR",
+    "name": "Sugarchain",
+    "catalog_id": "fork_sugarchain"
+  },
+  "theholyroger": {
+    "symbol": "ROGER",
+    "name": "TheHolyRogerCoin",
+    "catalog_id": "fork_utxo_theholyrogercoin"
+  },
+  "trumpow": {
+    "symbol": "TRMP",
+    "name": "TrumPOW",
+    "catalog_id": "fork_utxo_trumpow"
+  },
+  "ufocoin": {
+    "symbol": "UFO",
+    "name": "UFOCoin",
+    "catalog_id": "fork_utxo_ufocoin"
+  },
+  "veil-progpow": {
+    "symbol": "VEIL",
+    "name": "Veil",
+    "catalog_id": "fork_utxo_veil"
+  },
+  "veil-randomx": {
+    "symbol": "VEIL",
+    "name": "Veil",
+    "catalog_id": "fork_utxo_veil"
+  },
+  "veil-sha": {
+    "symbol": "VEIL",
+    "name": "Veil",
+    "catalog_id": "fork_utxo_veil"
+  },
+  "vertcoin": {
+    "symbol": "VTC",
+    "name": "Vertcoin",
+    "catalog_id": "vtc"
+  },
+  "vipstarcoin": {
+    "symbol": "VIPS",
+    "name": "VipStarCoin",
+    "catalog_id": "fork_utxo_vipstarcoin"
+  },
+  "virbicoin": {
+    "symbol": "VBC",
+    "name": "VirBiCoin",
+    "catalog_id": "vbc"
+  },
+  "vivo": {
+    "symbol": "VIVO",
+    "name": "VIVO",
+    "catalog_id": "fork_vivo"
+  },
+  "whive": {
+    "symbol": "WHIVE",
+    "name": "Whive",
+    "catalog_id": "fork_utxo_whive"
+  },
+  "wojakcoin": {
+    "symbol": "WJK",
+    "name": "Wojakcoin",
+    "catalog_id": "fork_utxo_wojakcoin"
+  },
+  "zano": {
+    "symbol": "ZANO",
+    "name": "Zano",
+    "catalog_id": "zano"
+  },
+  "zcash": {
+    "symbol": "ZEC",
+    "name": "Zcash",
+    "catalog_id": "zec"
+  },
+  "zeroonecoin": {
+    "symbol": "ZOC",
+    "name": "ZeroOneCoin",
+    "catalog_id": "fork_utxo_zeroonecoin"
+  }
+}

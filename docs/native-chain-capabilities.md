@@ -2,7 +2,7 @@
 
 Generated from the compiled, resolved catalog by `tools/native_coverage.ps1`. No token contract registry is read.
 
-Profiles: 205. Distinct execution/address domains: 176. Domains with a signing-code claim: 173.
+Profiles: 208. Distinct execution/address domains: 179. Domains with a signing-code claim: 176.
 
 EVM domains use chain ID; Bitcoin-family address variants merge when coin type and both Base58 versions agree (legacy rows may omit the SegWit HRP). Other adapters keep their explicit network IDs. These are conservative catalog groups, not independently attested chain identities. A domain is not necessarily an independent L1 or a distinct native coin: for example, several rollups use ETH.
 
@@ -32,9 +32,10 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | evm:196 | xlayer | OKB | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:2000 | dogechain | DOGE | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:200901 | bitlayer | BTC | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| evm:2020 | ronin | RON | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:204 | opbnb | BNB | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:210 | btn | BTN | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
-| evm:2222 | kava | KAVA | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
+| evm:2222 | kavaevm | KAVA | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:23294 | rose | ROSE | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:25 | cro | CRO | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:250 | ftm | FTM | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
@@ -43,6 +44,7 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | evm:324 | zksync | ETH | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:329 | vbc | VBC | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:33333 | avs | AVS | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| evm:361 | theta | TFUEL | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:40 | telos | TLOS | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:4200 | merlin | BTC | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:42161 | arb1 | ETH | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
@@ -62,10 +64,10 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | evm:7332 | zen | ZEN | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:747 | flow-evm | FLOW | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:7700 | canto | CANTO | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
+| evm:787 | acalaevm | ACA | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:800001 | octa | OCTA | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:80094 | bera | BERA | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:81457 | blast | ETH | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
-| evm:820 | clo | CLO | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:8217 | kaia | KAIA | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:8453 | base | ETH | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:9001 | evmos | EVMOS | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
@@ -82,11 +84,13 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:dot | dot | DOT | SIGN | Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005002/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update |
 | native:erg | erg | ERG | SIGN | P2PK (ProveDlog) transfers: device rebuilds the tx-id preimage, signs the Schnorr proof and returns the signed transaction. Review displays the single external output plus every token it carries and refuses a second external output or an undisplayable token list; only inputs owned by this key are signed |
 | native:fil | fil | FIL | SIGN | f1 sender, f0/f1/f3 recipient; canonical CBOR Send, CID signing; no actor calls or BLS signing |
+| native:grs | grs | GRS | SIGN | P2PKH legacy sighash signed with a single SHA-256 digest, as Groestlcoin does; Groestl-512 is used only for the address checksum |
 | native:hbar | hbar | HBAR | SIGN | Ed25519 key alias receive; numeric-account HBAR CryptoTransfer, one debit/credit; no HTS, allowances or contracts; node must verify payer ownership and network |
 | native:hive | hive | HIVE | SIGN | Single transfer; derived STM value is an active PUBLIC KEY, not a receive address. Named account/authority must be checked by node; no encrypted memo |
 | native:icp | icp | ICP | SIGN | Ed25519 default ledger account; pinned ICP ledger Candid transfer and signed CBOR request; no arbitrary canisters or staking; not Ledger seed/path compatible |
 | native:icx | icx | ICX | SIGN | native ICX transfer with canonical icx_sendTransaction serialization; no SCORE calls |
 | native:kas | kas | KAS | SIGN | Kaspa bech32 address; BIP340 Schnorr v0 transaction review and signing |
+| native:kava | kava | KAVA | SIGN | Cosmos SDK native MsgSend on kava_2222-N with ukava; the EVM side is registered separately as kavaevm |
 | native:ksm | ksm | KSM | SIGN | Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005001/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update |
 | native:near | near | NEAR | SIGN | Implicit receive accounts; Borsh V0 native Transfer; named account key membership and block network cannot be checked offline |
 | native:osmo | osmo | OSMO | SIGN | Cosmos SDK native MsgSend; direct sign mode, strict protobuf review |
@@ -97,6 +101,8 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:sol | sol | SOL | SIGN | SOL, SPL Token and Token-2022 TransferChecked: legacy/v0, single payer; exact mint/token accounts reviewed; Token-2022 extension warning; no ALTs or ATA creation |
 | native:stark | stark | STRK | SIGN | Stark curve keys (grindKey of the BIP32 child) and Cairo v3 transactions: deploy_account and one ERC-20 transfer through the account's execute entry point. The device rebuilds the SNIP-5 account address from the class hash, salt and single-key constructor it displays, and pins the chain id to SN_MAIN. Multi-call accounts, declare, paymaster, multisig and non-mainnet networks are refused |
 | native:sui | sui | SUI | SIGN | Ed25519 BCS split-gas native SUI transfer; no Move calls, sponsored transactions or tokens |
+| native:terra | terra | LUNA | SIGN | Cosmos SDK native MsgSend on phoenix-N with uluna; CW20 and wasm execute messages are refused |
+| native:terraclassic | terraclassic | LUNC | SIGN | Cosmos SDK native MsgSend on columbus-N with uluna; CW20 and wasm execute messages are refused |
 | native:tia | tia | TIA | SIGN | Cosmos SDK native MsgSend; direct sign mode, strict protobuf review |
 | native:ton | ton | TON | SIGN | wallet v4R2 native transfer; empty body only; no comments, jettons or multi-message orders |
 | native:trx | trx | TRX | SIGN | native TRX and registered TRC-20 transfer signing; owner permission only, strict protobuf review |
@@ -116,11 +122,11 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | utxo:1313:38:122 | fork_utxo_gaelium | GAEL | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:136:82:7 | firo | FIRO | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:140:85:122 | fork_lbry | LBC | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
-| utxo:1420:30:22 | fork_utxo_dogecoinev | DEV | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:156:38:23 | btg, btg49, btg84 | BTG | SIGN | BIP49 nested SegWit PSBT signing (BIP143); BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:160:3:125 | fork_bitcore | BTX | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:166:70:10 | fork_vivo | VIVO | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:1668:38:122 | fork_utxo_neoxa | NEOX | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| utxo:17:36:5 | grs49, grs84 | GRS | SIGN | BIP49 nested SegWit PSBT signing (BIP143) with Groestlcoin's single SHA-256 on every hash; BIP84 native SegWit PSBT signing (BIP143) with Groestlcoin's single SHA-256 on every hash |
 | utxo:1707:65:28 | fork_utxo_trumpow | TRMP | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:175:60:122 | rvn | RVN | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:176:38:10 | fork_gobyte | GBX | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
@@ -140,17 +146,14 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | utxo:20760:73:5 | fork_utxo_wojakcoin, fork_utxo_wojakcoin84 | WJK | SIGN | BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:216:35:8 | fork_utxo_florincoin | FLO | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:22:50:5 | fork_monacoin | MONA | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
-| utxo:228:53:5 | fork_utxo_actinium, fork_utxo_actinium84 | ACM | SIGN | BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:2301:58:50 | qtum | QTUM | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:231:100:40 | fork_utxo_helpthehomeless | HTH | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:236:0:5 | bsv | BSV | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
 | utxo:25252:25:85 | fork_utxo_bellcoin, fork_utxo_bellcoin84 | BELL | SIGN | BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
-| utxo:2686:23:23 | fork_utxo_aipowergrid | AIPG | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:28:71:5 | vtc, vtc49, vtc84 | VTC | SIGN | BIP49 nested SegWit PSBT signing (BIP143); BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:3:30:22 | doge | DOGE | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:3141:25:22 | fork_utxo_bit | B1T | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:3381:30:10 | fork_utxo_dynamic | DYN | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
-| utxo:363:28:30 | fork_cpuchain | CPU | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:37992:95:36 | fork_utxo_fxtc, fork_utxo_fxtc84 | FXTC | SIGN | BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:399:80:10 | fork_utxo_zeroonecoin | ZOC | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:408:63:125 | fork_sugarchain, fork_sugarchain49, fork_sugarchain84 | SUGAR | SIGN | BIP49 nested SegWit PSBT signing (BIP143); BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
