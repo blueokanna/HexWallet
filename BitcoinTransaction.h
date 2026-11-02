@@ -21,6 +21,7 @@ enum class BitcoinSpendType : uint8_t {
   NativeP2wpkh,
   NestedP2shP2wpkh,
   LegacyP2pkh,
+  TaprootBip86,
 };
 
 // Address family plus the consensus sighash rules the chain inherited.  The
@@ -61,6 +62,8 @@ struct BitcoinInput {
   uint8_t p2sh_hash[kRipemd160Size];
   uint32_t path[kBitcoinMaxPathDepth];
   uint8_t path_depth;
+  uint8_t taproot_output_key[32];
+  uint8_t taproot_sighash; // BIP86 policy: DEFAULT (0) or ALL (1).
 };
 
 struct BitcoinOutput {
@@ -98,6 +101,10 @@ TransactionError bitcoin_sign_request(const BitcoinSigningRequest &request,
 const char *transaction_error_text(TransactionError error);
 void clear_bitcoin_request(BitcoinSigningRequest *request);
 bool run_bitcoin_transaction_self_test();
+// Index of the last checkpoint reached by run_bitcoin_transaction_self_test().
+// A failing self-test on a device has no console worth reading; this turns "the
+// Bitcoin tests failed" into "they stopped at step 112".
+int bitcoin_self_test_stage();
 // Digest-only vectors (legacy, BIP143 and SIGHASH_FORKID). Safe to run on the
 // host: no ECDSA, no key derivation.
 bool run_bitcoin_sighash_self_tests();

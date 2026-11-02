@@ -160,6 +160,12 @@ namespace hexwallet
       // --- New multi-coin support (SLIP-0044) --------------------------------
       {"kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
+      // ZERO (ZER) is a Zcash fork (zerocurrency.io, github.com/zerocurrencycoin/Zero).
+      // Mainnet chainparams.cpp uses the same transparent version bytes as Zcash,
+      // publishes no segwit, and its newest activated upgrade is COSMOS with branch
+      // id 0x7361707a (consensus/upgrades.cpp + the vUpgrades heights in chainparams.cpp).
+      // SLIP-0044 323. Shielded (z) addresses are not part of this profile.
+      {"zer", "ZER", "ZERO (transparent)", 323, 323, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
       // Firo (formerly Zcoin) transparent P2PKH. SLIP-0044 136 (XZC).
       {"firo", "FIRO", "Firo (transparent)", 136, 136, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, {0x52, 0x07, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"vet", "VET", "VeChain", 818, 818, 44, DerivationStyle::Bip44, AddressEncoding::VeChainAddress, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
@@ -256,6 +262,7 @@ namespace hexwallet
       {"xec", SighashFamily::ForkId, 0},
       {"bsv", SighashFamily::ForkId, 0},
       {"zec", SighashFamily::ZcashZip243, 0},
+      {"zer", SighashFamily::ZcashZip243, 0},
       // Groestlcoin: Bitcoin's legacy preimage, single SHA-256 digest. The
       // address checksum uses double Groestl-512 (AddressEncoding::P2pkhGroestl
       // in the profile above) and is unrelated to the signature hash.
@@ -273,6 +280,8 @@ namespace hexwallet
   const ZcashNetworkPolicy kZcashNetworkPolicies[] = {
       // NU6.2 (zcash/src/consensus/upgrades.cpp, mainnet activation 3364600).
       {"zec", 0x5437f330, 21000000ULL * 100000000ULL},
+      // COSMOS epoch (activated at height 620450); 17,000,000 ZER total supply.
+      {"zer", 0x7361707a, 17000000ULL * 100000000ULL},
   };
 
   const size_t kZcashNetworkPolicyCount =
@@ -647,6 +656,8 @@ namespace hexwallet
     const NetworkProfile *bitcoin_sv = find_network_profile("bsv");
     const NetworkProfile *zcash = find_network_profile("zec");
     const ZcashNetworkPolicy *zcash_policy = find_zcash_network_policy("zec");
+    const NetworkProfile *zero = find_network_profile("zer");
+    const ZcashNetworkPolicy *zero_policy = find_zcash_network_policy("zer");
     test_size = sizeof(test_address);
     if (peercoin == nullptr || address_p2pkh(peercoin->utxo, test_public_key, test_address, &test_size) != WalletError::Ok ||
         strcmp(test_address, "PKGSi8HTQzLx89rkZrRrVkPFjrcSC55NP9") != 0)
@@ -786,6 +797,15 @@ namespace hexwallet
         zcash == nullptr || zcash->encoding != AddressEncoding::ZcashTransparent ||
         zcash->alt_p2pkh_version != 0x1cb8 || zcash->alt_p2sh_version != 0x1cbd ||
         zcash_policy == nullptr || zcash_policy->branch_id != 0x5437f330 ||
+        // ZERO is the second transparent Zcash lineage: same version bytes, its
+        // own branch id. Pairing one chain's address bytes with the other's
+        // branch id would produce a signature no node accepts.
+        zero == nullptr || zero->encoding != AddressEncoding::ZcashTransparent ||
+        zero->alt_p2pkh_version != 0x1cb8 || zero->alt_p2sh_version != 0x1cbd ||
+        zero->derivation_coin_type != 323 || zero_policy == nullptr ||
+        zero_policy->branch_id != 0x7361707a ||
+        zero_policy->max_zats != 17000000ULL * 100000000ULL ||
+        zero_policy->branch_id == zcash_policy->branch_id ||
         kaspa == nullptr || kaspa->slip44_coin_type != 111111 ||
         algorand == nullptr || algorand->slip44_coin_type != 283 ||
         solana == nullptr || solana->slip44_coin_type != 501 || chia == nullptr ||

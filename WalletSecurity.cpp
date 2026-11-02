@@ -13,1123 +13,1370 @@
 #include "WalletAddresses.h"
 #include "word_list.h"
 
-namespace hexwallet {
-namespace {
+namespace hexwallet
+{
+  namespace
+  {
 
-constexpr size_t kMnemonicTextSize = 256;
-constexpr size_t kMaxPassphraseSize = 128;
-constexpr size_t kExtendedKeyPayloadSize = 78;
-constexpr size_t kExtendedKeyCheckedSize = 82;
+    constexpr size_t kMnemonicTextSize = 256;
+    constexpr size_t kMaxPassphraseSize = 128;
+    constexpr size_t kExtendedKeyPayloadSize = 78;
+    constexpr size_t kExtendedKeyCheckedSize = 82;
 
-class WipeOnExit {
- public:
-  WipeOnExit(void *data, size_t size) : data_(data), size_(size) {}
-  ~WipeOnExit() { secure_zero(data_, size_); }
-  WipeOnExit(const WipeOnExit &) = delete;
-  WipeOnExit &operator=(const WipeOnExit &) = delete;
-  void release() { data_ = nullptr; }
- private:
-  void *data_;
-  size_t size_;
-};
+    class WipeOnExit
+    {
+    public:
+      WipeOnExit(void *data, size_t size) : data_(data), size_(size) {}
+      ~WipeOnExit() { secure_zero(data_, size_); }
+      WipeOnExit(const WipeOnExit &) = delete;
+      WipeOnExit &operator=(const WipeOnExit &) = delete;
+      void release() { data_ = nullptr; }
 
-bool valid_private_key(const uint8_t key[kPrivateKeySize]) {
-  return ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, key);
-}
+    private:
+      void *data_;
+      size_t size_;
+    };
 
-bool hash160(const uint8_t *data, size_t length, uint8_t out[20]) {
-  return crypto_hash160(data, length, out);
-}
+    bool valid_private_key(const uint8_t key[kPrivateKeySize])
+    {
+      return ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, key);
+    }
 
-int hex_nibble(char character) {
-  if (character >= '0' && character <= '9') return character - '0';
-  if (character >= 'a' && character <= 'f') return character - 'a' + 10;
-  if (character >= 'A' && character <= 'F') return character - 'A' + 10;
-  return -1;
-}
+    bool hash160(const uint8_t *data, size_t length, uint8_t out[20])
+    {
+      return crypto_hash160(data, length, out);
+    }
 
-bool parse_hex_fixed(const char *text, uint8_t *out, size_t size) {
-  if (text == nullptr || out == nullptr || strlen(text) != size * 2) return false;
-  for (size_t index = 0; index < size; ++index) {
-    const int high = hex_nibble(text[index * 2]);
-    const int low = hex_nibble(text[index * 2 + 1]);
-    if (high < 0 || low < 0) return false;
-    out[index] = static_cast<uint8_t>((high << 4) | low);
-  }
-  return true;
-}
+    int hex_nibble(char character)
+    {
+      if (character >= '0' && character <= '9')
+        return character - '0';
+      if (character >= 'a' && character <= 'f')
+        return character - 'a' + 10;
+      if (character >= 'A' && character <= 'F')
+        return character - 'A' + 10;
+      return -1;
+    }
 
-bool bip340_tagged_hash(const char *tag, const uint8_t *data, size_t size,
-                        uint8_t out[kSha256Size]) {  if (tag == nullptr || out == nullptr || (data == nullptr && size != 0) || size > 96) {
-    return false;
-  }
-  uint8_t tag_hash[kSha256Size];
-  uint8_t buffer[2 * kSha256Size + 96];
-  if (!crypto_sha256(reinterpret_cast<const uint8_t *>(tag), strlen(tag), tag_hash)) {
-    return false;
-  }
-  memcpy(buffer, tag_hash, kSha256Size);
-  memcpy(buffer + kSha256Size, tag_hash, kSha256Size);
-  if (size != 0) memcpy(buffer + 2 * kSha256Size, data, size);
-  const bool ok = crypto_sha256(buffer, 2 * kSha256Size + size, out);
-  secure_zero(tag_hash, sizeof(tag_hash));
-  secure_zero(buffer, sizeof(buffer));
-  return ok;
-}
-
-bool fingerprint(const uint8_t public_key[kCompressedPublicKeySize], uint32_t *out) {
-  if (public_key == nullptr || out == nullptr) return false;
-  uint8_t digest[20];
-  const bool ok = hash160(public_key, kCompressedPublicKeySize, digest);
-  if (ok) {
-    *out = (static_cast<uint32_t>(digest[0]) << 24) | (static_cast<uint32_t>(digest[1]) << 16) | (static_cast<uint32_t>(digest[2]) << 8) | digest[3];
-  }
-  secure_zero(digest, sizeof(digest));
-  return ok;
-}
-
-void write_u32_be(uint8_t *out, uint32_t value) {
-  out[0] = static_cast<uint8_t>(value >> 24);
-  out[1] = static_cast<uint8_t>(value >> 16);
-  out[2] = static_cast<uint8_t>(value >> 8);
-  out[3] = static_cast<uint8_t>(value);
-}
-
-bool version_bytes(ExtendedKeyFormat format, bool private_key, uint8_t out[4]) {
-  if ((private_key && (format == ExtendedKeyFormat::Xpub || format == ExtendedKeyFormat::Zpub || format == ExtendedKeyFormat::Tpub || format == ExtendedKeyFormat::Vpub)) || (!private_key && (format == ExtendedKeyFormat::Xprv || format == ExtendedKeyFormat::Zprv || format == ExtendedKeyFormat::Tprv || format == ExtendedKeyFormat::Vprv))) {
-    return false;
-  }
-  static const uint32_t kVersions[] = {
-    0x0488ADE4UL,
-    0x0488B21EUL,
-    0x04B2430CUL,
-    0x04B24746UL,
-    0x04358394UL,
-    0x043587CFUL,
-    0x045F18BCUL,
-    0x045F1CF6UL,
-  };
-  const uint8_t index = static_cast<uint8_t>(format);
-  if (index >= sizeof(kVersions) / sizeof(kVersions[0])) return false;
-  write_u32_be(out, kVersions[index]);
-  return true;
-}
-
-WalletError serialize_payload(const uint8_t *key, const uint8_t chain_code[kChainCodeSize],
-                              uint8_t depth, uint32_t parent_fingerprint, uint32_t child_number,
-                              ExtendedKeyFormat format, bool private_key,
-                              char *out, size_t *in_out_size) {
-  if (key == nullptr || chain_code == nullptr || out == nullptr || in_out_size == nullptr) {
-    return WalletError::InvalidArgument;
-  }
-  uint8_t version[4];
-  if (*in_out_size < kExtendedKeyTextSize || !version_bytes(format, private_key, version)) {
-    return *in_out_size < kExtendedKeyTextSize ? WalletError::BufferTooSmall : WalletError::InvalidArgument;
-  }
-  uint8_t payload[kExtendedKeyPayloadSize];
-  uint8_t checked[kExtendedKeyCheckedSize];
-  memcpy(payload, version, sizeof(version));
-  payload[4] = depth;
-  write_u32_be(payload + 5, parent_fingerprint);
-  write_u32_be(payload + 9, child_number);
-  memcpy(payload + 13, chain_code, kChainCodeSize);
-  if (private_key) {
-    payload[45] = 0;
-    memcpy(payload + 46, key, kPrivateKeySize);
-  } else {
-    memcpy(payload + 45, key, kCompressedPublicKeySize);
-  }
-  uint8_t checksum[32];
-  if (!crypto_double_sha256(payload, sizeof(payload), checksum)) {
-    secure_zero(payload, sizeof(payload));
-    secure_zero(checksum, sizeof(checksum));
-    return WalletError::CryptoFailure;
-  }
-  memcpy(checked, payload, sizeof(payload));
-  memcpy(checked + sizeof(payload), checksum, 4);
-  size_t encoded_size = *in_out_size;
-  const bool encoded = b58enc(out, &encoded_size, checked, sizeof(checked));
-  secure_zero(payload, sizeof(payload));
-  secure_zero(checked, sizeof(checked));
-  secure_zero(checksum, sizeof(checksum));
-  if (!encoded) {
-    *in_out_size = encoded_size;
-    return WalletError::BufferTooSmall;
-  }
-  *in_out_size = encoded_size;
-  return WalletError::Ok;
-}
-
-bool word_index(const char *word, size_t length, uint16_t *out_index) {
-  for (uint16_t index = 0; index < 2048; ++index) {
-    const char *candidate = english_word_list[index];
-    if (strlen(candidate) == length && memcmp(candidate, word, length) == 0) {
-      *out_index = index;
+    bool parse_hex_fixed(const char *text, uint8_t *out, size_t size)
+    {
+      if (text == nullptr || out == nullptr || strlen(text) != size * 2)
+        return false;
+      for (size_t index = 0; index < size; ++index)
+      {
+        const int high = hex_nibble(text[index * 2]);
+        const int low = hex_nibble(text[index * 2 + 1]);
+        if (high < 0 || low < 0)
+          return false;
+        out[index] = static_cast<uint8_t>((high << 4) | low);
+      }
       return true;
     }
-  }
-  return false;
-}
 
-bool english_word_list_is_valid() {
-  return strcmp(english_word_list[0], "abandon") == 0 && strcmp(english_word_list[2047], "zoo") == 0;
-}
+    bool bip340_tagged_hash(const char *tag, const uint8_t *data, size_t size,
+                            uint8_t out[kSha256Size])
+    {
+      if (tag == nullptr || out == nullptr || (data == nullptr && size != 0) || size > 96)
+      {
+        return false;
+      }
+      uint8_t tag_hash[kSha256Size];
+      uint8_t buffer[2 * kSha256Size + 96];
+      if (!crypto_sha256(reinterpret_cast<const uint8_t *>(tag), strlen(tag), tag_hash))
+      {
+        return false;
+      }
+      memcpy(buffer, tag_hash, kSha256Size);
+      memcpy(buffer + kSha256Size, tag_hash, kSha256Size);
+      if (size != 0)
+        memcpy(buffer + 2 * kSha256Size, data, size);
+      const bool ok = crypto_sha256(buffer, 2 * kSha256Size + size, out);
+      secure_zero(tag_hash, sizeof(tag_hash));
+      secure_zero(buffer, sizeof(buffer));
+      return ok;
+    }
 
-}  // namespace
+    bool fingerprint(const uint8_t public_key[kCompressedPublicKeySize], uint32_t *out)
+    {
+      if (public_key == nullptr || out == nullptr)
+        return false;
+      uint8_t digest[20];
+      const bool ok = hash160(public_key, kCompressedPublicKeySize, digest);
+      if (ok)
+      {
+        *out = (static_cast<uint32_t>(digest[0]) << 24) | (static_cast<uint32_t>(digest[1]) << 16) | (static_cast<uint32_t>(digest[2]) << 8) | digest[3];
+      }
+      secure_zero(digest, sizeof(digest));
+      return ok;
+    }
 
-void secure_zero(void *data, size_t length) {
-  if (data != nullptr && length != 0) {
-    mbedtls_platform_zeroize(data, length);
-  }
-}
+    void write_u32_be(uint8_t *out, uint32_t value)
+    {
+      out[0] = static_cast<uint8_t>(value >> 24);
+      out[1] = static_cast<uint8_t>(value >> 16);
+      out[2] = static_cast<uint8_t>(value >> 8);
+      out[3] = static_cast<uint8_t>(value);
+    }
 
-bool is_ascii(const char *text) {
-  if (text == nullptr) {
-    return false;
-  }
-  for (; *text != '\0'; ++text) {
-    if (static_cast<unsigned char>(*text) > 0x7f) {
+    bool version_bytes(ExtendedKeyFormat format, bool private_key, uint8_t out[4])
+    {
+      if ((private_key && (format == ExtendedKeyFormat::Xpub || format == ExtendedKeyFormat::Zpub || format == ExtendedKeyFormat::Tpub || format == ExtendedKeyFormat::Vpub)) || (!private_key && (format == ExtendedKeyFormat::Xprv || format == ExtendedKeyFormat::Zprv || format == ExtendedKeyFormat::Tprv || format == ExtendedKeyFormat::Vprv)))
+      {
+        return false;
+      }
+      static const uint32_t kVersions[] = {
+          0x0488ADE4UL,
+          0x0488B21EUL,
+          0x04B2430CUL,
+          0x04B24746UL,
+          0x04358394UL,
+          0x043587CFUL,
+          0x045F18BCUL,
+          0x045F1CF6UL,
+      };
+      const uint8_t index = static_cast<uint8_t>(format);
+      if (index >= sizeof(kVersions) / sizeof(kVersions[0]))
+        return false;
+      write_u32_be(out, kVersions[index]);
+      return true;
+    }
+
+    WalletError serialize_payload(const uint8_t *key, const uint8_t chain_code[kChainCodeSize],
+                                  uint8_t depth, uint32_t parent_fingerprint, uint32_t child_number,
+                                  ExtendedKeyFormat format, bool private_key,
+                                  char *out, size_t *in_out_size)
+    {
+      if (key == nullptr || chain_code == nullptr || out == nullptr || in_out_size == nullptr)
+      {
+        return WalletError::InvalidArgument;
+      }
+      uint8_t version[4];
+      if (*in_out_size < kExtendedKeyTextSize || !version_bytes(format, private_key, version))
+      {
+        return *in_out_size < kExtendedKeyTextSize ? WalletError::BufferTooSmall : WalletError::InvalidArgument;
+      }
+      uint8_t payload[kExtendedKeyPayloadSize];
+      uint8_t checked[kExtendedKeyCheckedSize];
+      memcpy(payload, version, sizeof(version));
+      payload[4] = depth;
+      write_u32_be(payload + 5, parent_fingerprint);
+      write_u32_be(payload + 9, child_number);
+      memcpy(payload + 13, chain_code, kChainCodeSize);
+      if (private_key)
+      {
+        payload[45] = 0;
+        memcpy(payload + 46, key, kPrivateKeySize);
+      }
+      else
+      {
+        memcpy(payload + 45, key, kCompressedPublicKeySize);
+      }
+      uint8_t checksum[32];
+      if (!crypto_double_sha256(payload, sizeof(payload), checksum))
+      {
+        secure_zero(payload, sizeof(payload));
+        secure_zero(checksum, sizeof(checksum));
+        return WalletError::CryptoFailure;
+      }
+      memcpy(checked, payload, sizeof(payload));
+      memcpy(checked + sizeof(payload), checksum, 4);
+      size_t encoded_size = *in_out_size;
+      const bool encoded = b58enc(out, &encoded_size, checked, sizeof(checked));
+      secure_zero(payload, sizeof(payload));
+      secure_zero(checked, sizeof(checked));
+      secure_zero(checksum, sizeof(checksum));
+      if (!encoded)
+      {
+        *in_out_size = encoded_size;
+        return WalletError::BufferTooSmall;
+      }
+      *in_out_size = encoded_size;
+      return WalletError::Ok;
+    }
+
+    bool word_index(const char *word, size_t length, uint16_t *out_index)
+    {
+      for (uint16_t index = 0; index < 2048; ++index)
+      {
+        const char *candidate = english_word_list[index];
+        if (strlen(candidate) == length && memcmp(candidate, word, length) == 0)
+        {
+          *out_index = index;
+          return true;
+        }
+      }
       return false;
     }
-  }
-  return true;
-}
 
-WalletError bip39_generate_english_24(char *out, size_t out_size) {
-  WipeOnExit output_on_failure(out, out_size);
-  if (out == nullptr || out_size < kMnemonicTextSize) {
-    return WalletError::BufferTooSmall;
-  }
-  if (!english_word_list_is_valid()) {
-    return WalletError::CryptoFailure;
-  }
-  uint8_t entropy[32];
-  uint8_t digest[32];
-  uint8_t bits[33];
-  WipeOnExit wipe_entropy(entropy, sizeof(entropy));
-  WipeOnExit wipe_digest(digest, sizeof(digest));
-  WipeOnExit wipe_bits(bits, sizeof(bits));
-  // A seed must never be derived from a source that failed its own health
-  // tests; random_fill() zeroes the buffer in that case, so refuse here instead
-  // of turning 32 zero bytes into a deterministic mnemonic.
-  if (!random_healthy()) return WalletError::CryptoFailure;
-  random_fill(entropy, sizeof(entropy));
-  if (!crypto_sha256(entropy, sizeof(entropy), digest)) {
-    secure_zero(entropy, sizeof(entropy));
-    return WalletError::CryptoFailure;
-  }
-  memcpy(bits, entropy, sizeof(entropy));
-  bits[32] = digest[0];
-  size_t used = 0;
-  for (uint8_t word = 0; word < 24; ++word) {
-    uint16_t index = 0;
-    for (uint8_t bit = 0; bit < 11; ++bit) {
-      const uint16_t position = static_cast<uint16_t>(word) * 11 + bit;
-      index = static_cast<uint16_t>((index << 1) | ((bits[position / 8] >> (7 - position % 8)) & 1));
+    bool english_word_list_is_valid()
+    {
+      return strcmp(english_word_list[0], "abandon") == 0 && strcmp(english_word_list[2047], "zoo") == 0;
     }
-    const char *candidate = english_word_list[index];
-    const size_t candidate_length = strlen(candidate);
-    if (used + candidate_length + (word == 0 ? 1 : 2) > out_size) {
-      secure_zero(entropy, sizeof(entropy));
-      secure_zero(digest, sizeof(digest));
-      secure_zero(bits, sizeof(bits));
+
+  } // namespace
+
+  void secure_zero(void *data, size_t length)
+  {
+    if (data != nullptr && length != 0)
+    {
+      mbedtls_platform_zeroize(data, length);
+    }
+  }
+
+  bool is_ascii(const char *text)
+  {
+    if (text == nullptr)
+    {
+      return false;
+    }
+    for (; *text != '\0'; ++text)
+    {
+      if (static_cast<unsigned char>(*text) > 0x7f)
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  WalletError bip39_generate_english_24(char *out, size_t out_size)
+  {
+    WipeOnExit output_on_failure(out, out_size);
+    if (out == nullptr || out_size < kMnemonicTextSize)
+    {
       return WalletError::BufferTooSmall;
     }
-    if (word != 0) {
-      out[used++] = ' ';
+    if (!english_word_list_is_valid())
+    {
+      return WalletError::CryptoFailure;
     }
-    memcpy(out + used, candidate, candidate_length);
-    used += candidate_length;
-  }
-  out[used] = '\0';
-  secure_zero(entropy, sizeof(entropy));
-  secure_zero(digest, sizeof(digest));
-  secure_zero(bits, sizeof(bits));
-  output_on_failure.release();
-  return WalletError::Ok;
-}
-
-WalletError bip39_validate_english(const char *mnemonic) {
-  if (mnemonic == nullptr || !is_ascii(mnemonic) || !english_word_list_is_valid()) {
-    return mnemonic != nullptr && !is_ascii(mnemonic) ? WalletError::UnsupportedUnicode : WalletError::InvalidMnemonic;
-  }
-  const size_t length = strlen(mnemonic);
-  if (length == 0 || length >= kMnemonicTextSize) {
-    return WalletError::InvalidMnemonic;
-  }
-  uint8_t bits[33] = { 0 };
-  WipeOnExit wipe_bits(bits, sizeof(bits));
-  uint16_t bit_position = 0;
-  uint8_t word_count = 0;
-  const char *cursor = mnemonic;
-  while (*cursor != '\0') {
-    const char *end = strchr(cursor, ' ');
-    const size_t word_length = end == nullptr ? strlen(cursor) : static_cast<size_t>(end - cursor);
-    uint16_t index;
-    if (word_length == 0 || word_count == 24 || !word_index(cursor, word_length, &index)) {
-      return WalletError::InvalidMnemonic;
+    uint8_t entropy[32];
+    uint8_t digest[32];
+    uint8_t bits[33];
+    WipeOnExit wipe_entropy(entropy, sizeof(entropy));
+    WipeOnExit wipe_digest(digest, sizeof(digest));
+    WipeOnExit wipe_bits(bits, sizeof(bits));
+    // A seed must never be derived from a source that failed its own health
+    // tests; random_fill() zeroes the buffer in that case, so refuse here instead
+    // of turning 32 zero bytes into a deterministic mnemonic.
+    if (!random_healthy())
+      return WalletError::CryptoFailure;
+    random_fill(entropy, sizeof(entropy));
+    if (!crypto_sha256(entropy, sizeof(entropy), digest))
+    {
+      secure_zero(entropy, sizeof(entropy));
+      return WalletError::CryptoFailure;
     }
-    for (int bit = 10; bit >= 0; --bit) {
-      if ((index >> bit) & 1) {
-        bits[bit_position / 8] |= static_cast<uint8_t>(1U << (7 - bit_position % 8));
+    memcpy(bits, entropy, sizeof(entropy));
+    bits[32] = digest[0];
+    size_t used = 0;
+    for (uint8_t word = 0; word < 24; ++word)
+    {
+      uint16_t index = 0;
+      for (uint8_t bit = 0; bit < 11; ++bit)
+      {
+        const uint16_t position = static_cast<uint16_t>(word) * 11 + bit;
+        index = static_cast<uint16_t>((index << 1) | ((bits[position / 8] >> (7 - position % 8)) & 1));
       }
-      ++bit_position;
+      const char *candidate = english_word_list[index];
+      const size_t candidate_length = strlen(candidate);
+      if (used + candidate_length + (word == 0 ? 1 : 2) > out_size)
+      {
+        secure_zero(entropy, sizeof(entropy));
+        secure_zero(digest, sizeof(digest));
+        secure_zero(bits, sizeof(bits));
+        return WalletError::BufferTooSmall;
+      }
+      if (word != 0)
+      {
+        out[used++] = ' ';
+      }
+      memcpy(out + used, candidate, candidate_length);
+      used += candidate_length;
     }
-    ++word_count;
-    if (end == nullptr) {
-      break;
-    }
-    cursor = end + 1;
-  }
-  if (word_count != 12 && word_count != 15 && word_count != 18 && word_count != 21 && word_count != 24) {
-    return WalletError::InvalidMnemonic;
-  }
-  const uint16_t entropy_bits = static_cast<uint16_t>(word_count) * 11 * 32 / 33;
-  const uint8_t checksum_bits = entropy_bits / 32;
-  uint8_t digest[32];
-  WipeOnExit wipe_digest(digest, sizeof(digest));
-  if (!crypto_sha256(bits, entropy_bits / 8, digest)) {
+    out[used] = '\0';
+    secure_zero(entropy, sizeof(entropy));
+    secure_zero(digest, sizeof(digest));
     secure_zero(bits, sizeof(bits));
-    return WalletError::CryptoFailure;
+    output_on_failure.release();
+    return WalletError::Ok;
   }
-  for (uint8_t bit = 0; bit < checksum_bits; ++bit) {
-    const uint8_t supplied = (bits[(entropy_bits + bit) / 8] >> (7 - ((entropy_bits + bit) % 8))) & 1;
-    const uint8_t expected = (digest[0] >> (7 - bit)) & 1;
-    if (supplied != expected) {
-      secure_zero(bits, sizeof(bits));
-      secure_zero(digest, sizeof(digest));
+
+  WalletError bip39_validate_english(const char *mnemonic)
+  {
+    if (mnemonic == nullptr || !is_ascii(mnemonic) || !english_word_list_is_valid())
+    {
+      return mnemonic != nullptr && !is_ascii(mnemonic) ? WalletError::UnsupportedUnicode : WalletError::InvalidMnemonic;
+    }
+    const size_t length = strlen(mnemonic);
+    if (length == 0 || length >= kMnemonicTextSize)
+    {
       return WalletError::InvalidMnemonic;
     }
+    uint8_t bits[33] = {0};
+    WipeOnExit wipe_bits(bits, sizeof(bits));
+    uint16_t bit_position = 0;
+    uint8_t word_count = 0;
+    const char *cursor = mnemonic;
+    while (*cursor != '\0')
+    {
+      const char *end = strchr(cursor, ' ');
+      const size_t word_length = end == nullptr ? strlen(cursor) : static_cast<size_t>(end - cursor);
+      uint16_t index;
+      if (word_length == 0 || word_count == 24 || !word_index(cursor, word_length, &index))
+      {
+        return WalletError::InvalidMnemonic;
+      }
+      for (int bit = 10; bit >= 0; --bit)
+      {
+        if ((index >> bit) & 1)
+        {
+          bits[bit_position / 8] |= static_cast<uint8_t>(1U << (7 - bit_position % 8));
+        }
+        ++bit_position;
+      }
+      ++word_count;
+      if (end == nullptr)
+      {
+        break;
+      }
+      cursor = end + 1;
+    }
+    if (word_count != 12 && word_count != 15 && word_count != 18 && word_count != 21 && word_count != 24)
+    {
+      return WalletError::InvalidMnemonic;
+    }
+    const uint16_t entropy_bits = static_cast<uint16_t>(word_count) * 11 * 32 / 33;
+    const uint8_t checksum_bits = entropy_bits / 32;
+    uint8_t digest[32];
+    WipeOnExit wipe_digest(digest, sizeof(digest));
+    if (!crypto_sha256(bits, entropy_bits / 8, digest))
+    {
+      secure_zero(bits, sizeof(bits));
+      return WalletError::CryptoFailure;
+    }
+    for (uint8_t bit = 0; bit < checksum_bits; ++bit)
+    {
+      const uint8_t supplied = (bits[(entropy_bits + bit) / 8] >> (7 - ((entropy_bits + bit) % 8))) & 1;
+      const uint8_t expected = (digest[0] >> (7 - bit)) & 1;
+      if (supplied != expected)
+      {
+        secure_zero(bits, sizeof(bits));
+        secure_zero(digest, sizeof(digest));
+        return WalletError::InvalidMnemonic;
+      }
+    }
+    secure_zero(bits, sizeof(bits));
+    secure_zero(digest, sizeof(digest));
+    return WalletError::Ok;
   }
-  secure_zero(bits, sizeof(bits));
-  secure_zero(digest, sizeof(digest));
-  return WalletError::Ok;
-}
 
-WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
-                                    uint8_t out_seed[kSeedSize]) {
-  WipeOnExit output_on_failure(out_seed, kSeedSize);
-  if (out_seed == nullptr || passphrase == nullptr) {
-    return WalletError::InvalidArgument;
+  WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
+                                      uint8_t out_seed[kSeedSize])
+  {
+    WipeOnExit output_on_failure(out_seed, kSeedSize);
+    if (out_seed == nullptr || passphrase == nullptr)
+    {
+      return WalletError::InvalidArgument;
+    }
+    const WalletError validation = bip39_validate_english(mnemonic);
+    if (validation != WalletError::Ok)
+    {
+      return validation;
+    }
+    if (!is_ascii(passphrase))
+    {
+      return WalletError::UnsupportedUnicode;
+    }
+    const size_t passphrase_length = strlen(passphrase);
+    if (passphrase_length > kMaxPassphraseSize)
+    {
+      return WalletError::InvalidArgument;
+    }
+    char salt[sizeof("mnemonic") + kMaxPassphraseSize];
+    memcpy(salt, "mnemonic", 8);
+    memcpy(salt + 8, passphrase, passphrase_length);
+    const int result = mbedtls_pkcs5_pbkdf2_hmac_ext(
+        MBEDTLS_MD_SHA512, reinterpret_cast<const unsigned char *>(mnemonic), strlen(mnemonic),
+        reinterpret_cast<const unsigned char *>(salt), 8 + passphrase_length,
+        2048, kSeedSize, out_seed);
+    secure_zero(salt, sizeof(salt));
+    if (result == 0)
+      output_on_failure.release();
+    return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
   }
-  const WalletError validation = bip39_validate_english(mnemonic);
-  if (validation != WalletError::Ok) {
-    return validation;
-  }
-  if (!is_ascii(passphrase)) {
-    return WalletError::UnsupportedUnicode;
-  }
-  const size_t passphrase_length = strlen(passphrase);
-  if (passphrase_length > kMaxPassphraseSize) {
-    return WalletError::InvalidArgument;
-  }
-  char salt[sizeof("mnemonic") + kMaxPassphraseSize];
-  memcpy(salt, "mnemonic", 8);
-  memcpy(salt + 8, passphrase, passphrase_length);
-  const int result = mbedtls_pkcs5_pbkdf2_hmac_ext(
-    MBEDTLS_MD_SHA512, reinterpret_cast<const unsigned char *>(mnemonic), strlen(mnemonic),
-    reinterpret_cast<const unsigned char *>(salt), 8 + passphrase_length,
-    2048, kSeedSize, out_seed);
-  secure_zero(salt, sizeof(salt));
-  if (result == 0) output_on_failure.release();
-  return result == 0 ? WalletError::Ok : WalletError::CryptoFailure;
-}
 
-bool run_bip39_self_test() {
-  static const char kMnemonic[] =
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-  static const uint8_t kExpectedSeed[kSeedSize] = {
-    0xc5,
-    0x52,
-    0x57,
-    0xc3,
-    0x60,
-    0xc0,
-    0x7c,
-    0x72,
-    0x02,
-    0x9a,
-    0xeb,
-    0xc1,
-    0xb5,
-    0x3c,
-    0x05,
-    0xed,
-    0x03,
-    0x62,
-    0xad,
-    0xa3,
-    0x8e,
-    0xad,
-    0x3e,
-    0x3e,
-    0x9e,
-    0xfa,
-    0x37,
-    0x08,
-    0xe5,
-    0x34,
-    0x95,
-    0x53,
-    0x1f,
-    0x09,
-    0xa6,
-    0x98,
-    0x75,
-    0x99,
-    0xd1,
-    0x82,
-    0x64,
-    0xc1,
-    0xe1,
-    0xc9,
-    0x2f,
-    0x2c,
-    0xf1,
-    0x41,
-    0x63,
-    0x0c,
-    0x7a,
-    0x3c,
-    0x4a,
-    0xb7,
-    0xc8,
-    0x1b,
-    0x2f,
-    0x00,
-    0x16,
-    0x98,
-    0xe7,
-    0x46,
-    0x3b,
-    0x04,
-  };
-  uint8_t seed[kSeedSize];
-  const bool passed = bip39_validate_english(kMnemonic) == WalletError::Ok && bip39_seed_from_english(kMnemonic, "TREZOR", seed) == WalletError::Ok && crypto_constant_time_equal(seed, kExpectedSeed, sizeof(seed));
-  secure_zero(seed, sizeof(seed));
-  return passed;
-}
-
-WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
-                                    uint8_t out_public_key[kCompressedPublicKeySize]) {
-  if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key)) {
-    return WalletError::InvalidKey;
+  bool run_bip39_self_test()
+  {
+    static const char kMnemonic[] =
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    static const uint8_t kExpectedSeed[kSeedSize] = {
+        0xc5,
+        0x52,
+        0x57,
+        0xc3,
+        0x60,
+        0xc0,
+        0x7c,
+        0x72,
+        0x02,
+        0x9a,
+        0xeb,
+        0xc1,
+        0xb5,
+        0x3c,
+        0x05,
+        0xed,
+        0x03,
+        0x62,
+        0xad,
+        0xa3,
+        0x8e,
+        0xad,
+        0x3e,
+        0x3e,
+        0x9e,
+        0xfa,
+        0x37,
+        0x08,
+        0xe5,
+        0x34,
+        0x95,
+        0x53,
+        0x1f,
+        0x09,
+        0xa6,
+        0x98,
+        0x75,
+        0x99,
+        0xd1,
+        0x82,
+        0x64,
+        0xc1,
+        0xe1,
+        0xc9,
+        0x2f,
+        0x2c,
+        0xf1,
+        0x41,
+        0x63,
+        0x0c,
+        0x7a,
+        0x3c,
+        0x4a,
+        0xb7,
+        0xc8,
+        0x1b,
+        0x2f,
+        0x00,
+        0x16,
+        0x98,
+        0xe7,
+        0x46,
+        0x3b,
+        0x04,
+    };
+    uint8_t seed[kSeedSize];
+    const bool passed = bip39_validate_english(kMnemonic) == WalletError::Ok && bip39_seed_from_english(kMnemonic, "TREZOR", seed) == WalletError::Ok && crypto_constant_time_equal(seed, kExpectedSeed, sizeof(seed));
+    secure_zero(seed, sizeof(seed));
+    return passed;
   }
-  return ecdsa_public_key_compressed(EcdsaCurve::Secp256k1, private_key, out_public_key)
-             ? WalletError::Ok
-             : WalletError::CryptoFailure;
-}
 
-WalletError uncompressed_public_key_from_private(
-  const uint8_t private_key[kPrivateKeySize],
-  uint8_t out_public_key[kUncompressedPublicKeySize]) {
-  if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key)) {
-    return WalletError::InvalidKey;
+  WalletError public_key_from_private(const uint8_t private_key[kPrivateKeySize],
+                                      uint8_t out_public_key[kCompressedPublicKeySize])
+  {
+    if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key))
+    {
+      return WalletError::InvalidKey;
+    }
+    return ecdsa_public_key_compressed(EcdsaCurve::Secp256k1, private_key, out_public_key)
+               ? WalletError::Ok
+               : WalletError::CryptoFailure;
   }
-  uint8_t point[kEcdsaPointSize];
-  if (!ecdsa_public_key(EcdsaCurve::Secp256k1, private_key, point)) {
+
+  WalletError uncompressed_public_key_from_private(
+      const uint8_t private_key[kPrivateKeySize],
+      uint8_t out_public_key[kUncompressedPublicKeySize])
+  {
+    if (private_key == nullptr || out_public_key == nullptr || !valid_private_key(private_key))
+    {
+      return WalletError::InvalidKey;
+    }
+    uint8_t point[kEcdsaPointSize];
+    if (!ecdsa_public_key(EcdsaCurve::Secp256k1, private_key, point))
+    {
+      secure_zero(point, sizeof(point));
+      return WalletError::CryptoFailure;
+    }
+    out_public_key[0] = 0x04;
+    memcpy(out_public_key + 1, point, sizeof(point));
     secure_zero(point, sizeof(point));
-    return WalletError::CryptoFailure;
+    return WalletError::Ok;
   }
-  out_public_key[0] = 0x04;
-  memcpy(out_public_key + 1, point, sizeof(point));
-  secure_zero(point, sizeof(point));
-  return WalletError::Ok;
-}
 
-WalletError secp256k1_sign_digest_recoverable(
-  const uint8_t private_key[kPrivateKeySize],
-  const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature) {
-  WipeOnExit output_on_failure(out_signature, sizeof(RecoverableSignature));
-  if (private_key == nullptr || digest == nullptr || out_signature == nullptr ||
-      !valid_private_key(private_key)) {
-    return WalletError::InvalidArgument;
-  }
-  memset(out_signature, 0, sizeof(*out_signature));
-  EcdsaRecoverableSignature signature;
-  memset(&signature, 0, sizeof(signature));
-  if (!ecdsa_sign_digest_recoverable(EcdsaCurve::Secp256k1, private_key, digest,
-                                     &signature)) {
+  WalletError secp256k1_sign_digest_recoverable(
+      const uint8_t private_key[kPrivateKeySize],
+      const uint8_t digest[kPrivateKeySize], RecoverableSignature *out_signature)
+  {
+    WipeOnExit output_on_failure(out_signature, sizeof(RecoverableSignature));
+    if (private_key == nullptr || digest == nullptr || out_signature == nullptr ||
+        !valid_private_key(private_key))
+    {
+      return WalletError::InvalidArgument;
+    }
+    memset(out_signature, 0, sizeof(*out_signature));
+    EcdsaRecoverableSignature signature;
+    memset(&signature, 0, sizeof(signature));
+    if (!ecdsa_sign_digest_recoverable(EcdsaCurve::Secp256k1, private_key, digest,
+                                       &signature))
+    {
+      secure_zero(&signature, sizeof(signature));
+      return WalletError::CryptoFailure;
+    }
+    // Bit 1 means R.x overflowed the group order. That case has no representation
+    // in the 65-byte r || s || v form Ethereum and Tron use, so it is refused
+    // rather than signed with a v that recovers the wrong key.
+    if ((signature.recovery_id & 2) != 0)
+    {
+      secure_zero(&signature, sizeof(signature));
+      return WalletError::CryptoFailure;
+    }
+    memcpy(out_signature->r, signature.signature, kPrivateKeySize);
+    memcpy(out_signature->s, signature.signature + kPrivateKeySize, kPrivateKeySize);
+    out_signature->y_parity = static_cast<uint8_t>(signature.recovery_id & 1);
     secure_zero(&signature, sizeof(signature));
-    return WalletError::CryptoFailure;
+    output_on_failure.release();
+    return WalletError::Ok;
   }
-  // Bit 1 means R.x overflowed the group order. That case has no representation
-  // in the 65-byte r || s || v form Ethereum and Tron use, so it is refused
-  // rather than signed with a v that recovers the wrong key.
-  if ((signature.recovery_id & 2) != 0) {
-    secure_zero(&signature, sizeof(signature));
-    return WalletError::CryptoFailure;
-  }
-  memcpy(out_signature->r, signature.signature, kPrivateKeySize);
-  memcpy(out_signature->s, signature.signature + kPrivateKeySize, kPrivateKeySize);
-  out_signature->y_parity = static_cast<uint8_t>(signature.recovery_id & 1);
-  secure_zero(&signature, sizeof(signature));
-  output_on_failure.release();
-  return WalletError::Ok;
-}
 
-WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize],
-                                       uint8_t out_xonly[kPrivateKeySize],
-                                       uint8_t *out_parity) {
-  if (private_key == nullptr || out_xonly == nullptr || !valid_private_key(private_key)) {
-    return WalletError::InvalidArgument;
+  WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize],
+                                         uint8_t out_xonly[kPrivateKeySize],
+                                         uint8_t *out_parity)
+  {
+    if (private_key == nullptr || out_xonly == nullptr || !valid_private_key(private_key))
+    {
+      return WalletError::InvalidArgument;
+    }
+    uint8_t parity = 0;
+    if (!ecdsa_xonly_public_key(EcdsaCurve::Secp256k1, private_key, out_xonly,
+                                &parity))
+    {
+      secure_zero(out_xonly, kPrivateKeySize);
+      return WalletError::CryptoFailure;
+    }
+    if (out_parity != nullptr)
+      *out_parity = parity;
+    return WalletError::Ok;
   }
-  uint8_t parity = 0;
-  if (!ecdsa_xonly_public_key(EcdsaCurve::Secp256k1, private_key, out_xonly,
-                              &parity)) {
-    secure_zero(out_xonly, kPrivateKeySize);
-    return WalletError::CryptoFailure;
-  }
-  if (out_parity != nullptr)
-    *out_parity = parity;
-  return WalletError::Ok;
-}
 
-WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
-                                   const uint8_t message[kPrivateKeySize],
-                                   const uint8_t aux_rand[kPrivateKeySize],
-                                   uint8_t out_signature[64]) {
-  if (private_key == nullptr || message == nullptr || aux_rand == nullptr ||
-      out_signature == nullptr || !valid_private_key(private_key)) {
-    return WalletError::InvalidArgument;
+  WalletError secp256k1_schnorr_sign(const uint8_t private_key[kPrivateKeySize],
+                                     const uint8_t message[kPrivateKeySize],
+                                     const uint8_t aux_rand[kPrivateKeySize],
+                                     uint8_t out_signature[64])
+  {
+    if (private_key == nullptr || message == nullptr || aux_rand == nullptr ||
+        out_signature == nullptr || !valid_private_key(private_key))
+    {
+      return WalletError::InvalidArgument;
+    }
+    if (!ecdsa_bip340_sign(EcdsaCurve::Secp256k1, private_key, message, aux_rand,
+                           out_signature))
+    {
+      memset(out_signature, 0, 64);
+      return WalletError::CryptoFailure;
+    }
+    return WalletError::Ok;
   }
-  if (!ecdsa_bip340_sign(EcdsaCurve::Secp256k1, private_key, message, aux_rand,
-                         out_signature)) {
-    memset(out_signature, 0, 64);
-    return WalletError::CryptoFailure;
-  }
-  return WalletError::Ok;
-}
 
-bool secp256k1_schnorr_verify(const uint8_t xonly_public_key[kPrivateKeySize],
-                              const uint8_t message[kPrivateKeySize],
-                              const uint8_t signature[64]) {
-  return ecdsa_bip340_verify(EcdsaCurve::Secp256k1, xonly_public_key, message,
-                             signature);
-}
+  bool secp256k1_schnorr_verify(const uint8_t xonly_public_key[kPrivateKeySize],
+                                const uint8_t message[kPrivateKeySize],
+                                const uint8_t signature[64])
+  {
+    return ecdsa_bip340_verify(EcdsaCurve::Secp256k1, xonly_public_key, message,
+                               signature);
+  }
 
-WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivateNode *out_node) {
-  WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
-  if (seed == nullptr || out_node == nullptr || seed_size < 16 || seed_size > 64) {
-    return WalletError::InvalidArgument;
+  WalletError taproot_bip86_output_key(const uint8_t internal_key[32], uint8_t output_key[32])
+  {
+    if (!internal_key || !output_key)
+      return WalletError::InvalidArgument;
+    WipeOnExit failure(output_key, 32);
+    uint8_t compressed[33] = {2}, point[64], tweak[32], offset[64], sum[64];
+    memcpy(compressed + 1, internal_key, 32);
+    if (!ecdsa_parse_public_key(EcdsaCurve::Secp256k1, compressed, 33, point) ||
+        !bip340_tagged_hash("TapTweak", internal_key, 32, tweak))
+      return WalletError::InvalidKey;
+    uint8_t nonzero = 0;
+    for (uint8_t b : tweak)
+      nonzero |= b;
+    if (nonzero == 0)
+      memcpy(output_key, internal_key, 32);
+    else
+    {
+      if (!ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, tweak) ||
+          !ecdsa_public_key(EcdsaCurve::Secp256k1, tweak, offset) ||
+          !ecdsa_point_add(EcdsaCurve::Secp256k1, point, offset, sum))
+        return WalletError::InvalidKey;
+      memcpy(output_key, sum, 32);
+    }
+    failure.release();
+    return WalletError::Ok;
   }
-  static const uint8_t kBip32Key[] = "Bitcoin seed";
-  uint8_t material[64];
-  WipeOnExit wipe_material(material, sizeof(material));
-  if (!crypto_hmac_sha512(kBip32Key, sizeof(kBip32Key) - 1, seed, seed_size, material)) {
-    return WalletError::CryptoFailure;
+
+  WalletError taproot_bip86_private_key(const uint8_t private_key[32], uint8_t tweaked_key[32])
+  {
+    if (!private_key || !tweaked_key)
+      return WalletError::InvalidArgument;
+    WipeOnExit failure(tweaked_key, 32);
+    uint8_t x[32], parity = 0, tweak[32], normalized[32], negative[32];
+    WipeOnExit wipe_normal(normalized, 32), wipe_negative(negative, 32), wipe_tweak(tweak, 32);
+    if (secp256k1_xonly_public_key(private_key, x, &parity) != WalletError::Ok ||
+        !bip340_tagged_hash("TapTweak", x, 32, tweak))
+      return WalletError::InvalidKey;
+    static const uint8_t order[32] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b,
+                                      0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x41};
+    unsigned borrow = 0;
+    for (size_t i = 32; i-- > 0;)
+    {
+      const unsigned difference = unsigned(order[i]) - private_key[i] - borrow;
+      negative[i] = uint8_t(difference);
+      borrow = (difference >> 8) & 1;
+    }
+    const uint8_t mask = uint8_t(0 - parity);
+    for (size_t i = 0; i < 32; ++i)
+      normalized[i] = (negative[i] & mask) | (private_key[i] & uint8_t(~mask));
+    if (!ecdsa_scalar_add(EcdsaCurve::Secp256k1, normalized, tweak, tweaked_key))
+      return WalletError::InvalidKey;
+    failure.release();
+    return WalletError::Ok;
   }
-  if (!valid_private_key(material)) {
+
+  WalletError hd_private_from_seed(const uint8_t *seed, size_t seed_size, HdPrivateNode *out_node)
+  {
+    WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
+    if (seed == nullptr || out_node == nullptr || seed_size < 16 || seed_size > 64)
+    {
+      return WalletError::InvalidArgument;
+    }
+    static const uint8_t kBip32Key[] = "Bitcoin seed";
+    uint8_t material[64];
+    WipeOnExit wipe_material(material, sizeof(material));
+    if (!crypto_hmac_sha512(kBip32Key, sizeof(kBip32Key) - 1, seed, seed_size, material))
+    {
+      return WalletError::CryptoFailure;
+    }
+    if (!valid_private_key(material))
+    {
+      secure_zero(material, sizeof(material));
+      return WalletError::InvalidChild;
+    }
+    memcpy(out_node->private_key, material, kPrivateKeySize);
+    memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
+    out_node->depth = 0;
+    out_node->parent_fingerprint = 0;
+    out_node->child_number = 0;
     secure_zero(material, sizeof(material));
-    return WalletError::InvalidChild;
+    output_on_failure.release();
+    return WalletError::Ok;
   }
-  memcpy(out_node->private_key, material, kPrivateKeySize);
-  memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
-  out_node->depth = 0;
-  out_node->parent_fingerprint = 0;
-  out_node->child_number = 0;
-  secure_zero(material, sizeof(material));
-  output_on_failure.release();
-  return WalletError::Ok;
-}
 
-WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPrivateNode *out_node) {
-  WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
-  if (parent == nullptr || out_node == nullptr || !valid_private_key(parent->private_key) || parent->depth == 255) {
-    return WalletError::InvalidArgument;
-  }
-  uint8_t data[37];
-  uint8_t material[64];
-  uint8_t parent_public[kCompressedPublicKeySize];
-  WipeOnExit wipe_data(data, sizeof(data));
-  WipeOnExit wipe_material(material, sizeof(material));
-  WipeOnExit wipe_public(parent_public, sizeof(parent_public));
-  const WalletError public_error = public_key_from_private(parent->private_key, parent_public);
-  if (public_error != WalletError::Ok) {
-    return public_error;
-  }
-  uint32_t parent_fingerprint;
-  if (!fingerprint(parent_public, &parent_fingerprint)) {
-    secure_zero(parent_public, sizeof(parent_public));
-    return WalletError::CryptoFailure;
-  }
-  if (index >= kHardenedOffset) {
-    data[0] = 0;
-    memcpy(data + 1, parent->private_key, kPrivateKeySize);
-  } else {
-    memcpy(data, parent_public, sizeof(parent_public));
-  }
-  write_u32_be(data + 33, index);
-  if (!crypto_hmac_sha512(parent->chain_code, kChainCodeSize, data, sizeof(data), material)) {
+  WalletError hd_private_derive(const HdPrivateNode *parent, uint32_t index, HdPrivateNode *out_node)
+  {
+    WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
+    if (parent == nullptr || out_node == nullptr || !valid_private_key(parent->private_key) || parent->depth == 255)
+    {
+      return WalletError::InvalidArgument;
+    }
+    uint8_t data[37];
+    uint8_t material[64];
+    uint8_t parent_public[kCompressedPublicKeySize];
+    WipeOnExit wipe_data(data, sizeof(data));
+    WipeOnExit wipe_material(material, sizeof(material));
+    WipeOnExit wipe_public(parent_public, sizeof(parent_public));
+    const WalletError public_error = public_key_from_private(parent->private_key, parent_public);
+    if (public_error != WalletError::Ok)
+    {
+      return public_error;
+    }
+    uint32_t parent_fingerprint;
+    if (!fingerprint(parent_public, &parent_fingerprint))
+    {
+      secure_zero(parent_public, sizeof(parent_public));
+      return WalletError::CryptoFailure;
+    }
+    if (index >= kHardenedOffset)
+    {
+      data[0] = 0;
+      memcpy(data + 1, parent->private_key, kPrivateKeySize);
+    }
+    else
+    {
+      memcpy(data, parent_public, sizeof(parent_public));
+    }
+    write_u32_be(data + 33, index);
+    if (!crypto_hmac_sha512(parent->chain_code, kChainCodeSize, data, sizeof(data), material))
+    {
+      secure_zero(data, sizeof(data));
+      secure_zero(parent_public, sizeof(parent_public));
+      return WalletError::CryptoFailure;
+    }
+    // BIP32 private child: k_child = (IL + k_par) mod n. A zero result, or an IL
+    // that is not a valid scalar, means this index is unusable and the caller has
+    // to move on rather than invent a key.
+    bool valid = ecdsa_scalar_add(EcdsaCurve::Secp256k1, material,
+                                  parent->private_key, out_node->private_key);
+    if (valid)
+    {
+      memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
+      out_node->depth = parent->depth + 1;
+      out_node->parent_fingerprint = parent_fingerprint;
+      out_node->child_number = index;
+    }
     secure_zero(data, sizeof(data));
+    secure_zero(material, sizeof(material));
     secure_zero(parent_public, sizeof(parent_public));
-    return WalletError::CryptoFailure;
+    if (valid)
+      output_on_failure.release();
+    return valid ? WalletError::Ok : WalletError::InvalidChild;
   }
-  // BIP32 private child: k_child = (IL + k_par) mod n. A zero result, or an IL
-  // that is not a valid scalar, means this index is unusable and the caller has
-  // to move on rather than invent a key.
-  bool valid = ecdsa_scalar_add(EcdsaCurve::Secp256k1, material,
-                                parent->private_key, out_node->private_key);
-  if (valid) {
-    memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
-    out_node->depth = parent->depth + 1;
-    out_node->parent_fingerprint = parent_fingerprint;
-    out_node->child_number = index;
-  }
-  secure_zero(data, sizeof(data));
-  secure_zero(material, sizeof(material));
-  secure_zero(parent_public, sizeof(parent_public));
-  if (valid) output_on_failure.release();
-  return valid ? WalletError::Ok : WalletError::InvalidChild;
-}
 
-WalletError hd_public_neuter(const HdPrivateNode *private_node, HdPublicNode *out_node) {
-  if (private_node == nullptr || out_node == nullptr) {
-    return WalletError::InvalidArgument;
+  WalletError hd_public_neuter(const HdPrivateNode *private_node, HdPublicNode *out_node)
+  {
+    if (private_node == nullptr || out_node == nullptr)
+    {
+      return WalletError::InvalidArgument;
+    }
+    const WalletError result = public_key_from_private(private_node->private_key, out_node->public_key);
+    if (result != WalletError::Ok)
+    {
+      return result;
+    }
+    memcpy(out_node->chain_code, private_node->chain_code, kChainCodeSize);
+    out_node->depth = private_node->depth;
+    out_node->parent_fingerprint = private_node->parent_fingerprint;
+    out_node->child_number = private_node->child_number;
+    return WalletError::Ok;
   }
-  const WalletError result = public_key_from_private(private_node->private_key, out_node->public_key);
-  if (result != WalletError::Ok) {
-    return result;
-  }
-  memcpy(out_node->chain_code, private_node->chain_code, kChainCodeSize);
-  out_node->depth = private_node->depth;
-  out_node->parent_fingerprint = private_node->parent_fingerprint;
-  out_node->child_number = private_node->child_number;
-  return WalletError::Ok;
-}
 
-WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPublicNode *out_node) {
-  if (parent == nullptr || out_node == nullptr || index >= kHardenedOffset || parent->depth == 255) {
-    return index >= kHardenedOffset ? WalletError::HardenedPublicDerivation : WalletError::InvalidArgument;
+  WalletError hd_public_derive(const HdPublicNode *parent, uint32_t index, HdPublicNode *out_node)
+  {
+    if (parent == nullptr || out_node == nullptr || index >= kHardenedOffset || parent->depth == 255)
+    {
+      return index >= kHardenedOffset ? WalletError::HardenedPublicDerivation : WalletError::InvalidArgument;
+    }
+    uint8_t data[37];
+    uint8_t material[64];
+    memcpy(data, parent->public_key, kCompressedPublicKeySize);
+    uint32_t parent_fingerprint;
+    if (!fingerprint(parent->public_key, &parent_fingerprint))
+    {
+      return WalletError::CryptoFailure;
+    }
+    write_u32_be(data + 33, index);
+    if (!crypto_hmac_sha512(parent->chain_code, kChainCodeSize, data, sizeof(data), material))
+    {
+      return WalletError::CryptoFailure;
+    }
+    // BIP32 public child: K_child = point(IL) + K_par. Both operands are public,
+    // so the point helpers are the variable-time ones; what matters is that an
+    // out-of-range offset or a point at infinity is refused instead of encoded.
+    uint8_t offset_point[kEcdsaPointSize];
+    uint8_t parent_point[kEcdsaPointSize];
+    uint8_t child_point[kEcdsaPointSize];
+    bool valid = ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, material) &&
+                 ecdsa_public_key(EcdsaCurve::Secp256k1, material, offset_point) &&
+                 ecdsa_parse_public_key(EcdsaCurve::Secp256k1, parent->public_key,
+                                        kCompressedPublicKeySize, parent_point) &&
+                 ecdsa_point_add(EcdsaCurve::Secp256k1, offset_point, parent_point,
+                                 child_point) &&
+                 ecdsa_encode_compressed(EcdsaCurve::Secp256k1, child_point,
+                                         out_node->public_key);
+    if (valid)
+    {
+      memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
+      out_node->depth = parent->depth + 1;
+      out_node->parent_fingerprint = parent_fingerprint;
+      out_node->child_number = index;
+    }
+    secure_zero(offset_point, sizeof(offset_point));
+    secure_zero(parent_point, sizeof(parent_point));
+    secure_zero(child_point, sizeof(child_point));
+    secure_zero(data, sizeof(data));
+    secure_zero(material, sizeof(material));
+    return valid ? WalletError::Ok : WalletError::InvalidChild;
   }
-  uint8_t data[37];
-  uint8_t material[64];
-  memcpy(data, parent->public_key, kCompressedPublicKeySize);
-  uint32_t parent_fingerprint;
-  if (!fingerprint(parent->public_key, &parent_fingerprint)) {
-    return WalletError::CryptoFailure;
-  }
-  write_u32_be(data + 33, index);
-  if (!crypto_hmac_sha512(parent->chain_code, kChainCodeSize, data, sizeof(data), material)) {
-    return WalletError::CryptoFailure;
-  }
-  // BIP32 public child: K_child = point(IL) + K_par. Both operands are public,
-  // so the point helpers are the variable-time ones; what matters is that an
-  // out-of-range offset or a point at infinity is refused instead of encoded.
-  uint8_t offset_point[kEcdsaPointSize];
-  uint8_t parent_point[kEcdsaPointSize];
-  uint8_t child_point[kEcdsaPointSize];
-  bool valid = ecdsa_scalar_is_valid(EcdsaCurve::Secp256k1, material) &&
-               ecdsa_public_key(EcdsaCurve::Secp256k1, material, offset_point) &&
-               ecdsa_parse_public_key(EcdsaCurve::Secp256k1, parent->public_key,
-                                      kCompressedPublicKeySize, parent_point) &&
-               ecdsa_point_add(EcdsaCurve::Secp256k1, offset_point, parent_point,
-                               child_point) &&
-               ecdsa_encode_compressed(EcdsaCurve::Secp256k1, child_point,
-                                       out_node->public_key);
-  if (valid) {
-    memcpy(out_node->chain_code, material + kPrivateKeySize, kChainCodeSize);
-    out_node->depth = parent->depth + 1;
-    out_node->parent_fingerprint = parent_fingerprint;
-    out_node->child_number = index;
-  }
-  secure_zero(offset_point, sizeof(offset_point));
-  secure_zero(parent_point, sizeof(parent_point));
-  secure_zero(child_point, sizeof(child_point));
-  secure_zero(data, sizeof(data));
-  secure_zero(material, sizeof(material));
-  return valid ? WalletError::Ok : WalletError::InvalidChild;
-}
 
-WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path,
-                                   HdPrivateNode *out_node) {
-  WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
-  if (master == nullptr || path == nullptr || out_node == nullptr || path[0] != 'm' || (path[1] != '\0' && path[1] != '/')) {
-    return WalletError::InvalidPath;
-  }
-  HdPrivateNode current = *master;
-  WipeOnExit wipe_current(&current, sizeof(current));
-  const char *cursor = path + 1;
-  while (*cursor != '\0') {
-    ++cursor;
-    if (*cursor < '0' || *cursor > '9') {
-      secure_zero(&current, sizeof(current));
+  WalletError hd_private_derive_path(const HdPrivateNode *master, const char *path,
+                                     HdPrivateNode *out_node)
+  {
+    WipeOnExit output_on_failure(out_node, sizeof(HdPrivateNode));
+    if (master == nullptr || path == nullptr || out_node == nullptr || path[0] != 'm' || (path[1] != '\0' && path[1] != '/'))
+    {
       return WalletError::InvalidPath;
     }
-    uint32_t index = 0;
-    while (*cursor >= '0' && *cursor <= '9') {
-      if (index > 214748364U || (index == 214748364U && *cursor > '7')) {
+    HdPrivateNode current = *master;
+    WipeOnExit wipe_current(&current, sizeof(current));
+    const char *cursor = path + 1;
+    while (*cursor != '\0')
+    {
+      ++cursor;
+      if (*cursor < '0' || *cursor > '9')
+      {
         secure_zero(&current, sizeof(current));
         return WalletError::InvalidPath;
       }
-      index = index * 10 + static_cast<uint32_t>(*cursor - '0');
-      ++cursor;
-    }
-    if (*cursor == '\'' || *cursor == 'h' || *cursor == 'H') {
-      index |= kHardenedOffset;
-      ++cursor;
-    }
-    if (*cursor != '\0' && *cursor != '/') {
+      uint32_t index = 0;
+      while (*cursor >= '0' && *cursor <= '9')
+      {
+        if (index > 214748364U || (index == 214748364U && *cursor > '7'))
+        {
+          secure_zero(&current, sizeof(current));
+          return WalletError::InvalidPath;
+        }
+        index = index * 10 + static_cast<uint32_t>(*cursor - '0');
+        ++cursor;
+      }
+      if (*cursor == '\'' || *cursor == 'h' || *cursor == 'H')
+      {
+        index |= kHardenedOffset;
+        ++cursor;
+      }
+      if (*cursor != '\0' && *cursor != '/')
+      {
+        secure_zero(&current, sizeof(current));
+        return WalletError::InvalidPath;
+      }
+      HdPrivateNode next = {};
+      WipeOnExit wipe_next(&next, sizeof(next));
+      const WalletError result = hd_private_derive(&current, index, &next);
       secure_zero(&current, sizeof(current));
-      return WalletError::InvalidPath;
+      if (result != WalletError::Ok)
+      {
+        return result;
+      }
+      current = next;
     }
-    HdPrivateNode next = {};
-    WipeOnExit wipe_next(&next, sizeof(next));
-    const WalletError result = hd_private_derive(&current, index, &next);
-    secure_zero(&current, sizeof(current));
-    if (result != WalletError::Ok) {
-      return result;
+    *out_node = current;
+    output_on_failure.release();
+    return WalletError::Ok;
+  }
+
+  WalletError hd_serialize_private(const HdPrivateNode *node, ExtendedKeyFormat format,
+                                   char *out, size_t *in_out_size)
+  {
+    if (node == nullptr || !valid_private_key(node->private_key))
+    {
+      return WalletError::InvalidKey;
     }
-    current = next;
+    return serialize_payload(node->private_key, node->chain_code, node->depth,
+                             node->parent_fingerprint, node->child_number, format, true, out, in_out_size);
   }
-  *out_node = current;
-  output_on_failure.release();
-  return WalletError::Ok;
-}
 
-WalletError hd_serialize_private(const HdPrivateNode *node, ExtendedKeyFormat format,
-                                 char *out, size_t *in_out_size) {
-  if (node == nullptr || !valid_private_key(node->private_key)) {
-    return WalletError::InvalidKey;
-  }
-  return serialize_payload(node->private_key, node->chain_code, node->depth,
-                           node->parent_fingerprint, node->child_number, format, true, out, in_out_size);
-}
-
-WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat format,
-                                char *out, size_t *in_out_size) {
-  if (node == nullptr) {
-    return WalletError::InvalidArgument;
-  }
-  return serialize_payload(node->public_key, node->chain_code, node->depth,
-                           node->parent_fingerprint, node->child_number, format, false, out, in_out_size);
-}
-
-bool run_bip32_self_test() {
-  const uint8_t seed[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                           0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
-  HdPrivateNode master{};
-  HdPrivateNode derived{};
-  HdPublicNode master_public{};
-  HdPublicNode derived_public{};
-  HdPrivateNode private_child{};
-  HdPublicNode private_child_public{};
-  static const uint8_t kExpectedMasterPrivate[kPrivateKeySize] = {
-    0xe8,
-    0xf3,
-    0x2e,
-    0x72,
-    0x3d,
-    0xec,
-    0xf4,
-    0x05,
-    0x1a,
-    0xef,
-    0xac,
-    0x8e,
-    0x2c,
-    0x93,
-    0xc9,
-    0xc5,
-    0xb2,
-    0x14,
-    0x31,
-    0x38,
-    0x17,
-    0xcd,
-    0xb0,
-    0x1a,
-    0x14,
-    0x94,
-    0xb9,
-    0x17,
-    0xc8,
-    0x43,
-    0x6b,
-    0x35,
-  };
-  static const uint8_t kExpectedMasterChain[kChainCodeSize] = {
-    0x87,
-    0x3d,
-    0xff,
-    0x81,
-    0xc0,
-    0x2f,
-    0x52,
-    0x56,
-    0x23,
-    0xfd,
-    0x1f,
-    0xe5,
-    0x16,
-    0x7e,
-    0xac,
-    0x3a,
-    0x55,
-    0xa0,
-    0x49,
-    0xde,
-    0x3d,
-    0x31,
-    0x4b,
-    0xb4,
-    0x2e,
-    0xe2,
-    0x27,
-    0xff,
-    0xed,
-    0x37,
-    0xd5,
-    0x08,
-  };
-  const WalletError master_error = hd_private_from_seed(seed, sizeof(seed), &master);
-  const bool master_vector = master_error == WalletError::Ok && memcmp(master.private_key, kExpectedMasterPrivate, kPrivateKeySize) == 0 && memcmp(master.chain_code, kExpectedMasterChain, kChainCodeSize) == 0;
-  const WalletError path_error = master_error == WalletError::Ok
-                                   ? hd_private_derive_path(&master, "m/0'/1/2'", &derived)
-                                   : WalletError::InvalidChild;
-  const bool path_metadata = path_error == WalletError::Ok && derived.depth == 3 && derived.child_number == (2 | kHardenedOffset);
-  const WalletError master_public_error = master_error == WalletError::Ok
-                                            ? hd_public_neuter(&master, &master_public)
-                                            : WalletError::InvalidKey;
-  const WalletError private_child_error = master_error == WalletError::Ok
-                                            ? hd_private_derive(&master, 0, &private_child)
-                                            : WalletError::InvalidChild;
-  const WalletError private_child_public_error = private_child_error == WalletError::Ok
-                                                   ? hd_public_neuter(&private_child, &private_child_public)
-                                                   : WalletError::InvalidKey;
-  const WalletError public_child_error = master_public_error == WalletError::Ok
-                                           ? hd_public_derive(&master_public, 0, &derived_public)
-                                           : WalletError::InvalidChild;
-  const bool public_metadata = master_public_error == WalletError::Ok && master_public.depth == 0 && public_child_error == WalletError::Ok && derived_public.depth == 1;
-  const bool public_private_match = private_child_public_error == WalletError::Ok && public_child_error == WalletError::Ok && memcmp(private_child_public.public_key, derived_public.public_key, kCompressedPublicKeySize) == 0 && memcmp(private_child_public.chain_code, derived_public.chain_code, kChainCodeSize) == 0;
-  const bool passed = master_vector && path_metadata && public_metadata && public_private_match;
-  if (!passed) {
-    // Report only stage status and error codes; never print key material.
-    Serial.print("BIP32_DETAIL master=");
-    Serial.print(master_vector ? "pass" : "FAIL");
-    Serial.print(" path=");
-    Serial.print(path_metadata ? "pass" : "FAIL");
-    Serial.print(" neuter=");
-    Serial.print(master_public_error == WalletError::Ok ? "pass" : "FAIL");
-    Serial.print(" private-child=");
-    Serial.print(private_child_error == WalletError::Ok ? "pass" : "FAIL");
-    Serial.print(" public-child=");
-    Serial.print(public_child_error == WalletError::Ok ? "pass" : "FAIL");
-    Serial.print(" public-match=");
-    Serial.println(public_private_match ? "pass" : "FAIL");
-  }
-  secure_zero(&master, sizeof(master));
-  secure_zero(&derived, sizeof(derived));
-  secure_zero(&master_public, sizeof(master_public));
-  secure_zero(&derived_public, sizeof(derived_public));
-  secure_zero(&private_child, sizeof(private_child));
-  secure_zero(&private_child_public, sizeof(private_child_public));
-  return passed;
-}
-
-bool run_bip84_self_test() {
-  // Published BIP84 vectors, including account serialization and change.
-  const char *mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-  const char *paths[] = {"m/84'/0'/0'/0/0", "m/84'/0'/0'/0/1", "m/84'/0'/0'/1/0"};
-  const char *addresses[] = {
-    "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
-    "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g",
-    "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el"
-  };
-  uint8_t seed[kSeedSize] = {};
-  HdPrivateNode master = {}, child = {};
-  HdPublicNode pub = {};
-  char text[kExtendedKeyTextSize] = {};
-  size_t size = sizeof(text);
-  bool passed = bip39_seed_from_english(mnemonic, "", seed) == WalletError::Ok &&
-      hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
-      hd_serialize_private(&master, ExtendedKeyFormat::Zprv, text, &size) == WalletError::Ok &&
-      strcmp(text, "zprvAWgYBBk7JR8Gjrh4UJQ2uJdG1r3WNRRfURiABBE3RvMXYSrRJL62XuezvGdPvG6GFBZduosCc1YP5wixPox7zhZLfiUm8aunE96BBa4Kei5") == 0;
-  size = sizeof(text);
-  passed = passed && hd_public_neuter(&master, &pub) == WalletError::Ok &&
-      hd_serialize_public(&pub, ExtendedKeyFormat::Zpub, text, &size) == WalletError::Ok &&
-      strcmp(text, "zpub6jftahH18ngZxLmXaKw3GSZzZsszmt9WqedkyZdezFtWRFBZqsQH5hyUmb4pCEeZGmVfQuP5bedXTB8is6fTv19U1GQRyQUKQGUTzyHACMF") == 0;
-  size = sizeof(text);
-  passed = passed && hd_private_derive_path(&master, "m/84'/0'/0'", &child) == WalletError::Ok &&
-      hd_serialize_private(&child, ExtendedKeyFormat::Zprv, text, &size) == WalletError::Ok &&
-      strcmp(text, "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE") == 0;
-  size = sizeof(text);
-  passed = passed && hd_public_neuter(&child, &pub) == WalletError::Ok &&
-      hd_serialize_public(&pub, ExtendedKeyFormat::Zpub, text, &size) == WalletError::Ok &&
-      strcmp(text, "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs") == 0;
-  for (size_t i = 0; i < 3; ++i) {
-    const bool valid = hd_private_derive_path(&master, paths[i], &child) == WalletError::Ok &&
-        hd_public_neuter(&child, &pub) == WalletError::Ok &&
-        address_p2wpkh(kBitcoinMainnet, pub.public_key, text, sizeof(text)) == WalletError::Ok &&
-        strcmp(text, addresses[i]) == 0;
-    passed = valid && passed;
-  }
-  secure_zero(seed, sizeof(seed));
-  secure_zero(&master, sizeof(master));
-  secure_zero(&child, sizeof(child));
-  secure_zero(&pub, sizeof(pub));
-  secure_zero(text, sizeof(text));
-  return passed;
-}
-
-bool run_evm_derivation_self_test() {
-  // Official Conflux Ledger app vector:
-  // tests/test_get_pubkey_cmd.py, m/44'/503'/0'/0/0.
-  static const char kMnemonic[] =
-      "clown disagree excess state tray tongue use fat teach woman dizzy include";
-  static const uint8_t kExpectedPublic[kUncompressedPublicKeySize] = {
-    0x04, 0x4b, 0x0e, 0x7a, 0xa1, 0x24, 0x22, 0xc8, 0xbd, 0x4b, 0x2b, 0xed,
-    0x18, 0xbb, 0xa7, 0x75, 0xe0, 0x27, 0x1e, 0x6b, 0x9a, 0x99, 0xa1, 0xbf,
-    0x53, 0x40, 0x57, 0x2a, 0xce, 0xeb, 0x80, 0xe0, 0x35, 0x05, 0x88, 0xd6,
-    0xdc, 0xc8, 0x97, 0x07, 0x41, 0x2b, 0x12, 0x76, 0xe4, 0xcd, 0xfb, 0xc5,
-    0xfc, 0x65, 0x91, 0x06, 0x96, 0xc6, 0x89, 0x46, 0x56, 0x11, 0xb1, 0x2d,
-    0xda, 0x5b, 0x07, 0x00, 0xdb,
-  };
-  static const char kExpectedAddress[] =
-      "0xdc2a4fe87a86f8cd561fdd56d26075b4496fc831";
-  uint8_t seed[kSeedSize] = {};
-  HdPrivateNode master = {}, child = {};
-  uint8_t public_key[kUncompressedPublicKeySize] = {};
-  char address[64] = {};
-  bool passed =
-      bip39_seed_from_english(kMnemonic, "", seed) == WalletError::Ok &&
-      hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
-      hd_private_derive_path(&master, "m/44'/503'/0'/0/0", &child) == WalletError::Ok &&
-      uncompressed_public_key_from_private(child.private_key, public_key) == WalletError::Ok &&
-      memcmp(public_key, kExpectedPublic, sizeof(kExpectedPublic)) == 0 &&
-      address_evm(public_key, address, sizeof(address)) == WalletError::Ok &&
-      strcmp(address, kExpectedAddress) == 0;
-  secure_zero(seed, sizeof(seed));
-  secure_zero(&master, sizeof(master));
-  secure_zero(&child, sizeof(child));
-  secure_zero(public_key, sizeof(public_key));
-  secure_zero(address, sizeof(address));
-  return passed;
-}
-
-bool run_bip340_self_test() {
-  struct Vector {
-    const char *secret;
-    const char *aux;
-    const char *message;
-    const char *public_key;
-    const char *signature;
-  };
-  static const Vector kVector[] = {
-    { "0000000000000000000000000000000000000000000000000000000000000003",
-      "0000000000000000000000000000000000000000000000000000000000000000",
-      "0000000000000000000000000000000000000000000000000000000000000000",
-      "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9",
-      "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215"
-      "25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0" },
-    { "B7E151628AED2A6ABF7158809CF4F3C762E7160F38B4DA56A784D9045190CFEF",
-      "0000000000000000000000000000000000000000000000000000000000000001",
-      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
-      "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
-      "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE3341"
-      "8906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A" },
-    { "C90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B14E5C9",
-      "C87AA53824B4D7AE2EB035A2B5BBBCCC080E76CDC6D1692C4B0B62D798E6D906",
-      "7E2D58D8B3BCDF1ABADEC7829054F90DDA9805AAB56C77333024B9D0A508B75C",
-      "DD308AFEC5777E13121FA72B9CC1B7CC0139715309B086C960E18FD969774EB8",
-      "5831AAEED7B44BB74E5EAB94BA9D4294C49BCF2A60728D8B4C200F50DD313C1B"
-      "AB745879A5AD954A72C45A91C3A51D3C7ADEA98D82F8481E0E1E03674A6F3FB7" },
-    { "0B432B2677937381AEF05BB02A66ECD012773062CF3FA2549E44F58ED2401710",
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-      "25D1DFF95105F5253C4022F628A996AD3A0D95FBF21D468A1B33F8C160D8F517",
-      "7EB0509757E246F19449885651611CB965ECC1A187DD51B64FDA1EDC9637D5EC"
-      "97582B9CB13DB3933705B32BA982AF5AF25FD78881EBB32771FC5922EFC66EA3" },
-  };
-  bool passed = true;
-  for (size_t index = 0; index < sizeof(kVector) / sizeof(kVector[0]); ++index) {
-    const Vector &vector = kVector[index];
-    uint8_t secret[kPrivateKeySize];
-    uint8_t aux[kPrivateKeySize];
-    uint8_t message[kPrivateKeySize];
-    uint8_t public_key[kPrivateKeySize];
-    uint8_t expected[64];
-    uint8_t signature[64];
-    uint8_t xonly[kPrivateKeySize];
-    uint8_t parity = 0;
-    bool ok = parse_hex_fixed(vector.secret, secret, sizeof(secret)) &&
-              parse_hex_fixed(vector.aux, aux, sizeof(aux)) &&
-              parse_hex_fixed(vector.message, message, sizeof(message)) &&
-              parse_hex_fixed(vector.public_key, public_key, sizeof(public_key)) &&
-              parse_hex_fixed(vector.signature, expected, sizeof(expected));
-    ok = ok && secp256k1_xonly_public_key(secret, xonly, &parity) == WalletError::Ok &&
-         crypto_constant_time_equal(xonly, public_key, sizeof(xonly));
-    ok = ok && secp256k1_schnorr_sign(secret, message, aux, signature) == WalletError::Ok &&
-         crypto_constant_time_equal(signature, expected, sizeof(signature));
-    ok = ok && secp256k1_schnorr_verify(public_key, message, expected);
-    if (ok) {
-      uint8_t tampered[64];
-      memcpy(tampered, expected, sizeof(tampered));
-      tampered[0] ^= 0x01;
-      ok = !secp256k1_schnorr_verify(public_key, message, tampered);
-      secure_zero(tampered, sizeof(tampered));
+  WalletError hd_serialize_public(const HdPublicNode *node, ExtendedKeyFormat format,
+                                  char *out, size_t *in_out_size)
+  {
+    if (node == nullptr)
+    {
+      return WalletError::InvalidArgument;
     }
-    if (ok) {
-      uint8_t changed_message[kPrivateKeySize];
-      memcpy(changed_message, message, sizeof(changed_message));
-      changed_message[0] ^= 0x01;
-      ok = !secp256k1_schnorr_verify(public_key, changed_message, expected);
-      secure_zero(changed_message, sizeof(changed_message));
+    return serialize_payload(node->public_key, node->chain_code, node->depth,
+                             node->parent_fingerprint, node->child_number, format, false, out, in_out_size);
+  }
+
+  bool run_bip32_self_test()
+  {
+    const uint8_t seed[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
+    HdPrivateNode master{};
+    HdPrivateNode derived{};
+    HdPublicNode master_public{};
+    HdPublicNode derived_public{};
+    HdPrivateNode private_child{};
+    HdPublicNode private_child_public{};
+    static const uint8_t kExpectedMasterPrivate[kPrivateKeySize] = {
+        0xe8,
+        0xf3,
+        0x2e,
+        0x72,
+        0x3d,
+        0xec,
+        0xf4,
+        0x05,
+        0x1a,
+        0xef,
+        0xac,
+        0x8e,
+        0x2c,
+        0x93,
+        0xc9,
+        0xc5,
+        0xb2,
+        0x14,
+        0x31,
+        0x38,
+        0x17,
+        0xcd,
+        0xb0,
+        0x1a,
+        0x14,
+        0x94,
+        0xb9,
+        0x17,
+        0xc8,
+        0x43,
+        0x6b,
+        0x35,
+    };
+    static const uint8_t kExpectedMasterChain[kChainCodeSize] = {
+        0x87,
+        0x3d,
+        0xff,
+        0x81,
+        0xc0,
+        0x2f,
+        0x52,
+        0x56,
+        0x23,
+        0xfd,
+        0x1f,
+        0xe5,
+        0x16,
+        0x7e,
+        0xac,
+        0x3a,
+        0x55,
+        0xa0,
+        0x49,
+        0xde,
+        0x3d,
+        0x31,
+        0x4b,
+        0xb4,
+        0x2e,
+        0xe2,
+        0x27,
+        0xff,
+        0xed,
+        0x37,
+        0xd5,
+        0x08,
+    };
+    const WalletError master_error = hd_private_from_seed(seed, sizeof(seed), &master);
+    const bool master_vector = master_error == WalletError::Ok && memcmp(master.private_key, kExpectedMasterPrivate, kPrivateKeySize) == 0 && memcmp(master.chain_code, kExpectedMasterChain, kChainCodeSize) == 0;
+    const WalletError path_error = master_error == WalletError::Ok
+                                       ? hd_private_derive_path(&master, "m/0'/1/2'", &derived)
+                                       : WalletError::InvalidChild;
+    const bool path_metadata = path_error == WalletError::Ok && derived.depth == 3 && derived.child_number == (2 | kHardenedOffset);
+    const WalletError master_public_error = master_error == WalletError::Ok
+                                                ? hd_public_neuter(&master, &master_public)
+                                                : WalletError::InvalidKey;
+    const WalletError private_child_error = master_error == WalletError::Ok
+                                                ? hd_private_derive(&master, 0, &private_child)
+                                                : WalletError::InvalidChild;
+    const WalletError private_child_public_error = private_child_error == WalletError::Ok
+                                                       ? hd_public_neuter(&private_child, &private_child_public)
+                                                       : WalletError::InvalidKey;
+    const WalletError public_child_error = master_public_error == WalletError::Ok
+                                               ? hd_public_derive(&master_public, 0, &derived_public)
+                                               : WalletError::InvalidChild;
+    const bool public_metadata = master_public_error == WalletError::Ok && master_public.depth == 0 && public_child_error == WalletError::Ok && derived_public.depth == 1;
+    const bool public_private_match = private_child_public_error == WalletError::Ok && public_child_error == WalletError::Ok && memcmp(private_child_public.public_key, derived_public.public_key, kCompressedPublicKeySize) == 0 && memcmp(private_child_public.chain_code, derived_public.chain_code, kChainCodeSize) == 0;
+    const bool passed = master_vector && path_metadata && public_metadata && public_private_match;
+    if (!passed)
+    {
+      // Report only stage status and error codes; never print key material.
+      Serial.print("BIP32_DETAIL master=");
+      Serial.print(master_vector ? "pass" : "FAIL");
+      Serial.print(" path=");
+      Serial.print(path_metadata ? "pass" : "FAIL");
+      Serial.print(" neuter=");
+      Serial.print(master_public_error == WalletError::Ok ? "pass" : "FAIL");
+      Serial.print(" private-child=");
+      Serial.print(private_child_error == WalletError::Ok ? "pass" : "FAIL");
+      Serial.print(" public-child=");
+      Serial.print(public_child_error == WalletError::Ok ? "pass" : "FAIL");
+      Serial.print(" public-match=");
+      Serial.println(public_private_match ? "pass" : "FAIL");
     }
-    passed = passed && ok;
-    secure_zero(secret, sizeof(secret));
-    secure_zero(aux, sizeof(aux));
-    secure_zero(message, sizeof(message));
+    secure_zero(&master, sizeof(master));
+    secure_zero(&derived, sizeof(derived));
+    secure_zero(&master_public, sizeof(master_public));
+    secure_zero(&derived_public, sizeof(derived_public));
+    secure_zero(&private_child, sizeof(private_child));
+    secure_zero(&private_child_public, sizeof(private_child_public));
+    return passed;
+  }
+
+  bool run_bip84_self_test()
+  {
+    const char *mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    const char *paths[] = {"m/84'/0'/0'/0/0", "m/84'/0'/0'/0/1", "m/84'/0'/0'/1/0"};
+    const char *addresses[] = {
+        "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
+        "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g",
+        "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el"};
+    uint8_t seed[kSeedSize] = {};
+    HdPrivateNode master = {}, child = {};
+    HdPublicNode pub = {};
+    char text[kExtendedKeyTextSize] = {};
+    size_t size = sizeof(text);
+    bool passed = bip39_seed_from_english(mnemonic, "", seed) == WalletError::Ok &&
+                  hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
+                  hd_serialize_private(&master, ExtendedKeyFormat::Zprv, text, &size) == WalletError::Ok &&
+                  strcmp(text, "zprvAWgYBBk7JR8Gjrh4UJQ2uJdG1r3WNRRfURiABBE3RvMXYSrRJL62XuezvGdPvG6GFBZduosCc1YP5wixPox7zhZLfiUm8aunE96BBa4Kei5") == 0;
+    size = sizeof(text);
+    passed = passed && hd_public_neuter(&master, &pub) == WalletError::Ok &&
+             hd_serialize_public(&pub, ExtendedKeyFormat::Zpub, text, &size) == WalletError::Ok &&
+             strcmp(text, "zpub6jftahH18ngZxLmXaKw3GSZzZsszmt9WqedkyZdezFtWRFBZqsQH5hyUmb4pCEeZGmVfQuP5bedXTB8is6fTv19U1GQRyQUKQGUTzyHACMF") == 0;
+    size = sizeof(text);
+    passed = passed && hd_private_derive_path(&master, "m/84'/0'/0'", &child) == WalletError::Ok &&
+             hd_serialize_private(&child, ExtendedKeyFormat::Zprv, text, &size) == WalletError::Ok &&
+             strcmp(text, "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE") == 0;
+    size = sizeof(text);
+    passed = passed && hd_public_neuter(&child, &pub) == WalletError::Ok &&
+             hd_serialize_public(&pub, ExtendedKeyFormat::Zpub, text, &size) == WalletError::Ok &&
+             strcmp(text, "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs") == 0;
+    for (size_t i = 0; i < 3; ++i)
+    {
+      const bool valid = hd_private_derive_path(&master, paths[i], &child) == WalletError::Ok &&
+                         hd_public_neuter(&child, &pub) == WalletError::Ok &&
+                         address_p2wpkh(kBitcoinMainnet, pub.public_key, text, sizeof(text)) == WalletError::Ok &&
+                         strcmp(text, addresses[i]) == 0;
+      passed = valid && passed;
+    }
+    secure_zero(seed, sizeof(seed));
+    secure_zero(&master, sizeof(master));
+    secure_zero(&child, sizeof(child));
+    secure_zero(&pub, sizeof(pub));
+    secure_zero(text, sizeof(text));
+    return passed;
+  }
+
+  bool run_evm_derivation_self_test()
+  {
+    // Official Conflux Ledger app vector:
+    // tests/test_get_pubkey_cmd.py, m/44'/503'/0'/0/0.
+    static const char kMnemonic[] =
+        "clown disagree excess state tray tongue use fat teach woman dizzy include";
+    static const uint8_t kExpectedPublic[kUncompressedPublicKeySize] = {
+        0x04,
+        0x4b,
+        0x0e,
+        0x7a,
+        0xa1,
+        0x24,
+        0x22,
+        0xc8,
+        0xbd,
+        0x4b,
+        0x2b,
+        0xed,
+        0x18,
+        0xbb,
+        0xa7,
+        0x75,
+        0xe0,
+        0x27,
+        0x1e,
+        0x6b,
+        0x9a,
+        0x99,
+        0xa1,
+        0xbf,
+        0x53,
+        0x40,
+        0x57,
+        0x2a,
+        0xce,
+        0xeb,
+        0x80,
+        0xe0,
+        0x35,
+        0x05,
+        0x88,
+        0xd6,
+        0xdc,
+        0xc8,
+        0x97,
+        0x07,
+        0x41,
+        0x2b,
+        0x12,
+        0x76,
+        0xe4,
+        0xcd,
+        0xfb,
+        0xc5,
+        0xfc,
+        0x65,
+        0x91,
+        0x06,
+        0x96,
+        0xc6,
+        0x89,
+        0x46,
+        0x56,
+        0x11,
+        0xb1,
+        0x2d,
+        0xda,
+        0x5b,
+        0x07,
+        0x00,
+        0xdb,
+    };
+    static const char kExpectedAddress[] =
+        "0xdc2a4fe87a86f8cd561fdd56d26075b4496fc831";
+    uint8_t seed[kSeedSize] = {};
+    HdPrivateNode master = {}, child = {};
+    uint8_t public_key[kUncompressedPublicKeySize] = {};
+    char address[64] = {};
+    bool passed =
+        bip39_seed_from_english(kMnemonic, "", seed) == WalletError::Ok &&
+        hd_private_from_seed(seed, sizeof(seed), &master) == WalletError::Ok &&
+        hd_private_derive_path(&master, "m/44'/503'/0'/0/0", &child) == WalletError::Ok &&
+        uncompressed_public_key_from_private(child.private_key, public_key) == WalletError::Ok &&
+        memcmp(public_key, kExpectedPublic, sizeof(kExpectedPublic)) == 0 &&
+        address_evm(public_key, address, sizeof(address)) == WalletError::Ok &&
+        strcmp(address, kExpectedAddress) == 0;
+    secure_zero(seed, sizeof(seed));
+    secure_zero(&master, sizeof(master));
+    secure_zero(&child, sizeof(child));
     secure_zero(public_key, sizeof(public_key));
-    secure_zero(expected, sizeof(expected));
-    secure_zero(signature, sizeof(signature));
-    secure_zero(xonly, sizeof(xonly));
-    (void)parity;
+    secure_zero(address, sizeof(address));
+    return passed;
   }
-  return passed;
-}
 
-bool run_secp256k1_self_test() {
-  static const uint8_t kPrivateKey[kPrivateKeySize] = {
-    0x61,
-    0x9c,
-    0x33,
-    0x50,
-    0x25,
-    0xc7,
-    0xf4,
-    0x01,
-    0x2e,
-    0x55,
-    0x6c,
-    0x2a,
-    0x58,
-    0xb2,
-    0x50,
-    0x6e,
-    0x30,
-    0xb8,
-    0x51,
-    0x1b,
-    0x53,
-    0xad,
-    0xe9,
-    0x5e,
-    0xa3,
-    0x16,
-    0xfd,
-    0x8c,
-    0x32,
-    0x86,
-    0xfe,
-    0xb9,
-  };
-  static const uint8_t kDigest[kSha256Size] = {
-    0xc3,
-    0x7a,
-    0xf3,
-    0x11,
-    0x16,
-    0xd1,
-    0xb2,
-    0x7c,
-    0xaf,
-    0x68,
-    0xaa,
-    0xe9,
-    0xe3,
-    0xac,
-    0x82,
-    0xf1,
-    0x47,
-    0x79,
-    0x29,
-    0x01,
-    0x4d,
-    0x5b,
-    0x91,
-    0x76,
-    0x57,
-    0xd0,
-    0xeb,
-    0x49,
-    0x47,
-    0x8c,
-    0xb6,
-    0x70,
-  };
-  static const uint8_t kExpectedR[kPrivateKeySize] = {
-    0x36,
-    0x09,
-    0xe1,
-    0x7b,
-    0x84,
-    0xf6,
-    0xa7,
-    0xd3,
-    0x0c,
-    0x80,
-    0xbf,
-    0xa6,
-    0x10,
-    0xb5,
-    0xb4,
-    0x54,
-    0x2f,
-    0x32,
-    0xa8,
-    0xa0,
-    0xd5,
-    0x44,
-    0x7a,
-    0x12,
-    0xfb,
-    0x13,
-    0x66,
-    0xd7,
-    0xf0,
-    0x1c,
-    0xc4,
-    0x4a,
-  };
-  static const uint8_t kExpectedS[kPrivateKeySize] = {
-    0x57,
-    0x3a,
-    0x95,
-    0x4c,
-    0x45,
-    0x18,
-    0x33,
-    0x15,
-    0x61,
-    0x40,
-    0x6f,
-    0x90,
-    0x30,
-    0x0e,
-    0x8f,
-    0x33,
-    0x58,
-    0xf5,
-    0x19,
-    0x28,
-    0xd4,
-    0x3c,
-    0x21,
-    0x2a,
-    0x8c,
-    0xae,
-    0xd0,
-    0x2d,
-    0xe6,
-    0x7e,
-    0xeb,
-    0xee,
-  };
-  RecoverableSignature signature;
-  const bool passed = secp256k1_sign_digest_recoverable(kPrivateKey, kDigest, &signature) == WalletError::Ok && crypto_constant_time_equal(signature.r, kExpectedR, sizeof(signature.r)) && crypto_constant_time_equal(signature.s, kExpectedS, sizeof(signature.s)) && signature.y_parity <= 1;
-  secure_zero(&signature, sizeof(signature));
-  return passed;
-}
+  bool run_bip340_self_test()
+  {
+    struct Vector
+    {
+      const char *secret;
+      const char *aux;
+      const char *message;
+      const char *public_key;
+      const char *signature;
+    };
+    static const Vector kVector[] = {
+        {"0000000000000000000000000000000000000000000000000000000000000003",
+         "0000000000000000000000000000000000000000000000000000000000000000",
+         "0000000000000000000000000000000000000000000000000000000000000000",
+         "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9",
+         "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215"
+         "25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0"},
+        {"B7E151628AED2A6ABF7158809CF4F3C762E7160F38B4DA56A784D9045190CFEF",
+         "0000000000000000000000000000000000000000000000000000000000000001",
+         "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+         "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+         "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE3341"
+         "8906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A"},
+        {"C90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B14E5C9",
+         "C87AA53824B4D7AE2EB035A2B5BBBCCC080E76CDC6D1692C4B0B62D798E6D906",
+         "7E2D58D8B3BCDF1ABADEC7829054F90DDA9805AAB56C77333024B9D0A508B75C",
+         "DD308AFEC5777E13121FA72B9CC1B7CC0139715309B086C960E18FD969774EB8",
+         "5831AAEED7B44BB74E5EAB94BA9D4294C49BCF2A60728D8B4C200F50DD313C1B"
+         "AB745879A5AD954A72C45A91C3A51D3C7ADEA98D82F8481E0E1E03674A6F3FB7"},
+        {"0B432B2677937381AEF05BB02A66ECD012773062CF3FA2549E44F58ED2401710",
+         "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+         "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+         "25D1DFF95105F5253C4022F628A996AD3A0D95FBF21D468A1B33F8C160D8F517",
+         "7EB0509757E246F19449885651611CB965ECC1A187DD51B64FDA1EDC9637D5EC"
+         "97582B9CB13DB3933705B32BA982AF5AF25FD78881EBB32771FC5922EFC66EA3"},
+    };
+    bool passed = true;
+    for (size_t index = 0; index < sizeof(kVector) / sizeof(kVector[0]); ++index)
+    {
+      const Vector &vector = kVector[index];
+      uint8_t secret[kPrivateKeySize];
+      uint8_t aux[kPrivateKeySize];
+      uint8_t message[kPrivateKeySize];
+      uint8_t public_key[kPrivateKeySize];
+      uint8_t expected[64];
+      uint8_t signature[64];
+      uint8_t xonly[kPrivateKeySize];
+      uint8_t parity = 0;
+      bool ok = parse_hex_fixed(vector.secret, secret, sizeof(secret)) &&
+                parse_hex_fixed(vector.aux, aux, sizeof(aux)) &&
+                parse_hex_fixed(vector.message, message, sizeof(message)) &&
+                parse_hex_fixed(vector.public_key, public_key, sizeof(public_key)) &&
+                parse_hex_fixed(vector.signature, expected, sizeof(expected));
+      ok = ok && secp256k1_xonly_public_key(secret, xonly, &parity) == WalletError::Ok &&
+           crypto_constant_time_equal(xonly, public_key, sizeof(xonly));
+      ok = ok && secp256k1_schnorr_sign(secret, message, aux, signature) == WalletError::Ok &&
+           crypto_constant_time_equal(signature, expected, sizeof(signature));
+      ok = ok && secp256k1_schnorr_verify(public_key, message, expected);
+      if (ok)
+      {
+        uint8_t tampered[64];
+        memcpy(tampered, expected, sizeof(tampered));
+        tampered[0] ^= 0x01;
+        ok = !secp256k1_schnorr_verify(public_key, message, tampered);
+        secure_zero(tampered, sizeof(tampered));
+      }
+      if (ok)
+      {
+        uint8_t changed_message[kPrivateKeySize];
+        memcpy(changed_message, message, sizeof(changed_message));
+        changed_message[0] ^= 0x01;
+        ok = !secp256k1_schnorr_verify(public_key, changed_message, expected);
+        secure_zero(changed_message, sizeof(changed_message));
+      }
+      passed = passed && ok;
+      secure_zero(secret, sizeof(secret));
+      secure_zero(aux, sizeof(aux));
+      secure_zero(message, sizeof(message));
+      secure_zero(public_key, sizeof(public_key));
+      secure_zero(expected, sizeof(expected));
+      secure_zero(signature, sizeof(signature));
+      secure_zero(xonly, sizeof(xonly));
+      (void)parity;
+    }
+    return passed;
+  }
 
-}  // namespace hexwallet
+  bool run_secp256k1_self_test()
+  {
+    static const uint8_t kPrivateKey[kPrivateKeySize] = {
+        0x61,
+        0x9c,
+        0x33,
+        0x50,
+        0x25,
+        0xc7,
+        0xf4,
+        0x01,
+        0x2e,
+        0x55,
+        0x6c,
+        0x2a,
+        0x58,
+        0xb2,
+        0x50,
+        0x6e,
+        0x30,
+        0xb8,
+        0x51,
+        0x1b,
+        0x53,
+        0xad,
+        0xe9,
+        0x5e,
+        0xa3,
+        0x16,
+        0xfd,
+        0x8c,
+        0x32,
+        0x86,
+        0xfe,
+        0xb9,
+    };
+    static const uint8_t kDigest[kSha256Size] = {
+        0xc3,
+        0x7a,
+        0xf3,
+        0x11,
+        0x16,
+        0xd1,
+        0xb2,
+        0x7c,
+        0xaf,
+        0x68,
+        0xaa,
+        0xe9,
+        0xe3,
+        0xac,
+        0x82,
+        0xf1,
+        0x47,
+        0x79,
+        0x29,
+        0x01,
+        0x4d,
+        0x5b,
+        0x91,
+        0x76,
+        0x57,
+        0xd0,
+        0xeb,
+        0x49,
+        0x47,
+        0x8c,
+        0xb6,
+        0x70,
+    };
+    static const uint8_t kExpectedR[kPrivateKeySize] = {
+        0x36,
+        0x09,
+        0xe1,
+        0x7b,
+        0x84,
+        0xf6,
+        0xa7,
+        0xd3,
+        0x0c,
+        0x80,
+        0xbf,
+        0xa6,
+        0x10,
+        0xb5,
+        0xb4,
+        0x54,
+        0x2f,
+        0x32,
+        0xa8,
+        0xa0,
+        0xd5,
+        0x44,
+        0x7a,
+        0x12,
+        0xfb,
+        0x13,
+        0x66,
+        0xd7,
+        0xf0,
+        0x1c,
+        0xc4,
+        0x4a,
+    };
+    static const uint8_t kExpectedS[kPrivateKeySize] = {
+        0x57,
+        0x3a,
+        0x95,
+        0x4c,
+        0x45,
+        0x18,
+        0x33,
+        0x15,
+        0x61,
+        0x40,
+        0x6f,
+        0x90,
+        0x30,
+        0x0e,
+        0x8f,
+        0x33,
+        0x58,
+        0xf5,
+        0x19,
+        0x28,
+        0xd4,
+        0x3c,
+        0x21,
+        0x2a,
+        0x8c,
+        0xae,
+        0xd0,
+        0x2d,
+        0xe6,
+        0x7e,
+        0xeb,
+        0xee,
+    };
+    RecoverableSignature signature;
+    const bool passed = secp256k1_sign_digest_recoverable(kPrivateKey, kDigest, &signature) == WalletError::Ok && crypto_constant_time_equal(signature.r, kExpectedR, sizeof(signature.r)) && crypto_constant_time_equal(signature.s, kExpectedS, sizeof(signature.s)) && signature.y_parity <= 1;
+    secure_zero(&signature, sizeof(signature));
+    return passed;
+  }
+
+}

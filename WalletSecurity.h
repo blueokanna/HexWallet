@@ -111,6 +111,9 @@ bool run_bip84_self_test();
 bool run_evm_derivation_self_test();
 bool run_secp256k1_self_test();
 bool run_bip340_self_test();
+// BIP86: TapTweak commits to the internal x-only key, without a script tree.
+WalletError taproot_bip86_output_key(const uint8_t internal_key[32], uint8_t output_key[32]);
+WalletError taproot_bip86_private_key(const uint8_t private_key[32], uint8_t tweaked_key[32]);
 
 }  // namespace hexwallet
 

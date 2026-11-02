@@ -80,13 +80,18 @@ drift is only reported, because issuers rename contracts in place - Arbitrum's U
 contract now reports `USD-T0` at the same address with the same 6 decimals. An
 unregistered contract is still rejected.
 
-User-declared tokens live in `WalletCustomTokens`: at most eight records, each
+User-declared tokens live in `WalletCustomTokens`: at most 64 records, each
 bound to one network and one chain-native identifier - a 20-byte EVM contract, a
 21-byte TRON account, a 32-byte SPL mint, a Stellar issuer plus asset code, or a
 32-byte Starknet contract address. The width follows the network, so a caller
 cannot file an Ethereum-shaped key under a Starknet token. The table is one
 digest-checked blob; a torn or edited blob is rejected whole instead of being
 half-applied, and v1 (EVM-only) blobs are upgraded on load.
+
+Custom ERC-721/1155 collections use `token custom-add-nft <network>
+<contract-hex> <erc721|erc1155> <symbol> <name>`. Their IDs and quantities are
+reviewed as integers; collection labels remain unverified. See the
+[PSBT/NFT validation record](docs/psbt-nft-validation-2026-11-02.md) for limits.
 
 A record is a label, never an authorization. The amount that gets signed is
 always the base-unit integer the chain carries; the device only rescales it for
@@ -136,7 +141,7 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `WalletCatalog` | Strict user-facing wallet catalog |
 | `WalletMiningCatalog` | MiningPoolStats coverage restricted to fully supported wallets |
 | `WalletCli` | Authenticated serial CLI and approval flow |
-| `WalletLink` | Phone link: pairing, Ed25519 handshake, session, replay protection |
+| `WalletLink` | Phone link: pairing, X25519 ephemeral key agreement over Ed25519 identities, session, replay protection |
 | `WalletLinkCrypto` | HKDF-SHA256, ChaCha20, encrypt-then-MAC for the link |
 | `WalletNfcApdu` | ISO 7816-4 APDU application that carries link frames |
 | `WalletNfcPort` | PN7161 NCI port (card emulation), pin-gated |
@@ -162,13 +167,13 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `CryptoNoteSigning` | Host payload parse → review → per-input CLSAG → serialized transaction; session state and zeroization |
 | `CryptoNoteMasari` | Legacy regression source; MSR is not exposed as a wallet |
 | `MoneroTxVectorsTest.inc` | Real mainnet RCT type-6 transactions pinned for parse/rewrite/balance regression |
-| `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 and LayerZero ABI decoding; ERC-20 needs registered decimals, unique NFT selectors may be reviewed unregistered |
+| `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 and LayerZero ABI decoding; ERC-20 needs registered decimals, ERC-721/1155 collections require registration, including user-declared custom records |
 | `WalletTokens` | Registered EVM token metadata |
 | `WalletCustomTokens` | User-declared tokens for EVM, TRON, Solana, Stellar and Starknet: one digest-checked blob, per-network key widths |
 | `MlDsa87` | FIPS 204 ML-DSA-87 keygen/sign/verify, used by QRL v2 |
 | `P256Sign` | NIST P-256 ECDSA with RFC 6979 nonces, low-S and strict DER; the ES256 primitive a CTAP2 authenticator needs |
 | `src/EcdsaCurve.h` | One ECDSA engine for both 256-bit curves the wallet signs on — secp256k1 (`a = 0`) and secp256r1 (`a = -3`) — with RFC 6979, low-S, strict DER and a verifier. Runs on the host, so a produced signature can be checked without mbedtls; the Montgomery factors are derived from the modulus instead of being transcribed |
-| `src/Secp256k1Sign.h` | secp256k1 ECDSA sign/verify through mbedtls, with RFC 6979 determinism, low-S and a self-check on the curve |
+| `src/Secp256k1Sign.h` | secp256k1 ECDSA sign/verify as a thin adapter over `src/EcdsaCurve.h`: RFC 6979 determinism, low-S normalisation, strict DER, and no mbedtls EC in the signing path |
 | `Ed25519` / X25519 | RFC 8032 Ed25519 (sign, verify, Edwards point/scalar arithmetic) plus RFC 7748 X25519, the iterated test, and the birational map from an Ed25519 identity to its Curve25519 public key |
 | `Se051Apdu` | SE05x/SE051 applet command encoding: CLA/INS/P1/P2/TLV tables transcribed from NXP plug-and-trust, `CreateECCurve`/`SetECCurveParam`/`ReadECCurveList`, ECDSA/EdDSA signing, ECDH, the one-shot HMAC the in-card BIP32 design needs, and session commands |
 | `QrlV2Transaction` | QRL v2 dynamic-fee envelope, keccak-256 digest, ML-DSA-87 signature |
@@ -283,7 +288,9 @@ Sending is initiated by the phone. The wallet only reviews, authorizes and signs
 - Send: `BEGIN_SIGN` → the device parses and validates the request (input ownership, change derivation, fee caps, token whitelist, CryptoNote ring/key-image/commitment binding) → the trusted display shows recipient/amount/fee with `APPROVE` / `REJECT` → after the physical press the phone calls `RESULT` and receives the signed transaction bytes.
 - Request payloads are capped at 16 KiB so a CryptoNote transaction fits; the CryptoNote layout is documented in [phone-link-protocol.md](docs/phone-link-protocol.md#7-cryptonotexmr--msr).
 - Pairing: the first connection shows a six-digit code plus the phone fingerprint on the device; the phone key is then pinned and any other phone is refused.
-- Link protection: Ed25519-signed handshake plus ephemeral ECDH (HKDF-SHA256 session keys), ChaCha20 + HMAC-SHA256 per frame with a strictly increasing sequence number. Forged, replayed, reordered or tampered frames fail and destroy the session.
+- Link protection: the handshake is Ed25519-signed (identity keys) with an **X25519** ephemeral exchange, then HKDF-SHA256 session keys and ChaCha20 + HMAC-SHA256 per frame with a strictly increasing sequence number. Forged, replayed, reordered or tampered frames fail and destroy the session.
+
+  Protocol version is **2**. Version 1 used Ed25519-group ECDH for the ephemeral exchange; the ephemeral public keys on the wire are now Curve25519 u-coordinates, so a v1 peer and a v2 device would derive different shared secrets from the same transcript. The version byte is the only thing that stops that, which is why it was bumped rather than left alone.
 - USB data is **off by default**: long-press the BOOT/user button for three seconds to open a bounded window; another long press, the timeout, or a lock closes it and discards buffered input.
 - NFC uses a PN7161 (NCI 2.0) ISO-DEP card-emulation port. Pins must come from the schematic (`HEXWALLET_NFC_PN7161` + `HEXWALLET_NFC_PIN_*`); without them `link status` reports `nfc=not-configured` and the firmware does not guess pins. The driver has not yet been validated on hardware.
 - Boards without a display never review a transaction over the link (`unsupported`); there is no fallback to host-only confirmation.

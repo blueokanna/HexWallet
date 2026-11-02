@@ -1,6 +1,5 @@
 #include "AirgapFrame.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "CryptoPrimitives.h"
@@ -898,15 +897,6 @@ bool run_airgap_self_tests() {
              passed;
     size_t ignored = 0;
     if (passed) g_airgap_stage = 15;
-    {
-      const AirgapResult probe = airgap_sender_render(
-          &sender, sender.params.frames, frames[0], sizeof(frames[0]), &ignored);
-      char line[64];
-      const int n = snprintf(line, sizeof(line), "airgap-probe rc=%d frames=%u\n",
-                             static_cast<int>(probe),
-                             static_cast<unsigned>(sender.params.frames));
-      if (n > 0) fwrite(line, 1, static_cast<size_t>(n), stderr);
-    }
     passed = airgap_sender_render(&sender, sender.params.frames, frames[0],
                                   sizeof(frames[0]), &ignored) ==
                  AirgapResult::IndexOutOfRange &&

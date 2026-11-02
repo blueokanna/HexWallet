@@ -26,6 +26,65 @@ namespace hexwallet
     constexpr size_t kMaxLegacyScriptSigSize = 1 + kBitcoinMaxDerSignatureSize + 1 + 1 + kCompressedPublicKeySize;
     constexpr uint8_t kPsbtMagic[] = {'p', 's', 'b', 't', 0xff};
 
+    // PSBT v2 key types. BIP370 keeps PSBT_GLOBAL_VERSION (0xfb) at 2 and moves
+    // the transaction itself into the maps; there is no version 1 on the wire,
+    // which is why this reader accepts exactly v0 and v2.
+    constexpr uint8_t kPsbtGlobalUnsignedTx = 0x00;
+    constexpr uint8_t kPsbtGlobalXpub = 0x01;
+    constexpr uint8_t kPsbtGlobalTxVersion = 0x02;
+    constexpr uint8_t kPsbtGlobalFallbackLocktime = 0x03;
+    constexpr uint8_t kPsbtGlobalInputCount = 0x04;
+    constexpr uint8_t kPsbtGlobalOutputCount = 0x05;
+    constexpr uint8_t kPsbtGlobalTxModifiable = 0x06;
+    constexpr uint8_t kPsbtGlobalVersion = 0xfb;
+    constexpr uint8_t kPsbtInNonWitnessUtxo = 0x00;
+    constexpr uint8_t kPsbtInWitnessUtxo = 0x01;
+    constexpr uint8_t kPsbtInSighashType = 0x03;
+    constexpr uint8_t kPsbtInRedeemScript = 0x04;
+    constexpr uint8_t kPsbtInBip32Derivation = 0x06;
+    constexpr uint8_t kPsbtInPreviousTxid = 0x0e;
+    constexpr uint8_t kPsbtInOutputIndex = 0x0f;
+    constexpr uint8_t kPsbtInSequence = 0x10;
+    constexpr uint8_t kPsbtInRequiredTimeLocktime = 0x11;
+    constexpr uint8_t kPsbtInRequiredHeightLocktime = 0x12;
+    constexpr uint8_t kPsbtOutBip32Derivation = 0x02;
+    constexpr uint8_t kPsbtOutAmount = 0x03;
+    constexpr uint8_t kPsbtOutScript = 0x04;
+    // nLockTime values below this are block heights, at or above it they are
+    // Unix timestamps (Bitcoin Core's LOCKTIME_THRESHOLD).
+    constexpr uint32_t kLocktimeThreshold = 500000000U;
+
+    // Checkpoint index for run_bitcoin_transaction_self_test(), reported through
+    // bitcoin_self_test_stage() so a device failure names the step it reached.
+    int g_bitcoin_stage = 0;
+
+    struct PsbtGlobalFields
+    {
+      bool has_unsigned_tx;
+      const uint8_t *unsigned_tx;
+      size_t unsigned_tx_size;
+      bool has_psbt_version;
+      uint32_t psbt_version;
+      bool has_tx_version;
+      uint32_t tx_version;
+      bool has_fallback_locktime;
+      uint32_t fallback_locktime;
+      bool has_input_count;
+      uint64_t input_count;
+      bool has_output_count;
+      uint64_t output_count;
+      bool has_tx_modifiable;
+      uint32_t tx_modifiable;
+    };
+
+    struct PsbtInputLocktime
+    {
+      bool has_time;
+      bool has_height;
+      uint32_t time;
+      uint32_t height;
+    };
+
     struct Cursor
     {
       const uint8_t *data;
@@ -317,7 +376,7 @@ namespace hexwallet
 
     bool valid_bitcoin_single_sig_path(const uint32_t *path, size_t depth)
     {
-      return depth == 5 && (path[0] == (44U | kHardenedOffset) || path[0] == (49U | kHardenedOffset) || path[0] == (84U | kHardenedOffset)) && path[1] == kHardenedOffset && path[2] >= kHardenedOffset && path[3] <= 1 && path[4] < kHardenedOffset;
+      return depth == 5 && (path[0] == (44U | kHardenedOffset) || path[0] == (49U | kHardenedOffset) || path[0] == (84U | kHardenedOffset) || path[0] == (86U | kHardenedOffset)) && path[1] == kHardenedOffset && path[2] >= kHardenedOffset && path[3] <= 1 && path[4] < kHardenedOffset;
     }
 
     bool path_matches_spend_type(const BitcoinInput &input)
@@ -326,6 +385,8 @@ namespace hexwallet
         return false;
       switch (input.spend_type)
       {
+      case BitcoinSpendType::TaprootBip86:
+        return input.path[0] == (86U | kHardenedOffset);
       case BitcoinSpendType::NativeP2wpkh:
         return input.path[0] == (84U | kHardenedOffset);
       case BitcoinSpendType::NestedP2shP2wpkh:
@@ -339,9 +400,17 @@ namespace hexwallet
     TransactionError parse_derivation(const uint8_t *key, size_t key_size,
                                       const uint8_t *value, size_t value_size,
                                       const HdPrivateNode &master, BitcoinInput *input,
-                                      BitcoinOutput *output)
+                                      BitcoinOutput *output, bool taproot = false)
     {
-      if (key_size != 34 || value_size < 8 || (value_size - 4) % 4 != 0)
+      if (taproot)
+      {
+        // BIP86 internal keys have no leaf hashes. Reject script-path metadata.
+        if (value_size == 0 || value[0] != 0)
+          return TransactionError::Unsupported;
+        ++value;
+        --value_size;
+      }
+      if (key_size != (taproot ? 33U : 34U) || value_size < 8 || (value_size - 4) % 4 != 0)
         return TransactionError::NonCanonical;
       const size_t depth = (value_size - 4) / 4;
       if (depth > kBitcoinMaxPathDepth)
@@ -361,6 +430,8 @@ namespace hexwallet
       }
       if (!valid_bitcoin_single_sig_path(path, depth))
         return TransactionError::Unsupported;
+      if (taproot != (path[0] == (86U | kHardenedOffset)))
+        return TransactionError::Unsupported;
       HdPrivateNode derived;
       uint8_t public_key[kCompressedPublicKeySize];
       const WalletError derive_result = derive_array_path(master, path, depth, &derived);
@@ -371,7 +442,7 @@ namespace hexwallet
         secure_zero(public_key, sizeof(public_key));
         return TransactionError::CryptoFailure;
       }
-      const bool key_ok = crypto_constant_time_equal(key + 1, public_key, sizeof(public_key));
+      const bool key_ok = crypto_constant_time_equal(key + 1, public_key + (taproot ? 1 : 0), taproot ? 32 : sizeof(public_key));
       if (input != nullptr)
       {
         memcpy(input->path, path, depth * sizeof(uint32_t));
@@ -388,7 +459,11 @@ namespace hexwallet
         const bool native = hashed && path[0] == (84U | kHardenedOffset) && output->script_size == 22 && output->script[0] == 0 && output->script[1] == 20 && crypto_constant_time_equal(output->script + 2, hash, sizeof(hash));
         const bool nested = hashed && path[0] == (49U | kHardenedOffset) && output->script_size == 23 && output->script[0] == 0xa9 && output->script[1] == 0x14 && output->script[22] == 0x87 && crypto_hash160(redeem_script, sizeof(redeem_script), redeem_hash) && crypto_constant_time_equal(output->script + 2, redeem_hash, sizeof(redeem_hash));
         const bool legacy = hashed && path[0] == (44U | kHardenedOffset) && output->script_size == kLegacyP2pkhScriptSize && output->script[0] == 0x76 && output->script[1] == 0xa9 && output->script[2] == 0x14 && output->script[23] == 0x88 && output->script[24] == 0xac && crypto_constant_time_equal(output->script + 3, hash, sizeof(hash));
-        const bool script_ok = native || nested || legacy;
+        uint8_t output_key[32];
+        const bool tap = taproot && output->script_size == 34 && output->script[0] == 0x51 && output->script[1] == 32 &&
+                         taproot_bip86_output_key(public_key + 1, output_key) == WalletError::Ok &&
+                         crypto_constant_time_equal(output_key, output->script + 2, 32);
+        const bool script_ok = native || nested || legacy || tap;
         secure_zero(hash, sizeof(hash));
         secure_zero(redeem_script, sizeof(redeem_script));
         secure_zero(redeem_hash, sizeof(redeem_hash));
@@ -542,6 +617,14 @@ namespace hexwallet
                                           uint8_t script_size, bool has_redeem_script,
                                           const uint8_t *redeem_script)
     {
+      if (script_size == 34 && script[0] == 0x51 && script[1] == 32)
+      {
+        if (has_redeem_script)
+          return TransactionError::Unsupported;
+        input->spend_type = BitcoinSpendType::TaprootBip86;
+        memcpy(input->taproot_output_key, script + 2, 32);
+        return TransactionError::Ok;
+      }
       if (script_size == 22 && script[0] == 0 && script[1] == 20)
       {
         if (has_redeem_script)
@@ -700,6 +783,15 @@ namespace hexwallet
 
     TransactionError verify_input_script(BitcoinInput *input)
     {
+      if (input->spend_type == BitcoinSpendType::TaprootBip86)
+      {
+        uint8_t output_key[32];
+        return path_matches_spend_type(*input) && input->taproot_sighash <= 1 &&
+                       taproot_bip86_output_key(input->public_key + 1, output_key) == WalletError::Ok &&
+                       crypto_constant_time_equal(output_key, input->taproot_output_key, 32)
+                   ? TransactionError::Ok
+                   : TransactionError::WrongWallet;
+      }
       uint8_t hash[kRipemd160Size] = {};
       const bool hashed = crypto_hash160(input->public_key, sizeof(input->public_key), hash);
       const bool matches = hashed &&
@@ -736,6 +828,466 @@ namespace hexwallet
           return TransactionError::Unsupported;
         }
       }
+    }
+
+    // -------------------------------------------------------------------------
+    // PSBT v2 (BIP370)
+    // -------------------------------------------------------------------------
+    //
+    // The global map carries what the unsigned transaction used to: the
+    // transaction version, a fallback lock time and the input/output counts.
+    // Each input map then carries its own outpoint and sequence, each output map
+    // its own amount and script. Everything the signer must not be able to
+    // reinterpret stays where it was: the UTXO, the BIP32 derivation and the
+    // redeem script are still cross-checked against the firmware's own keys.
+
+    // Reads one unsigned 32-bit little-endian value that must occupy its value
+    // field exactly.
+    bool psbt_read_u32_value(const uint8_t *value, size_t value_size, uint32_t *out)
+    {
+      if (value == nullptr || out == nullptr || value_size != 4)
+        return false;
+      *out = static_cast<uint32_t>(value[0]) |
+             (static_cast<uint32_t>(value[1]) << 8) |
+             (static_cast<uint32_t>(value[2]) << 16) |
+             (static_cast<uint32_t>(value[3]) << 24);
+      return true;
+    }
+
+    TransactionError read_psbt_global(Cursor *cursor, PsbtGlobalFields *fields)
+    {
+      if (cursor == nullptr || fields == nullptr)
+        return TransactionError::InvalidArgument;
+      while (true)
+      {
+        const uint8_t *key;
+        const uint8_t *value;
+        size_t key_size;
+        size_t value_size;
+        bool end;
+        const TransactionError result =
+            read_map_item(cursor, &key, &key_size, &value, &value_size, &end);
+        if (result != TransactionError::Ok || end)
+          return result;
+        switch (key[0])
+        {
+        case kPsbtGlobalUnsignedTx:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (fields->has_unsigned_tx)
+            return TransactionError::DuplicateField;
+          fields->has_unsigned_tx = true;
+          fields->unsigned_tx = value;
+          fields->unsigned_tx_size = value_size;
+          break;
+        case kPsbtGlobalXpub:
+          // A host-supplied account xpub is never trusted: every key this
+          // firmware signs with is derived from the device seed. Accepting the
+          // field keeps ordinary PSBTv2 constructors usable without letting it
+          // influence a signature.
+          break;
+        case kPsbtGlobalTxVersion:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (fields->has_tx_version)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &fields->tx_version))
+            return TransactionError::NonCanonical;
+          fields->has_tx_version = true;
+          break;
+        case kPsbtGlobalFallbackLocktime:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (fields->has_fallback_locktime)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &fields->fallback_locktime))
+            return TransactionError::NonCanonical;
+          fields->has_fallback_locktime = true;
+          break;
+        case kPsbtGlobalInputCount:
+        case kPsbtGlobalOutputCount:
+        {
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          bool &seen = key[0] == kPsbtGlobalInputCount ? fields->has_input_count
+                                                       : fields->has_output_count;
+          uint64_t &count = key[0] == kPsbtGlobalInputCount ? fields->input_count
+                                                            : fields->output_count;
+          if (seen)
+            return TransactionError::DuplicateField;
+          // Encoded as a compact size integer, so a non-minimal encoding is a
+          // canonicality error rather than a different count.
+          Cursor counter = {value, value_size, 0};
+          uint64_t parsed = 0;
+          const TransactionError count_result = read_compact_size(&counter, &parsed);
+          if (count_result != TransactionError::Ok)
+            return count_result;
+          if (counter.position != counter.size)
+            return TransactionError::NonCanonical;
+          seen = true;
+          count = parsed;
+          break;
+        }
+        case kPsbtGlobalTxModifiable:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (fields->has_tx_modifiable)
+            return TransactionError::DuplicateField;
+          if (value_size != 1)
+            return TransactionError::NonCanonical;
+          fields->tx_modifiable = value[0];
+          fields->has_tx_modifiable = true;
+          break;
+        case kPsbtGlobalVersion:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (fields->has_psbt_version)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &fields->psbt_version))
+            return TransactionError::NonCanonical;
+          fields->has_psbt_version = true;
+          break;
+        default:
+          // Proprietary and future global types are refused, not skipped: a
+          // field this signer cannot interpret has no business in a spend it is
+          // about to authorize.
+          return TransactionError::Unsupported;
+        }
+      }
+    }
+
+    // v2 input map. The v0 map reader already holds the UTXO cross-checks; this
+    // one adds the outpoint, sequence and required-locktime fields and applies
+    // the same UTXO rules, so a v2 input cannot reach a signature through a
+    // weaker path than a v0 one.
+    TransactionError parse_input_map_v2(Cursor *cursor, const HdPrivateNode &master,
+                                        const BitcoinChainParams &chain,
+                                        BitcoinInput *input, PsbtInputLocktime *locktime)
+    {
+      bool has_previous_txid = false;
+      bool has_previous_index = false;
+      bool has_sequence = false;
+      bool has_witness_utxo = false;
+      bool has_non_witness_utxo = false;
+      bool has_derivation = false;
+      bool has_sighash = false;
+      bool has_redeem_script = false;
+      uint8_t redeem_script[22] = {};
+      uint64_t utxo_value = 0;
+      uint8_t utxo_script[kBitcoinMaxScriptSize + 1] = {};
+      uint8_t utxo_script_size = 0;
+      const uint8_t *non_witness_utxo = nullptr;
+      size_t non_witness_utxo_size = 0;
+      const uint32_t expected_sighash = chain.sighash == SighashFamily::ForkId
+                                            ? (chain.fork_id << 8) | kSighashForkIdAll
+                                            : kSighashAll;
+      while (true)
+      {
+        const uint8_t *key;
+        const uint8_t *value;
+        size_t key_size;
+        size_t value_size;
+        bool end;
+        TransactionError result = read_map_item(cursor, &key, &key_size, &value, &value_size, &end);
+        if (result != TransactionError::Ok)
+          return result;
+        if (end)
+          break;
+        switch (key[0])
+        {
+        case kPsbtInPreviousTxid:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_previous_txid)
+            return TransactionError::DuplicateField;
+          if (value_size != 32)
+            return TransactionError::NonCanonical;
+          // BIP370 states this is the txid in standard (internal) byte order,
+          // the same order v0 reads out of the unsigned transaction.
+          memcpy(input->previous_txid, value, 32);
+          has_previous_txid = true;
+          break;
+        case kPsbtInOutputIndex:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_previous_index)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &input->previous_index))
+            return TransactionError::NonCanonical;
+          has_previous_index = true;
+          break;
+        case kPsbtInSequence:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_sequence)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &input->sequence))
+            return TransactionError::NonCanonical;
+          has_sequence = true;
+          break;
+        case kPsbtInRequiredTimeLocktime:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (locktime->has_time)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &locktime->time))
+            return TransactionError::NonCanonical;
+          // A value below the threshold is a block height wearing a timestamp
+          // label; taking it as one would silently change the transaction.
+          if (locktime->time < kLocktimeThreshold)
+            return TransactionError::NonCanonical;
+          locktime->has_time = true;
+          break;
+        case kPsbtInRequiredHeightLocktime:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (locktime->has_height)
+            return TransactionError::DuplicateField;
+          if (!psbt_read_u32_value(value, value_size, &locktime->height))
+            return TransactionError::NonCanonical;
+          if (locktime->height == 0 || locktime->height >= kLocktimeThreshold)
+            return TransactionError::NonCanonical;
+          locktime->has_height = true;
+          break;
+        case kPsbtInNonWitnessUtxo:
+        {
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_non_witness_utxo)
+            return TransactionError::DuplicateField;
+          // Cannot be cross-checked yet: BIP370 lets the outpoint appear after
+          // this field, so the previous transaction is verified once the whole
+          // map is known.
+          non_witness_utxo = value;
+          non_witness_utxo_size = value_size;
+          has_non_witness_utxo = true;
+          break;
+        }
+        case kPsbtInWitnessUtxo:
+        {
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_witness_utxo)
+            return TransactionError::DuplicateField;
+          Cursor utxo = {value, value_size, 0};
+          uint64_t script_size;
+          if (!read_u64(&utxo, &utxo_value) || utxo_value > kMaximumBitcoinSupply)
+            return TransactionError::InvalidAmount;
+          result = read_compact_size(&utxo, &script_size);
+          if (result != TransactionError::Ok)
+            return result;
+          const uint8_t *script;
+          if (script_size > kBitcoinMaxScriptSize ||
+              !read_bytes(&utxo, static_cast<size_t>(script_size), &script) ||
+              utxo.position != utxo.size)
+            return TransactionError::Unsupported;
+          if (sighash_family_is_legacy(chain.sighash) && script_size == 25 &&
+              script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
+              script[23] == 0x88 && script[24] == 0xac)
+            return TransactionError::MissingField;
+          memcpy(utxo_script, script, static_cast<size_t>(script_size));
+          utxo_script_size = static_cast<uint8_t>(script_size);
+          has_witness_utxo = true;
+          break;
+        }
+        case kPsbtInBip32Derivation:
+          if (has_derivation)
+            return TransactionError::DuplicateField;
+          if (key_size != 34)
+            return TransactionError::NonCanonical;
+          result = parse_derivation(key, key_size, value, value_size, master, input, nullptr);
+          if (result != TransactionError::Ok)
+            return result;
+          has_derivation = true;
+          break;
+        case kPsbtInSighashType:
+        {
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_sighash)
+            return TransactionError::DuplicateField;
+          uint32_t requested = 0;
+          if (!psbt_read_u32_value(value, value_size, &requested))
+            return TransactionError::NonCanonical;
+          if (requested != expected_sighash)
+            return TransactionError::Unsupported;
+          has_sighash = true;
+          break;
+        }
+        case kPsbtInRedeemScript:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_redeem_script)
+            return TransactionError::DuplicateField;
+          if (value_size != sizeof(redeem_script) || value[0] != 0 || value[1] != 20)
+            return TransactionError::Unsupported;
+          memcpy(redeem_script, value, sizeof(redeem_script));
+          has_redeem_script = true;
+          break;
+        default:
+          return TransactionError::Unsupported;
+        }
+      }
+      if (!has_previous_txid || !has_previous_index)
+        return TransactionError::MissingField;
+      if (!has_derivation)
+        return TransactionError::MissingField;
+      if (has_witness_utxo == has_non_witness_utxo)
+        return TransactionError::MissingField;
+      if (has_non_witness_utxo)
+      {
+        // Now that the outpoint is known, the previous transaction must hash to
+        // it and contain the claimed output; otherwise the review would show a
+        // value the chain never had.
+        const TransactionError previous =
+            parse_previous_transaction(non_witness_utxo, non_witness_utxo_size,
+                                       input->previous_txid, input->previous_index,
+                                       &utxo_value, utxo_script, &utxo_script_size);
+        if (previous != TransactionError::Ok)
+          return previous;
+      }
+      // BIP370: an absent PSBT_IN_SEQUENCE means the final sequence number.
+      if (!has_sequence)
+        input->sequence = 0xffffffffU;
+      input->value = utxo_value;
+      TransactionError result = classify_utxo_script(input, utxo_script, utxo_script_size,
+                                                     has_redeem_script, redeem_script);
+      secure_zero(redeem_script, sizeof(redeem_script));
+      if (result != TransactionError::Ok)
+        return result;
+      const bool family_ok =
+          sighash_family_is_legacy(chain.sighash) ||
+          (chain.sighash == SighashFamily::ForkId && input->spend_type == BitcoinSpendType::LegacyP2pkh);
+      if (!family_ok)
+        return TransactionError::Unsupported;
+      return path_matches_spend_type(*input) ? TransactionError::Ok : TransactionError::WrongWallet;
+    }
+
+    TransactionError parse_output_map_v2(Cursor *cursor, const HdPrivateNode &master,
+                                         const BitcoinChainParams &chain, BitcoinOutput *output)
+    {
+      bool has_amount = false;
+      bool has_script = false;
+      bool has_derivation = false;
+      const uint8_t *derivation_key = nullptr;
+      const uint8_t *derivation_value = nullptr;
+      size_t derivation_key_size = 0;
+      size_t derivation_value_size = 0;
+      while (true)
+      {
+        const uint8_t *key;
+        const uint8_t *value;
+        size_t key_size;
+        size_t value_size;
+        bool end;
+        const TransactionError result = read_map_item(cursor, &key, &key_size, &value, &value_size, &end);
+        if (result != TransactionError::Ok)
+          return result;
+        if (end)
+          break;
+        switch (key[0])
+        {
+        case kPsbtOutAmount:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_amount)
+            return TransactionError::DuplicateField;
+          if (value_size != 8)
+            return TransactionError::NonCanonical;
+          {
+            uint64_t amount = 0;
+            for (size_t index = 0; index < 8; ++index)
+              amount |= static_cast<uint64_t>(value[index]) << (index * 8);
+            if (amount > kMaximumBitcoinSupply)
+              return TransactionError::InvalidAmount;
+            output->value = amount;
+          }
+          has_amount = true;
+          break;
+        case kPsbtOutScript:
+          if (key_size != 1)
+            return TransactionError::NonCanonical;
+          if (has_script)
+            return TransactionError::DuplicateField;
+          if (value_size > kBitcoinMaxScriptSize)
+            return TransactionError::Unsupported;
+          output->script_size = static_cast<uint8_t>(value_size);
+          memcpy(output->script, value, value_size);
+          if (chain_address_from_script(chain, output->script, output->script_size,
+                                        output->address, sizeof(output->address)) != WalletError::Ok)
+            return TransactionError::Unsupported;
+          has_script = true;
+          break;
+        case kPsbtOutBip32Derivation:
+          // The derivation can arrive before the script it describes, so it is
+          // applied once the whole map is known.
+          if (has_derivation || key_size != 34)
+            return has_derivation ? TransactionError::DuplicateField
+                                  : TransactionError::NonCanonical;
+          derivation_key = key;
+          derivation_key_size = key_size;
+          derivation_value = value;
+          derivation_value_size = value_size;
+          has_derivation = true;
+          break;
+        default:
+          return TransactionError::Unsupported;
+        }
+      }
+      if (!has_amount || !has_script)
+        return TransactionError::MissingField;
+      if (has_derivation)
+      {
+        const TransactionError result =
+            parse_derivation(derivation_key, derivation_key_size, derivation_value,
+                             derivation_value_size, master, nullptr, output);
+        if (result != TransactionError::Ok)
+          return result;
+      }
+      return TransactionError::Ok;
+    }
+
+    // BIP370 lock time selection: the fallback when no input asks for one,
+    // otherwise the type every constrained input supports, choosing height when
+    // both types are possible, and the largest value of that type.
+    TransactionError psbt_resolve_locktime(const PsbtInputLocktime *locks, size_t count,
+                                           uint32_t fallback, uint32_t *out)
+    {
+      if (locks == nullptr || out == nullptr || count == 0)
+        return TransactionError::InvalidArgument;
+      bool any = false;
+      bool time_possible = true;
+      bool height_possible = true;
+      for (size_t index = 0; index < count; ++index)
+      {
+        if (locks[index].has_time || locks[index].has_height)
+          any = true;
+        if (locks[index].has_height && !locks[index].has_time)
+          time_possible = false;
+        if (locks[index].has_time && !locks[index].has_height)
+          height_possible = false;
+      }
+      if (!any)
+      {
+        *out = fallback;
+        return TransactionError::Ok;
+      }
+      bool use_height;
+      if (height_possible)
+        use_height = true;
+      else if (time_possible)
+        use_height = false;
+      else
+        return TransactionError::Unsupported;
+      uint32_t chosen = 0;
+      for (size_t index = 0; index < count; ++index)
+      {
+        const uint32_t value = use_height ? locks[index].height : locks[index].time;
+        if (use_height ? locks[index].has_height : locks[index].has_time)
+          chosen = value > chosen ? value : chosen;
+      }
+      *out = chosen != 0 ? chosen : fallback;
+      return TransactionError::Ok;
     }
 
     bool serialize_outputs(const BitcoinSigningRequest &request, uint8_t *out, size_t out_size, size_t *written)
@@ -963,46 +1515,128 @@ namespace hexwallet
     {
       return TransactionError::NonCanonical;
     }
-    bool has_unsigned_tx = false;
-    while (true)
+    PsbtGlobalFields global = {};
+    TransactionError global_result = read_psbt_global(&cursor, &global);
+    if (global_result != TransactionError::Ok)
+      return global_result;
+
+    // BIP370: v2 is the form that carries PSBT_GLOBAL_VERSION = 2 and must not
+    // carry the unsigned transaction. A PSBT that says version 0 (or omits the
+    // field) is v0 and must carry it. Anything else - including a v0 blob that
+    // mixes in v2-only globals - is refused instead of guessed at.
+    bool version_2 = false;
+    if (global.has_psbt_version)
     {
-      const uint8_t *key;
-      const uint8_t *value;
-      size_t key_size;
-      size_t value_size;
-      bool end;
-      TransactionError result = read_map_item(&cursor, &key, &key_size, &value, &value_size, &end);
-      if (result != TransactionError::Ok)
-        return result;
-      if (end)
-        break;
-      if (key_size != 1 || key[0] != 0x00)
+      if (global.psbt_version == 2)
+      {
+        version_2 = true;
+      }
+      else if (global.psbt_version != 0)
+      {
         return TransactionError::Unsupported;
-      if (has_unsigned_tx)
-        return TransactionError::DuplicateField;
-      result = parse_unsigned_transaction(value, value_size, chain, &parsed);
-      if (result != TransactionError::Ok)
-        return result;
-      has_unsigned_tx = true;
+      }
     }
-    if (!has_unsigned_tx)
+    else if (!global.has_unsigned_tx)
+    {
       return TransactionError::MissingField;
-    for (size_t index = 0; index < parsed.input_count; ++index)
-    {
-      TransactionError result = parse_input_map(&cursor, master, chain, &parsed.inputs[index]);
-      if (result != TransactionError::Ok)
-        return result;
-      result = verify_input_script(&parsed.inputs[index]);
-      if (result != TransactionError::Ok)
-        return result;
-      if (!add_u64(parsed.input_total, parsed.inputs[index].value, &parsed.input_total))
-        return TransactionError::InvalidAmount;
     }
-    for (size_t index = 0; index < parsed.output_count; ++index)
+    if (version_2)
     {
-      const TransactionError result = parse_output_map(&cursor, master, &parsed.outputs[index]);
-      if (result != TransactionError::Ok)
-        return result;
+      if (global.has_unsigned_tx)
+        return TransactionError::NonCanonical;
+    }
+    else
+    {
+      if (!global.has_unsigned_tx)
+        return TransactionError::MissingField;
+      if (global.has_tx_version || global.has_fallback_locktime ||
+          global.has_input_count || global.has_output_count ||
+          global.has_tx_modifiable)
+        return TransactionError::NonCanonical;
+    }
+
+    if (version_2)
+    {
+      if (!global.has_tx_version || !global.has_input_count || !global.has_output_count)
+        return TransactionError::MissingField;
+      if (global.tx_version != 1 && global.tx_version != 2)
+        return TransactionError::Unsupported;
+      // A constructor that keeps the inputs or outputs modifiable has not
+      // finished deciding what the user is about to approve, and this wallet
+      // signs the final transaction rather than a draft of one.
+      if (global.has_tx_modifiable && global.tx_modifiable != 0)
+        return TransactionError::Unsupported;
+      if (global.input_count == 0 || global.input_count > kBitcoinMaxInputs ||
+          global.output_count == 0 || global.output_count > kBitcoinMaxOutputs)
+        return TransactionError::TooLarge;
+      parsed.version = global.tx_version;
+      parsed.input_count = static_cast<uint8_t>(global.input_count);
+      parsed.output_count = static_cast<uint8_t>(global.output_count);
+      PsbtInputLocktime locks[kBitcoinMaxInputs] = {};
+      for (size_t index = 0; index < parsed.input_count; ++index)
+      {
+        TransactionError result =
+            parse_input_map_v2(&cursor, master, chain, &parsed.inputs[index], &locks[index]);
+        if (result != TransactionError::Ok)
+          return result;
+        result = verify_input_script(&parsed.inputs[index]);
+        if (result != TransactionError::Ok)
+          return result;
+        if (!add_u64(parsed.input_total, parsed.inputs[index].value, &parsed.input_total))
+          return TransactionError::InvalidAmount;
+      }
+      if (!distinct_outpoints(parsed))
+        return TransactionError::DuplicateField;
+      const TransactionError locktime_result =
+          psbt_resolve_locktime(locks, parsed.input_count,
+                                global.has_fallback_locktime ? global.fallback_locktime : 0,
+                                &parsed.lock_time);
+      if (locktime_result != TransactionError::Ok)
+        return locktime_result;
+      bool required_locktime = false;
+      bool locktime_enabled = false;
+      for (size_t index = 0; index < parsed.input_count; ++index)
+      {
+        required_locktime |= locks[index].has_height || locks[index].has_time;
+        locktime_enabled |= parsed.inputs[index].sequence != 0xffffffffU;
+      }
+      // Final sequences disable nLockTime in consensus. Never silently change
+      // a supplied sequence to make the requested constraint effective.
+      if (required_locktime && !locktime_enabled)
+        return TransactionError::Unsupported;
+      for (size_t index = 0; index < parsed.output_count; ++index)
+      {
+        BitcoinOutput &output = parsed.outputs[index];
+        const TransactionError result = parse_output_map_v2(&cursor, master, chain, &output);
+        if (result != TransactionError::Ok)
+          return result;
+        if (!add_u64(parsed.output_total, output.value, &parsed.output_total))
+          return TransactionError::InvalidAmount;
+      }
+    }
+    else
+    {
+      global_result = parse_unsigned_transaction(global.unsigned_tx, global.unsigned_tx_size,
+                                                 chain, &parsed);
+      if (global_result != TransactionError::Ok)
+        return global_result;
+      for (size_t index = 0; index < parsed.input_count; ++index)
+      {
+        TransactionError result = parse_input_map(&cursor, master, chain, &parsed.inputs[index]);
+        if (result != TransactionError::Ok)
+          return result;
+        result = verify_input_script(&parsed.inputs[index]);
+        if (result != TransactionError::Ok)
+          return result;
+        if (!add_u64(parsed.input_total, parsed.inputs[index].value, &parsed.input_total))
+          return TransactionError::InvalidAmount;
+      }
+      for (size_t index = 0; index < parsed.output_count; ++index)
+      {
+        const TransactionError result = parse_output_map(&cursor, master, &parsed.outputs[index]);
+        if (result != TransactionError::Ok)
+          return result;
+      }
     }
     if (cursor.position != cursor.size)
       return TransactionError::NonCanonical;
@@ -1309,19 +1943,8 @@ namespace hexwallet
     return ok;
   }
 
-  // Groestlcoin's legacy signature hash. The preimage is Bitcoin's; the digest is
-  // a single SHA-256. Two things make this vector worth pinning:
-  //   * it is a real mainnet spend (block 6324419,
-  //     tx b566ddf7ae1374d13081bc01ddee3d5a1f2390773c6c910b4414063ba95f6c92), so
-  //     the DER signature and compressed public key below come from its scriptSig
-  //     and were never produced by this code;
-  //   * the same request run as SighashFamily::Bitcoin must produce the
-  //     double-SHA256 digest, and that digest must FAIL to verify the same
-  //     signature. That is the exact difference the previous round got wrong.
   bool run_groestlcoin_sighash_self_tests()
   {
-    // Output 0 of the previous transaction: 76a9148f2e... in P2PKH form for
-    // hash160 5a2fb6e385f6d64d2bc050cd77967de9a90f9e4a.
     static const uint8_t kSpentScript[25] = {
         0x76, 0xa9, 0x14, 0x5a, 0x2f, 0xb6, 0xe3, 0x85, 0xf6, 0xd6, 0x4d, 0x2b,
         0xc0, 0x50, 0xcd, 0x77, 0x96, 0x7d, 0xe9, 0xa9, 0x0f, 0x9e, 0x4a, 0x88,
@@ -1615,6 +2238,7 @@ namespace hexwallet
 
   bool run_bitcoin_transaction_self_test()
   {
+    g_bitcoin_stage = 1;
     BitcoinSigningRequest request = {};
     request.version = 1;
     request.lock_time = 0x11;
@@ -1723,7 +2347,276 @@ namespace hexwallet
     BitcoinSigningRequest parsed;
     uint8_t signed_transaction[384];
     size_t signed_size = sizeof(signed_transaction);
-    passed = serialized && bitcoin_parse_psbt(psbt, psbt_writer.position, master, request_chain, &parsed) == TransactionError::Ok && parsed.input_count == 1 && parsed.output_count == 1 && parsed.fee == 10000 && parsed.outputs[0].wallet_owned && parsed.outputs[0].change && bitcoin_sign_request(parsed, master, signed_transaction, &signed_size) == TransactionError::Ok && signed_size > 44 && signed_transaction[4] == 0 && signed_transaction[5] == 1 && signed_transaction[43] == 23 && signed_transaction[44] == 22;
+    bool v0_ok = serialized &&
+                 bitcoin_parse_psbt(psbt, psbt_writer.position, master, request_chain, &parsed) == TransactionError::Ok &&
+                 parsed.input_count == 1 && parsed.output_count == 1 && parsed.fee == 10000 &&
+                 parsed.outputs[0].wallet_owned && parsed.outputs[0].change &&
+                 bitcoin_sign_request(parsed, master, signed_transaction, &signed_size) == TransactionError::Ok &&
+                 signed_size > 44 && signed_transaction[4] == 0 && signed_transaction[5] == 1 &&
+                 signed_transaction[43] == 23 && signed_transaction[44] == 22;
+    const uint32_t v0_vbytes = parsed.estimated_vbytes;
+    if (passed)
+      g_bitcoin_stage = 100;
+    const size_t v0_signed_size = signed_size;
+    clear_bitcoin_request(&parsed);
+    passed = passed && v0_ok;
+
+    // ---------------------------------------------------------------------
+    // The same transaction as PSBT v2 (BIP370). The envelope is different and
+    // every field now lives in a map, so the invariant worth pinning is that
+    // the wallet reaches the same conclusion: identical parsed request and a
+    // byte-identical signed transaction.
+    // ---------------------------------------------------------------------
+    uint8_t psbt2[512];
+    Writer v2 = {psbt2, sizeof(psbt2), 0};
+    const uint8_t key_tx_version = kPsbtGlobalTxVersion;
+    const uint8_t key_fallback_locktime = kPsbtGlobalFallbackLocktime;
+    const uint8_t key_input_count = kPsbtGlobalInputCount;
+    const uint8_t key_output_count = kPsbtGlobalOutputCount;
+    const uint8_t key_psbt_version = kPsbtGlobalVersion;
+    const uint8_t key_previous_txid = kPsbtInPreviousTxid;
+    const uint8_t key_output_index = kPsbtInOutputIndex;
+    const uint8_t key_sequence = kPsbtInSequence;
+    const uint8_t key_out_derivation = kPsbtOutBip32Derivation;
+    if (passed)
+      g_bitcoin_stage = 101;
+    const uint8_t key_out_amount = kPsbtOutAmount;
+    const uint8_t key_out_script = kPsbtOutScript;
+    bool built2 = write_bytes(&v2, kPsbtMagic, sizeof(kPsbtMagic));
+    // Global map: transaction version, fallback lock time, both counts and the
+    // PSBT version that makes this v2.
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_tx_version, 1) &&
+             write_compact_size(&v2, 4) && write_u32(&v2, 2);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_fallback_locktime, 1) &&
+             write_compact_size(&v2, 4) && write_u32(&v2, 0);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_input_count, 1) &&
+             write_compact_size(&v2, 1) && write_compact_size(&v2, 1);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_output_count, 1) &&
+             write_compact_size(&v2, 1) && write_compact_size(&v2, 1);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_psbt_version, 1) &&
+             write_compact_size(&v2, 4) && write_u32(&v2, 2);
+    built2 = built2 && write_compact_size(&v2, 0);
+    // Input map. The outpoint comes last on purpose: BIP370 does not fix the
+    // order, so the non-witness UTXO check must not assume it arrives first.
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_sequence, 1) &&
+             write_compact_size(&v2, 4) && write_u32(&v2, 0xfffffffd);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &witness_utxo_key, 1) &&
+             write_compact_size(&v2, 8 + 1 + sizeof(input_script)) && write_u64(&v2, 100000) &&
+             write_compact_size(&v2, sizeof(input_script)) && write_bytes(&v2, input_script, sizeof(input_script));
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &redeem_script_key, 1) &&
+             write_compact_size(&v2, sizeof(input_redeem)) && write_bytes(&v2, input_redeem, sizeof(input_redeem));
+    built2 = built2 && write_compact_size(&v2, 34) && write_bytes(&v2, &input_derivation_type, 1) &&
+             write_bytes(&v2, input_public, sizeof(input_public)) &&
+             write_compact_size(&v2, 24) && write_bytes(&v2, fingerprint, sizeof(fingerprint));
+    for (size_t index = 0; built2 && index < 5; ++index)
+      built2 = write_u32(&v2, input_path[index]);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_previous_txid, 1) &&
+             write_compact_size(&v2, 32) && write_bytes(&v2, zero_txid, sizeof(zero_txid));
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_output_index, 1) &&
+             write_compact_size(&v2, 4) && write_u32(&v2, 0);
+    built2 = built2 && write_compact_size(&v2, 0);
+    // Output map: derivation first, then amount and script.
+    built2 = built2 && write_compact_size(&v2, 34) && write_bytes(&v2, &key_out_derivation, 1) &&
+             write_bytes(&v2, output_public, sizeof(output_public)) &&
+             write_compact_size(&v2, 24) && write_bytes(&v2, fingerprint, sizeof(fingerprint));
+    for (size_t index = 0; built2 && index < 5; ++index)
+      built2 = write_u32(&v2, output_path[index]);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_out_amount, 1) &&
+             write_compact_size(&v2, 8) && write_u64(&v2, 90000);
+    built2 = built2 && write_compact_size(&v2, 1) && write_bytes(&v2, &key_out_script, 1) &&
+             write_compact_size(&v2, sizeof(output_script)) && write_bytes(&v2, output_script, sizeof(output_script));
+    built2 = built2 && write_compact_size(&v2, 0);
+
+    if (passed)
+      g_bitcoin_stage = 102;
+    BitcoinSigningRequest parsed2;
+    uint8_t signed_transaction2[384];
+    size_t signed2_size = sizeof(signed_transaction2);
+    const TransactionError v2_parse =
+        built2 ? bitcoin_parse_psbt(psbt2, v2.position, master, request_chain, &parsed2)
+               : TransactionError::InvalidArgument;
+    passed = passed && v2_parse == TransactionError::Ok;
+    if (passed)
+      g_bitcoin_stage = 103;
+    passed = passed && parsed2.version == 2 && parsed2.lock_time == 0 &&
+             parsed2.input_count == 1 && parsed2.output_count == 1;
+    if (passed)
+      g_bitcoin_stage = 104;
+    passed = passed && parsed2.inputs[0].previous_index == 0 &&
+             parsed2.inputs[0].sequence == 0xfffffffd &&
+             parsed2.inputs[0].value == 100000 &&
+             parsed2.inputs[0].spend_type == BitcoinSpendType::NestedP2shP2wpkh;
+    if (passed)
+      g_bitcoin_stage = 105;
+    passed = passed && parsed2.inputs[0].path_depth == 5 &&
+             memcmp(parsed2.inputs[0].path, input_path, sizeof(input_path)) == 0;
+    if (passed)
+      g_bitcoin_stage = 106;
+    passed = passed && parsed2.outputs[0].value == 90000;
+    if (passed)
+      g_bitcoin_stage = 107;
+    passed = passed && parsed2.outputs[0].wallet_owned;
+    if (passed)
+      g_bitcoin_stage = 108;
+    passed = passed && parsed2.outputs[0].change;
+    if (passed)
+      g_bitcoin_stage = 109;
+    passed = passed && parsed2.fee == 10000;
+    if (passed)
+      g_bitcoin_stage = 110;
+    passed = passed && parsed2.estimated_vbytes == v0_vbytes;
+    if (passed)
+      g_bitcoin_stage = 111;
+    passed = passed &&
+             bitcoin_sign_request(parsed2, master, signed_transaction2, &signed2_size) == TransactionError::Ok &&
+             signed2_size == v0_signed_size &&
+             crypto_constant_time_equal(signed_transaction, signed_transaction2, v0_signed_size);
+    if (passed)
+      g_bitcoin_stage = 112;
+    clear_bitcoin_request(&parsed2);
+    secure_zero(signed_transaction2, sizeof(signed_transaction2));
+    if (passed)
+      g_bitcoin_stage = 113;
+    {
+      uint8_t mixed[256];
+      Writer mixed_writer = {mixed, sizeof(mixed), 0};
+      bool wrote = write_bytes(&mixed_writer, kPsbtMagic, sizeof(kPsbtMagic));
+      const uint8_t key_unsigned = kPsbtGlobalUnsignedTx;
+      wrote = wrote && write_compact_size(&mixed_writer, 1) && write_bytes(&mixed_writer, &key_unsigned, 1) &&
+              write_compact_size(&mixed_writer, unsigned_writer.position) &&
+              write_bytes(&mixed_writer, unsigned_transaction, unsigned_writer.position);
+      wrote = wrote && write_compact_size(&mixed_writer, 1) && write_bytes(&mixed_writer, &key_psbt_version, 1) &&
+              write_compact_size(&mixed_writer, 4) && write_u32(&mixed_writer, 2);
+      wrote = wrote && write_compact_size(&mixed_writer, 0);
+      if (passed)
+        g_bitcoin_stage = 114;
+      BitcoinSigningRequest ignored;
+      passed = passed && wrote &&
+               bitcoin_parse_psbt(mixed, mixed_writer.position, master, request_chain, &ignored) ==
+                   TransactionError::NonCanonical;
+      clear_bitcoin_request(&ignored);
+
+      if (passed)
+        g_bitcoin_stage = 115;
+      // A v0 blob carrying v2-only globals is not "almost v2", it is invalid.
+      uint8_t v0_with_count[256];
+      Writer v0_writer = {v0_with_count, sizeof(v0_with_count), 0};
+      wrote = write_bytes(&v0_writer, kPsbtMagic, sizeof(kPsbtMagic));
+      const uint8_t key_global_unsigned = kPsbtGlobalUnsignedTx;
+      wrote = wrote && write_compact_size(&v0_writer, 1) && write_bytes(&v0_writer, &key_global_unsigned, 1) &&
+              write_compact_size(&v0_writer, unsigned_writer.position) &&
+              write_bytes(&v0_writer, unsigned_transaction, unsigned_writer.position);
+      wrote = wrote && write_compact_size(&v0_writer, 1) && write_bytes(&v0_writer, &key_input_count, 1) &&
+              write_compact_size(&v0_writer, 1) && write_compact_size(&v0_writer, 1);
+      wrote = wrote && write_compact_size(&v0_writer, 0);
+      passed = passed && wrote &&
+               bitcoin_parse_psbt(v0_with_count, v0_writer.position, master, request_chain, &ignored) ==
+                   TransactionError::NonCanonical;
+      clear_bitcoin_request(&ignored);
+
+      if (passed)
+        g_bitcoin_stage = 116;
+      uint8_t future[64];
+      Writer future_writer = {future, sizeof(future), 0};
+      wrote = write_bytes(&future_writer, kPsbtMagic, sizeof(kPsbtMagic));
+      wrote = wrote && write_compact_size(&future_writer, 1) && write_bytes(&future_writer, &key_psbt_version, 1) &&
+              write_compact_size(&future_writer, 4) && write_u32(&future_writer, 3);
+      wrote = wrote && write_compact_size(&future_writer, 0);
+      passed = passed && wrote &&
+               bitcoin_parse_psbt(future, future_writer.position, master, request_chain, &ignored) ==
+                   TransactionError::Unsupported;
+      clear_bitcoin_request(&ignored);
+
+      if (passed)
+        g_bitcoin_stage = 117;
+      uint8_t without_count[128];
+      Writer no_count = {without_count, sizeof(without_count), 0};
+      wrote = write_bytes(&no_count, kPsbtMagic, sizeof(kPsbtMagic));
+      wrote = wrote && write_compact_size(&no_count, 1) && write_bytes(&no_count, &key_tx_version, 1) &&
+              write_compact_size(&no_count, 4) && write_u32(&no_count, 2);
+      wrote = wrote && write_compact_size(&no_count, 1) && write_bytes(&no_count, &key_output_count, 1) &&
+              write_compact_size(&no_count, 1) && write_compact_size(&no_count, 1);
+      wrote = wrote && write_compact_size(&no_count, 1) && write_bytes(&no_count, &key_psbt_version, 1) &&
+              write_compact_size(&no_count, 4) && write_u32(&no_count, 2);
+      wrote = wrote && write_compact_size(&no_count, 0);
+      passed = passed && wrote &&
+               bitcoin_parse_psbt(without_count, no_count.position, master, request_chain, &ignored) ==
+                   TransactionError::MissingField;
+      clear_bitcoin_request(&ignored);
+
+      if (passed)
+        g_bitcoin_stage = 118;
+      uint8_t modifiable[128];
+      Writer modify_writer = {modifiable, sizeof(modifiable), 0};
+      wrote = write_bytes(&modify_writer, kPsbtMagic, sizeof(kPsbtMagic));
+      const uint8_t key_modifiable = kPsbtGlobalTxModifiable;
+      const uint8_t inputs_modifiable = 1;
+      wrote = wrote && write_compact_size(&modify_writer, 1) && write_bytes(&modify_writer, &key_tx_version, 1) &&
+              write_compact_size(&modify_writer, 4) && write_u32(&modify_writer, 2);
+      wrote = wrote && write_compact_size(&modify_writer, 1) && write_bytes(&modify_writer, &key_input_count, 1) &&
+              write_compact_size(&modify_writer, 1) && write_compact_size(&modify_writer, 1);
+      wrote = wrote && write_compact_size(&modify_writer, 1) && write_bytes(&modify_writer, &key_output_count, 1) &&
+              write_compact_size(&modify_writer, 1) && write_compact_size(&modify_writer, 1);
+      wrote = wrote && write_compact_size(&modify_writer, 1) && write_bytes(&modify_writer, &key_modifiable, 1) &&
+              write_compact_size(&modify_writer, 1) && write_bytes(&modify_writer, &inputs_modifiable, 1);
+      wrote = wrote && write_compact_size(&modify_writer, 1) && write_bytes(&modify_writer, &key_psbt_version, 1) &&
+              write_compact_size(&modify_writer, 4) && write_u32(&modify_writer, 2);
+      wrote = wrote && write_compact_size(&modify_writer, 0);
+      passed = passed && wrote &&
+               bitcoin_parse_psbt(modifiable, modify_writer.position, master, request_chain, &ignored) ==
+                   TransactionError::Unsupported;
+      clear_bitcoin_request(&ignored);
+
+      if (passed)
+        g_bitcoin_stage = 119;
+      uint8_t bad_locktime[128];
+      Writer lock_writer = {bad_locktime, sizeof(bad_locktime), 0};
+      wrote = write_bytes(&lock_writer, kPsbtMagic, sizeof(kPsbtMagic));
+      const uint8_t key_time_lock = kPsbtInRequiredTimeLocktime;
+      wrote = wrote && write_compact_size(&lock_writer, 1) && write_bytes(&lock_writer, &key_time_lock, 1) &&
+              write_compact_size(&lock_writer, 4) && write_u32(&lock_writer, 1000);
+      wrote = wrote && write_compact_size(&lock_writer, 0);
+      Cursor lock_cursor = {bad_locktime, lock_writer.position, 5};
+      BitcoinInput lock_input = {};
+      PsbtInputLocktime lock_state = {};
+      passed = passed && wrote &&
+               parse_input_map_v2(&lock_cursor, master, request_chain, &lock_input, &lock_state) ==
+                   TransactionError::NonCanonical &&
+               lock_cursor.position == lock_writer.position - 1;
+      secure_zero(&lock_input, sizeof(lock_input));
+    }
+
+    if (passed)
+      g_bitcoin_stage = 120;
+    {
+      PsbtInputLocktime locks[3] = {};
+      uint32_t chosen = 1;
+      passed = passed && psbt_resolve_locktime(locks, 3, 77, &chosen) == TransactionError::Ok &&
+               chosen == 77;
+      locks[0].has_height = true;
+      locks[0].height = 100;
+      locks[1].has_height = true;
+      locks[1].height = 200;
+      locks[1].has_time = true;
+      locks[1].time = 600000000UL;
+      passed = passed && psbt_resolve_locktime(locks, 3, 77, &chosen) == TransactionError::Ok &&
+               chosen == 200;
+      PsbtInputLocktime conflict[2] = {};
+      conflict[0].has_time = true;
+      conflict[0].time = 600000000UL;
+      conflict[1].has_height = true;
+      conflict[1].height = 500;
+      passed = passed && psbt_resolve_locktime(conflict, 2, 0, &chosen) ==
+                             TransactionError::Unsupported;
+      PsbtInputLocktime time_only[2] = {};
+      time_only[0].has_time = true;
+      time_only[0].time = 600000001UL;
+      time_only[1].has_time = true;
+      time_only[1].time = 600000002UL;
+      passed = passed && psbt_resolve_locktime(time_only, 2, 0, &chosen) == TransactionError::Ok &&
+               chosen == 600000002UL;
+    }
+
     clear_bitcoin_request(&parsed);
     secure_zero(&master, sizeof(master));
     secure_zero(&input_node, sizeof(input_node));
@@ -1739,6 +2632,11 @@ namespace hexwallet
     secure_zero(psbt, sizeof(psbt));
     secure_zero(signed_transaction, sizeof(signed_transaction));
     return passed;
+  }
+
+  int bitcoin_self_test_stage()
+  {
+    return g_bitcoin_stage;
   }
 
 }

@@ -3,8 +3,6 @@
 #include <string.h>
 
 #include "WalletSecurity.h"
-#include <stdio.h>
-#define SAY(x) do { ::printf("se051-fail %s\n", x); } while (0)
 #include "src/EcdsaCurve.h"
 
 namespace hexwallet
@@ -288,13 +286,10 @@ namespace hexwallet
                                          size_t user_id_size, uint8_t *out,
                                          size_t capacity, size_t *out_size)
   {
-    // Optional in the SDK (TLVSET_u8bufOptional); an empty tag 1 asks the card
-    // to verify the user id bound at session creation.
     uint8_t data[24];
     Se051TlvBuilder builder(data, sizeof(data));
     if (!builder.tag_bytes(kSe051Tag1, user_id, user_id_size))
       return false;
-    // Case 3 in the SDK: this command returns a status word only.
     return build(kSe051InsMgmt, kSe051P1Default, kSe051P2SessionUserId, data,
                  builder.size(), 0, out, capacity, out_size);
   }
@@ -491,7 +486,6 @@ namespace hexwallet
     bool passed = true;
     uint8_t apdu[kSe051MaxApdu];
     size_t size = 0;
-    // GetVersion: 80 04 00 20 00.
     static const uint8_t kExpectedVersion[5] = {0x80, 0x04, 0x00, 0x20, 0x00};
     passed = passed && se051_apdu_get_version(apdu, sizeof(apdu), &size) &&
              size == sizeof(kExpectedVersion) &&
@@ -503,16 +497,12 @@ namespace hexwallet
              size == sizeof(kExpectedList) &&
              memcmp(apdu, kExpectedList, size) == 0;
 
-    // CreateECCurve(secp256k1): 80 01 0B 04 03 41 01 10. Case 3, so no Le and
-    // the curve id rides in TLV tag 1.
     static const uint8_t kExpectedCreate[8] = {0x80, 0x01, 0x0b, 0x04,
                                                0x03, 0x41, 0x01, 0x10};
     passed = passed && se051_apdu_create_ec_curve(kSe051CurveSecp256k1, apdu, sizeof(apdu), &size) &&
              size == sizeof(kExpectedCreate) &&
              memcmp(apdu, kExpectedCreate, size) == 0;
 
-    // SetECCurveParam(secp256k1, PRIME, 0x01) - the 0x01 payload is not a prime,
-    // it only pins the outer frame: Lc 9 = 41 01 10 | 42 01 10 | 43 01 01.
     static const uint8_t kExpectedParam[12] = {0x80, 0x01, 0x0b, 0x40, 0x09,
                                                0x41, 0x01, 0x10, 0x42, 0x01,
                                                0x10, 0x43};
@@ -522,7 +512,6 @@ namespace hexwallet
              memcmp(apdu, kExpectedParam, sizeof(kExpectedParam)) == 0 &&
              apdu[12] == 0x01 && apdu[13] == 0x01;
 
-    // A 32-byte parameter takes the same shape with Lc 0x28 = 40.
     uint8_t parameter[32];
     memset(parameter, 0x5a, sizeof(parameter));
     passed = passed && se051_apdu_set_ec_curve_param(kSe051CurveNistP256, kSe051EcParamPrime, parameter, sizeof(parameter), apdu, sizeof(apdu), &size) &&
@@ -530,8 +519,6 @@ namespace hexwallet
              apdu[8] == 0x42 && apdu[11] == 0x43 && apdu[12] == 32 &&
              memcmp(apdu + 13, parameter, sizeof(parameter)) == 0;
 
-    // Sign(object 0x00000001, SHA-256, 32-byte digest): Lc 43 = 6 + 3 + 34,
-    // 80 03 0C 09 2B | 41 04 00 00 00 01 | 42 01 21 | 43 20 <digest> | 00.
     uint8_t digest[32];
     memset(digest, 0xa5, sizeof(digest));
     passed = passed && se051_apdu_sign(0x00000001u, kSe051SignAlgoSha256, digest, sizeof(digest), apdu, sizeof(apdu), &size) &&
@@ -574,7 +561,6 @@ namespace hexwallet
              apdu[6] == 0x02 && apdu[7] == 0x00 && apdu[8] == 0x20 &&
              apdu[9] == 0x00 && apdu[10] == 0x00;
 
-    // Length encoding: 0x7f stays one byte, 0x80 becomes 0x81 0x80.
     {
       uint8_t scratch[300];
       Se051TlvBuilder builder(scratch, sizeof(scratch));
@@ -587,14 +573,12 @@ namespace hexwallet
                long_builder.size() == 3 + sizeof(payload) &&
                scratch[0] == 0x43 && scratch[1] == 0x81 &&
                scratch[2] == 0x80;
-      // A buffer that cannot hold the value fails instead of truncating.
       uint8_t tight[4];
       Se051TlvBuilder cramped(tight, sizeof(tight));
       passed = passed && !cramped.tag_bytes(0x43, payload, sizeof(payload)) &&
                !cramped.ok();
     }
 
-    // A command that needs more than a short Lc is refused, not split silently.
     {
       uint8_t huge[300];
       memset(huge, 0x22, sizeof(huge));
@@ -606,7 +590,6 @@ namespace hexwallet
                                                      sizeof(small), &size);
     }
 
-    // Response parsing: status word, tag 1, and the curve list.
     static const uint8_t kCurveResponse[7] = {0x41, 0x03, 0x03, 0x10, 0x41,
                                               0x90, 0x00};
     uint16_t status = 0;
@@ -620,8 +603,6 @@ namespace hexwallet
     present = true;
     passed = passed && se051_response_curve_list_contains(kSe051CurveEd25519, &present, kCurveResponse, sizeof(kCurveResponse)) &&
              !present;
-    // Truncated lengths are refused rather than read past; the 0x81 form the
-    // applet uses for lengths 0x80..0xff is understood.
     static const uint8_t kTruncated[4] = {0x41, 0x05, 0x03, 0x90};
     static const uint8_t kNonMinimal[7] = {0x41, 0x81, 0x01, 0x03, 0x00,
                                            0x90, 0x00};
@@ -636,40 +617,30 @@ namespace hexwallet
     secure_zero(digest, sizeof(digest));
     secure_zero(parameter, sizeof(parameter));
     secure_zero(mac_input, sizeof(mac_input));
-#if defined(HEXWALLET_HOST_TEST)
-    if (!passed)
-    {
-      ::printf("se051-fail old-block\n");
-      return false;
-    }
-#endif
-
-    if (!se051_curve_params_match_engine(kSe051CurveSecp256k1, EcdsaCurve::Secp256k1)) { ::printf("sw-fail 1\n"); return false; }
-    if (!se051_curve_params_match_engine(kSe051CurveNistP256, EcdsaCurve::Secp256r1)) { ::printf("sw-fail 2\n"); return false; }
-    passed = passed && true;
+    passed = passed &&
+             se051_curve_params_match_engine(kSe051CurveSecp256k1, EcdsaCurve::Secp256k1) &&
+             se051_curve_params_match_engine(kSe051CurveNistP256, EcdsaCurve::Secp256r1);
     passed = passed && se051_curve_params(kSe051CurveEd25519) == nullptr &&
              se051_curve_params(0x00) == nullptr;
 
     // Installer and PIN sequences against a fake card that records frames.
     {
-      FakeCard card;
+      FakeCard card = {};
       card.status = 0x9000;
       uint16_t status = 0;
       passed = passed && se051_install_curve(fake_send, &card, kSe051CurveSecp256k1, &status) &&
                status == 0x9000 && card.count == 6 &&
                card.frames[0].size == 8 && card.frames[0].bytes[3] == 0x04 &&
-               // SetECCurveParam: 41 01 <curve> | 42 01 <param> | 43 Lc <value>
                card.frames[1].bytes[3] == 0x40 && card.frames[1].bytes[8] == 0x42 &&
                card.frames[1].bytes[10] == kSe051EcParamA &&
                card.frames[3].bytes[10] == kSe051EcParamG &&
-               // 5 header/Lc + 3 + 3 + (1 tag + 1 len + 65) = 78, case 3 so no Le.
                card.frames[3].size == 78 &&
                card.frames[5].bytes[10] == kSe051EcParamPrime;
-      FakeCard unknown;
+      FakeCard unknown = {};
       unknown.status = 0x9000;
       passed = passed && !se051_install_curve(fake_send, &unknown, 0x7f, &status) &&
                unknown.count == 0;
-      FakeCard partial;
+      FakeCard partial = {};
       partial.status = 0x9000;
       partial.fail_at = 2;
       passed = passed && !se051_install_curve(fake_send, &partial, kSe051CurveNistP256, &status) &&
@@ -677,7 +648,7 @@ namespace hexwallet
     }
 
     {
-      FakeCard card;
+      FakeCard card = {};
       card.status = 0x9000;
       static const uint8_t kList[] = {0x41, 0x02, 0x03, 0x10, 0x90, 0x00};
       memcpy(card.response, kList, sizeof(kList));
@@ -689,17 +660,15 @@ namespace hexwallet
       present = true;
       passed = passed && se051_curve_present(fake_send, &card, kSe051CurveEd25519, &present, &status) &&
                !present;
-      FakeCard refusing;
+      FakeCard refusing = {};
       refusing.status = 0x6a88;
       present = false;
       passed = passed && !se051_curve_present(fake_send, &refusing, kSe051CurveSecp256k1, &present, &status) &&
                !present && status == 0x6a88;
     }
 
-    // PIN session: create, policy, verify, HMAC. A 0x63C2 answer must be read as
-    // "two attempts left" without authenticating, and 0x63C0 must lock.
     {
-      FakeCard card;
+      FakeCard card = {};
       card.status = 0x9000;
       static const uint8_t kPolicy[8] = {0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
                                          0x00, 0x00};
@@ -711,8 +680,6 @@ namespace hexwallet
                session.state == Se051PinState::SessionCreated &&
                card.count == 2 && card.frames[0].bytes[3] == 0x1b &&
                card.frames[1].bytes[3] == 0x1f;
-      // Not yet authenticated: the HMAC must be refused here, before it ever
-      // reaches the card.
       {
         uint8_t unused_mac[8] = {};
         size_t unused_size = 0;

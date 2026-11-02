@@ -189,12 +189,70 @@ void set_active_secure_element_profile(const SecureElementProfile *profile) {
   (void)profile;
 }
 
-bool secure_custody_backend_ready() {
-  // A production session may open only after derivation, review-bound signing
-  // and recovery use non-exportable handles end to end. A working SCP03 channel
-  // alone is insufficient; allowing it here would unlock the RAM-only wallet.
-  return false;
+CustodyBlocker custody_gate_blocker(const CustodyGateState &state) {
+  if (!state.backend_registered) return CustodyBlocker::BackendMissing;
+  if (!state.channel_authenticated) return CustodyBlocker::ChannelNotAuthenticated;
+  if (!state.user_authenticated) return CustodyBlocker::UserNotAuthenticated;
+  if (!state.keys_non_exportable) return CustodyBlocker::KeysExportable;
+  if (!state.wallet_uses_handles) return CustodyBlocker::WalletLayerNotConverted;
+  return CustodyBlocker::None;
 }
+
+const char *custody_blocker_text(CustodyBlocker blocker) {
+  switch (blocker) {
+    case CustodyBlocker::None:
+      return "ready";
+    case CustodyBlocker::BackendMissing:
+      return "no secure-element backend";
+    case CustodyBlocker::ChannelNotAuthenticated:
+      return "secure channel not authenticated";
+    case CustodyBlocker::UserNotAuthenticated:
+      return "user not authenticated";
+    case CustodyBlocker::KeysExportable:
+      return "keys not held by the secure element";
+    case CustodyBlocker::WalletLayerNotConverted:
+      return "wallet still derives and signs on the MCU";
+  }
+  return "unknown";
+}
+
+namespace {
+
+CustodyWalletLayerQuery g_wallet_layer_query = nullptr;
+
+}  // namespace
+
+CustodyWalletLayerQuery custody_set_wallet_layer_query(
+    CustodyWalletLayerQuery query) {
+  const CustodyWalletLayerQuery previous = g_wallet_layer_query;
+  g_wallet_layer_query = query;
+  return previous;
+}
+
+CustodyGateState custody_gate_state() {
+  CustodyGateState state = {};
+  state.backend_registered = secure_element_name()[0] != '\0';
+  state.channel_authenticated = secure_element_ready();
+  state.user_authenticated = secure_element_user_authenticated();
+  state.keys_non_exportable = secure_element_keys_non_exportable();
+  // Asked of the wallet layer, not the card: a card holding keys does not make
+  // the wallet use them.
+  state.wallet_uses_handles =
+    g_wallet_layer_query != nullptr && g_wallet_layer_query();
+  return state;
+}
+
+bool secure_custody_backend_ready() {
+  return custody_gate_blocker(custody_gate_state()) == CustodyBlocker::None;
+}
+
+namespace {
+
+bool wallet_layer_ready() {
+  return true;
+}
+
+}  // namespace
 
 bool run_custody_self_tests() {
   const NetworkProfile *ethereum = find_network_profile("eth");
@@ -242,8 +300,65 @@ bool run_custody_self_tests() {
   set_active_secure_element_profile(nullptr);
   const bool active_reset =
     active_secure_element_profile().capabilities == SecureElementNone;
-  return se050_matrix && software_matrix && active_default && target_cannot_activate &&
-         target_ed25519 && active_reset;
+
+  // The gate is five facts ANDed in a fixed order. Each case below falsifies
+  // exactly one fact, so no single integration change can open it alone.
+  const CustodyGateState armed = {true, true, true, true, true};
+  const bool gate_open_only_when_all =
+    custody_gate_blocker(armed) == CustodyBlocker::None;
+  const CustodyBlocker expected[] = {
+    CustodyBlocker::BackendMissing, CustodyBlocker::ChannelNotAuthenticated,
+    CustodyBlocker::UserNotAuthenticated, CustodyBlocker::KeysExportable,
+    CustodyBlocker::WalletLayerNotConverted};
+  bool gate_independent = true;
+  for (size_t i = 0; i < 5; ++i) {
+    CustodyGateState single = armed;
+    bool *facts[5] = {&single.backend_registered, &single.channel_authenticated,
+                      &single.user_authenticated, &single.keys_non_exportable,
+                      &single.wallet_uses_handles};
+    *facts[i] = false;
+    gate_independent = custody_gate_blocker(single) == expected[i] &&
+                       gate_independent;
+  }
+  // With two facts broken, the earlier one in the fix order wins: a status line
+  // must never name a cause the caller cannot act on first.
+  CustodyGateState card_and_wallet = armed;
+  card_and_wallet.keys_non_exportable = false;
+  card_and_wallet.wallet_uses_handles = false;
+  CustodyGateState user_and_channel = armed;
+  user_and_channel.user_authenticated = false;
+  user_and_channel.channel_authenticated = false;
+  gate_independent =
+    custody_gate_blocker(card_and_wallet) == CustodyBlocker::KeysExportable &&
+    custody_gate_blocker(user_and_channel) ==
+        CustodyBlocker::ChannelNotAuthenticated &&
+    gate_independent;
+  for (CustodyBlocker blocker : expected) {
+    const char *text = custody_blocker_text(blocker);
+    gate_independent = text[0] != '\0' && strcmp(text, "unknown") != 0 &&
+                       strcmp(text, "ready") != 0 && gate_independent;
+  }
+  const bool text_ready =
+    strcmp(custody_blocker_text(CustodyBlocker::None), "ready") == 0;
+  // Whatever this build's state is, the live gate must be closed today.
+  const CustodyGateState live = custody_gate_state();
+  const bool live_closed = !secure_custody_backend_ready() &&
+                           custody_gate_blocker(live) != CustodyBlocker::None;
+  // The wallet layer's answer is consulted, and it alone cannot open the gate.
+  const CustodyWalletLayerQuery previous =
+    custody_set_wallet_layer_query(&wallet_layer_ready);
+  const bool query_consulted =
+    custody_gate_state().wallet_uses_handles &&
+    custody_gate_blocker(custody_gate_state()) == CustodyBlocker::BackendMissing;
+  custody_set_wallet_layer_query(previous);
+  const bool query_restored =
+    custody_gate_state().wallet_uses_handles ==
+    (previous != nullptr && previous());
+
+  return se050_matrix && software_matrix && active_default &&
+         target_cannot_activate && target_ed25519 && active_reset &&
+         gate_open_only_when_all && gate_independent && text_ready &&
+         live_closed && query_consulted && query_restored;
 }
 
 }  // namespace hexwallet

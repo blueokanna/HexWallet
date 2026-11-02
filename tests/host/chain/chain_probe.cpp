@@ -3,6 +3,7 @@
 #include <string.h>
 #include "ChainCommon.h"
 #include "ChainTransaction.h"
+#include "BitcoinTransaction.h"
 #include "CosmosTransaction.h"
 #include "WalletAltAddresses.h"
 #include "WalletEngine.h"
@@ -40,6 +41,15 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "dash-sign-selftest")) {
     const bool ok = run_dash_self_tests() && run_dash_signature_self_test();
     printf("dash-sign=%s\n", ok ? "pass" : "FAIL");
+    return ok ? 0 : 1;
+  }
+  // PSBT v0 and v2 parsing plus the final signature need BIP32 derivation and
+  // ECDSA, so they only run where the real curve code is linked. The stubbed
+  // host harness never gets this far, which is why it is a distinct mode.
+  if (argc == 2 && !strcmp(argv[1], "bitcoin-tx-selftest")) {
+    const bool ok = run_bitcoin_transaction_self_test();
+    printf("bitcoin-tx=%s\n", ok ? "pass" : "FAIL");
+    if (!ok) printf("bitcoin-stage=%d\n", bitcoin_self_test_stage());
     return ok ? 0 : 1;
   }
   // EVM signing needs the real keccak/secp256k1 stack, so the stubbed host

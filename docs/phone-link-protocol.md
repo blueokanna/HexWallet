@@ -99,12 +99,18 @@ sig = Ed25519(sk_dev, "HWLK1-RESP" | PK_phone | PK_phone_eph | nonce_phone
 transcript      = "HWLK1-SESSION" | PK_phone | PK_phone_eph | nonce_phone
                                 | PK_dev   | PK_dev_eph   | nonce_dev
 transcript_hash = SHA256(transcript)
-shared          = Ed25519-ECDH(sk_eph, peer PK_eph)     // clamp(SHA512(seed)[0..31]) * peer
+scalar          = SHA512(seed_eph)[0..31]              // 未 clamp 的预密钥
+shared          = X25519(scalar, peer_eph)             // RFC 7748，内部 clamp
 keys            = HKDF-SHA256(ikm=shared, salt=transcript_hash, info="HWLK1-KEYS", 64)
 key_c2d         = keys[0..31]
 key_d2c         = keys[32..63]
 session_id      = LE32(transcript_hash[0..3])
 ```
+
+`PK_*_eph` 是 **Curve25519 的 u 坐标**，不是 Ed25519 点。身份密钥仍然是 Ed25519（签名用），
+只有临时交换换成了 X25519：协议版本因此从 1 升到 2，v1 手机与 v2 设备必须直接失败，
+否则两端会对同一段 transcript 派生出不同的共享密钥。X25519 的贡献是对端库只要会
+"curve25519/x25519" 就能互通，不必实现 Ed25519 群上的 ECDH 约定。
 
 每帧一个方向键、一个 12 字节 nonce：`session_id(4) | direction(1) | sequence(4) | 00 00 00`。
 加密为 ChaCha20（计数器从 0 起），认证为 HMAC-SHA256（Encrypt-then-MAC），

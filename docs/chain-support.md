@@ -122,9 +122,10 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 | APT | SIGN | apt（原生转账；BCS RawTransaction） |
 | STRK | SIGN | stark（Stark 曲线账户；Cairo v3 `deploy_account` 与 1–4 笔 ERC-20 `transfer`，地址按 SNIP-5 用 class hash/constructor 现算；金额默认 base unit 原文，登记过的代币才换算并标注未核验） |
 | ZEC | SIGN | zec |
+| ZER | SIGN | zer?ZERO??? t1/t3?ZIP-243?COSMOS epoch ?? ID `0x7361707a`? |
 | DASH | SIGN | dash（type-0 P2PKH 普通支付，主网摘要向量锚定；特殊交易类型与 InstantSend 锁状态由手机侧判断） |
 | RVN | SIGN | rvn |
-| BTC | SIGN | btc, btc44, btc49 |
+| BTC | SIGN | btc, btc44, btc49?PSBT v0 ? v2/BIP370?? [chain-protocols.md](chain-protocols.md)? |
 | BCH | SIGN | bch |
 | ADA | SIGN | ada |
 | AVAX | SIGN | avaxc |
@@ -286,6 +287,8 @@ REGISTERED 表示已登记并连接现有签名路径；不是主网验收结果
 | BTC | Bitcoin | REGISTERED | btc（原生） |
 | BTC | X Layer | MISSING | X Layer 上的 BTC 是桥接封装，合约地址未取证 |
 | BTC | Lightning | MISSING | 需要通道状态协议，不是普通转账 |
+| BTC | Stacks | MISSING | STX ?????c32check ???anchored/Nakamoto ?????Clarity post-condition????? EVM profile ? UTXO ?????? |
+| BTC | Rootstock | REGISTERED | `rsk`?chain 30??? RBTC?EIP-155??BTC ?????? |
 | xBTC | Aptos / Sui / Solana | MISSING | 三条链都没有自研代币注册表 |
 | ETH | Ethereum / Arbitrum / Base / Linea / Optimism | REGISTERED | eth / arb1 / base / linea / opt（原生） |
 | ETH | X Layer | MISSING | 桥接封装地址未取证 |

@@ -90,6 +90,24 @@ WalletError secp256k1_xonly_public_key(const uint8_t private_key[kPrivateKeySize
   return WalletError::CryptoFailure;
 }
 
+// BIP86 key tweaking needs the real curve; the host shim refuses instead of
+// approximating it. A taproot input therefore fails verification on the host
+// harness by design, and the real answer is pinned in the native probe
+// (tests/host/chain) where WalletSecurity.cpp is linked.
+WalletError taproot_bip86_output_key(const uint8_t internal_key[kPrivateKeySize],
+                                     uint8_t out_output_key[kPrivateKeySize]) {
+  (void)internal_key;
+  (void)out_output_key;
+  return WalletError::CryptoFailure;
+}
+
+WalletError taproot_bip86_private_key(const uint8_t private_key[kPrivateKeySize],
+                                      uint8_t out_tweaked_key[kPrivateKeySize]) {
+  (void)private_key;
+  (void)out_tweaked_key;
+  return WalletError::CryptoFailure;
+}
+
 }  // namespace hexwallet
 
 void esp_fill_random(void *buffer, size_t length) {

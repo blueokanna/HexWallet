@@ -292,6 +292,13 @@ const TokenProfile *custom_token_profile(const CustomTokenRecord &record,
   static char ids[kCustomTokenMax][20];
   static char contracts[kCustomTokenMax][43];
   if (index >= kCustomTokenMax) return nullptr;
+  TokenStandard standard;
+  switch (record.standard) {
+    case CustomTokenStandard::EvmErc20: standard = TokenStandard::Erc20; break;
+    case CustomTokenStandard::EvmErc721: standard = TokenStandard::Erc721; break;
+    case CustomTokenStandard::EvmErc1155: standard = TokenStandard::Erc1155; break;
+    default: return nullptr;
+  }
   TokenProfile &profile = profiles[index];
   snprintf(ids[index], sizeof(ids[index]), "custom-%u",
            static_cast<unsigned>(index));
@@ -300,7 +307,7 @@ const TokenProfile *custom_token_profile(const CustomTokenRecord &record,
   chain_hex(record.identifier, kEvmAddressSize, contracts[index] + 2,
             sizeof(contracts[index]) - 2);
   profile = {ids[index], record.network_id, record.symbol, record.name,
-             TokenStandard::Erc20, contracts[index], record.decimals,
+             standard, contracts[index], record.decimals,
              static_cast<uint8_t>(TokenCapabilityAccountAddress |
                                   TokenCapabilityTransferSigning),
              "User-declared token: the contract address was entered on this "

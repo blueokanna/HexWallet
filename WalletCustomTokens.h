@@ -30,6 +30,7 @@ namespace hexwallet {
 //
 // Standards and identifier widths:
 //   EVM        ERC-20   20-byte contract
+//   EVM        ERC-721 / ERC-1155 collection, 20-byte contract, decimals = 0
 //   TRON       TRC-20   21-byte account address (0x41 || 20-byte payload)
 //   Solana     SPL      32-byte mint
 //   Stellar    asset    32-byte issuer key + up to 12-byte asset code
@@ -54,6 +55,8 @@ enum class CustomTokenStandard : uint8_t {
   SolanaSpl = 2,
   StellarAsset = 3,
   StarknetErc20 = 4,
+  EvmErc721 = 5,
+  EvmErc1155 = 6,
 };
 
 struct CustomTokenRecord {
@@ -148,6 +151,13 @@ CustomTokenError custom_token_add_stellar(const char *network_id,
                                           const uint8_t issuer[32],
                                           const char *code, const char *symbol,
                                           const char *name, uint8_t decimals);
+
+// Collection labels only; token IDs and quantities come from signed calldata.
+// One network/contract has one declared standard. No on-chain identity claim.
+CustomTokenError custom_token_add_nft(const char *network_id,
+                                      const uint8_t contract[20],
+                                      CustomTokenStandard standard,
+                                      const char *symbol, const char *name);
 
 CustomTokenError custom_token_remove(const char *network_id,
                                      const uint8_t *identifier,

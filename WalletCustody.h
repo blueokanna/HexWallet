@@ -85,9 +85,64 @@ const SecureElementProfile &software_only_profile();
 const SecureElementProfile &active_secure_element_profile();
 // Compatibility entry point; rejects all profile-only activation attempts.
 void set_active_secure_element_profile(const SecureElementProfile *profile);
-// End-to-end wallet custody gate. Remains false while wallet signers take
-// plaintext MCU private keys, even if a transport backend authenticates.
+// End-to-end wallet custody gate: true only when every CustodyBlocker is
+// cleared, i.e. the card holds the keys, the user is authenticated, and the
+// wallet layer derives and signs through handles.
 bool secure_custody_backend_ready();
+
+// ---------------------------------------------------------------------------
+// Custody gate
+// ---------------------------------------------------------------------------
+//
+// SE custody is five separate facts, and the wallet only gets it when all five
+// hold at once. Keeping them apart is the point: a single boolean that some
+// integration path sets is exactly how "hardware wallet" claims turn into
+// marketing. Each fact is observable from a different layer, so no one layer
+// can open the gate alone:
+//
+//   backend_registered       SecureElementPort knows a backend
+//   channel_authenticated    SCP03 session up (authenticates the host)
+//   user_authenticated       PIN verified (authenticates the person)
+//   keys_non_exportable      the backend can keep key material inside the card
+//   wallet_uses_handles      WalletSession derives and signs through handles
+//
+// The last one is the wallet layer's answer, not the card's. It stays false
+// until derivation, review and signing no longer take a plaintext seed or a
+// plaintext private key on the MCU.
+enum class CustodyBlocker : uint8_t {
+  None = 0,
+  BackendMissing,
+  ChannelNotAuthenticated,
+  UserNotAuthenticated,
+  KeysExportable,
+  WalletLayerNotConverted,
+};
+
+struct CustodyGateState {
+  bool backend_registered;
+  bool channel_authenticated;
+  bool user_authenticated;
+  bool keys_non_exportable;
+  bool wallet_uses_handles;
+};
+
+// Pure, total, and ordered: the blocker returned is the first one a caller
+// should fix. "None" is only possible when every fact is true.
+CustodyBlocker custody_gate_blocker(const CustodyGateState &state);
+// Fixed English text, suitable for a status line or a CLI diagnostic.
+const char *custody_blocker_text(CustodyBlocker blocker);
+// Snapshot of the live state. The card-side facts come from the registered
+// backend; the wallet-side fact comes from whoever owns the wallet session.
+CustodyGateState custody_gate_state();
+// Installs the wallet layer's answer to "does derivation and signing run
+// through card handles?" and returns the previous query, so a caller (a test)
+// can restore it. WalletSession registers itself, so the fact is real state
+// rather than a constant somebody flips during an integration. A null (or
+// never-registered) query means "not converted", which is the safe default for
+// a build that does not link the wallet session at all.
+using CustodyWalletLayerQuery = bool (*)();
+CustodyWalletLayerQuery custody_set_wallet_layer_query(
+    CustodyWalletLayerQuery query);
 
 bool run_custody_self_tests();
 

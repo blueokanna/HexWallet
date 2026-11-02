@@ -36,18 +36,36 @@ int main() {
   CHECK(zero(seed, sizeof(seed)) && zero(&master, sizeof(master)));
 
   // Regression: an authenticated transport must not unlock MCU seed custody.
+  // It answers "user verified" and "keys non-exportable" as favourably as a
+  // backend could, so the remaining blockers are the only thing holding the
+  // gate shut.
   const SecureElementBackend transport = {
-    "test-authenticated-channel", [](char *, size_t) { return true; },
+    "test-authenticated-channel",
+    [](char *, size_t) { return true; },
+    []() { return true; },
+    []() { return true; },
     []() { return true; },
     [](uint32_t, const uint8_t *, uint8_t *, size_t *) { return false; },
-    [](uint32_t, uint8_t *, size_t *) { return false; }, []() {}};
+    [](uint32_t, uint8_t *, size_t *) { return false; },
+    []() {}};
   CHECK(secure_element_register_backend(&transport));
   CHECK(secure_element_open(nullptr, 0) && secure_element_ready());
+  CHECK(secure_element_user_authenticated());
+  CHECK(secure_element_keys_non_exportable());
   CHECK(!secure_custody_backend_ready());
+  // The gate must be shut by the wallet layer, not by the card.
+  const CustodyGateState gate = custody_gate_state();
+  CHECK(gate.backend_registered && gate.channel_authenticated &&
+        gate.user_authenticated && gate.keys_non_exportable);
+  CHECK(!gate.wallet_uses_handles);
+  CHECK(custody_gate_blocker(gate) == CustodyBlocker::WalletLayerNotConverted);
   CHECK(&active_secure_element_profile() == &software_only_profile());
   CHECK(wallet_session_generate() == WalletError::CustodyUnavailable);
   CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") == WalletError::CustodyUnavailable);
   CHECK(secure_element_register_backend(nullptr));
+  // With nothing registered the same gate names the card, not the wallet.
+  CHECK(custody_gate_blocker(custody_gate_state()) ==
+        CustodyBlocker::BackendMissing);
 
   // DOT/KSM are admitted in production only through the pinned runtime pair.
   // The historical DOT1 layout is not compiled into this build at all, so a

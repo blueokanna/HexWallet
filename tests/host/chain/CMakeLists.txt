@@ -14,13 +14,13 @@ set(WALLET_SOURCES
   WalletAltAddresses.cpp WalletNetworks.cpp WalletCatalog.cpp WalletMiningCatalog.cpp
   WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp Bls12381.cpp base58.cpp
   local_bech32.cpp local_segwit.cpp keccak256.cpp local_ripemd160.cpp
-  Groestl512.cpp ThetaTransaction.cpp
+  Groestl512.cpp ThetaTransaction.cpp BitcoinTransaction.cpp BitcoinTransaction.cpp
   ChainCommon.cpp ChainTransaction.cpp VeChainTransaction.cpp IconTransaction.cpp
   PolkadotTransaction.cpp SuiTransaction.cpp FilecoinTransaction.cpp TonTransaction.cpp TonCell.cpp
   DecredTransaction.cpp CkbTransaction.cpp ZcashTransaction.cpp CardanoDerivation.cpp CardanoTransaction.cpp HiveTransaction.cpp HederaTransaction.cpp SiaTransaction.cpp NemTransaction.cpp IcpTransaction.cpp ErgoTransaction.cpp Clvm.cpp ChiaTransaction.cpp BlsG2.cpp EvmTransaction.cpp TokenCalldata.cpp
   CosmosTransaction.cpp StellarTransaction.cpp AlgorandTransaction.cpp DashTransaction.cpp
   NearTransaction.cpp TezosTransaction.cpp QrlXmss.cpp QrlOtsJournal.cpp QrlOtsStore.cpp
-  QrlTransaction.cpp QrlV2Transaction.cpp MlDsa87.cpp StarknetCrypto.cpp AptosTransaction.cpp StarknetTransaction.cpp WalletCustomTokens.cpp WalletCustody.cpp SecureElementPort.cpp Se051Apdu.cpp Se051Curves.cpp RandomSource.cpp EinkPanel.cpp QrCode.cpp
+  QrlTransaction.cpp QrlV2Transaction.cpp MlDsa87.cpp StarknetCrypto.cpp AptosTransaction.cpp StarknetTransaction.cpp WalletCustomTokens.cpp WalletCustody.cpp WalletSession.cpp SecureElementPort.cpp Se051Apdu.cpp Se051Curves.cpp RandomSource.cpp EinkPanel.cpp QrCode.cpp
   CryptoNoteAddress.cpp CryptoNoteRingCt.cpp CryptoNoteAmounts.cpp CryptoNoteSpend.cpp
   CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp)
 list(TRANSFORM WALLET_SOURCES PREPEND "${WALLET_ROOT}/")
@@ -37,7 +37,7 @@ target_link_libraries(chain_probe PRIVATE mbedcrypto bcrypt)
 # Compile the real policy WITHOUT the host-only historical Substrate admission.
 # This target also exercises the production secure-custody requirement.
 add_executable(production_policy ${WALLET_SOURCES}
-  "${WALLET_ROOT}/WalletSession.cpp" production_policy.cpp platform.cpp)
+  production_policy.cpp platform.cpp)
 target_include_directories(production_policy PRIVATE . "${WALLET_ROOT}"
   "${WALLET_ROOT}/tests/host" "${WALLET_ROOT}/tests/host/mock")
 target_compile_definitions(production_policy PRIVATE MBEDTLS_ALLOW_PRIVATE_ACCESS

@@ -737,3 +737,124 @@ GRS 用例）；`device_compile_check.ps1 -Target esp32p4` 与不带参数的 ES
 - `WalletLinkCrypto` 仍用 Ed25519 群上的 ECDH，没有切到 X25519：改握手要同时改手机端，
   这一轮只补了原语。
 - SE051：实卡、曲线参数块、PIN 会话接续、托管门。
+
+## 2026-11-02（六）：修掉两条 CI 断链，曲线收拢成一个引擎
+
+这一轮的起点是两个 CI 失败，两处都修在根因上，不是绕过。
+
+### `dash_validate_inputs` 从未有定义
+
+`WalletSigning.cpp` 在展示审阅前调用它，头文件声明了它，`DashTransaction.cpp` 里却没有实现——arduino-cli 全量编译时立刻 `undefined reference`。修法不是补一个空壳，而是把 `dash_sign_transaction()` 里那段"结构 + 手续费 + 归属"的校验抽成 `validate_request()`，`dash_validate_inputs()` 与签名器共用同一条路径：
+
+```text
+dash_validate_inputs(req, master)  -> validate_request(req, master, nullptr, nullptr)
+dash_sign_transaction(req, ...)    -> validate_request(req, master, keys, pubs) -> 签名
+```
+
+好处不只是链接通过：审阅和签名不再可能用两套规则判断同一笔交易。派生结果按需回传，`nullptr` 时在循环内清零，所以校验路径不会把私钥留在栈上。
+
+### `build_chain_native.ps1` 的链接错误
+
+`tests/host/chain/CMakeLists.txt` 的源列表缺 `Groestl512.cpp` 与 `ThetaTransaction.cpp`，所以 `chain_probe` 与 `production_policy` 都找不到 `groestl512`、`theta_review_payload`、`theta_sign_payload`。补进列表即可——这两个文件是本轮之前新增的，CMake 那边没跟。
+
+### `WalletMiningCatalog.cpp` 的断链
+
+`tests/host/catalog_dump.cpp` 的 `--selftest` 调用 `run_mining_catalog_self_tests()`，但 `build.ps1` 的 `catalogSources` 里没有 `WalletMiningCatalog.cpp`；同时自检本身把 `MiningCoinType::Merged` 当成越界值，而目录里确实有合并挖矿条目。现在源文件进了列表，类型上界改成 `Merged`。
+
+自检顺带变强了，而且每一条都能从这个数据集合里证伪：
+
+- 每一行都必须解析到一个**同符号**的目录条目——这条取代了原来"BIT 不能存在"式的硬编码名单，因为一条解析不到的挖矿条目会让矿机页面提供钱包根本不能寻址的币；
+- `source_id` 是矿池列表主键，必须唯一（符号可以重复，一个币按算法出现多次）；
+- 仍要求 `BTC` 可签名、`XMR`/`XCH` 按名称解析到各自的目录 id。
+
+### secp256k1 的生产签名搬进仓库
+
+`src/Secp256k1Sign.h` 原来是 mbedtls 的 `mbedtls_ecdsa_sign_det_ext`。它有三个问题：主机链接的是桩版 mbedtls（所有 EC 操作直接 `BAD_INPUT`），所以**主机测试从来没有验证过任何一枚产出的签名**；设备为这一个操作把 mbedtls 的 EC 代码整段链接进来；仓库里因此同时存在两份 256 位曲线实现。
+
+现在 `WalletSecurity.cpp` 里已经没有任何 mbedtls EC 调用（`grep mbedtls_ecp|mbedtls_ecdsa|mbedtls_mpi` 为 0），全部走 `src/EcdsaCurve.h`：
+
+- `public_key_from_private` / `uncompressed_…`：`ecdsa_public_key[_compressed]`
+- `valid_private_key`：`ecdsa_scalar_is_valid`
+- `hd_private_derive`：`ecdsa_scalar_add`（`k_child = (IL + k_par) mod n`，零结果与越界 IL 都返回 `InvalidChild`）
+- `hd_public_derive`：`point(IL) + K_par`，结果必须能编码成 SEC1 压缩点
+- `secp256k1_sign_digest_recoverable`：`ecdsa_sign_digest_recoverable`，恢复位随 low-S 归一翻转；`R.x` 溢出（恢复位 bit 1）在 65 字节 `r||s||v` 里没有表示，直接失败而不是签一个 `v` 错的签名
+- `secp256k1_schnorr_sign` / `_verify` / `xonly`：BIP340 落在 `EcdsaCurve` 里，签名返回前按验证器的方式自检
+
+BIP340 那次 `tagged_hash` 一上来就写错了：`SHA256(tag)` 被算了两次而不是重复一次，`bip340=FAIL` 立刻抓出来。这就是为什么这些向量必须真的跑。
+
+### P-256 的两份实现合成一份
+
+`src/P256Sign.h` 从 841 行降到 193 行：Montgomery 域、Jacobian 点运算、RFC 6979、DER 编解码全部删掉，只留下 ES256 的视角（`X||Y` 公钥、`r||s` 签名）转发给 `EcdsaCurve`。RFC 6979 A.2.5 的 KAT、high-S 接受、篡改/零 r,s/错摘要/曲线外公钥/零私钥/私钥=n 全部保留并通过。两份 1300 行的手写曲线算术，风险从来不在"写得对不对"，而在"只改对了一份"。
+
+### GRS：P2SH 与 bech32 花费
+
+上一轮只解封了 legacy P2PKH。这次读了 Groestlcoin Core 的真实源码（`git clone --filter=blob:none --sparse`，只取 `src`）：
+
+```c
+/* src/script/interpreter.cpp */
+uint256 GetPrevoutsSHA256(const T& txTo)  { HashWriter ss{}; ... return ss.GetSHA256(); }
+uint256 GetSequencesSHA256(const T& txTo) { ... ss.GetSHA256(); }
+uint256 GetOutputsSHA256(const T& txTo)   { ... ss.GetSHA256(); }
+/* src/hash.h */
+uint256 GetHash() { ctx.Finalize(result.begin()); /* GRS ctx.Reset()... */ return result; }
+```
+
+也就是说 GRS 的 BIP143 等价预映像在**四个位置**都是单次 SHA-256，而 Bitcoin 的 BIP143 三个子哈希是双次（用 BIP143 自己的向量验证过：outpoints 的 dSHA256 才是 `96b827c8…`）。只把最后一步改成单次会得到一个没有节点接受的预映像。
+
+`bip143_digest()` 现在统一走 `sighash_hash(family, …)`，四个哈希一起切。`grs49`/`grs84` 两个账户（coin type 17、派生 49/84、地址 `P2shP2wpkh`/`P2wpkh`）随之进网表与目录，`SighashFamily::GroestlLegacy` 与 GRS 地址族的绑定改成按 **utxo 档案**判定（0x24/0x05/`grs`），因为三条 GRS 账户只有导出路径和地址形式不同，编码并不都是 `P2pkhGroestl`。
+
+自检新增 segwit 用例，两个期望值都来自独立的 Python 实现（同一份字段、两种哈希规则），并且互相为反面：GRS 得到 `390905ce…1978f`，同一笔按 Bitcoin 规则得到 `94828586…af3b4f`；`grs1q…` 地址必须渲染出来。
+
+诚实边界：legacy 路径有真实主网签名作锚，segwit 路径**没有**链上签名向量——它的依据是 GRS 源码本身加上独立实现的交叉复算。首次实机/节点验收应优先补这一条。
+
+### 手机链路改成 X25519
+
+`WalletLink` 的临时交换从 Ed25519 群换成 RFC 7748：`scalar = SHA512(seed)[0..31]`，`shared = X25519(scalar, peer)`。身份密钥仍是 Ed25519（签名不变），但线上的 `PK_*_eph` 现在是 Curve25519 u 坐标，**协议版本从 1 升到 2**——v1 手机与 v2 设备必须直接失败，否则两端对同一段 transcript 派生出不同密钥，症状是"握手成功、之后每帧都认证失败"。手机端要同步改，这是有意的破坏性变更。
+
+### SE051：参数块、装载序列、PIN 会话
+
+`Se051Curves.cpp` 把 `se05x_ecc_curves_values.h` 里 secp256k1 与 prime256v1 的 prime/a/b/G/order 逐字节搬进来，并提供：
+
+- `se051_install_curve()`：`CreateECCurve` + A/B/G/N/PRIME 五条 `SetECCurveParam`（顺序与 SDK 的 `Se05x_API_CreateCurve_*` 一致），任何一条非 `0x9000` 立即停止并交回状态字；
+- `se051_curve_present()`：`0x6A88`/`0x6A80` 当错误，不当"没有曲线"；
+- `Se051PinSession`：会话创建 → 策略 → `VerifySessionUserID`，只按 ISO 7816-4 的 `0x63Cx` 解释剩余次数，`0x63C0` 锁死；未认证会话里 `se051_pin_hmac()` 在本地就拒绝，不把命令发给卡。
+
+自检最硬的一条是**反向校验参数块**：从 `src/EcdsaCurve.h` 重算 prime/order/b/G 再逐字节比对（`a` 按 `a=-3`/`a=0` 现算）。写错一个字节的后果是卡接受参数、然后签出固件验不过的签名——静默、且只有网络能发现。
+
+装载序列、列表解析、PIN 状态机都用假卡验证：帧数、帧内偏移、部分失败时的停止点（第 2 条失败 → 只发出 2 条）、`0x63C2` → `attempts_left=2`、`0x63C0` → `Locked`。
+
+策略层和驱动层之间原来要调用方自己写接线，两处规则（每条命令必须 `0x9000`；`0x6A88` 不等于缺曲线）很容易漏一个。现在 `Se051Provisioning` 里有 `se051_curve_query()` / `se051_curve_provision()`，自检用一张"第 6 条命令之后才把曲线列进列表"的假卡把 `Absent → 装载 → Ready → Ready` 整条路径跑完。半装载的曲线只能报成 `Absent`（`ReadECCurveList` 不区分"没建过"和"没写完"），重复 `CreateECCurve` 会失败，所以调用方拿到的是 `ProvisionFailed`，不会拿到一条参数是 0 的曲线去签名。
+
+顺手清掉了 `Se051Apdu.cpp` 里的调试脚手架：一个从未被用到的 `SAY()` 宏（连带 `<stdio.h>`）、两处 `::printf("sw-fail …")`、一句 `passed = passed && true;`，以及 6 个未初始化的 `FakeCard`（`response_size` 是随机值，靠运气才能通过）。`AirgapFrame.cpp` 里也有一处同样的残留：同一调用被打印一遍再断言一遍，把调试输出写到了 stderr，CI 上表现为一串 PowerShell `NativeCommandError`。这些都在，说明自检里混进了没清干净的一次性代码；它们不影响断言，但会让人以为测试跑出了错。
+
+### 托管门
+
+`secure_custody_backend_ready()` 原来是字面 `return false;`。这个结论本身是对的，但写法有隐患：真正接入后端的人只要"顺手"改成 `true`，没有任何地方能证明那是对的。
+
+现在是五个事实的合取，每个来自不同的层：
+
+| 事实 | 来源 |
+| --- | --- |
+| `backend_registered` | `secure_element_name()` |
+| `channel_authenticated` | `secure_element_ready()`（SCP03，认证的是主机） |
+| `user_authenticated` | 后端新钩子 `user_authenticated()`（认证的是人，接 `Se051PinSession`） |
+| `keys_non_exportable` | 后端新钩子 `keys_non_exportable()` |
+| `wallet_uses_handles` | `WalletSession` 自己注册的查询 |
+
+`custody_gate_blocker()` 按修复顺序返回第一个不成立的事实，`custody_blocker_text()` 给可读原因，`custody <coin>` 直接打进 CLI。自检逐条伪证：五个事实全真必须开；分别打掉一个必须落到各自的 blocker；打掉两个必须报顺序更靠前的那个；再验证注册钱包层查询后门不会被它单独打开，且查询恢复后状态回到原样。
+
+`production_policy` 里那个"已认证传输"的假后端现在把 `user_authenticated` 和 `keys_non_exportable` 都答成 `true`——它能开的最多到卡这一侧，门仍然由 `WalletLayerNotConverted` 关着。这正是想要的性质：**换后端不改变结论，改钱包层才会。**
+
+### 结果
+
+- `build.ps1` 全项 pass（`se051-apdu`、`ecdsa-curve`、`x25519`、`p256-ecdsa`、`sighash`、`mining-catalog` 均 pass）；
+- `device_compile_check.ps1 -Target esp32p4` 与 ESP32 目标全源通过（含 `WalletCli.cpp` 的 arduino-parity 段）；
+- `build_chain_native.ps1` 新增 `wallet-selftest` 子命令并接入：`bip39/bip32/bip84/evm-derive/secp256k1/bip340` 六项全部在真实密钥、真曲线、真 mbedtls 哈希下 pass——这是主机套件（桩 mbedtls）根本跑不到的一层；
+- `build_clang_ubsan.ps1`、`policy_check.ps1` 通过。
+
+### 仍未做
+
+- GRS segwit 缺链上签名向量（见上）；P2SH 多签、非 P2WPKH 的 bech32 花费不在范围。
+- SE051 实卡互验、曲线装载权限、PIN 派生（PIN → user id）、PIN 会话接续；托管门已经会用这些事实，但它们目前都还不成立。
+- `Ed25519` 的 PKCS#8/SPKI 导入、P-256 密钥协商未做。
+- 手机端 X25519 同步改造在固件之外。

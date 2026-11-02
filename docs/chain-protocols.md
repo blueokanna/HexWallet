@@ -2,6 +2,58 @@
 
 > **Tooling note (2026-10-28).** The Python/Node oracle harness (	ests/*.py, 	ests/reference/*, 	ools/*.py) was removed at the owner's request: this repository now needs exactly two toolchains, Arduino/xtensa for the device and MSVC or clang plus PowerShell for the host. Every vector those harnesses produced is still pinned in `src/generated/*.inc` and executed by `tests/host/host_test.exe`, so the checks still run on every build. The prose below records the original independent-SDK comparisons; bring the SDKs back if you need to regenerate a fixture.
 
+## Bitcoin PSBT: v0 and v2 (BIP370)
+
+There is no PSBT version 1 on the wire. BIP370's own footnote records that the
+number was skipped because v0 had been called "version 1" colloquially, so the
+two envelopes in circulation are:
+
+- **v0** — `psbt\xff`, then a global map whose `PSBT_GLOBAL_UNSIGNED_TX` (0x00)
+  carries the whole unsigned transaction; each input/output map then adds the
+  UTXO, derivation and redeem script for its position.
+- **v2** — `psbt\xff`, `PSBT_GLOBAL_VERSION` (0xfb) = 2, no unsigned
+  transaction. The transaction version (0x02), a fallback lock time (0x03) and
+  the input/output counts (0x04/0x05) live in the global map; each input map
+  carries its own `PSBT_IN_PREVIOUS_TXID` (0x0e), `PSBT_IN_OUTPUT_INDEX` (0x0f)
+  and optional `PSBT_IN_SEQUENCE` (0x10), and each output map its own
+  `PSBT_OUT_AMOUNT` (0x03) and `PSBT_OUT_SCRIPT` (0x04).
+
+`bitcoin_parse_psbt()` accepts both and produces the same
+`BitcoinSigningRequest`, so review and signing are one code path. The invariant
+the self-test pins is stronger than "both parse": the same transaction encoded
+as v0 and as v2 must yield a **byte-identical signed transaction**.
+
+Rules the reader enforces, each with its own error so a constructor bug is
+visible instead of silently reinterpreted:
+
+| Condition | Result |
+| --- | --- |
+| `PSBT_GLOBAL_VERSION` present with a value other than 0 or 2 | `Unsupported` |
+| v2 carrying `PSBT_GLOBAL_UNSIGNED_TX` | `NonCanonical` |
+| v0 carrying any v2-only global (0x02–0x06) | `NonCanonical` |
+| v2 missing tx version, input count or output count | `MissingField` |
+| `PSBT_GLOBAL_TX_MODIFIABLE` with any flag set | `Unsupported` |
+| input/output count outside 1..8 / 1..16 | `TooLarge` |
+| v2 input without a previous txid or output index | `MissingField` |
+| `PSBT_IN_REQUIRED_TIME_LOCKTIME` < 500000000, or height ≥ 500000000 | `NonCanonical` |
+| both a time-only and a height-only input constraint | `Unsupported` |
+
+Lock time follows BIP370: the fallback when no input asks for one, otherwise the
+type every constrained input supports, choosing height when both types are
+possible, and the largest value of the chosen type. An absent
+`PSBT_IN_SEQUENCE` means `0xffffffff`.
+
+Field order inside a map is not fixed by the spec, so the reader never assumes
+it: a non-witness UTXO is re-hashed against the outpoint only after the whole
+input map is read, and an output's BIP32 derivation is applied only after its
+script is known. Both orders are exercised by the self-test.
+
+A `PSBT_GLOBAL_XPUB` is accepted and ignored. Every key this firmware signs with
+derives from the device seed, so a host-supplied account xpub can never steer a
+signature; refusing the field would only reject ordinary constructors. Every
+other unknown or proprietary key is refused, because a field the signer cannot
+interpret has no business in a spend it is about to authorize.
+
 ## Account-model chain signing (VET / ICX / TON / DCR / CKB)
 
 *Merged from docs/chain-signing.md.*
@@ -334,7 +386,7 @@ InstantSend 仍然**不改变交易字节**：它是主网 quorum 对输入达�
 仍然不支持、并且不会假装支持：特殊交易类型、混币（PrivateSend）流程、`nLockTime` 之外的时间锁语义、
 P2SH 多签花费（设备只持有一把钥匙）。
 
-### Zcash (ZEC)
+### Zcash (ZEC) and ZERO (ZER)
 
 The Zcash v4 transparent ZIP-243 engine runs with the mainnet NU6.2 branch id
 `0x5437f330`, SLIP-0044 coin type `133`, and t1/t3 base58 prefixes
@@ -344,6 +396,26 @@ host that reproduces this layout. The device prints ZCASH on the review screen
 and returns the complete signed v4 transaction. Shielded components and non-v4
 transaction versions are rejected, and the transparent supply cap is 21,000,000
 ZEC.
+
+ZERO (`zer`) is the second entry on that engine and the reason it takes its
+parameters from the network profile instead of the file. ZERO is a Zcash fork
+(zerocurrency.io; node at github.com/zerocurrencycoin/Zero) whose mainnet
+`chainparams.cpp` uses the **same** transparent version bytes `0x1cb8`/`0x1cbd`
+and the same base58 alphabet, so an address looks like Zcash's; what differs is
+the consensus branch id. Its `consensus/upgrades.cpp` table runs Sprout →
+Overwinter (`0x6f76727a`) → Sapling/Cosmos (`0x7361707a`) → Blossom
+(`0x2bb40e60`), and `chainparams.cpp` leaves Blossom at
+`NO_ACTIVATION_HEIGHT`, so the active epoch after height 620450 is COSMOS and the
+sighash branch id is `0x7361707a`. Coin type 323 per SLIP-0044, transparent cap
+17,000,000 ZER. The network self-test asserts that the two chains share address
+bytes but **not** branch ids — pairing one chain's addresses with the other's
+branch id produces a signature no node accepts, which is exactly the kind of
+mistake that survives a "it signed something" test.
+
+Shielded (z/zs) addresses are out of scope for both chains: spending from the
+shielded pool needs the Sapling proving and note-tracking machinery, and a
+device that cannot see the note cannot honestly claim to have reviewed the
+spend. This is the same boundary Ledger and Trezor draw for Zcash.
 
 Signed inputs are t1 P2PKH and t3 P2SH whose redeem script is exactly
 `<0x21> <33-byte compressed pubkey> OP_CHECKSIG` holding this wallet's key. For a

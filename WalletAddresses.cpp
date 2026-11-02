@@ -200,6 +200,14 @@ WalletError address_from_script(const UtxoAddressProfile &profile,
                                 const uint8_t *script, size_t script_size,
                                 char *out, size_t out_size) {
   if (script == nullptr || out == nullptr || out_size == 0) return WalletError::InvalidArgument;
+  if (script_size == 34 && script[0] == 0x51 && script[1] == 32 && profile.bech32_hrp != nullptr) {
+    const std::vector<uint8_t> program(script + 2, script + 34);
+    const std::string address = segwit_address::encode(profile.bech32_hrp, 1, program);
+    if (address.empty()) return WalletError::CryptoFailure;
+    if (address.size() + 1 > out_size) return WalletError::BufferTooSmall;
+    memcpy(out, address.c_str(), address.size() + 1);
+    return WalletError::Ok;
+  }
   if (script_size == 22 && script[0] == 0x00 && script[1] == 0x14 && profile.bech32_hrp != nullptr) {
     const std::vector<uint8_t> program(script + 2, script + 22);
     const std::string address = segwit_address::encode(profile.bech32_hrp, 0, program);

@@ -39,6 +39,9 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'cosmos sign self-test failed' }
   & 'build/chain-native/Release/chain_probe.exe' dash-sign-selftest
   if ($LASTEXITCODE -ne 0) { throw 'dash sign self-test failed' }
+  # PSBT v0/v2 parsing and the signature both envelopes must agree on: needs real BIP32/ECDSA.
+  & 'build/chain-native/Release/chain_probe.exe' bitcoin-tx-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'bitcoin transaction self-test failed' }
   & 'build/chain-native/Release/chain_probe.exe' evm-sign-selftest
   if ($LASTEXITCODE -ne 0) { throw 'evm sign self-test failed' }
 

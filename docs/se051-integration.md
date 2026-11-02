@@ -6,13 +6,11 @@
 
 `Se051ArduinoPort.cpp` 实现 NXP Plug & Trust 的 `axI2CInit/Read/Write/Term` 和计时接口，替代官方 Linux 平台端口。接口按 [NXP 官方源码](https://github.com/NXP/plug-and-trust/tree/7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2) 核对，固定提交为 `7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2`。
 
-- 专用 Wire1，100 kHz，单次总线操作超时 100 ms。
-- 上游使用 8 位地址 `0x90`，Arduino Wire 使用 7 位地址 `0x48`。
-- 缓冲至少 260 字节；一个 T=1 帧只发起一次 I²C 事务。
-- 短写清空发送缓冲；短读清空接收输出。数据 NACK、超时或不完整帧会使端口失效，必须关闭并重新建立安全会话。
-- 同一会话只允许创建它的任务操作。板级诊断不再读取任意 I²C 字节并伪称 ATR，也不会重置 SDK 已占用的总线。初始化、诊断和关闭仍须由同一串行执行路径调度。
+曲线装载与 PIN 会话的应用层是 `Se051Apdu` + `Se051Curves`：前者只负责编码，后者只负责"往卡里写什么"。两者都通过一个 `Se051Sender` 回调取命令、给响应，SCP03 包裹由调用方做——这样这一层没有通道状态，也能在主机上逐帧验证。
 
-端口默认不启用。启用需要 `HEXWALLET_ENABLE_NXP_SE051=1`、板型 7、官方 SDK 的 `T1oI2C` 配置与头文件搜索路径。不能同时链接 SDK 的 Linux `i2c_a7.c` 或通用 `sm_timer.c`。本仓库没有打包完整的 Arduino SSS 库，也没有用默认测试密钥自动打开 SCP03；打开该宏本身不足以完成固件集成。
+- `se051_install_curve()`：`CreateECCurve` 后按 SDK 的顺序发 A、B、G、N、PRIME 五条 `SetECCurveParam`，任一条不是 `0x9000` 就停下并把状态字交回调用方。参数取自 `se05x_ecc_curves_values.h`（secp256k1 与 prime256v1），并且由自检**反向从 `src/EcdsaCurve.h` 重算 prime/a/b/G/order 逐字节比对**——写错一个字节的后果是卡接受参数、然后签出固件验不过的签名，那是最坏的失败模式。
+- `se051_curve_present()`：读曲线列表。`0x6A88`/`0x6A80` 一律当错误返回，不当"没有曲线"。
+- `se051_pin_begin/verify/hmac`：CreateSession → 会话策略 → `VerifySessionUserID`，只按 ISO 7816-4 的 `0x63Cx` 解释剩余次数，`0x63C0` 直接锁死；未认证的会话里 `se051_pin_hmac()` 在本地就拒绝，不会把命令发给卡。
 
 `SecureElementPort` 现在会清理打开失败时的半初始化状态，会话失去认证后必须重新打开。假后端生命周期测试只在主机测试构建中存在，设备自检不会替换真实后端。
 
@@ -39,6 +37,52 @@ RFC 4493 向量自证），钉死的内容包括：派生出的 S-ENC/S-MAC/S-RM
 SE051 出厂可能没有装载 secp256k1 域参数。`Se051Provisioning.h` 把
 `0x6A80`/`0x6A88` 明确归类为"曲线未装载"，并且只允许：装载一次 → 立即重试一次；重试仍报
 缺曲线就判死，不再循环。其它状态字一律不当成缺曲线，避免把真实故障当成"再写一次就好"。
+
+### 两层之间的接线
+
+策略层（`Se051Provisioning`）只认回调，不认识 APDU 字节；驱动层（`Se051Curves`）只认
+"发一条命令、收一条应答"，不认识工厂授权。之前的接线要调用方自己写，两处规则很容易漏：
+一处是"每条命令必须 `0x9000`"，另一处是"`0x6A88` 不等于曲线缺失"。现在有现成的适配器：
+
+```cpp
+Se051CurveProvisionContext context = {send, transport, kSe051CurveSecp256k1};
+se051_factory_prepare_curve(factory_authorized, se051_curve_query,
+                            se051_curve_provision, &context, &status);
+```
+
+`se051_curve_query()` 把 `ReadECCurveList` 的结果翻成 `Ready`/`Absent`，
+`se051_curve_provision()` 调 `se051_install_curve()`。自检里有一张假卡：它在第 6 条命令
+（CreateECCurve + 五条 SetECCurveParam）之后才把曲线列进列表，于是 `Absent → 装载 →
+Ready → Ready` 整条路径被真正跑过一遍，而不是只数调用次数。
+
+半装载的曲线**报成 Absent**：公开资料里 `ReadECCurveList` 不区分"从未创建"与"创建了但参数
+没写完"，而重复的 `CreateECCurve` 会失败，所以调用方看到的是 `ProvisionFailed`，不会拿到
+一条 G 坐标为 0 的曲线去签名。恢复只能由操作员带恢复流程处理。
+
+## 托管门
+
+之前 `secure_custody_backend_ready()` 是字面 `return false;`。它诚实，但把结论写死了：
+真要接入后端时，谁都可以"顺手"改成 `true`，而没有任何地方能证明那是对的。
+
+现在它由五个互相独立的事实推导，缺一不可：
+
+| 事实 | 来源 | 谁能让它成立 |
+| --- | --- | --- |
+| `backend_registered` | `secure_element_name()` | 链接进来的后端注册自己 |
+| `channel_authenticated` | `secure_element_ready()` | SCP03 握手成功 |
+| `user_authenticated` | `secure_element_user_authenticated()` | 卡内 PIN 会话认证（见 `Se051PinSession`） |
+| `keys_non_exportable` | `secure_element_keys_non_exportable()` | 后端承诺密钥不出卡 |
+| `wallet_uses_handles` | `WalletCustody` 里注册的钱包层查询 | `WalletSession` 自报是否走句柄 |
+
+`custody_gate_blocker()` 返回第一个不成立的事实，`custody_blocker_text()` 给出可读原因，
+`custody <coin>` 直接把它们打进 CLI（`custody-ready=no custody-blocker="..."`）。这样"为什么
+托管没开"是一个可以回答的问题，而不是屏幕上一句含糊的拒绝。
+
+自检逐条伪证：把五个事实摆成全真，分别打掉其中一个，必须落到各自的 blocker；同时打掉两个，
+必须报**修复顺序更靠前**的那个。没有任何单一改动能让门自己开。
+
+SCP03 通道认证的是**主机**，PIN 认证的是**人**，两件事分开是因为只凭通道就放行等于把
+"能连上卡"当成"用户在场"。`se051_pin_hmac()` 在会话未认证时本地就拒绝，不会把命令发给卡。
 
 ## Applet 命令字节（本轮新增，按 NXP 公开源码逐项核对）
 
@@ -83,8 +127,11 @@ CLA/INS/P1/P2 与 TLV 布局都能逐行核对。`Se051Apdu.h/.cpp` 就是照这
 `P1_HMAC_KEY` 并绑定 UserID（PIN 认证对象），每次派生子密钥前先 `VerifySessionUserID` 再用
 `INS_CRYPTO` 做 HMAC-SHA512；PIN 错误次数由卡片硬件计数，超过 `MaxAttempts` 锁死槽位。
 命令帧已经具备（`se051_apdu_session_create`、`se051_apdu_session_policy`、
-`se051_apdu_verify_session_user_id`、`se051_apdu_hmac`），还缺的是 PIN 会话接续与实卡互验，
-所以当前派生仍在 MCU 内完成——这正是 `WalletCustody` 仍拒绝声明"生产托管"的原因。
+`se051_apdu_verify_session_user_id`、`se051_apdu_hmac`），会话状态机 `Se051PinSession` 也已
+实现并有主机测试。**会话接续本身没有做完**：真卡上 `CreateSession` 的应答里带回 session id，
+后续命令要用它，而"PIN 验证失败后同一个会话还能不能用"取决于 applet 的 policy，公开资料
+没有说明，所以这里既不猜、也不假装续得上——没认证的会话里 `se051_pin_hmac()` 在本地就
+拒绝。这条没通，托管门就不会开。
 
 ## 原理图记录
 
@@ -99,9 +146,9 @@ CLA/INS/P1/P2 与 TLV 布局都能逐行核对。`Se051Apdu.h/.cpp` 就是照这
 | 项目 | 必须补齐的实际工作 |
 | --- | --- |
 | SSS/SCP03 | SCP03 通道已实现并主机自检（KDF、卡/主机 cryptogram、C-MAC 包裹、R-MAC 校验与解锁、计数推进、篡改即清会话）；缺的是 applet 的 INS 表与实卡互验、设备独有配钥、主机密钥保护、完整 Arduino 库链接 |
-| 曲线装载 | 帧已按 plug-and-trust 逐字节实现并自检（`Se051Apdu`：`CreateECCurve`、5 个 `SetECCurveParam`、`ReadECCurveList`）；`Se051Provisioning` 仍负责"只在本机配一次、失败立即重试一次、再失败即判死"的策略。缺的是实卡互验与（如果料号未预置曲线）A/B/G/N/PRIME 参数块 |
-| 卡内派生 | 设计已定：BIP32 子密钥由 SE051 用 HMAC-SHA512 在卡内完成，主种子前 32 字节作 `k_par`、后 32 字节作 `c_par`，`c_par` 进 `P1_HMAC_KEY` 并绑定 UserID；命令帧已具备（会话创建/策略/`VerifySessionUserID`/单次 HMAC），缺 PIN 会话接续与实卡验证，因此当前仍由 MCU 派生，托管门保持关闭 |
-| 钱包托管 | 非导出对象句柄贯通派生、签名与恢复；禁止回退到明文 MCU 私钥；签名前绑定已审阅交易 |
+| 曲线装载 | 帧与参数都已按 plug-and-trust 逐字节实现；`Se051Curves` 提供 `se051_install_curve()`（CreateECCurve + 五条 SetECCurveParam）与 `se051_curve_present()`，参数块由自检对照 `src/EcdsaCurve.h` 重算校验，并已接上策略层（`se051_curve_query`/`se051_curve_provision`）。缺的是实卡互验：某料号是否出厂已带曲线、装载权限是否受平台 SCP 约束，只有实卡能回答 |
+| 卡内派生 | 设计已定：BIP32 子密钥由 SE051 用 HMAC-SHA512 在卡内完成，主种子前 32 字节作 `k_par`、后 32 字节作 `c_par`，`c_par` 进 `P1_HMAC_KEY` 并绑定 UserID；会话状态机（`Se051PinSession`）、单次 HMAC 与 `0x63Cx` 重试计数已实现并有主机测试，缺 PIN 派生（PBKDF2/PIN 加密）与实卡验证，因此当前仍由 MCU 派生，托管门保持关闭 |
+| 钱包托管 | 非导出对象句柄贯通派生、签名与恢复；禁止回退到明文 MCU 私钥；签名前绑定已审阅交易。托管门本身已改成五个事实合取（见上），并有逐条伪证的自检；缺的是让 `wallet_uses_handles` 真的能成立的句柄派生/签名路径 |
 | Chia | 替换 G1/G2 和标量运算的可变时间路径；验证 EIP-2333、synthetic key、AugScheme 与标准 puzzle 的上游向量；P4 侧信道和资源验证 |
 | QRL | 完整 XMSS 签名及交易编码；按公钥绑定的不可回滚 OTS 预留；预留先于签名，取消、断电与结果丢失均不归还叶索引；跨设备恢复防重用 |
 | DOT/KSM | 可信 runtime metadata 来源、版本和扩展绑定；验证 SCALE、extrinsic、metadata hash 与审阅字段；升级或未知调用默认拒绝 |

@@ -44,7 +44,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 已登记代币共 79 条，覆盖 61 个 EVM 网络（其中 BSC 27 条，含 WBNB、CAKE、FDUSD、TUSD、LINK、DOT、ADA、XRP、DOGE、SHIB、UNI、AAVE、ATOM、XVS、BSW、ANKR、COMP、BETH、AVAX、PENDLE、SFP）；`tools/token_audit.ps1` 会把每一条 EVM 代币行拿去链上核对 `symbol()`/`decimals()`/`name()`：位数不符即失败，标签漂移只告警（Arbitrum 上的 USDT 合约已被 Tether 原地升级成 USD-T0，地址与 6 位小数不变）。未登记合约仍拒绝盲签。
 - 自定义代币（`WalletCustomTokens`）：最多 8 条，覆盖 EVM ERC-20（20 字节合约）、TRON TRC-20（21 字节账户地址）、Solana SPL（32 字节 mint）、Stellar 发行资产（32 字节 issuer + 资产代码）、Starknet ERC-20（32 字节合约地址）。键宽由网络决定，调用方无法把 20 字节的以太坊式地址塞进 Starknet 记录；整表是一块带 SHA-256 的 blob，半写或改动一律整表拒绝，旧版 EVM-only v1 blob 在加载时自动升级。
 - 自定义记录只是标签，不是授权：真正签名的永远是链上携带的 base unit 整数，设备只做显示换算；用记录换算出的金额会标 `USER-DECLARED`/`UNVERIFIED`，并在提示里说明标签来自本机而不是发行方。已登记代币优先，用户记录绝不遮蔽它们。没有记录时显示原文（`1500000 raw`），不猜小数位。设备侧命令：`token custom-list`、`token custom-add <network> <id-hex> <symbol> <name> <decimals>`、`token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals>`、对应的 `custom-remove`。
-- 显式的安全芯片托管策略 `WalletCustody`：SE050C1H1 目标只声明 secp256k1 + ECDSA + seed 封装能力（SCP03/applet 驱动尚未实现）；Kaspa Schnorr 和 Ed25519/BLS/XMSS 私钥保留在 MCU RAM。
+- 显式的安全芯片托管策略 `WalletCustody`：SE051C2HQ1 **目标**档案声明 secp256k1 + ECDSA + Ed25519 + seed 封装（目标能力，未经实机验证）；托管门由"后端已注册、通道已认证、用户已认证、密钥不出卡、钱包层走句柄"五个事实合取推导，逐条都有自检伪证，因此没有任何单一改动能把它打开。Kaspa Schnorr 和 BLS/XMSS 私钥保留在 MCU RAM。
 - 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
 - 审查并签名受限的 Bitcoin PSBT v0。
 - 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 与 t3 P2SH-P2PK 输入、t1/t3 输出）：`zec inspect <ZEC4|ZEC5-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。t3 花费要求 redeem script 恰好是单个压缩公钥加 `OP_CHECKSIG`，设备会把它当作 `scriptCode` 重新哈希并与地址比对，多签或其他 redeem 形式、屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在自检中校验。
@@ -120,7 +120,7 @@ HexWallet 的“发送”由手机发起：手机构造未签名交易，硬件�
 - **接收**：手机通过链路调用 `ADDRESS`，设备派生并返回地址（仅公钥/地址，不含私钥）。
 - **发送**：手机调用 `BEGIN_SIGN` → 设备解析并校验（输入归属、找零派生、手续费上限、合约白名单）→ 在可信屏幕显示收款地址/金额/手续费并给出 `APPROVE` / `REJECT` 按钮 → 用户按键后，手机再次调用 `RESULT` 取回签名。
 - **配对**：首次连接在设备屏幕显示 6 位配对码与手机指纹，必须现场确认。手机公钥被固定，之后换成其他手机一律拒绝。
-- **链路保护**：握手是 Ed25519 双向签名 + 临时 ECDH（HKDF-SHA256 派生会话密钥）；每帧 ChaCha20 加密 + HMAC-SHA256 认证，并带单调递增序号。伪造、重放、乱序、篡改都会失败并销毁会话。
+- **链路保护**：握手用 Ed25519 身份密钥做双向签名，临时密钥交换是 **X25519**（RFC 7748）；HKDF-SHA256 派生会话密钥，每帧 ChaCha20 加密 + HMAC-SHA256 认证，并带单调递增序号。伪造、重放、乱序、篡改都会失败并销毁会话。协议版本 2：v1 手机与 v2 设备必须直接握手失败，不能沿用旧派生。
 - **USB 默认关闭**：只有长按 BOOT/用户按键 3 秒才开启（默认 10 分钟窗口），再次长按、超时、上锁都会关闭；关闭时丢弃一切串口输入。
 - **NFC**：PN7161（NCI 2.0）ISO-DEP 卡模拟，手机作为读卡器。引脚必须来自原理图，在板级 profile 中定义 `HEXWALLET_NFC_PN7161` 与 `HEXWALLET_NFC_PIN_*`；未定义时 `link status` 显示 `nfc=not-configured`，固件不会猜测引脚。该驱动尚未在实机上做射频一致性验证。
 - **无显示屏的板子**：不提供签名审阅，链路会返回 `unsupported`，不会退化成“主机确认”。
@@ -677,7 +677,7 @@ ERR trusted-display-required-for-signing
 
 ## EVM 交易审查和签名
 
-当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 的 `safeTransferFrom` 唯一 selector 在空回调数据时可在没有 NFT 合约注册记录的情况下审阅，设备显示合约地址、标准与未登记警告，但无法离线验证合约身份或元数据；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。66 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 以及新增的 Robinhood Chain、Flare、XinFin、Horizen EON、Oasis Sapphire、Merlin、Bitlayer 保持 legacy-only。合约创建与未知选择器在 opaque 审阅模式下不会被静默放行：设备单列 `CONTRACT CREATION` 或 `UNDECODED CONTRACT CALL`，显示目标地址（创建交易则显示设备自算的预期合约地址）、完整 calldata、calldata 的 keccak-256 与原生币金额，并明确标注“效果与权限未验证”。非规范 ABI 偏移、超出容量限制的 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 仍会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
+当前开放已登记网络上的 EIP-155 legacy、经链策略允许的 EIP-1559 type-2 原生转账及已登记 ERC-20 合约调用。ERC-721/1155 可以通过 `token custom-add-nft` 登记集合，再审阅现有解码器支持的单笔转移；设备显示合约地址、标准与用户声明警告，无法离线验证合约身份或元数据。未登记合约不会作为已解码 NFT 转移放行；其余 ERC-4626/777/3525/6551/OFT/ONFT 仍缺少对应合约准入记录，不能作为通用合约签名功能。下面的 ABI 限制描述解析器行为，不代表相关合约已开放。66 个 EVM profile 都支持 legacy；type-2 只对 `eth`、`matic`、`opt`、`arb1`、`base`、`avaxc`、`xdai`、`glmr`、`movr`、`cro`、`kava`、`core`、`unichain`、`monad`、`plasma`、`bera`、`arc`、`xlayer`、`zksync` 开放，ETC/BSC/Rootstock/Celo/Fantom/Conflux eSpace/OKT 以及新增的 Robinhood Chain、Flare、XinFin、Horizen EON、Oasis Sapphire、Merlin、Bitlayer 保持 legacy-only。合约创建与未知选择器在 opaque 审阅模式下不会被静默放行：设备单列 `CONTRACT CREATION` 或 `UNDECODED CONTRACT CALL`，显示目标地址（创建交易则显示设备自算的预期合约地址）、完整 calldata、calldata 的 keccak-256 与原生币金额，并明确标注“效果与权限未验证”。非规范 ABI 偏移、超出容量限制的 access list、ERC-1155 批量转移、ERC-6551 批量执行、ERC-721/1155/3525/777 的非空回调数据以及未实现 typed transaction 仍会被拒绝。OFT/ONFT 允许携带原生跨链费，但 `lzTokenFee` 必须为 0 且原生 value 不得低于 `nativeFee`；NFT 转移中的 `from`、金库的 `owner` 以及 `operatorSend` 的 from 必须等于本钱包地址（operator 是交易发送者，不是 calldata 参数）。
 
 审查 unsigned RLP：
 
@@ -852,7 +852,7 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `MlDsa87` | FIPS 204 ML-DSA-87 的 keygen/sign/verify，供 QRL v2 使用 |
 | `P256Sign` | NIST P-256 ECDSA：RFC 6979 确定性 nonce、low-S 归一、严格 DER；CTAP2 认证器需要的 ES256 原语 |
 | `src/EcdsaCurve.h` | 本钱包要签的两条 256 位素数曲线共用一个 ECDSA 引擎：secp256k1（`a = 0`）与 secp256r1（`a = -3`），含 RFC 6979、low-S、严格 DER 与验签。主机上可跑，所以产出的签名不需要 mbedtls 就能被独立复核；Montgomery 因子由模数推导而不是照抄常量表 |
-| `src/Secp256k1Sign.h` | 经 mbedtls 的 secp256k1 ECDSA 签名/验签，RFC 6979 确定性、low-S，并在曲线上自检 |
+| `src/Secp256k1Sign.h` | secp256k1 ECDSA 签名/验签：`src/EcdsaCurve.h` 之上的薄适配层，RFC 6979 确定性 nonce、low-S 归一、严格 DER，签名路径里没有 mbedtls 的 EC 代码 |
 | `Ed25519` / X25519 | RFC 8032 Ed25519（签名、验签、Edwards 点/标量运算）与 RFC 7748 X25519、迭代测试，以及 Ed25519 身份到 Curve25519 公钥的双有理映射 |
 | `Se051Apdu` | SE05x/SE051 applet 命令编码：CLA/INS/P1/P2/TLV 表按 NXP plug-and-trust 逐项核对，含 `CreateECCurve`/`SetECCurveParam`/`ReadECCurveList`、ECDSA/EdDSA 签名、ECDH、卡内 BIP32 需要的单次 HMAC 与会话命令 |
 | `QrlV2Transaction` | QRL v2 动态费信封：keccak-256 摘要 + ML-DSA-87 hedged 签名 |
@@ -872,7 +872,7 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `EvmTransaction` | EIP-155、EIP-1559、原生转账和白名单 Token 调用 |
 | `TokenCalldata` | ERC-20/721/1155/4626/777/3525/6551 与 LayerZero OFT/ONFT 的选择器白名单和规范 ABI 解码 |
 | `WalletBoardPort` | 板级显示器、输入和电源适配 |
-| `WalletLink` | 手机链路：配对、Ed25519 握手、会话、重放防护 |
+| `WalletLink` | 手机链路：配对、Ed25519 身份之上的 X25519 临时密钥协商、会话、重放防护 |
 | `WalletLinkCrypto` | 链路的 HKDF-SHA256、ChaCha20、Encrypt-then-MAC |
 | `WalletNfcApdu` | 承载链路帧的 ISO 7816-4 APDU 应用 |
 | `WalletNfcPort` | PN7161 NCI 卡模拟端口（需板级引脚） |

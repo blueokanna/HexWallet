@@ -242,6 +242,7 @@ void show_help() {
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
   Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
+  Serial.println("OK NFT: token custom-add-nft <network> <contract-hex> <erc721|erc1155> <symbol> <name>");
   Serial.println("OK totp: totp time [unix] | totp add <otpauth-uri> | totp list | totp show <slot> | totp remove <slot>");
   Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
   Serial.println("OK chain: chain begin <network> <index> <payload-hex> | chain sign <code> | chain reject  (native Theta SendTx payload is 46 bytes)");
@@ -646,6 +647,8 @@ bool split_arguments(char *text, char *parts[], size_t count) {
 const char *custom_standard_text(CustomTokenStandard standard) {
   switch (standard) {
     case CustomTokenStandard::EvmErc20: return "erc20";
+    case CustomTokenStandard::EvmErc721: return "erc721";
+    case CustomTokenStandard::EvmErc1155: return "erc1155";
     case CustomTokenStandard::TronTrc20: return "trc20";
     case CustomTokenStandard::SolanaSpl: return "spl";
     case CustomTokenStandard::StellarAsset: return "stellar-asset";
@@ -701,6 +704,21 @@ void report_custom_result(CustomTokenError error) {
     Serial.print("ERR custom-");
     Serial.println(custom_token_error_text(error));
   }
+}
+
+void custom_nft_add_command(char *arguments) {
+  char *parts[5];
+  uint8_t contract[20];
+  size_t size = 0;
+  if (!split_arguments(arguments, parts, 5) ||
+      !chain_parse_hex(parts[1], contract, sizeof(contract), &size) || size != 20 ||
+      (strcmp(parts[2], "erc721") != 0 && strcmp(parts[2], "erc1155") != 0)) {
+    Serial.println("ERR usage-token-custom-add-nft");
+    return;
+  }
+  report_custom_result(custom_token_add_nft(parts[0], contract,
+      strcmp(parts[2], "erc721") == 0 ? CustomTokenStandard::EvmErc721 : CustomTokenStandard::EvmErc1155,
+      parts[3], parts[4]));
 }
 
 void custom_token_add_command(char *arguments) {
@@ -776,6 +794,7 @@ void handle_token(char *command) {
   else if (strncmp(command, "token custom-list ", 18) == 0 && command[18] != '\0') show_custom_tokens(command + 18);
   else if (strncmp(command, "token custom-add-stellar ", 25) == 0 && command[25] != '\0') custom_token_add_stellar_command(command + 25);
   else if (strncmp(command, "token custom-add ", 17) == 0 && command[17] != '\0') custom_token_add_command(command + 17);
+  else if (strncmp(command, "token custom-add-nft ", 21) == 0 && command[21] != '\0') custom_nft_add_command(command + 21);
   else if (strncmp(command, "token custom-remove-stellar ", 28) == 0 && command[28] != '\0') custom_token_remove_stellar_command(command + 28);
   else if (strncmp(command, "token custom-remove ", 20) == 0 && command[20] != '\0') custom_token_remove_command(command + 20);
   else Serial.println("ERR invalid-token-command");
@@ -1000,6 +1019,13 @@ void handle_wallet_custody(char *arguments) {
   Serial.print(plan.mcu_must_hold_key ? "yes" : "no");
   Serial.print(" seed-in-mcu=");
   Serial.print(plan.requires_seed_in_mcu ? "yes" : "no");
+  const CustodyGateState gate = custody_gate_state();
+  const CustodyBlocker blocker = custody_gate_blocker(gate);
+  Serial.print(" custody-ready=");
+  Serial.print(blocker == CustodyBlocker::None ? "yes" : "no");
+  Serial.print(" custody-blocker=\"");
+  Serial.print(custody_blocker_text(blocker));
+  Serial.print("\"");
   Serial.print(" reason=\"");
   Serial.print(plan.reason);
   Serial.println("\"");
