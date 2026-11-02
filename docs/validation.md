@@ -2,6 +2,149 @@
 
 最新本地回归及未验收边界见 [2026-10-31 生产签名补齐记录](hardening-2026-10-31.md) 与 [2026-10-31 代币登记与自定义代币](hardening-2026-10-31-tokens.md)。历史记录保留当时运行范围，不代表后续修改自动通过。
 
+## 2026-11-01：Groestlcoin 锚定交易取证（结论：先要 Groestl-512）
+
+- 取到一条真实主网交易做锚，块高 6323381，txid
+  `e32bec4eaeccf21bb5dd88b8ec9c582374a111e5dc82b84d1e4d60bfceadcffd`：1 个 P2PKH 输入
+  （`scriptSig` 带 DER 签名 + `02a7863e…` 压缩公钥，SIGHASH_ALL），输出 25.18313539 GRS 到
+  `Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W` 与 109.63742195 GRS 到
+  `grs1qj0w0z9ggm50nw74xzyclf3m4xp7wyqyp3hzrs4`，`locktime` 6323380。
+- 本想把这条交易当作地址层 KAT 落进 `run_network_profile_self_tests()`，实测直接否掉了这个
+  方案：把该输出的 hash160 用双 SHA-256 做 base58check（版本 0x24）得到
+  `Fa5oaNLoshov4C6HtcnwVYnGamYJ7qnnEn`，链上是 `…J7q**XN9W**`。Groestlcoin 把校验和与
+  txid 的哈希换成了**双 Groestl-512**，因此连地址渲染都依赖这个哈希。
+- 结论：注册表里没有留 GRS。加一个用 SHA-256 校验和的 GRS 地址会生成链上不存在的地址，
+  比"暂不支持"危险得多。改动已整体回退，`networks=pass`、`catalog=pass`。
+- 下一步只需补 `Groestl512.cpp`（P/Q 各 14 轮、1024-bit 状态），用上面这条交易的
+  `scriptSig` 验签作为验收：sighash 算错、序列化错、哈希错，三种情况都会验签失败。
+  锚定交易与期望地址已写入 [chain-support.md](chain-support.md)。
+
+## 2026-11-01：airgap 传输状态机（发送/接收/重扫）落地
+
+- `AirgapFrame` 之前只有帧格式和计划枚举，没有"谁来驱动动画"。本轮补上两端状态机：
+  - `AirgapSender`：按 blob 哈希派生计划索引，切块，逐帧渲染。chunk 数与帧数会一起收缩直到
+    存在合法计划（小 blob 不会要求超过它能填满的帧数）。
+  - `AirgapReceiver`：第一帧定计划（unrank 校验分组和等于 chunk 数），其余帧按 chunk_index
+    落到计划区间；乱序、重复扫描、中途漏帧都能处理，重复帧是幂等的，缺帧时
+    `airgap_receiver_next()` 直接给出该重扫的帧号。
+- 两处帧头字段是被实测逼出来的，不是设计洁癖：
+  - `max_group` 必须上线。同一个 `plan_index` 在不同上界下表示**不同**分组，接收端无法从索引
+    反推上界，早期版本因此永远解不出计划（`airgap_plan_count` 直接 `OutOfRange`）。
+  - `chunk_bytes` 必须上线。首帧可能携带 4 个 chunk，用"首帧 payload 长度"当 chunk 大小会得到
+    76 而真实值是 19，随后每帧都被判成截断。帧头因此从 24 字节变为 26 字节，CRC 覆盖到它。
+- 自检覆盖：300 字节 blob（不能被 chunk 数整除，末块短）的正序/逆序重组、丢第 2 帧后按提示
+  补扫、重复帧幂等、异号 blob_tag 拒绝、CRC 损坏拒绝且不破坏已接受状态、计划外的 chunk_index
+  拒绝、5 类参数边界。`airgap=pass`。
+- 回归：`build.ps1` exit 0；`device_compile_check.ps1 -Target esp32p4` 全源通过；
+  `policy_check.ps1` pass。
+
+## 2026-11-01：Groestlcoin 取证（txid 之谜解开，地址校验和仍缺）
+
+按官方规范文档（`http://www.groestl.info/Groestl.pdf`，3.4.4 与 3.4.6 节）核对了自己写的
+Groestl 原型，抓到两处真实偏差：
+
+- **ShiftBytes 表用错了**。规范里短变体（8 列，摘要 ≤256）用 `P=[0,1,2,3,4,5,6,7]`、
+  `Q=[1,3,5,7,0,2,4,6]`；长变体（16 列，摘要 >256）用 **ShiftBytesWide**
+  `P=[0,1,2,3,4,5,6,11]`、`Q=[1,3,5,11,0,2,4,6]`。我一开始把 wide 的
+  `[1,3,5,11,…]` 当成了两种变体共用的 Q 表，于是 512 位的 P 少了 `11`、256 位的 Q 把
+  `11 mod 8 = 3` 当成了 `7`。
+- **漏了输出变换**。`Ω(x) = trunc_n(P(x) ⊕ x)`，我原来直接取了链值。
+
+改掉之后仍未复现链上数值，所以 `grs`/`grs49`/`grs84` 没有进注册表，`kUtxoGroestl` 也已删除。
+
+同时用一条真实主网交易（块 6323381，txid `e32bec4e…dcffd`）做了一次决定性测量：
+
+| 假设 | 结果 |
+| --- | --- |
+| `txid == SHA-256(raw_tx)` 反转 | **成立** |
+| `txid == SHA-256d(raw_tx)` 反转 | 不成立 |
+| `txid == BLAKE2b-256(raw_tx)` 反转 | 不成立 |
+
+256 位对上不可能是巧合，所以 **Groestlcoin 的交易哈希是单次 SHA-256**，legacy sighash 仍是
+Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512"的判断。
+
+仍然阻塞的是 base58check：真实地址反解得 `version=0x24`、`hash160=35ead48b…16fc43`、
+校验和 `b77ec511`；`sha256`/`sha256d` 的首/尾、正/反四种截断分别是
+`56541b08`/`b7fc49cd`/`b7aca9fb`/`eaa3c044`，都不匹配。也就是说 Groestl-512 只用于地址
+校验和这一处，但必须是已验证的实现。等在规范文档里拿到附录测试向量再落 `Groestl512.cpp`。
+
+## 2026-11-01：airgap 分帧器（枚举帧索引）、Kava 拆分与 Cosmos 表校验
+
+- `AirgapFrame.cpp`：分帧头（magic/version/blob tag/plan index/chunk index/chunk count/
+  CRC-32）与**枚举帧索引**。帧计划定义为把 `chunks` 拆成 `frames` 个非空组、相邻组相差
+  ≤1 的有界合成：连续帧的符号密度不会突变，摄像头不用反复拉风箱找对焦。计数用精确 64 位
+  DP，溢出即 `CountOverflow`，不截断——截断会破坏 rank/unrank 的双射。`airgap=pass`：
+  - 穷举证明双射：`chunks=6, frames=3, max_group=3` 逐索引 unrank→rank 回到原索引，
+    总数与手写三重循环的暴力计数一致；
+  - 64×8×6 的宽空间做中点取值往返；
+  - `IndexOutOfRange`、`OutOfRange`、`EmptyPlanSpace`、非法参数、步长为 2、和不对齐，
+    六类拒绝；
+  - 帧头在 `frame_size` 内**逐字节翻转**都必须被拒（CRC 覆盖头部与载荷）；
+  - 计划索引由 `SHA-256(seed‖blob_tag‖counter)` 做拒绝采样得到，避免取模偏置，且同一
+    (种子, 标签) 必然得到同一索引——索引不上线传输。
+- Kava 拆分：EVM 侧改名 `kavaevm`（chain 2222，仍在 EIP-1559 名单），Cosmos 侧新增
+  `kava`（`kava_2222-N`、`ukava`）。之前 `kava` 同时想当两个东西，结果只有 EVM 能用、
+  Cosmos 侧根本调不到参数表。
+- Cosmos 新增 `terra`（`phoenix-N`、`uluna`，BIP44 330）与 `terraclassic`（`columbus-N`、
+  `uluna`）。三者的 bank `MsgSend` 编码与 atom/osmo/tia 完全一致，差别只有 bech32 前缀、
+  chain-id 前缀和显示 denom，所以是参数而不是新代码路径。
+- 新增 `cosmos_chain_table_is_consistent()`：参数表的 id 必须能在网络注册表里找到且
+  `Bech32Cosmos` + hrp 一致，hrp 只能小写字母数字，denom 非空，decimals ≤ 18，id 不许重复，
+  (denom, chain_prefix, decimals, symbol) 组合不许撞车。这类错误以前只会表现为"某条链的地
+  址前缀莫名不对"。
+- 回归：`build.ps1` 全项通过（新增 `airgap`；`cosmos`、`networks`、`catalog` 均 pass）。
+
+## 2026-11-01：SE051 安全通道、曲线装载编排与 EVM 网络补登记
+
+- `Se051Scp03.cpp`：SCP03 全链路实现（AES-CMAC KDF、卡/主机 cryptogram、命令包裹与
+  C-MAC、响应 R-MAC 校验与解密、链值与计数推进、失败即清会话）。`SecureElementPort` 补
+  AES-128 逆密码（`aes128_decrypt_block`），自检里用 FIPS-197 C.1 的加密向量做双向验证。
+  `build.ps1` 输出 `scp03=pass`。
+- 对照值来自独立的纯 Python AES-128/CMAC 实现（先用 FIPS-197 C.1 与 RFC 4493 自证），钉死
+  S-ENC/S-MAC/S-RMAC、两个 cryptogram、一条 21 字节命令的密文与 C-MAC、一条响应的 R-MAC；
+  另有篡改 R-MAC、截断响应、超长数据、无会话包裹、缓冲不足五类拒绝路径。
+- `Se051Provisioning`：把 `0x6A80`/`0x6A88` 归类为"曲线未装载"，只允许装载一次 + 重试一次，
+  重试再报缺曲线即判死；其它状态字不触发装载。`se051-provisioning=pass` 覆盖 9 种分支，
+  含"回调失败"与"装载成功但重试失败"。`WriteECCurve` 的实际 APDU 属于 applet 协议，仓库里
+  没有可核对来源，因此没有编造字节。
+- EVM 网络补登记：`ronin`（chain 2020）、`theta`（chain 361，只能搬 TFUEL）、`acalaevm`
+  （chain 787）。三者都没有进 EIP-1559 名单，只签 EIP-155 legacy——typed envelope 在拒绝它的
+  链上等于一笔花不出去的签名。`networks=pass`、`catalog=pass`。
+- CI：`qr_cross_check.ps1` 不再写死 `%ProgramFiles%\Microsoft Visual Studio\2022\Community`，
+  改用 `vswhere`（保留 `HEXWALLET_VS_INSTALL` 覆盖）。本机跑通：
+  `qr-cross-check: cases=320 matrix_mismatches=0`。
+- 回归：`build.ps1` 全项通过（新增 `scp03`、`se051-provisioning`）；`device_compile_check.ps1
+  -Target esp32p4` 全源编译通过（含两个新文件）。
+
+## 2026-11-02：面板双配置、P-256/ES256 原语与认证传输边界
+
+- 墨水屏驱动拆成两种物理模式：`EinkColorMode::Mono`（1bpp，SSD1680）与
+  `EinkColorMode::FourColor`（2bpp，SSD1683 类，128×296，黑/白/红/黄）。`EinkFrame` 按模式
+  给出行宽与整帧字节数，`EinkPanel` 用 `0x21`/`0x18` 打开四色窗口与内部 LUT 选择，四色走
+  `0x10` RAM + `0x12` 刷新，黑白继续走 `0x24`/`0x22`/`0x20`。四色没有局刷波形，
+  `partial_refresh()` 在碰 BUSY 之前返回 `PartialUnsupported`；`begin()` 见到四色 + LUT 直接拒绝。
+- 局刷波形改为控制器 OTP：驱动不再向 `0x32` 写任何厂商表，`third_party/` 整个目录已删除，
+  仓库内不再有第三方代码或数据文件。板子若确实需要 tuned 波形，在自己的 pins 头文件里定义
+  153 字节 `HEXWALLET_EPD_PARTIAL_LUT`，驱动检测到才写。自检把原来的
+  “无 LUT 必须拒绝” 换成 “无 LUT 走 OTP：不写 `0x32`、窗口与 `0x22` 模式仍然生效”。
+- `src/P256Sign.h`：P-256 ECDSA 全在仓库内实现（8×32-bit Montgomery 域、全宽乘积 + REDC、
+  Jacobian a=−3 点运算、double-and-add-always、RFC 6979 nonce、low-S 归一、严格 DER、签名前自验）。
+  KAT 用 RFC 6979 A.2.5（P-256/SHA-256/"sample"）：`r` 与 `k` 逐字节一致，`s` 与 `n − s_RFC` 一致；
+  RFC 原文的高 `s` 也必须验签通过；DER 逐字节检查最短编码（INTEGER 长度非零、无多余前导零、
+  总长与 `SEQUENCE` 头一致）；篡改 `r`、零 `s`、错误摘要、私钥 `0` 与私钥 `n` 全部拒绝。
+  `build.ps1` 输出 `p256-ecdsa=pass`。
+- 这套自检抓出两个真 bug：`add_mod()` 在 `a+b ≥ 2^256` 时用“减模数”处理进位，正确做法是
+  加 `2^256 − modulus`（可观测后果是 `3α` 少 2，公钥直接错）；签名 `s` 曾写成
+  `k·(e+rd)^{-1}`，应为 `(e+rd)·k^{-1}`。两者都由 KAT 钉死，不靠人工审查发现。
+- `tests/host/build.ps1` 改为在仓库根目录执行测试二进制：Masari 向量按
+  `tests/fixtures/...` 相对路径打开，从 `tests/host` 启动会误报 `masari-stage=55`。
+- 认证部分的实现边界（TOTP 账户表、USB/NFC 传输、CTAPHID 只到传输层、没有 CTAP2 命令）
+  单独记在 [authentication-status.md](authentication-status.md)，不在这里重复宣称能力。
+- 回归：`build.ps1` 全项通过（含 `eink-panel=pass`、`p256-ecdsa=pass`、`masari=pass`）；
+  `build_chain_native.ps1`、`build_clang_ubsan.ps1`、`policy_check.ps1` 通过；
+  `device_compile_check.ps1 -Target esp32p4` 全源编译通过。`epd_driver_compile_check.ps1`
+  需要外部 GxEPD2 检出（`build/epd-deps/GxEPD2`），本机没有该目录，因此这一项未运行。
+
 ## 2026-11-02：Starknet 批量调用与跨链自定义代币
 
 - `StarknetTransaction.cpp` 从"恰一笔 transfer"扩到 1–4 笔：calldata 布局改成
@@ -335,6 +478,103 @@ ADA、DOT、FIL、CHIA、DCR、FIRO、FLUX 等交易适配器尚未补齐。当�
 - `tests/fixtures/xrp-sdk.json` 由 xrpl-py binary codec 生成：3 组合格（无 tag、tag、零 tag）、10 组拒绝；`xrp_probe` 与 `tests/test_xrp.py` 独立比较 unsigned/hash/字段。
 - 结果：107 项 Python 测试通过；主机 `xrp=pass`、`tezos=pass`、`extended-crypto=pass`；S3 编译与 Clang UBSan 通过；P4 runtime 编译通过。
 - 未执行 rippled 提交、主网 sequence/费用实测或硬件按键验收；不支持 issued currency、path、memo、partial payment、多签名。
+
+## 2026-11-02（续）：airgap 栈清理、面板配置对齐与首编译修正
+
+这一轮没有新增协议，全部是把已有代码改成能在真实任务栈和真实编译选项下跑起来的样子。
+
+- **airgap 去掉两处 2 KB 栈临时**：`airgap_sender_render()` 不再把 payload 拼进中间缓冲，chunk 在
+  blob 里本来就是连续的，直接切 `blob + chunk_offset[first_chunk]` 交给 `airgap_frame_pack()`；
+  `airgap_receiver_blob()` 直接按 chunk 序号写进调用方的 `out`。4 KB 任务栈上省下的这 4 KB
+  不是优化，是能不能跑起来的区别。
+- **`AirgapScratch` 不再藏在函数里**：`airgap_receiver_accept()` 原来用函数内 `static` 持有
+  37 KB 的取样表，等于把它钉在 .bss 且整个函数不可重入。现在它是显式参数，由调用方持有；
+  唯一保留 `static` 的是自检函数，因为启动任务栈放不下，而且自检只跑一次。
+- **`Se051Provisioning.cpp` 第一次真正被编译**：上一轮它是靠 `device_compile_check` 报
+  `C1083` 才发现的，主机侧从没编译过。第一次编译就炸出两处：自检里
+  `for (const uint16_t w : {...})` 需要 `std::initializer_list`，而文件只有 `<stdint.h>`，
+  MSVC 直接给 `C3312 no callable 'begin'`；还有 `size_t` 缺 `<stddef.h>`。前者改成普通数组
+  循环，后者补头文件。**结论：文件存在不等于编译过。**
+- **面板配置头/源对齐**：`EinkPanel.h` 和 `EinkPanel.cpp` 当时已经是两个版本——头文件还叫
+  `EinkController::Waveshare29G`，源文件和板级已经在用 `Ssd1683`；头文件还留着
+  `otp_partial_verified` 开关，`partial_supported()` 因此要求"有 LUT 或显式声明 OTP 已验证"，
+  而实际驱动早就默认走 OTP。对齐后的规则是：黑白面板只要初始化成功就支持局刷，LUT 是可选
+  覆盖项；四色一律拒绝 LUT 和局刷；`Ssd1683` 必须由板级提供 `color_init` 表，驱动不猜模拟
+  电压。自检补了这张表，四色路径才真正被跑起来。
+- **局刷表长度统一成 159 字节**：前 153 字节写 `0x32`，其余是 EOPT `0x3f`、VGH `0x03`、
+  VSH1/VSH2/VSL `0x04`、VCOM `0x2c`。文档之前写的 153 只覆盖波形，漏掉了电压和收尾，按那个
+  长度给出的表会被 `begin()` 拒掉。
+- 结果：`build.ps1` 61 项全 pass（含 `airgap`、`scp03`、`se051-provisioning`、`eink-panel`、
+  `eink`）；`build_clang_ubsan.ps1` 通过；`device_compile_check.ps1 -Target esp32p4` 全源通过；
+  `policy_check.ps1` 通过。仍没有实机：SCP03 与曲线装载没有实卡互验，airgap 也没有接屏幕
+  动画和摄像头解码。
+- **四色档位原本是条死路**：`EinkPanel::begin()` 要求 `Ssd1683` 必须带板级 `color_init` 表，
+  但 `WalletBoardPort` 从来没有接过这张表，选了 `HEXWALLET_EPD_PROFILE=1` 只会在开屏时报
+  `ERR: e-paper panel did not initialise`。现在板级用 `HEXWALLET_EPD_COLOR_INIT` 提供表，
+  `p4_runtime_compile_check.ps1` 的三个档位会真的把这行编译进去（档位 1 用带花括号的
+  `-D` 传一张样例表），不再只是"编过就行"。
+
+## 2026-11-02（三）：Groestl-512、Groestlcoin 地址与原生 THETA SendTx
+
+这一轮全部用可核对的外部数据推进，没有一项是靠"看起来对"落地的。
+
+- **Groestl-512 落地**（`Groestl512.h/.cpp`）。关键细节是输出变换
+  `Ω(x) = trunc_n(P(x) ⊕ x)` 取的**不是首 n 字节而是末 n 字节**：之前几轮实现把 128 字节的
+  `P(x) ⊕ x` 整段当摘要，于是空串的输出末尾明明已经等于官方值、却被自己的截断规则判成错误。
+  S 盒不粘贴 256 项常量表，而是按规范定义 `inv(x) ⊕ rotl(inv,1..4) ⊕ 0x63` 在首次使用时算出来，
+  表有问题就只能说明公式照抄错了。
+- 验收用的是 NIST 提交包里的 `KAT_MCT/ShortMsgKAT_512.txt`（8 组：空串、1/2/3 字节、
+  32 字节、64 字节、128 字节、`abc`）。注意 KAT 的 `Len` 是**位**长度，非 8 倍数时消息最后
+  一个字节要按位掩码，按字节取会全线失败——第一次就踩了这个坑，所以自检只取字节对齐的组。
+- **Groestlcoin 的校验和定案**：`base58check` 的 4 字节校验和是 **Groestl-512 做两次取前 4 字节**，
+  单次不行、取末尾 4 字节也不行。用 `0x24 ‖ 35ead48b…16fc43` 能精确还原主网地址
+  `Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W`，这就是 `grs-address=pass` 的锚点。网络登记为
+  `grs`（SLIP-44 17、p2pkh version 0x24、bech32 hrp `grs`），能力只有 `WalletCapabilityAddress`。
+- **GRS 的 legacy sighash 仍然没有解开，而且这次证伪了上一轮的猜测**。上一轮文档写过"txid 是
+  SHA-256，所以 sighash 也还是 Bitcoin 那套"。实际上把那条主网交易的两个输出、`0xfffffffd`
+  序列号、`SIGHASH_ALL` 和 P2PKH/P2PK 两种 scriptCode 都还原之后，签名在
+  `sha256`、`sha256d`、`Groestl-512` 单/双次的三种截断、`Groestl-256` 单/双次下**全部验不过**，
+  高低 S 都试过。结论：这条链的 legacy sighash 不是上述任何一种朴素组合，缺一份能对上签名的
+  来源就不能开签名——GRS 保持"能收不能发"。（`sha256(raw)=txid` 这一条仍然成立，是独立事实。）
+- **原生 THETA SendTx 打通**（`ThetaTransaction.h/.cpp`）。方案本身在 Theta 的
+  `ledger/types/tx.go` 里：`SignBytes = RLP(chainID) ‖ RLP(type=2) ‖ RLP({fee, inputs, outputs})`，
+  再套一层只有 `input` 非零的六字段以太坊信封，摘要取 `keccak-256`。
+- 三处实测踩点：① `TxInput.Signature` 为空时是 `0x80`（空串），不是零长度——写成"什么都不写"
+  整条 RLP 长度全错；② 信封里 nonce/gasPrice/gasLimit/value 四个 0 同样是 `0x80`；③ chain id
+  是 **`mainnet`** 而不是 `theta-mainnet-1`，试错前四种全不匹配。
+- 验收：`explorer.thetatoken.org:8443` 的 `/api/transaction/<hash>` 取到 block 1000000 里的真实
+  转账 `0x1ccc4b6e…063e17bca`（该浏览器把 SendTx 标成 `type: 2`，coinbase 才是 `0`）。
+  `theta_sendtx_sign_bytes()` 逐字节复现 121 字节信封，`theta_sendtx_digest()` 得到
+  `03490f71…e01cbe`，而这个摘要正是让那笔交易的 65 字节签名恢复出输入地址
+  `0x2623912…98de62` 的那个。另外覆盖了 chain id、fee、sequence、输出数量任一变化都必须换摘要，
+  以及空输入、零发送方、零输出、缓冲不足四类拒绝。
+- 结果：`build.ps1` 全项 pass（新增 `groestl512`、`grs-address`、`theta`）；
+  `build_clang_ubsan.ps1` 通过；`device_compile_check.ps1 -Target esp32p4` 全源通过；
+  `policy_check.ps1` 通过。
+- 仍未做：THETA 还没接进 `ChainFamily`/审阅界面/APDU，也就是"能算对、还不能点"；
+  GRS 签名、P-256 验签命令、SE051 的 T=1 帧与 APDU 常量这一轮都没有动，也没有编任何字节。
+
+## 2026-11-02（四）：原生 THETA 接入链适配层
+
+`ThetaTransaction` 从"算得对"变成"点得动"：`ChainFamily::Theta` 已进 `kFamilyMap`、审阅分支、
+签名分支和 `run_chain_self_tests`，`chain_family_for_network("theta")` 现在返回 `Theta`。
+
+- 设备请求固定 46 字节：版本(1) / 链选择(1，0=mainnet、1=testnet、2=privatenet) / 收款方(20) /
+  金额(8，TFuelWei) / 手续费(8) / sequence(8)，全部大端。没有发送方字段——发送方永远是派生地址，
+  否则设备就会替别人的币签名。
+- 审阅把 `TFUEL`、收款方 `0x…`、金额、手续费、"seq N mainnet" 打进 `ChainReview`，摘要就是
+  要签的那 32 字节。自检把**同一笔主网交易的请求形式**喂进适配器，摘要必须还是
+  `03490f71…e01cbe`，这样"面板显示"和"签名覆盖"就不可能各说各话。
+- 拒绝路径：版本号错、链选择器越界、金额为 0、手续费为 0、收款方全零、载荷长度不对，一律
+  `Malformed`；签名缓冲小于 65 返回 `BufferTooSmall`；零私钥返回 `CryptoFailure`。
+- 一个诚实的边界：主机测试链接的是**桩版 mbedtls**（`mbedtls_ecp_mul`、`mbedtls_ecdsa_sign_det_ext`
+  直接返回 `MBEDTLS_ERR_ECP_BAD_INPUT_DATA`），所以 secp256k1 的签名/派生在主机上跑不了。
+  自检因此只验证"签名前必须拒绝什么"，真正的签名输出由设备与原生探针覆盖。这也是为什么
+  `public_key_from_private` 在这条路径上不再被调用——发送方地址从审阅结果传入，少一层依赖。
+- 网络 id 复用 `theta`：EVM 转账继续走 EVM 适配器，原生 SendTx 走 `ChainFamily::Theta`，
+  由载荷格式决定走哪条路。两边都动 TFUEL，别把两者的签名字节混为一谈。
+- 结果：`build.ps1` 全项 pass（`theta=pass`）、`build_clang_ubsan.ps1` 通过、
+  `device_compile_check.ps1 -Target esp32p4` 全源通过、`policy_check.ps1` 通过。
 
 ## SUI/FIL 验证记录 — 2026-10-26
 

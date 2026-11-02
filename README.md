@@ -1,5 +1,7 @@
 # HexWallet
 
+Display, TOTP, USB/NFC and FIDO2 implementation boundaries are tracked in [authentication status](docs/authentication-status.md). CTAPHID transport alone is not a working passkey authenticator.
+
 > Every chain in the table below has a signing path in this tree; none of them has
 > completed hardware or node acceptance. Latest additions: Starknet (Cairo v3
 > `deploy_account`, and `execute` with 1-4 ERC-20 `transfer` calls), QRL v2
@@ -27,12 +29,13 @@ The public wallet catalog is filtered by the configured signing policies. This f
 | --- | --- | --- | --- |
 | Bitcoin | BIP44/BIP49/BIP84 | PSBT v0, `SIGHASH_ALL` | Native SegWit, nested SegWit, legacy P2PKH |
 | Bitcoin-family forks | P2PKH / SegWit profiles | Legacy sighash or BIP143 + `SIGHASH_FORKID` | Litecoin, Dogecoin, Dash, DigiByte, Bitcoin Gold, Ravencoin, Namecoin, Vertcoin, Axe, BCH, BSV, XEC, Sugarchain, e-Gulden, LBRY, MazaCoin, Myriad, NewYorkCoin, Auroracoin, Bitcore, CPUchain, DigitalCoin, Einsteinium, Feathercoin, GoByte, Monacoin, Ritocoin, VIVO, and other source-verified generated profiles |
-| EVM | BIP44 secp256k1 | EIP-155 / EIP-1559, native and whitelisted token calls | 54 registered networks; BSC BEP-20 registry has 26 RPC-checked contracts |
+| EVM | BIP44 secp256k1 | EIP-155 / EIP-1559, native and whitelisted token calls | 69 registered networks; BSC BEP-20 registry has 26 RPC-checked contracts |
 | XRP | BIP44 secp256k1, `m/44'/144'/0'/0/i` | Native Payment, canonical XRPL binary, SHA-512Half, secp256k1 DER | No issued currency, paths, memo, partial payments or multisig |
 | TRON | BIP44 secp256k1, `m/44'/195'/0'/0/i` | Owner-permission `TransferContract`, `TransferAssetContract` (TRC-10), registered TRC-20 `transfer`/self-`transferFrom`, printable memo ≤64 bytes | No TRC-721/1155 (no NFT registration exists, every request is refused), batch NFT, multi-contract, multisig or third-party-debit `transferFrom`; unregistered TRC-10 ids show exact base units |
 | Stellar | SEP-0005 Ed25519, `m/44'/148'/i'` | Public-network XDR Payment/CreateAccount, issued-asset issuer and memo review | Up to eight operations; G addresses; no fee bump, muxed accounts, Soroban or multisig |
 | Solana | SLIP-0010 ed25519, `m/44'/501'/0'/0'/i'` | Legacy/v0, System Transfer, SPL and Token-2022 `TransferChecked` | Single payer; no ALTs, ATA creation, staking or extra token accounts |
-| Cosmos SDK | BIP44 secp256k1, `m/44'/118'/0'/0/i` | 1-4 `MsgSend`s, `SIGN_MODE_DIRECT`, optional memo, native or verbatim denom (unpinned precision renders exact base units) | ATOM, OSMO, TIA; no IBC packet messages, authz or amino/JSON signing |
+| Cosmos SDK | BIP44 secp256k1 | 1-4 `MsgSend`s, `SIGN_MODE_DIRECT`, optional memo, native or verbatim denom (unpinned precision renders exact base units) | ATOM, OSMO, TIA, KAVA (Cosmos), LUNA, LUNC; no IBC packet messages, authz, wasm execute or amino/JSON signing |
+| Airgap | — | 枚举帧计划（有界步长合成）+ 帧头 CRC + 发送/接收状态机 + 重扫提示 | UI 帧动画与摄像头侧解码尚未接线（传输层已可验收） |
 | Algorand | SLIP-0010 Ed25519, `m/44'/283'/0'/0'/i'` | Canonical MessagePack `pay`/`axfer`, genesis/fee/round checks, ASA transfer and opt-in | Mainnet only; no groups, rekey, close, clawback, LogicSig or application calls |
 | NEAR | SLIP-0010 Ed25519, `m/44'/397'/i'` | Borsh `TransactionV0`, 1–16 native Transfers, SHA-256/Ed25519 | Implicit accounts only; no FunctionCall, access keys, delegation or staking |
 | Tezos | SLIP-0010 Ed25519, `m/44'/1729'/account'/change'/index'` | Manager operations, optional reveal, tz1–tz4 native transfers, BLAKE2b/Ed25519 | No KT1, Michelson, delegation or FA tokens; branch origin not authenticated |
@@ -140,7 +143,7 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `WalletUi` | Trusted-display transaction review |
 | `WalletCustody` | MCU vs secure-element capability policy |
 | `SecureElementPort` | SE051 backend contract, custody gate, ISO 7816-3 CRC16/A + ATR, AES-128, AES-CMAC |
-| `EinkPanel` | SSD1680-class command sequence, partial-refresh state machine, damage policy |
+| `EinkPanel` | SSD1680 mono (1bpp, OTP partial waveform) and SSD1683-class four-color (2bpp, full refresh only) command sequences, damage policy |
 | `QrCode` | Byte-mode QR v1-3 (L/M) encoder and 1bpp renderer |
 | `CoinIcons` | 32x32 I1 coin marks for the review header, packed from CC0 artwork with no decoder in flash |
 | `QrlOtsJournal` | Durable one-time-signature index reservation: two redundant slots, read-back proof, torn-write skip, refuse-when-unknown |
@@ -161,6 +164,7 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `WalletTokens` | Registered EVM token metadata |
 | `WalletCustomTokens` | User-declared tokens for EVM, TRON, Solana, Stellar and Starknet: one digest-checked blob, per-network key widths |
 | `MlDsa87` | FIPS 204 ML-DSA-87 keygen/sign/verify, used by QRL v2 |
+| `P256Sign` | NIST P-256 ECDSA with RFC 6979 nonces, low-S and strict DER; the ES256 primitive a CTAP2 authenticator needs |
 | `QrlV2Transaction` | QRL v2 dynamic-fee envelope, keccak-256 digest, ML-DSA-87 signature |
 | `AptosTransaction` | BCS `RawTransaction`, `APTOS::RawTransaction` domain hash, Ed25519 authenticator |
 | `StarknetCrypto` | Stark curve field/point arithmetic, Pedersen, Poseidon, Stark ECDSA, SNIP-5 address, Cairo v3 hashes |
@@ -213,7 +217,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3 `
 
 The headless build uses `-DHEXWALLET_BOARD=6 -DHEXWALLET_ENABLE_LVGL=0`. See `partitions/hexwallet-16mb-ota.csv` for the flash layout.
 
-The ESP32-P4 hardware wallet (`--fqbn esp32:esp32:esp32p4`) selects its pin map with `-DHEXWALLET_BOARD=7`: 2.9" 128x296 SSD1680 e-paper on SPI, SE051C2HQ1 on `Wire1`, PN7161 on the shared SPI bus. Every pin comes from the EasyEDA project nets; see [docs/display.md](docs/display.md) for the table and for what is deliberately not enabled yet (the panel's partial-refresh LUT).
+The ESP32-P4 hardware wallet (`--fqbn esp32:esp32:esp32p4`) selects its pin map with `-DHEXWALLET_BOARD=7`: 2.9" 128x296 e-paper on SPI, SE051C2HQ1 on `Wire1`, PN7161 on the shared SPI bus. `HEXWALLET_EPD_PROFILE` picks the panel (0 mono, 1 four-color, 2 mono V2) and `HEXWALLET_EPD_COLORS` must agree with it; partial refresh runs on the controller's OTP waveform, a board that needs its own waveform defines the 159-byte `HEXWALLET_EPD_PARTIAL_LUT`, and profile 1 additionally requires a `HEXWALLET_EPD_COLOR_INIT` register table because the driver refuses to guess four-color analogue settings. Every pin comes from the EasyEDA project nets; see [docs/display.md](docs/display.md) for the table and for what is deliberately not enabled yet.
 
 ## Verification
 

@@ -18,6 +18,36 @@
 
 `WalletCustody` 区分“认证通道”和“钱包密钥托管”。现有 `WalletSession` 仍返回 MCU 明文 seed，交易模块仍接收 MCU 私钥，因此即使通道认证成功，生产托管门也保持关闭。这是未完成的架构工作，不能通过返回 `true` 或增加能力标志解决。
 
+## SCP03 安全通道（本轮新增，已主机验证，未实卡验证）
+
+`Se051Scp03.cpp` 按 GlobalPlatform SCP03 实现：AES-CMAC KDF（label 0x04/0x06/0x07，context =
+host challenge ‖ card challenge）、卡与主机 cryptogram（label 0x01/0x02）、命令包裹（CLA 置 SM
+位、ISO 7816-4 填充、`S-ENC` CBC 加密、C-MAC 覆盖 `chain‖header‖Lc‖data'`、链值推进）、响应解包
+（先校验 8 字节 R-MAC 再解密，MAC 错即清会话）。`SecureElementPort` 补了 AES-128 逆密码
+（FIPS-197 加密向量反向验证），响应解密需要它。
+
+主机自检的数值对照来自一份独立实现（纯 Python 的 AES-128/CMAC，先用 FIPS-197 C.1 与
+RFC 4493 向量自证），钉死的内容包括：派生出的 S-ENC/S-MAC/S-RMAC、两个 cryptogram、一条
+21 字节载荷的命令密文与 C-MAC、一条响应的 R-MAC。另有篡改、截断、超长、无会话、缓冲不足
+五类拒绝路径。
+
+这些只证明代码与规范一致，**不证明某张真实 SE051 接受它**。实卡验收前不要把它写进任何
+"已支持"表述。
+
+## 曲线装载与卡内派生
+
+SE051 出厂可能没有装载 secp256k1 域参数。`Se051Provisioning.h` 把
+`0x6A80`/`0x6A88` 明确归类为"曲线未装载"，并且只允许：装载一次 → 立即重试一次；重试仍报
+缺曲线就判死，不再循环。其它状态字一律不当成缺曲线，避免把真实故障当成"再写一次就好"。
+`WriteECCurve` 本身的 APDU 字节属于 applet 协议，仓库里没有可核对的来源，所以没有编造；
+补齐时需要实卡手册或厂家确认。
+
+卡内 BIP32 派生的设计是：主种子前 32 字节作 `k_par`、后 32 字节作 `c_par`，`c_par` 写入
+`P1_HMAC_KEY` 并绑定 UserID（PIN 认证对象），每次派生子密钥前先 `VerifySessionUserID` 再用
+`INS_CRYPTO` 做 HMAC-SHA512；PIN 错误次数由卡片硬件计数，超过 `MaxAttempts` 锁死槽位。
+固件侧还缺这条命令的 applet 定义与 PIN 会话接续，所以当前派生仍在 MCU 内完成——这正是
+`WalletCustody` 仍拒绝声明"生产托管"的原因。
+
 ## 原理图记录
 
 审阅输入是用户提供的 `ProPrj_c26102103_2026-10-28.epro2`，SHA-256：
@@ -30,7 +60,9 @@
 
 | 项目 | 必须补齐的实际工作 |
 | --- | --- |
-| SSS/SCP03 | 真实 applet/OEF 识别；设备独有配钥；主机密钥保护；认证、命令/响应 MAC、重连与错误状态验证；完整 Arduino 库链接 |
+| SSS/SCP03 | SCP03 通道已实现并主机自检（KDF、卡/主机 cryptogram、C-MAC 包裹、R-MAC 校验与解锁、计数推进、篡改即清会话）；缺的是 applet 的 INS 表与实卡互验、设备独有配钥、主机密钥保护、完整 Arduino 库链接 |
+| 曲线装载 | `Se051Provisioning` 把 0x6A80/0x6A88 归类为"曲线未装载"，只允许在本机配一次并立即重试一次，重试仍失败即判死；`WriteECCurve` 的实际 APDU 属于 applet，必须由实卡协议补齐，不猜字节 |
+| 卡内派生 | 设计已定：BIP32 子密钥由 SE051 用 HMAC-SHA512 在卡内完成，主种子前 32 字节作 `k_par`、后 32 字节作 `c_par`，`c_par` 进 `P1_HMAC_KEY` 并绑定 UserID；固件侧还缺 applet 的 HMAC 命令与 PIN 会话，因此当前仍由 MCU 派生，托管门保持关闭 |
 | 钱包托管 | 非导出对象句柄贯通派生、签名与恢复；禁止回退到明文 MCU 私钥；签名前绑定已审阅交易 |
 | Chia | 替换 G1/G2 和标量运算的可变时间路径；验证 EIP-2333、synthetic key、AugScheme 与标准 puzzle 的上游向量；P4 侧信道和资源验证 |
 | QRL | 完整 XMSS 签名及交易编码；按公钥绑定的不可回滚 OTS 预留；预留先于签名，取消、断电与结果丢失均不归还叶索引；跨设备恢复防重用 |

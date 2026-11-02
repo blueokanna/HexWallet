@@ -15,6 +15,7 @@ namespace hexwallet
     constexpr UtxoAddressProfile kUtxoBitcoinGold = {0x26, 0x17, "btg", false};
     constexpr UtxoAddressProfile kUtxoRavencoin = {0x3c, 0x7a, nullptr, false};
     constexpr UtxoAddressProfile kUtxoVertcoin = {0x47, 0x05, "vtc", false};
+    constexpr UtxoAddressProfile kUtxoGroestlcoin = {0x24, 0x05, "grs", false};
     constexpr UtxoAddressProfile kUtxoAxe = {0x8c, 0x13, "axe", false};
 
     // CryptoNote prefixes are varints, not one-byte version fields. The
@@ -52,6 +53,8 @@ namespace hexwallet
       {"vtc49", "VTC", "Vertcoin Nested SegWit", 28, 28, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoVertcoin, 0, 0, 0, 0, nullptr},
       {"vtc84", "VTC", "Vertcoin Native SegWit", 28, 28, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoVertcoin, 0, 0, 0, 0, nullptr},
       {"axe", "AXE", "Axe", 4242, 4242, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoAxe, 0, 0, 0, 0, nullptr},
+      // Groestlcoin: SLIP-44 17, Bitcoin address layout, Groestl-512 checksum.
+      {"grs", "GRS", "Groestlcoin", 17, 17, 44, DerivationStyle::Bip44, AddressEncoding::P2pkhGroestl, kUtxoGroestlcoin, 0, 0, 0, 0, nullptr},
       // --- EVM networks ------------------------------------------------------
       // Official network references and supported envelopes: docs/chain-protocols.md.
       {"xlayer", "OKB", "X Layer", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 196, 0, 0, nullptr},
@@ -59,7 +62,7 @@ namespace hexwallet
       {"eth", "ETH", "Ethereum", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1, 0, 0, nullptr},
       {"etc", "ETC", "Ethereum Classic", 61, 61, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 61, 0, 0, nullptr},
       {"cro", "CRO", "Cronos", 394, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 25, 0, 0, nullptr},
-      {"kava", "KAVA", "Kava EVM", 459, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 2222, 0, 0, nullptr},
+      {"kavaevm", "KAVA", "Kava EVM", 459, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 2222, 0, 0, nullptr},
       {"opt", "ETH", "Optimism", 614, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 10, 0, 0, nullptr},
       {"xdai", "XDAI", "Gnosis Chain", 700, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 100, 0, 0, nullptr},
       {"matic", "POL", "Polygon", 966, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 137, 0, 0, nullptr},
@@ -85,6 +88,12 @@ namespace hexwallet
       {"aurora", "ETH", "Aurora", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1313161554, 0, 0, nullptr},
       {"metis", "METIS", "Metis Andromeda", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1088, 0, 0, nullptr},
       {"kaia", "KAIA", "Kaia", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 8217, 0, 0, nullptr},
+      // Ronin, Theta and Acala's Frontier chain keep EIP-155 legacy envelopes
+      // only: none of them is admitted to the EIP-1559 list above, because a
+      // typed envelope on a chain that rejects it is an unspendable signature.
+      {"ronin", "RON", "Ronin", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 2020, 0, 0, nullptr},
+      {"theta", "TFUEL", "Theta", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 361, 0, 0, nullptr},
+      {"acalaevm", "ACA", "Acala EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 787, 0, 0, nullptr},
       {"astar", "ASTR", "Astar", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 592, 0, 0, nullptr},
       {"canto", "CANTO", "Canto", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 7700, 0, 0, nullptr},
       {"dogechain", "DOGE", "Dogechain EVM", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 2000, 0, 0, nullptr},
@@ -200,6 +209,12 @@ namespace hexwallet
       {"osmo", "OSMO", "Osmosis", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "osmo"},
       {"tia", "TIA", "Celestia", 118, 118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "celestia"},
       {"sei", "SEI", "SEI", 19000118, 19000118, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "sei"},
+      // Cosmos-side entries whose EVM counterpart exists under its own id. Kava
+      // is the pair that used to collide: `kavaevm` is chain 2222, `kava` is the
+      // Cosmos zone with the kava_2222-N chain ids.
+      {"kava", "KAVA", "Kava", 459, 459, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "kava"},
+      {"terra", "LUNA", "Terra", 330, 330, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "terra"},
+      {"terraclassic", "LUNC", "Terra Classic", 330, 330, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Cosmos, {0, 0, nullptr, false}, 0, 0, 0, 0, "terra"},
       {"avax", "AVAX", "Avalanche X/P Chain", 9000, 9000, 44, DerivationStyle::Bip44, AddressEncoding::Bech32Avalanche, {0, 0, nullptr, false}, 0, 0, 0, 0, "avax"},
       {"fil", "FIL", "Filecoin", 461, 461, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase32Filecoin, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"erg", "ERG", "Ergo", 429, 429, 44, DerivationStyle::Bip44, AddressEncoding::Blake2bBase58Ergo, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
@@ -326,7 +341,7 @@ namespace hexwallet
         "glmr",
         "movr",
         "cro",
-        "kava",
+        "kavaevm",
         "core",
         "unichain",
         "monad",

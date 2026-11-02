@@ -1,5 +1,4 @@
 #include "SecureElementPort.h"
-
 #include <string.h>
 
 #include "WalletSecurity.h"
@@ -63,6 +62,22 @@ constexpr AesTables make_aes_tables() {
 
 constexpr AesTables kAesTables = make_aes_tables();
 
+// Inverse S-box, derived from the forward table at compile time so the two can
+// never drift apart.
+struct AesInverseTables {
+  uint8_t inv_sbox[256];
+};
+
+constexpr AesInverseTables make_aes_inverse_tables() {
+  AesInverseTables tables{};
+  for (int index = 0; index < 256; ++index) {
+    tables.inv_sbox[kAesTables.sbox[index]] = static_cast<uint8_t>(index);
+  }
+  return tables;
+}
+
+constexpr AesInverseTables kAesInverseTables = make_aes_inverse_tables();
+
 void add_round_key(uint8_t state[16], const uint8_t *round_key) {
   for (size_t index = 0; index < 16; ++index) {
     state[index] = static_cast<uint8_t>(state[index] ^ round_key[index]);
@@ -99,9 +114,40 @@ void mix_columns(uint8_t state[16]) {
   }
 }
 
+void inv_sub_bytes(uint8_t state[16]) {
+  for (size_t index = 0; index < 16; ++index) {
+    state[index] = kAesInverseTables.inv_sbox[state[index]];
+  }
+}
+
+// Row r is rotated right by r positions, the inverse of shift_rows().
+void inv_shift_rows(uint8_t state[16]) {
+  uint8_t shifted[16];
+  for (size_t column = 0; column < 4; ++column) {
+    for (size_t row = 0; row < 4; ++row) {
+      shifted[column * 4 + row] = state[((column + 4 - row) % 4) * 4 + row];
+    }
+  }
+  memcpy(state, shifted, sizeof(shifted));
+}
+
+void inv_mix_columns(uint8_t state[16]) {
+  for (size_t column = 0; column < 4; ++column) {
+    uint8_t *block = state + column * 4;
+    const uint8_t a0 = block[0], a1 = block[1], a2 = block[2], a3 = block[3];
+    block[0] = static_cast<uint8_t>(gf_mul8(a0, 0x0e) ^ gf_mul8(a1, 0x0b) ^
+                                    gf_mul8(a2, 0x0d) ^ gf_mul8(a3, 0x09));
+    block[1] = static_cast<uint8_t>(gf_mul8(a0, 0x09) ^ gf_mul8(a1, 0x0e) ^
+                                    gf_mul8(a2, 0x0b) ^ gf_mul8(a3, 0x0d));
+    block[2] = static_cast<uint8_t>(gf_mul8(a0, 0x0d) ^ gf_mul8(a1, 0x09) ^
+                                    gf_mul8(a2, 0x0e) ^ gf_mul8(a3, 0x0b));
+    block[3] = static_cast<uint8_t>(gf_mul8(a0, 0x0b) ^ gf_mul8(a1, 0x0d) ^
+                                    gf_mul8(a2, 0x09) ^ gf_mul8(a3, 0x0e));
+  }
+}
+
 // Doubles a 128-bit CMAC subkey modulo x^128+x^7+x^2+x+1.
-void cmac_double(const uint8_t in[16], uint8_t out[16]) {
-  const bool high_bit = (in[0] & 0x80U) != 0;
+void cmac_double(const uint8_t in[16], uint8_t out[16]) {  const bool high_bit = (in[0] & 0x80U) != 0;
   uint8_t carry = 0;
   for (int index = 15; index >= 0; --index) {
     const uint8_t next = static_cast<uint8_t>(in[index] & 0x80U);
@@ -241,9 +287,28 @@ void aes128_encrypt_block(const Aes128Schedule &schedule, const uint8_t in[16],
   secure_zero(state, sizeof(state));
 }
 
+// Inverse cipher (FIPS-197 5.3). SCP03 needs it to open encrypted responses.
+void aes128_decrypt_block(const Aes128Schedule &schedule, const uint8_t in[16],
+                          uint8_t out[16]) {
+  if (in == nullptr || out == nullptr) return;
+  uint8_t state[16];
+  memcpy(state, in, sizeof(state));
+  add_round_key(state, schedule.round_keys + 160);
+  for (int round = 9; round >= 1; --round) {
+    inv_shift_rows(state);
+    inv_sub_bytes(state);
+    add_round_key(state, schedule.round_keys + round * 16);
+    inv_mix_columns(state);
+  }
+  inv_shift_rows(state);
+  inv_sub_bytes(state);
+  add_round_key(state, schedule.round_keys);
+  memcpy(out, state, sizeof(state));
+  secure_zero(state, sizeof(state));
+}
+
 bool aes128_cmac(const uint8_t key[16], const uint8_t *data, size_t size,
-                 uint8_t mac[16]) {
-  if (key == nullptr || mac == nullptr || (data == nullptr && size != 0)) {
+                 uint8_t mac[16]) {  if (key == nullptr || mac == nullptr || (data == nullptr && size != 0)) {
     return false;
   }
   Aes128Schedule schedule;
@@ -323,15 +388,11 @@ bool secure_element_open(char *reason, size_t reason_size) {
   }
   if (g_open) secure_element_close();
   if (!g_backend->open(reason, reason_size)) {
-    // Open can fail after allocating transport or SCP03 key contexts.
-    // Close must tolerate partial initialization and is mandatory on failure.
     g_backend->close();
     g_open = false;
     return false;
   }
   if (!g_backend->session_authenticated()) {
-    // A backend that returns success without an authenticated channel cannot be
-    // trusted for anything else either, so it is unregistered entirely.
     g_backend->close();
     g_open = false;
     g_backend = nullptr;
@@ -367,9 +428,6 @@ void secure_element_close() {
 namespace {
 
 #if defined(HEXWALLET_HOST_TEST)
-// Two fake backends: one that opens the transport but never authenticates (the
-// failure mode a real card produces when the static keys are wrong), and one
-// that authenticates. Only the second may ever satisfy the custody gate.
 bool g_fake_open = false;
 unsigned g_fake_closes = 0;
 
@@ -458,10 +516,17 @@ bool run_secure_element_self_tests() {
   aes128_encrypt_block(schedule, kFipsPlain, cipher);
   passed = hex_equals(cipher, sizeof(cipher),
                       "69c4e0d86a7b0430d8cdb78070b4c55a") && passed;
+  uint8_t recovered[16] = {};
+  aes128_decrypt_block(schedule, cipher, recovered);
+  passed = hex_equals(recovered, sizeof(recovered),
+                      "00112233445566778899aabbccddeeff") && passed;
+  uint8_t again[16] = {};
+  aes128_decrypt_block(schedule, kFipsPlain, again);
+  uint8_t restored[16] = {};
+  aes128_encrypt_block(schedule, again, restored);
+  passed = hex_equals(restored, sizeof(restored),
+                      "00112233445566778899aabbccddeeff") && passed;
   secure_zero(&schedule, sizeof(schedule));
-
-  // RFC 4493 section 4: AES-128-CMAC over 0, 16, 40 and 64 byte messages.
-  // The 40-byte case exercises the padding path, 16 and 64 the subkey path.
   static const uint8_t kCmacKey[16] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2,
                                        0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
                                        0x4f, 0x3c};
@@ -493,8 +558,6 @@ bool run_secure_element_self_tests() {
   passed = aes128_cmac(kOtherKey, kMessage64, 16, other_mac) &&
            !constant_time_equal(mac, other_mac, 16) && passed;
 
-  // Answer-to-reset structure. These are constructed from the ISO 7816-3 rules
-  // (TS/T0/interface chain/historical bytes/TCK), not captured from a card.
   static const uint8_t kAtrMinimal[] = {0x3B, 0x00};
   static const uint8_t kAtrInverse[] = {0x3F, 0x00};
   static const uint8_t kAtrHistorical[] = {0x3B, 0x02, 0x14, 0x50};
@@ -536,29 +599,22 @@ bool run_secure_element_self_tests() {
            g_fake_closes == 1 && !secure_element_ready() && passed;
   secure_element_register_backend(nullptr);
 
-  // A backend that opens the transport but never authenticates must leave the
-  // gate closed and must be unregistered, because a real card that rejects the
-  // static keys produces exactly this answer.
   passed = secure_element_register_backend(&kFakeUnverified) && passed;
   passed = !secure_element_open(reason, sizeof(reason)) && !secure_element_ready() &&
            strcmp(secure_element_name(), "") == 0 && passed;
 
-  // A backend with an authenticated session may satisfy the gate...
   passed = secure_element_register_backend(&kFakeVerified) && passed;
   passed = secure_element_open(reason, sizeof(reason)) && secure_element_ready() &&
            strcmp(secure_element_name(), "fake-verified") == 0 && passed;
   passed = !secure_custody_backend_ready() &&
            &active_secure_element_profile() == &software_only_profile() && passed;
-  // ...but only one backend may be registered at a time.
   passed = !secure_element_register_backend(&kFakeVerified) && passed;
   g_fake_open = false;
   passed = !secure_element_ready() && passed;
   g_fake_open = true;
-  // A recovered boolean cannot resurrect a session invalidated above.
   passed = !secure_element_ready() && passed;
   secure_element_close();
   passed = !secure_element_ready() && passed;
-  // Closing is idempotent, and removing the backend leaves nothing ready.
   secure_element_close();
   passed = secure_element_register_backend(nullptr) && !secure_element_ready() &&
            strcmp(secure_element_name(), "") == 0 && passed;

@@ -1,5 +1,3 @@
-// Runs the production UI against real LVGL objects. Only board I/O, catalog and
-// seal hashing are replaced: TrustAnchor's cryptographic tests run separately.
 #include <stdio.h>
 #include <string>
 #include <vector>
@@ -11,46 +9,59 @@ static std::vector<std::string> sealed_lines;
 uint32_t millis() { return test_now; }
 void delay(uint32_t ms) { test_now += ms; }
 
-namespace hexwallet {
-bool board_is_eink() { return true; }
-uint8_t board_display_colors() { return 2; }
-uint16_t board_display_width() { return 128; }
-uint16_t board_display_height() { return 296; }
-uint16_t board_battery_millivolts() { return 3800; }
-bool board_has_display() { return true; }
-bool board_partial_refresh_supported() { return test_partial; }
-bool board_display_review_ready() { return test_committed; }
-void board_display_prepare_review() {}
-void board_display_service() {}
-size_t wallet_catalog_count() { return 0; }
-bool wallet_catalog_at_sorted(size_t, WalletCatalogEntry *) { return false; }
-bool wallet_catalog_matches(const WalletCatalogEntry &, const char *) { return false; }
-bool wallet_catalog_has(const WalletCatalogEntry &, WalletCapability) { return false; }
-void random_fill(void *out, size_t size) { memset(out, 0x37, size); }
-bool random_healthy() { return test_entropy; }
-bool review_seal_build(ReviewSeal *seal, const uint8_t *, const char *const *lines,
-                       size_t count, uint32_t now, uint32_t window) {
-  sealed_lines.clear();
-  for (size_t index = 0; index < count; ++index) sealed_lines.emplace_back(lines[index]);
-  *seal = {};
-  seal->built = true;
-  seal->expires_ms = now + window;
-  return true;
-}
-void review_seal_code(const ReviewSeal &, char out[9]) { memcpy(out, "1234ABCD", 9); }
-void review_seal_mark_displayed(ReviewSeal *seal) { seal->displayed = seal->built; }
-bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now) {
-  if (!seal->built || !seal->displayed || seal->consumed ||
-      static_cast<int32_t>(now - seal->expires_ms) >= 0) return false;
-  seal->consumed = true;
-  return true;
-}
+namespace hexwallet
+{
+  bool board_is_eink() { return true; }
+  uint8_t board_display_colors() { return 2; }
+  uint16_t board_display_width() { return 128; }
+  uint16_t board_display_height() { return 296; }
+  uint16_t board_battery_millivolts() { return 3800; }
+  bool board_has_display() { return true; }
+  bool board_partial_refresh_supported() { return test_partial; }
+  bool board_display_review_ready() { return test_committed; }
+  void board_display_prepare_review() {}
+  void board_display_service() {}
+  size_t wallet_catalog_count() { return 0; }
+  bool wallet_catalog_at_sorted(size_t, WalletCatalogEntry *) { return false; }
+  bool wallet_catalog_matches(const WalletCatalogEntry &, const char *) { return false; }
+  bool wallet_catalog_has(const WalletCatalogEntry &, WalletCapability) { return false; }
+  void random_fill(void *out, size_t size) { memset(out, 0x37, size); }
+  bool random_healthy() { return test_entropy; }
+  bool review_seal_build(ReviewSeal *seal, const uint8_t *, const char *const *lines,
+                         size_t count, uint32_t now, uint32_t window)
+  {
+    sealed_lines.clear();
+    for (size_t index = 0; index < count; ++index)
+      sealed_lines.emplace_back(lines[index]);
+    *seal = {};
+    seal->built = true;
+    seal->expires_ms = now + window;
+    return true;
+  }
+  void review_seal_code(const ReviewSeal &, char out[9]) { memcpy(out, "1234ABCD", 9); }
+  void review_seal_mark_displayed(ReviewSeal *seal) { seal->displayed = seal->built; }
+  bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now)
+  {
+    if (!seal->built || !seal->displayed || seal->consumed ||
+        static_cast<int32_t>(now - seal->expires_ms) >= 0)
+      return false;
+    seal->consumed = true;
+    return true;
+  }
 }
 
-#define CHECK(condition) do { if (!(condition)) { \
-  fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #condition); return 1; } } while (0)
+#define CHECK(condition)                                           \
+  do                                                               \
+  {                                                                \
+    if (!(condition))                                              \
+    {                                                              \
+      fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #condition); \
+      return 1;                                                    \
+    }                                                              \
+  } while (0)
 
-int main() {
+int main()
+{
   using namespace hexwallet;
   CHECK(run_mascot_self_tests());
   CHECK(run_maid_sprite_self_tests());
@@ -85,7 +96,8 @@ int main() {
   review.show_decision_buttons = true;
   review.output_count = kWalletUiMaxTransactionOutputs;
   std::string details[16];
-  for (size_t index = 0; index < review.output_count; ++index) {
+  for (size_t index = 0; index < review.output_count; ++index)
+  {
     details[index] = std::string(300, 'A' + static_cast<char>(index));
     review.outputs[index].amount_text = "1 ETH";
     review.outputs[index].address = "0x1111111111111111111111111111111111111111";
@@ -136,6 +148,17 @@ int main() {
   test_committed = false;
   CHECK(!wallet_ui_review_authorize());
   test_committed = true;
+  CHECK(wallet_ui_review_authorize());
+  CHECK(wallet_ui_show_otp("Example", "alice@example.com", "012345", 2000000030));
+  CHECK(otp_visible && strcmp(otp_text, "012345") == 0 && !wallet_ui_review_authorize());
+  wallet_ui_hide_otp();
+  CHECK(!otp_visible && otp_text[0] == 0);
+  CHECK(!wallet_ui_show_otp("Example", "alice", "12345x", 2000000030));
+  CHECK(wallet_ui_show_otp("Example", "alice", "12345678", 2000000030));
+  wallet_ui_show_transaction(review);
+  CHECK(!otp_visible && otp_text[0] == 0);
+  // Expiry of an earlier code must not erase a later transaction review.
+  wallet_ui_hide_otp();
   CHECK(wallet_ui_review_authorize());
   wallet_ui_show_port_error();
   CHECK(!wallet_ui_ready() && !wallet_ui_review_authorize());

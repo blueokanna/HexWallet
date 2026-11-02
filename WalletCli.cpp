@@ -16,6 +16,7 @@
 #include "KaspaTransaction.h"
 #include "ZcashTransaction.h"
 #include "Totp.h"
+#include "WalletTotp.h"
 #include "WalletAltAddresses.h"
 #include "WalletBoardPort.h"
 #include "ChainCommon.h"
@@ -30,6 +31,7 @@
 #include "WalletSession.h"
 #include "SensitiveValue.h"
 #include "SensitiveLineBuffer.h"
+#include "UsbApduFrame.h"
 #include "WalletTokens.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
@@ -84,13 +86,14 @@ uint32_t usb_data_enabled_at = 0;
 bool usb_button_down = false;
 bool usb_button_long_handled = false;
 uint32_t usb_button_down_at = 0;
-constexpr uint8_t kUsbApduMagic0 = 0xa5;
-constexpr uint8_t kUsbApduMagic1 = 0x5a;
-constexpr size_t kUsbApduMax = 5000;
-uint8_t usb_apdu_frame[kUsbApduMax + 4];
-size_t usb_apdu_used = 0;
-size_t usb_apdu_expected = 0;
-bool usb_apdu_mode = false;
+UsbApduFrame usb_apdu_frame;
+
+void discard_serial_input() {
+  // Snapshot the queue: a continuously transmitting host must not starve the
+  // watchdog, NFC polling, local buttons or the display task.
+  int remaining = Serial.available();
+  while (remaining-- > 0) Serial.read();
+}
 
 bool deadline_reached(uint32_t now, uint32_t deadline) {
   return static_cast<int32_t>(now - deadline) >= 0;
@@ -172,7 +175,7 @@ void clear_wallet() {
   clear_pending_transaction();
   wallet_session_clear();
   command_line.clear();
-  secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
+  usb_apdu_frame.clear();
 }
 
 void record_failure() {
@@ -236,7 +239,7 @@ void show_help() {
   Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
   Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
   Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
-  Serial.println("OK totp: totp time | totp time <unix> | totp <base32> [digits] [period] [sha1|sha256|sha512] | totp clear");
+  Serial.println("OK totp: totp time [unix] | totp add <otpauth-uri> | totp list | totp show <slot> | totp remove <slot>");
   Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
   Serial.println("OK link: link status | link pair confirm | link pair reject");
   Serial.println("OK security: secret export and host mnemonic import unavailable | selftest");
@@ -2071,114 +2074,54 @@ void handle_totp(char *command) {
   if (strcmp(command, "totp time") == 0) {
     uint64_t now = 0;
     if (!totp_clock_unix(static_cast<uint64_t>(esp_timer_get_time()) / 1000U, &now)) {
-      Serial.println("ERR totp-clock-not-set");
-      return;
+      Serial.println("ERR totp-clock-not-set"); return;
     }
-    Serial.print("OK unix=");
-    Serial.println(static_cast<unsigned long long>(now));
+    Serial.print("OK unix="); Serial.println(static_cast<unsigned long long>(now));
     return;
   }
   if (strncmp(command, "totp time ", 10) == 0) {
-    char *end = nullptr;
-    const unsigned long long unix_seconds = strtoull(command + 10, &end, 10);
-    if (end == command + 10 || *end != '\0' || unix_seconds == 0) {
-      Serial.println("ERR invalid-unix-time");
-      return;
-    }
-    if (!totp_clock_set_unix(unix_seconds, static_cast<uint64_t>(esp_timer_get_time()) / 1000U)) {
-      Serial.println("ERR invalid-unix-time");
-      return;
-    }
-    Serial.println("OK totp-clock-set");
-    return;
-  }
-  if (strcmp(command, "totp clear") == 0) {
-    totp_clock_clear();
-    Serial.println("OK totp-clock-cleared");
-    return;
-  }
-  if (strncmp(command, "totp ", 5) != 0 || command[5] == '\0') {
-    Serial.println("ERR invalid-totp-command");
-    return;
-  }
-  char secret_text[128] = {};
-  char *save = nullptr;
-  char *token = strtok_r(command + 5, " ", &save);
-  if (token == nullptr || strlen(token) >= sizeof(secret_text)) {
-    Serial.println("ERR invalid-totp-secret");
-    return;
-  }
-  memcpy(secret_text, token, strlen(token) + 1);
-  uint32_t digits = kTotpDefaultDigits;
-  uint32_t period = kTotpDefaultPeriod;
-  TotpAlgorithm algorithm = TotpAlgorithm::Sha1;
-  uint8_t fields = 0;
-  while ((token = strtok_r(nullptr, " ", &save)) != nullptr) {
-    if (fields == 0) {
-      char *end = nullptr;
-      const unsigned long value = strtoul(token, &end, 10);
-      if (end == token || *end != '\0' || value < 6 || value > 8) {
-        Serial.println("ERR invalid-totp-digits");
-        secure_zero(secret_text, sizeof(secret_text));
-        return;
+    uint64_t value = 0;
+    const char *p = command + 10;
+    if (*p == 0) { Serial.println("ERR invalid-unix-time"); return; }
+    for (; *p; ++p) {
+      if (*p < '0' || *p > '9' || value > (UINT64_MAX - (*p - '0')) / 10U) {
+        Serial.println("ERR invalid-unix-time"); return;
       }
-      digits = static_cast<uint32_t>(value);
-    } else if (fields == 1) {
-      char *end = nullptr;
-      const unsigned long value = strtoul(token, &end, 10);
-      if (end == token || *end != '\0' || value < 1 || value > 300) {
-        Serial.println("ERR invalid-totp-period");
-        secure_zero(secret_text, sizeof(secret_text));
-        return;
-      }
-      period = static_cast<uint32_t>(value);
-    } else if (fields == 2) {
-      if (strcmp(token, "sha1") == 0) algorithm = TotpAlgorithm::Sha1;
-      else if (strcmp(token, "sha256") == 0) algorithm = TotpAlgorithm::Sha256;
-      else if (strcmp(token, "sha512") == 0) algorithm = TotpAlgorithm::Sha512;
-      else {
-        Serial.println("ERR invalid-totp-algorithm");
-        secure_zero(secret_text, sizeof(secret_text));
-        return;
-      }
-    } else {
-      Serial.println("ERR invalid-totp-command");
-      secure_zero(secret_text, sizeof(secret_text));
-      return;
+      value = value * 10U + (*p - '0');
     }
-    ++fields;
-  }
-  uint8_t secret[kTotpSecretMaxBytes] = {};
-  size_t secret_size = 0;
-  const TotpError decode = totp_base32_decode(secret_text, secret, sizeof(secret),
-                                              &secret_size);
-  secure_zero(secret_text, sizeof(secret_text));
-  if (decode != TotpError::Ok) {
-    Serial.println("ERR invalid-totp-secret");
-    secure_zero(secret, sizeof(secret));
+    Serial.println(wallet_totp_set_time(value) ? "OK confirm-clock-on-device" : "ERR totp-unavailable");
     return;
   }
-  uint64_t now = 0;
-  if (!totp_clock_unix(static_cast<uint64_t>(esp_timer_get_time()) / 1000U, &now)) {
-    Serial.println("ERR totp-clock-not-set; use totp time <unix>");
-    secure_zero(secret, sizeof(secret));
+  if (strncmp(command, "totp add ", 9) == 0) {
+    const char *uri = command + 9;
+    const bool pending = wallet_totp_import(uri, strlen(uri));
+    Serial.println(pending ? "OK confirm-account-on-device" : "ERR invalid-account-or-unavailable");
     return;
   }
-  uint32_t code = 0;
-  const TotpError generated = totp_generate_unix(
-      secret, secret_size, now, period, digits, algorithm, &code);
-  secure_zero(secret, sizeof(secret));
-  if (generated != TotpError::Ok) {
-    Serial.println("ERR totp-generation-failed");
+  if (strcmp(command, "totp list") == 0) {
+    for (uint8_t slot = 0; slot < kTotpAccountLimit; ++slot) {
+      TotpAccountInfo info = {};
+      if (wallet_totp_info(slot, &info)) {
+        Serial.print("ACCOUNT "); Serial.print(slot); Serial.print(' ');
+        Serial.print(info.issuer); Serial.print(':'); Serial.println(info.account);
+      }
+    }
+    Serial.println("OK session-accounts"); return;
+  }
+  const bool show = strncmp(command, "totp show ", 10) == 0;
+  const bool remove = strncmp(command, "totp remove ", 12) == 0;
+  if (show || remove) {
+    const char *slot_text = command + (show ? 10 : 12);
+    if (slot_text[0] < '0' || slot_text[0] > '7' || slot_text[1] != 0) {
+      Serial.println("ERR invalid-account-slot"); return;
+    }
+    const uint8_t slot = static_cast<uint8_t>(slot_text[0] - '0');
+    const bool pending = show ? wallet_totp_show(slot) : wallet_totp_remove(slot);
+    Serial.println(pending ? "OK confirm-on-device" : "ERR account-clock-or-display-unavailable");
     return;
   }
-  char output[64];
-  snprintf(output, sizeof(output), "OK code=%0*u remaining=%u",
-           static_cast<int>(digits), code,
-           static_cast<unsigned>(period - static_cast<uint32_t>(now % period)));
-  Serial.println(output);
+  Serial.println("ERR use-totp-time-add-list-show-remove; codes-are-device-only");
 }
-
 void handle_line(char *command) {
   while (*command == ' ') ++command;
   if (*command == '\0') return;
@@ -2186,7 +2129,7 @@ void handle_line(char *command) {
   // replace an approval screen while the original request remains signable.
   const bool passive = strcmp(command, "help") == 0 || strcmp(command, "status") == 0 ||
       strcmp(command, "lock") == 0 || strcmp(command, "link status") == 0;
-  if (!passive && (wallet_signing_active() || wallet_link_service_pairing_pending())) {
+  if (!passive && (wallet_signing_active() || wallet_link_service_pairing_pending() || wallet_totp_pending())) {
     Serial.println("ERR device-review-active");
     return;
   }
@@ -2228,6 +2171,7 @@ bool wallet_cli_init(bool display_available) {
   return false;
 #else
   display_is_available = display_available;
+  usb_data_enabled_at = millis();
   preferences_open = preferences.begin(kPreferencesNamespace, false);
   if (!preferences_open) {
     Serial.println("FATAL CLI authentication storage unavailable");
@@ -2269,15 +2213,19 @@ bool wallet_usb_data_enabled() {
 
 void wallet_usb_data_set(bool enabled) {
 #if HEXWALLET_ENABLE_CLI
+  if (!enabled) {
+    wallet_cli_lock();
+    return;
+  }
+  if (usb_data_enabled) return;
   usb_data_enabled = enabled;
   usb_data_enabled_at = millis();
-  usb_apdu_used = 0;
-  usb_apdu_expected = 0;
-  usb_apdu_mode = false;
+  usb_apdu_frame.clear();
+  command_line.clear();
   if (enabled) {
     // Drop bytes that arrived while the transport was closed so they can
     // never be replayed into an authenticated session later.
-    while (Serial.available() > 0) Serial.read();
+    discard_serial_input();
     Serial.print("INFO usb-data-enabled window-ms=");
     Serial.println(HEXWALLET_USB_ENABLE_WINDOW_MS);
   } else {
@@ -2290,12 +2238,17 @@ void wallet_usb_data_set(bool enabled) {
 
 void wallet_usb_data_service() {
 #if HEXWALLET_ENABLE_CLI
+  const uint32_t now = millis();
+  // Enforce expiry even on boards without a button and when enabled at t=0.
+  if (usb_data_enabled &&
+      now - usb_data_enabled_at >= HEXWALLET_USB_ENABLE_WINDOW_MS) {
+    wallet_usb_data_set(false);
+  }
   if (!board_has_user_button()) {
     usb_button_down = false;
     return;
   }
   const bool down = board_user_button_pressed();
-  const uint32_t now = millis();
   if (down && !usb_button_down) {
     usb_button_down = true;
     usb_button_long_handled = false;
@@ -2307,72 +2260,49 @@ void wallet_usb_data_service() {
     usb_button_long_handled = true;
     wallet_usb_data_set(!usb_data_enabled);
   }
-  if (usb_data_enabled && usb_data_enabled_at != 0 &&
-      now - usb_data_enabled_at >= HEXWALLET_USB_ENABLE_WINDOW_MS) {
-    wallet_usb_data_set(false);
-  }
 #endif
 }
 
+#if HEXWALLET_ENABLE_CLI
 bool service_usb_apdu() {
-  if (!usb_apdu_mode && Serial.available() > 0 &&
-      Serial.peek() == kUsbApduMagic0) {
-    command_line.clear();
-    usb_apdu_mode = true;
-    usb_apdu_used = 0;
-    usb_apdu_expected = 0;
-  }
-  if (!usb_apdu_mode) return false;
-  while (Serial.available() > 0 && usb_apdu_used < sizeof(usb_apdu_frame)) {
-    usb_apdu_frame[usb_apdu_used++] = static_cast<uint8_t>(Serial.read());
-  }
-  if (usb_apdu_used >= 2 &&
-      (usb_apdu_frame[0] != kUsbApduMagic0 ||
-       usb_apdu_frame[1] != kUsbApduMagic1)) {
-    usb_apdu_used = 0;
-    usb_apdu_expected = 0;
-    usb_apdu_mode = false;
-    secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
+  if (!usb_apdu_frame.active() &&
+      (Serial.available() <= 0 || Serial.peek() != UsbApduFrame::kMagic0)) return false;
+  command_line.clear();
+  if (usb_apdu_frame.expired(millis())) {
+    wallet_cli_lock();
     return true;
   }
-  if (usb_apdu_expected == 0 && usb_apdu_used >= 4) {
-    const size_t length = static_cast<size_t>(usb_apdu_frame[2]) |
-                          (static_cast<size_t>(usb_apdu_frame[3]) << 8);
-    if (length > kUsbApduMax) {
-      usb_apdu_used = 0;
-      usb_apdu_mode = false;
-    secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
+  while (Serial.available() > 0) {
+    const auto result = usb_apdu_frame.feed(static_cast<uint8_t>(Serial.read()), millis());
+    if (result == UsbApduFrame::Result::Rejected) {
+      wallet_cli_lock();
       return true;
     }
-    usb_apdu_expected = 4 + length;
-  }
-  if (usb_apdu_expected != 0 && usb_apdu_used >= usb_apdu_expected) {
-    uint8_t response[kUsbApduMax + 4];
-    const size_t apdu_size = usb_apdu_expected - 4;
+    if (result != UsbApduFrame::Result::Ready) continue;
+    uint8_t response[UsbApduFrame::kCapacity + 4];
     const size_t response_size = wallet_link_service_apdu(
-        usb_apdu_frame + 4, apdu_size, millis(), response + 4,
-        sizeof(response) - 4);
+        WalletLinkTransport::Usb, usb_apdu_frame.data(), usb_apdu_frame.size(),
+        millis(), response + 4, sizeof(response) - 4);
     const size_t total = 4 + response_size;
-    response[0] = kUsbApduMagic0;
-    response[1] = kUsbApduMagic1;
+    response[0] = UsbApduFrame::kMagic0;
+    response[1] = UsbApduFrame::kMagic1;
     response[2] = static_cast<uint8_t>(response_size);
     response[3] = static_cast<uint8_t>(response_size >> 8);
     for (size_t index = 0; index < total; ++index) {
       Serial.write(response[index]);
     }
     secure_zero(response, sizeof(response));
-    usb_apdu_used = 0;
-    usb_apdu_expected = 0;
-    usb_apdu_mode = false;
-    secure_zero(usb_apdu_frame, sizeof(usb_apdu_frame));
+    usb_apdu_frame.clear();
     return true;
   }
   return true;
 }
+#endif
 
 void wallet_cli_service() {
 #if HEXWALLET_ENABLE_CLI
   wallet_usb_data_service();
+  wallet_totp_tick();
   if (authenticated && millis() - authenticated_at >= HEXWALLET_CLI_SESSION_TIMEOUT_MS) {
     wallet_cli_lock();
     Serial.println("INFO session-expired-and-wallet-cleared");
@@ -2382,7 +2312,7 @@ void wallet_cli_service() {
     Serial.println("INFO transaction-review-expired");
   }
   if (!usb_data_enabled) {
-    while (Serial.available() > 0) Serial.read();
+    discard_serial_input();
     return;
   }
   if (service_usb_apdu()) return;
@@ -2390,14 +2320,20 @@ void wallet_cli_service() {
     command_line.discard();
     Serial.println("ERR command-timeout");
   }
-  while (Serial.available() > 0) {
+  size_t byte_budget = 512;
+  while (Serial.available() > 0 && byte_budget-- != 0) {
+    // A binary frame can follow a complete text command in the same read.
+    if (Serial.peek() == UsbApduFrame::kMagic0) {
+      service_usb_apdu();
+      return;
+    }
     command_last_byte_ms = millis();
     const LineReadResult result = command_line.feed(static_cast<uint8_t>(Serial.read()));
     if (result == LineReadResult::Ready) {
       handle_line(command_line.data());
       command_line.clear();
       if (!usb_data_enabled) {
-        while (Serial.available() > 0) Serial.read();
+        discard_serial_input();
         break;
       }
     } else if (result == LineReadResult::Rejected) {
@@ -2432,10 +2368,12 @@ void wallet_cli_lock() {
   // Closing the USB gate on lock also drops anything that was typed but not
   // yet executed, so a half-typed signing command cannot survive a lock.
   usb_data_enabled = false;
-  usb_apdu_used = 0;
-  usb_apdu_expected = 0;
-  usb_apdu_mode = false;
+  usb_apdu_frame.clear();
+  discard_serial_input();
+  wallet_totp_clear();
+  wallet_link_service_reset();
   clear_wallet();
+  wallet_ui_set_authenticated(false);
 #endif
 }
 

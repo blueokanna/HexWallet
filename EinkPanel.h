@@ -6,32 +6,18 @@
 
 namespace hexwallet {
 
-// Monochrome e-paper panel layer for the 2.9" 128x296 class (SSD1680 and the
-// UC8151-compatible clones), plus the 4-color variant of the same size
-// (SSD1683). Two things this file is deliberately explicit about:
+// SPI panel protocols: SSD1680 monochrome and the SSD1683-class 2.9 inch
+// four-color panel (128x296, black/white/red/yellow). Controller selection is
+// explicit. UC8151, JD79667, grayscale SSD1680 modes and other four-color
+// panels are not interchangeable.
 //
-//  1. These panels are SPI. A 128x296 e-paper module has no MIPI DSI interface;
-//     MIPI DSI is what the colour panels in this project use. If a future board
-//     wires the panel through a MIPI bridge, only EinkBus changes - the command
-//     sequence does not.
-//
-//  2. Partial refresh needs a waveform LUT that is specific to the panel batch,
-//     and every byte of it matters. The sequence is implemented here, the LUT is
-//     a board-profile constant (EinkPanelConfig::partial_lut). With no LUT the
-//     driver refuses partial updates instead of pretending and producing grey
-//     smears; callers fall back to a full refresh. The 4-color panels have no
-//     partial waveform at all, so EinkColorMode::FourColor rejects
-//     partial_refresh() outright, whatever the config says.
-//
-// Framebuffer formats (both MSB-first, rows padded to a byte):
-//   Mono       1 bit per pixel, bit 1 = black.
-//   FourColor  2 bits per pixel, 4 pixels per byte. The nibble values are not
-//              painted by this driver: EinkPanelConfig::palette maps the
-//              framebuffer's palette index (0 black, 1 white, 2 red, 3 yellow,
-//              the order EinkFrame produces) to the panel's code. SSD1683
-//              4-color modules use {0b00, 0b01, 0b11, 0b10}; that is the
-//              default, and a panel with a different table must override it
-//              rather than being drawn with the wrong colours.
+// Mono uses 1 bit/pixel, 1=black; the driver inverts for SSD1680 RAM.
+// FourColor uses 2 bits/pixel in palette order black/white/red/yellow, wire
+// codes 00/01/11/10. Both formats are MSB-first.
+// Partial refresh needs no host waveform: the SSD1680 runs the mode-2 table it
+// keeps in OTP. FourColor has no partial waveform at all. Controller
+// capabilities do not identify a panel or prove its OTP contents. A failed
+// transfer invalidates the panel state.
 
 struct EinkRect {
   uint16_t x;
@@ -46,6 +32,16 @@ constexpr uint16_t kEink29Height = 296;
 enum class EinkColorMode : uint8_t {
   Mono = 0,
   FourColor = 1,
+};
+
+enum class EinkController : uint8_t { Ssd1680, Ssd1683 };
+
+// Board-owned register settings verified against the fitted panel's hardware
+// documentation. No unknown analogue/boost settings are supplied by default.
+struct EinkInitCommand {
+  uint8_t command;
+  uint8_t size;
+  uint8_t bytes[8];
 };
 
 // Framebuffer palette indices, the order eink_convert_rgb565() writes.
@@ -83,6 +79,8 @@ struct EinkBus {
   void (*reset)(void *context, bool asserted);
   bool (*busy)(void *context);
   void (*delay_ms)(void *context, uint32_t milliseconds);
+  // Continue the current RAM command without issuing a new command byte.
+  bool (*data)(void *context, const uint8_t *data, size_t size);
 };
 
 struct EinkPanelConfig {
@@ -90,11 +88,13 @@ struct EinkPanelConfig {
   uint16_t height;
   EinkColorMode color;
   // Framebuffer palette index -> panel 2-bit code, used by FourColor only.
-  // Defaults to the SSD1683 4-color table when left zero-initialised, see
+  // A zero-initialised config gets the 00/01/11/10 table; see
   // EinkPanel::begin().
   uint8_t palette[4];
-  // Waveform LUT for partial updates; nullptr disables partial refresh. A
-  // 4-color panel must leave this null: it has no partial waveform.
+  // Optional SSD1680 complete waveform setting: 159 bytes, that is the 153 LUT
+  // bytes of section 6.7 followed by EOPT, VGH, VSH1, VSH2, VSL and VCOM.
+  // A bare LUT omits required voltage/end settings and is rejected. Leave it
+  // null to run the panel's own OTP table. Never set it on FourColor.
   const uint8_t *partial_lut;
   size_t partial_lut_size;
   // BUSY timeout. A panel that never releases BUSY is a hardware fault and the
@@ -104,6 +104,9 @@ struct EinkPanelConfig {
   // After this many partial updates the driver reports that a full refresh is
   // due. E-paper accumulates ghosting; the policy keeps it bounded.
   uint8_t partial_budget;
+  EinkController controller = EinkController::Ssd1680;
+  const EinkInitCommand *color_init = nullptr;
+  size_t color_init_count = 0;
 };
 
 enum class EinkRefreshResult : uint8_t {
@@ -136,7 +139,7 @@ class EinkPanel {
 
   const EinkStats &stats() const { return stats_; }
   bool partial_supported() const {
-    return config_.color == EinkColorMode::Mono && config_.partial_lut != nullptr;
+    return stats_.initialised && config_.color == EinkColorMode::Mono;
   }
   EinkColorMode color_mode() const { return config_.color; }
   size_t frame_bytes() const {
@@ -149,13 +152,17 @@ class EinkPanel {
 
  private:
   EinkRefreshResult wait_idle(uint32_t timeout_ms);
-  bool push_window(const uint8_t *bitmap, size_t size, const EinkRect &window);
-  // Packs one frame row slice into panel codes. Mono copies bytes through;
+  bool command(uint8_t command, const uint8_t *data, size_t size);
+  bool data(const uint8_t *bytes, size_t size);
+  bool push_window(const uint8_t *bitmap, size_t size, const EinkRect &window,
+                   uint8_t ram_command = 0x24);
+  // Packs one frame row slice into panel codes. Mono converts 1=black to 0=black;
   // FourColor unpacks 2-bit palette indices and remaps them via palette_.
   bool push_window_color(const uint8_t *bitmap, size_t size,
                          const EinkRect &window);
   bool set_window(const EinkRect &window);
   bool begin_panel();
+  bool begin_four_color();
 
   EinkBus bus_ = {};
   EinkPanelConfig config_ = {};

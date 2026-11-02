@@ -55,6 +55,7 @@ namespace hexwallet
     IcpLedgerAccount,       // default ICP ledger account identifier (32-byte CRC/hash)
     QrlMlDsa,               // QRL v2: SHAKE256(010000 || ML-DSA-87 pk), 'Q' + 128 hex
     StarknetKey,            // Starknet: 0x + 64 hex x-coordinate of grindKey(BIP32 child) * G
+    P2pkhGroestl,           // base58check p2pkh whose checksum is Grøstl-512 twice (GRS)
   };
 
   // BIP32-style derivation policy per network. `derive_address` selects the path

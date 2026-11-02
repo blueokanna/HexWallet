@@ -15,8 +15,20 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $reference = Join-Path $root "build\qr-reference"
 $referenceCommit = "3c6d0b3cefb4e049dc337e82237c9644399716a8"
 
+# Locate the MSVC toolchain the same way the other host scripts do: an explicit
+# override first, then whatever vswhere reports as the newest C++ install.
 $vsInstall = if ($env:HEXWALLET_VS_INSTALL) { $env:HEXWALLET_VS_INSTALL }
-             else { "C:\Program Files\Microsoft Visual Studio\2022\Community" }
+             else {
+               $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+               if (-not (Test-Path $vswhere)) { $null }
+               else {
+                 & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+               }
+             }
+if (-not $vsInstall) {
+  Write-Output "ERROR: no Visual Studio C++ toolset found; set HEXWALLET_VS_INSTALL to override"
+  exit 2
+}
 $vcvars = Join-Path $vsInstall "VC\Auxiliary\Build\vcvars64.bat"
 if (-not (Test-Path $vcvars)) {
   Write-Output "ERROR: vcvars64.bat not found at $vcvars"

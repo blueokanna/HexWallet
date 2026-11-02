@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -101,6 +101,16 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: TOTP local approval and transport protocol regressions
+        shell: pwsh
+        run: |
+          cmake -S tests/host/auth -B build/auth-native -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/auth-native --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/auth-native/Release/auth_test.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Firmware policy gates
         shell: pwsh
         run: |
@@ -126,10 +136,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
 
-      - name: P4 worker and signing orchestration compile check
-        shell: pwsh
-        run: |
-          powershell -ExecutionPolicy Bypass -File tests/host/p4_runtime_compile_check.ps1
 
       - name: Checkout pinned NXP transport headers
         uses: actions/checkout@v4
@@ -153,6 +159,11 @@ jobs:
           # driver code can never drift from the actual 9.5 API (the removed
           # lv_disp_drv_t/lv_indev_drv_t API once broke the build silently).
           git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git tests/host/lvgl_real
+
+      - name: P4 worker and signing orchestration compile check
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File tests/host/p4_runtime_compile_check.ps1
 
       - name: Board port compile check (all board profiles)
         shell: pwsh

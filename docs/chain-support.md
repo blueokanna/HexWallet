@@ -195,12 +195,18 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 | LUNC | ABSENT | no Terra adapter |
 | XRD | ABSENT | no Radix adapter |
 | TEL | ABSENT | no Telos EVM profile registered |
+| KAVA | SIGN | `kava`（Cosmos，`kava_2222-N`、`ukava`）与 `kavaevm`（EVM chain 2222）分开登记，两个都能签 |
+| LUNA | SIGN | `terra`（Cosmos，`phoenix-N`、`uluna`）；CW20 与 wasm execute 一律拒绝 |
+| LUNC | SIGN | `terraclassic`（Cosmos，`columbus-N`、`uluna`）；同上 |
 | ROSE | SIGN | rose（Oasis Sapphire EVM chain 23294，原生 ROSE） |
 | ZEN | SIGN | zen（Horizen EON EVM chain 7332，原生 ZEN） |
 | SCRT | ABSENT | no Secret Network adapter |
 | DERO | ABSENT | no Dero adapter |
 | TAO | ABSENT | no Bittensor adapter |
-| THETA | ABSENT | 治理币 THETA 不在 EVM 上（EVM 交易只能搬 TFUEL）；需要 Theta 原生 `SendTx` RLP 与 `SignBytes` 前缀 |
+| GRS | 地址可用，签名未开 | `grs`（SLIP-44 17、version 0x24）。基线特征已用真实链数据钉死：base58check 的校验和是 **Groestl-512 做两次、取前 4 字节**，用 `24 ‖ 35ead48b…16fc43` 能精确还原主网地址 `Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W`；txid 是 **单次 SHA-256 反转**。阻塞的是 legacy sighash：这条主网交易 `e32bec4e…dcffd` 的签名在 sha256/sha256d 与 Groestl-512/256 的各种截断、P2PKH/P2PK 两种 scriptCode 下**全部验不过**，所以只开放地址与收币，`WalletCapabilityAddress` 之外不加任何能力 |
+| THETA（原生） | 已接入 `ChainFamily::Theta` | `ThetaTransaction` 逐字节复现主网 `0x1ccc4b6e…063e17bca`（block 1000000）的 `SignBytes` 与 `keccak-256` 摘要 `03490f71…e01cbe`，该交易的 65 字节签名在 chain id `mainnet` 下正好恢复出输入地址。设备请求是 46 字节固定布局（版本/链选择/收款方/金额/手续费/sequence），发送方一律取派生地址，签名输出 `r‖s‖recovery`。网络 id 仍是 `theta`：EVM 转账走 EVM 适配器，原生 SendTx 走这个 family，由载荷格式决定；签名本身在主机自检里只验证拒绝路径，真正的签名由设备/原生探针覆盖 |
+| RON | SIGN | `ronin`（EVM chain 2020，原生 RON；未列入 EIP-1559 名单，只签 legacy） |
+| ACA | TOKEN | `acalaevm`（Acala EVM chain 787，只签 EVM 侧原生转账）。Substrate 侧 Acala 代币、跨链 XCM 未接入 |
 | POKT | ABSENT | no Pocket adapter |
 | ICP | SIGN | icp |
 | SC | SIGN | sc |

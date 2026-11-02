@@ -54,7 +54,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - Cosmos SDK `MsgSend`（ATOM/OSMO/TIA）已接入 `BEGIN_SIGN kind=8`：设备自行构建 `TxBody`/`AuthInfo`/`SignDoc`/`TxRaw`，支持单笔 1..4 条 `MsgSend`、`SIGN_MODE_DIRECT`、可选 memo（写入 `TxBody.memo` 并进入摘要），以及原生或任意 denom；无固定精度的 denom 会原样显示并给出精确 base unit 金额。不支持 IBC 报文、authz 与 amino/JSON，范围与向量来源见 [Cosmos 范围与证据](docs/chain-protocols.md)。
 - Algorand 原生 `pay` 与 ASA `axfer`/opt-in 已接入 `BEGIN_SIGN kind=10`：设备只接受 canonical unsigned MessagePack，绑定主网 genesis、fee 和轮次窗口，显示 note/lease，返回 `{sig, txn}`；不支持 group、rekey、close、clawback、LogicSig 和应用调用，见 [algorand-signing.md](docs/chain-protocols.md)。
 - NEAR Borsh `TransactionV0` 原生 Transfer 已接入 `BEGIN_SIGN kind=11`：1–16 笔转账、128 位总额溢出拒绝、隐式账户 owner 绑定，返回 `tx || 0x00 || sig`；不支持 FunctionCall、访问密钥、委托或命名账户所有权，见 [near-signing.md](docs/chain-protocols.md)。
-- 离线 TOTP（RFC 6238，SHA-1/256/512）已实现并通过 RFC 6238/2202/4648 向量；认证后的 CLI 用 `totp time <unix>` 锚定时钟，`totp <base32>` 生成验证码，密钥不落盘、不回显。时钟与硬件 RTC 的边界见 [totp.md](docs/totp.md)。
+- TOTP 支持八个会话账户、otpauth URI 导入、本机批准和设备屏幕出码；锁定清除账户及时间锚，尚无持久存储或可信 RTC。见 [TOTP](docs/totp.md) 和 [认证与传输验收状态](docs/authentication-status.md)。
 - Tezos（XTZ）manager operation 已接入 `BEGIN_SIGN kind=12`：可选 Ed25519 reveal、1–16 笔 tz1–tz4 原生转账、BLAKE2b-256(0x03 || forged) 摘要与 Ed25519 签名；不支持 KT1、Michelson、委托或 FA token，见 [tezos-signing.md](docs/chain-protocols.md)。
 - XRP 原生 Payment 已接入 `BEGIN_SIGN kind=13`：设备从 50 字节紧凑结构构建规范 XRPL 二进制，使用 SHA-512Half 与 secp256k1 DER 签名；classic r-address 使用 Ripple base58 + hash160。不支持 issued currency、path、memo、partial payment 或多签名，见 [xrp-signing.md](docs/chain-protocols.md)。
 - QRL v1（XMSS/SHAKE-256）原生转账已接入 Chain 适配器：设备自建 `master ‖ fee ‖ message ‖ (addr ‖ amount)*` 预映像并对其 `sha256` 摘要签名；签名前把一次性叶写入 NVS 双槽记录并回读证明，签名后立即用独立验证器重建根自检。与 qrllib `xmss_Signmsg` 在 h=4/6/10 逐字节一致。
@@ -348,7 +348,10 @@ evm sign <six-digit-confirmation>
 zec inspect <ZEC4-payload-hex>
 zec sign <six-digit-confirmation>
 totp time <unix-seconds>
-totp <base32-secret> [6|7|8] [period] [sha1|sha256|sha512]
+totp add <otpauth-uri>
+totp list
+totp show <slot>
+totp remove <slot>
 tx reject
 selftest
 ```
@@ -845,6 +848,7 @@ ESP32-P4 没有 Wi-Fi/BLE，OTA 传输层是 USB-C 桌面工具或 NFC；这两�
 | `CoinIcons` | 审阅页 32×32 I1 币种图徽，CC0 源图打包，固件内无解码器 |
 | `QrlOtsJournal` | XMSS 一次性索引的持久化预留：双槽冗余、回读证明、半写跳过、状态未知即拒签 |
 | `MlDsa87` | FIPS 204 ML-DSA-87 的 keygen/sign/verify，供 QRL v2 使用 |
+| `P256Sign` | NIST P-256 ECDSA：RFC 6979 确定性 nonce、low-S 归一、严格 DER；CTAP2 认证器需要的 ES256 原语 |
 | `QrlV2Transaction` | QRL v2 动态费信封：keccak-256 摘要 + ML-DSA-87 hedged 签名 |
 | `AptosTransaction` | BCS `RawTransaction`、`APTOS::RawTransaction` 域分隔哈希、Ed25519 authenticator |
 | `StarknetCrypto` | Stark 曲线域运算、Pedersen、Poseidon、Stark ECDSA、SNIP-5 地址、Cairo v3 摘要 |

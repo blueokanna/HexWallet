@@ -43,6 +43,7 @@ namespace hexwallet
     Aptos,
     QrlV2,
     Starknet,
+    Theta,
   };
 
   enum class ChainError : uint8_t

@@ -421,6 +421,13 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
                                    &output_size);
             break;
           }
+        case AddressEncoding::P2pkhGroestl:
+          {
+            size_t output_size = sizeof(out->address);
+            result = address_p2pkh_groestl(network.utxo, public_key, out->address,
+                                           &output_size);
+            break;
+          }
         case AddressEncoding::ZcashTransparent:
           {
             size_t output_size = sizeof(out->address);

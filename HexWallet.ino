@@ -206,10 +206,13 @@ namespace
 
   SelfTestReport self_test_report;
 
-} // namespace
+}
 
 void setup()
 {
+#if ARDUINO_USB_CDC_ON_BOOT && !ARDUINO_USB_MODE
+  Serial.enableReboot(false);
+#endif
   Serial.begin(115200);
 
   bool self_tests_queued = false;
@@ -243,15 +246,10 @@ void setup()
     Serial.println(hexwallet::board_name());
   }
 
-  // Companion counters (level, bond, signed/rejected) survive a reboot; a first
-  // boot simply has nothing stored yet, which is not an error.
   if (!hexwallet::mascot_nvs_begin())
   {
     Serial.println("INFO: companion starts fresh (no stored state)");
   }
-
-  // User-declared tokens. A missing or unreadable table is an empty table, not a
-  // failure: the device then simply has no custom tokens to offer.
   if (!hexwallet::custom_tokens_nvs_begin())
   {
     Serial.println("WARN: custom token table not available");
@@ -260,11 +258,13 @@ void setup()
 #if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
   if (self_tests_queued)
   {
-    if (display_available) hexwallet::wallet_ui_show_busy("Running self-tests...");
+    if (display_available)
+      hexwallet::wallet_ui_show_busy("Running self-tests...");
     const uint32_t self_test_started = millis();
     while (!hexwallet::wallet_worker_wait(0))
     {
-      if (display_available) hexwallet::wallet_ui_service();
+      if (display_available)
+        hexwallet::wallet_ui_service();
       if (static_cast<uint32_t>(millis() - self_test_started) >= HEXWALLET_SELFTEST_TIMEOUT_MS)
       {
         Serial.println("FATAL: self-test did not finish; wallet services disabled");

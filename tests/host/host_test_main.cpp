@@ -15,11 +15,18 @@
 #include "../../BitcoinTransaction.h"
 #include "../../PeercoinSighash.h"
 #include "../../Blake2b.h"
+#include "../../Groestl512.h"
+#include "../../ThetaTransaction.h"
+#include "../../WalletAddresses.h"
 #include "../../Blake256.h"
 #include "../../KaspaTransaction.h"
 #include "../../MlDsa87.h"
 #include "../../SolanaTransaction.h"
 #include "../../StarknetCrypto.h"
+#include "../../src/P256Sign.h"
+#include "../../AirgapFrame.h"
+#include "../../Se051Provisioning.h"
+#include "../../Se051Scp03.h"
 #include "../../TokenCalldata.h"
 #include "../../TronTransaction.h"
 #include "../../CosmosTransaction.h"
@@ -54,7 +61,8 @@
 #include "../../WalletTokens.h"
 #include "../../WalletCustomTokens.h"
 
-int main() {
+int main()
+{
   const bool output_scan = hexwallet::run_cryptonote_output_scan_self_tests();
   printf("cryptonote-output-scan=%s\n", output_scan ? "pass" : "FAIL");
   const bool primitives = hexwallet::run_crypto_self_tests();
@@ -75,6 +83,9 @@ int main() {
   const bool qrl = hexwallet::run_qrl_xmss_self_tests();
   const bool custody = hexwallet::run_custody_self_tests();
   const bool secure_element = hexwallet::run_secure_element_self_tests();
+  const bool scp03 = hexwallet::run_scp03_self_tests();
+  const bool se051_provisioning = hexwallet::run_se051_provisioning_self_tests();
+  const bool airgap = hexwallet::run_airgap_self_tests();
   const bool random_source = hexwallet::run_random_source_self_tests();
   const bool eink_panel = hexwallet::run_eink_panel_self_tests();
   const bool qr_code = hexwallet::run_qr_code_self_tests();
@@ -87,6 +98,9 @@ int main() {
   const bool sighash = hexwallet::run_bitcoin_sighash_self_tests() && peercoin;
   const bool kaspa = hexwallet::run_kaspa_self_tests();
   const bool blake2b = hexwallet::run_blake2b_self_tests();
+  const bool groestl512 = hexwallet::run_groestl512_self_tests();
+  const bool grs_address = hexwallet::run_groestl_address_self_tests();
+  const bool theta = hexwallet::run_theta_self_tests();
   const bool blake256 = hexwallet::run_blake256_self_tests();
   const bool calldata = hexwallet::run_token_calldata_self_tests();
   const bool tron = hexwallet::run_tron_self_tests();
@@ -106,6 +120,7 @@ int main() {
   const bool ml_dsa = hexwallet::run_ml_dsa_87_self_tests();
   const bool solana = hexwallet::run_solana_self_tests();
   const bool starknet = hexwallet::run_starknet_crypto_self_tests();
+  const bool p256 = hexwallet::run_p256_self_tests();
   const bool catalog = hexwallet::run_catalog_self_tests();
   const bool mining = hexwallet::run_mining_catalog_self_tests();
   const bool tokens = hexwallet::run_token_profile_self_tests();
@@ -126,16 +141,24 @@ int main() {
   printf("bulletproof-plus-reference=%s\n", bulletproof_plus_reference ? "pass" : "FAIL");
   const bool bulletproof_plus_mainnet = hexwallet::run_bulletproof_plus_mainnet_probe();
   printf("cryptonote-review=%s\n", cryptonote_review ? "pass" : "FAIL");
-  if (!cryptonote_review) printf("cryptonote-review-stage=%d error=%d\n", hexwallet::cryptonote_review_last_stage(), hexwallet::cryptonote_review_last_error());
+  if (!cryptonote_review)
+    printf("cryptonote-review-stage=%d error=%d\n", hexwallet::cryptonote_review_last_stage(), hexwallet::cryptonote_review_last_error());
   printf("cryptonote-signing=%s\n", cryptonote_signing ? "pass" : "FAIL");
-  if (!cryptonote_signing) printf("cryptonote-signing-stage=%d error=%d\n", hexwallet::cryptonote_signing_last_stage(), hexwallet::cryptonote_signing_last_error());
+  if (!cryptonote_signing)
+    printf("cryptonote-signing-stage=%d error=%d\n", hexwallet::cryptonote_signing_last_stage(), hexwallet::cryptonote_signing_last_error());
   printf("masari=%s\n", masari ? "pass" : "FAIL");
-  if (!masari) printf("masari-stage=%d error=%d\n", hexwallet::masari_last_stage(), hexwallet::masari_last_error());
+  if (!masari)
+    printf("masari-stage=%d error=%d\n", hexwallet::masari_last_stage(), hexwallet::masari_last_error());
   printf("cryptonote-mainnet=%s\n", cryptonote_mainnet ? "pass" : "FAIL");
   printf("bulletproof-plus-mainnet=%s\n", bulletproof_plus_mainnet ? "accepted" : "rejected");
   printf("qrl-xmss=%s\n", qrl ? "pass" : "FAIL");
   printf("custody=%s\n", custody ? "pass" : "FAIL");
   printf("secure-element=%s\n", secure_element ? "pass" : "FAIL");
+  printf("scp03=%s\n", scp03 ? "pass" : "FAIL");
+  printf("se051-provisioning=%s\n", se051_provisioning ? "pass" : "FAIL");
+  printf("airgap=%s\n", airgap ? "pass" : "FAIL");
+  if (!airgap)
+    printf("airgap-stage=%d\n", hexwallet::airgap_last_stage());
   printf("random-source=%s\n", random_source ? "pass" : "FAIL");
   printf("eink-panel=%s\n", eink_panel ? "pass" : "FAIL");
   printf("qrcode=%s\n", qr_code ? "pass" : "FAIL");
@@ -146,6 +169,9 @@ int main() {
   printf("sighash=%s\n", sighash ? "pass" : "FAIL");
   printf("kaspa=%s\n", kaspa ? "pass" : "FAIL");
   printf("blake2b=%s\n", blake2b ? "pass" : "FAIL");
+  printf("groestl512=%s\n", groestl512 ? "pass" : "FAIL");
+  printf("grs-address=%s\n", grs_address ? "pass" : "FAIL");
+  printf("theta=%s\n", theta ? "pass" : "FAIL");
   printf("blake256=%s\n", blake256 ? "pass" : "FAIL");
   printf("token-calldata=%s\n", calldata ? "pass" : "FAIL");
   printf("tron=%s\n", tron ? "pass" : "FAIL");
@@ -154,7 +180,8 @@ int main() {
   printf("algorand=%s\n", algorand ? "pass" : "FAIL");
   printf("chain=%s\n", chain ? "pass" : "FAIL");
 #if defined(HEXWALLET_HOST_TEST)
-  if (!chain) hexwallet::report_chain_self_tests();
+  if (!chain)
+    hexwallet::report_chain_self_tests();
 #endif
   printf("tezos=%s\n", tezos ? "pass" : "FAIL");
   printf("near=%s\n", near ? "pass" : "FAIL");
@@ -168,6 +195,7 @@ int main() {
   printf("ml-dsa-87=%s\n", ml_dsa ? "pass" : "FAIL");
   printf("solana=%s\n", solana ? "pass" : "FAIL");
   printf("starknet-crypto=%s\n", starknet ? "pass" : "FAIL");
+  printf("p256-ecdsa=%s\n", p256 ? "pass" : "FAIL");
   printf("catalog=%s\n", catalog ? "pass" : "FAIL");
   printf("mining-catalog=%s\n", mining ? "pass" : "FAIL");
   printf("tokens=%s\n", tokens ? "pass" : "FAIL");
@@ -175,5 +203,5 @@ int main() {
   printf("link-crypto=%s\n", link_crypto ? "pass" : "FAIL");
   printf("wallet-link=%s\n", wallet_link ? "pass" : "FAIL");
   printf("nfc-apdu=%s\n", nfc_apdu ? "pass" : "FAIL");
-  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && ml_dsa && solana && starknet && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
+  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && scp03 && se051_provisioning && airgap && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && groestl512 && grs_address && theta && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && ml_dsa && solana && starknet && p256 && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
 }

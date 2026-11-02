@@ -31,6 +31,8 @@ struct Aes128Schedule {
 void aes128_expand_key(const uint8_t key[16], Aes128Schedule *schedule);
 void aes128_encrypt_block(const Aes128Schedule &schedule, const uint8_t in[16],
                           uint8_t out[16]);
+void aes128_decrypt_block(const Aes128Schedule &schedule, const uint8_t in[16],
+                          uint8_t out[16]);
 
 // AES-128-CMAC (RFC 4493). Returns false only for a null pointer.
 bool aes128_cmac(const uint8_t key[16], const uint8_t *data, size_t size,

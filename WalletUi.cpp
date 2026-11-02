@@ -30,6 +30,8 @@ namespace hexwallet
 
     bool initialized = false;
     bool session_authenticated = false;
+    bool otp_visible = false;
+    char otp_text[9] = {};
     bool eink_panel = false;
     uint8_t eink_colors = 1;
     unsigned long last_service_ms = 0;
@@ -109,9 +111,6 @@ namespace hexwallet
     }
     static lv_color_t theme_badge_on() { return lv_color_hex(eink_panel ? 0xffffff : 0xe5e5e5); }
     static lv_color_t theme_badge_off() { return lv_color_hex(eink_panel ? 0xffffff : 0xf0d8d5); }
-
-    // lv_color32_t stores its channels BGR(A); the theme works in RGB, so convert
-    // explicitly rather than relying on initialiser order.
     static lv_color32_t to_color32(lv_color_t color)
     {
       const lv_color32_t converted = {color.blue, color.green, color.red, 0xFF};
@@ -144,8 +143,10 @@ namespace hexwallet
 
     void clear_content()
     {
-      // Invalidate before deleting. Allocator reuse makes lv_obj_is_valid on an
-      // old pointer insufficient: it could now point at a transaction label.
+      otp_visible = false;
+      volatile char *code = otp_text;
+      for (size_t i = 0; i < sizeof(otp_text); ++i)
+        code[i] = 0;
       forget_companion();
       review_seal_valid = false;
       decision_pending = false;
@@ -172,9 +173,6 @@ namespace hexwallet
       }
     };
 
-    // Defined below the catalog view, which is the first screen to draw it.
-    // The seal covers exactly the strings this screen renders, plus a fresh nonce, so
-    // two reviews of the same transaction never share an authorization.
     void finish_review_seal(const RenderedReviewLines &lines)
     {
       uint8_t nonce[kReviewSealNonceSize] = {};
@@ -254,8 +252,6 @@ namespace hexwallet
       return label;
     }
 
-    // Inserts a space every four characters so a human can verify an address in
-    // groups. The address itself is unchanged; this is display-only.
     void nothing_group_address(char *out, size_t capacity, const char *address)
     {
       if (out == nullptr || capacity < 2)
@@ -292,8 +288,6 @@ namespace hexwallet
 
       static QrCode code;
       QrEcc chosen = QrEcc::Medium;
-      // Wallet policy: H first, then Q, then M. Never L - a code that survives
-      // one scratch is not an address.
       if (!qr_encode_best(reinterpret_cast<const uint8_t *>(text), length, &code,
                           &chosen))
       {
@@ -331,12 +325,9 @@ namespace hexwallet
         return nullptr;
       }
       lv_canvas_set_draw_buf(canvas, &draw_buffer);
-      // I1 palette: index 0 is the paper, index 1 is the ink. There is no grey on
-      // this panel, and a dither pattern here would destroy module edges.
       lv_canvas_set_palette(canvas, 0, to_color32(theme_bg()));
       lv_canvas_set_palette(canvas, 1, to_color32(theme_fg()));
-      // Integer zoom only: a module that lands on a half pixel turns a scannable
-      // code into a grey smear on e-paper.
+
       const lv_coord_t available = static_cast<lv_coord_t>(board_display_width() - sc(16));
       lv_coord_t zoom = available / side;
       if (zoom < 1)
@@ -346,13 +337,6 @@ namespace hexwallet
       return canvas;
     }
 
-    // 32x32 I1 logo for the review header. It goes through a canvas for the
-    // same reason the QR code does: the panel is 1bpp, so a scaled colour image
-    // would be dithered into a patch nobody can recognise, while an I1 mask
-    // lands on exact pixels with the theme's own paper and ink.
-    //
-    // The buffer and draw descriptor are static: one review header exists at a
-    // time, and the panel commits the frame before the next review can start.
     lv_obj_t *coin_icon_view(lv_obj_t *parent, const char *key)
     {
       const CoinIcon *icon = coin_icon_find(key);
@@ -388,7 +372,6 @@ namespace hexwallet
       WalletCatalogEntry entry;
       if (!wallet_catalog_at_sorted(index, &entry) || status_label == nullptr)
         return;
-      // Never truncate the limitations at the end of a capability description.
       lv_label_set_text_fmt(status_label, "%s\n%s", entry.name, entry.status);
     }
 
@@ -457,9 +440,6 @@ namespace hexwallet
       clear_content();
       lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
       lv_obj_set_style_pad_row(screen_content, 8, 0);
-
-      // The companion is confined to the catalog. Page transitions invalidate
-      // every companion handle before any transaction labels are allocated.
       MascotInputs companion_inputs = {};
       companion_inputs.phone_linked = true;
       companion_inputs.battery_mv = board_battery_millivolts();
@@ -508,7 +488,6 @@ namespace hexwallet
 
     void companion_parts(lv_obj_t *stage, const MascotSnapshot &snapshot)
     {
-      // I1 buffers begin with two ARGB8888 palette entries, followed by aligned rows.
       const uint32_t stride = lv_draw_buf_width_to_stride(64, LV_COLOR_FORMAT_I1);
       if (stride < 8 || stride > 16)
         return;
@@ -788,9 +767,6 @@ namespace hexwallet
 #endif
   }
 
-  // Long field-arithmetic steps (Bulletproofs+ verification takes seconds on the
-  // MCU) run on the same task as the UI, so the panel would otherwise keep the
-  // previous screen until they finish. Flush the status line first.
   void wallet_ui_show_busy(const char *status)
   {
 #if HEXWALLET_ENABLE_LVGL
@@ -868,14 +844,10 @@ namespace hexwallet
     lv_obj_t *qr = nothing_qr(qr_row, address, &qr_level);
     if (qr == nullptr)
     {
-      // Refusing is better than drawing a QR that encodes something else or a
-      // version the panel cannot carry.
       nothing_micro_label(screen_content, "QR UNAVAILABLE - USE ADDRESS", true);
     }
     else if (qr_level != nullptr)
     {
-      // Say which error-correction level the symbol ended up with: H when it
-      // fits, Q or M when the payload forced a step down.
       char caption[16];
       snprintf(caption, sizeof(caption), "QR %s", qr_level);
       nothing_micro_label(screen_content, caption, false);
@@ -892,8 +864,6 @@ namespace hexwallet
     lv_obj_set_style_border_color(address_label, theme_accent(), 0);
     lv_obj_set_style_radius(address_label, sc(8), 0);
     lv_obj_set_style_pad_all(address_label, sc(8), 0);
-    // Addresses are compared character by character, so the tracking has to be
-    // loose enough to read and tight enough to fit 128 px.
     lv_obj_set_style_text_letter_space(address_label, 1, 0);
 
     nothing_micro_label(screen_content, path, false);
@@ -911,6 +881,61 @@ namespace hexwallet
     (void)address;
     (void)path;
     return false;
+#endif
+  }
+
+  bool wallet_ui_show_otp(const char *issuer, const char *account, const char *code,
+                          uint64_t expires_unix)
+  {
+#if HEXWALLET_ENABLE_LVGL
+    if (!initialized || screen_content == nullptr || !board_has_display() ||
+        issuer == nullptr || account == nullptr || code == nullptr)
+      return false;
+    const size_t length = strlen(code);
+    if (length != 6 && length != 8)
+      return false;
+    for (size_t i = 0; i < length; ++i)
+      if (code[i] < '0' || code[i] > '9')
+        return false;
+    clear_content();
+    decision_callback = nullptr;
+    board_display_prepare_review();
+    lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
+    nothing_micro_label(screen_content, "AUTHENTICATOR", true);
+    nothing_rule(screen_content);
+    const char *labels[] = {issuer, account};
+    for (const char *text : labels)
+    {
+      lv_obj_t *label = lv_label_create(screen_content);
+      lv_obj_set_width(label, LV_PCT(100));
+      lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+      lv_label_set_text(label, text);
+    }
+    memcpy(otp_text, code, length + 1);
+    lv_obj_t *label = lv_label_create(screen_content);
+    lv_label_set_text_static(label, otp_text);
+    lv_obj_set_style_text_letter_space(label, 2, 0);
+    char expiry[64];
+    snprintf(expiry, sizeof(expiry), "Valid before Unix %llu", static_cast<unsigned long long>(expires_unix));
+    nothing_micro_label(screen_content, expiry, false);
+    nothing_micro_label(screen_content, "Session account", false);
+    otp_visible = true;
+    wallet_ui_set_status("Code shown only on this device");
+    return true;
+#else
+    (void)issuer;
+    (void)account;
+    (void)code;
+    (void)expires_unix;
+    return false;
+#endif
+  }
+
+  void wallet_ui_hide_otp()
+  {
+#if HEXWALLET_ENABLE_LVGL
+    if (otp_visible)
+      wallet_ui_show_catalog();
 #endif
   }
 
@@ -939,8 +964,6 @@ namespace hexwallet
     lv_obj_set_scrollbar_mode(screen_content, LV_SCROLLBAR_MODE_AUTO);
 
     nothing_dot_band(screen_content, 6);
-    // The logo is looked up from the same sealed network string that the title
-    // shows, so the seal still covers everything the user sees.
     lv_obj_t *title_row = lv_obj_create(screen_content);
     set_clean_container(title_row);
     lv_obj_clear_flag(title_row, LV_OBJ_FLAG_SCROLLABLE);
@@ -980,8 +1003,6 @@ namespace hexwallet
       lv_obj_set_width(label, LV_PCT(100));
       lv_label_set_text(label, line);
       lines.add(label);
-      // Addresses must never share a bounded summary buffer with amounts or
-      // ownership text: a long amount could otherwise truncate the destination.
       const char *fields[] = {output.address, output.ownership};
       for (const char *text : fields)
       {
@@ -1203,7 +1224,6 @@ namespace hexwallet
   {
     if (!review_seal_valid)
       return false;
-    // The panel must have committed this exact screen before it can authorize.
     if (!review_seal.displayed)
     {
       if (!board_display_review_ready())

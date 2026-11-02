@@ -42,8 +42,6 @@ namespace hexwallet
 {
   namespace
   {
-
-    //  Shared state and helpers
     bool g_display_ready = false;
     bool g_touch_ready = false;
     bool g_review_frame_pending = true;
@@ -171,8 +169,6 @@ namespace hexwallet
       SPI.setFrequency(HEXWALLET_LCD_SPI_FREQ);
       pinMode(HEXWALLET_LCD_PIN_DC, OUTPUT);
 
-      // Run the init sequence three times, as the official driver does, to ride
-      // out cold-start glitches on the panel's internal controller.
       for (int pass = 0; pass < 3; ++pass)
       {
         for (size_t i = 0; i < sizeof(kRm67162SpiInit) / sizeof(kRm67162SpiInit[0]); ++i)
@@ -185,12 +181,6 @@ namespace hexwallet
       return true;
     }
 
-//  ST7789 8-bit parallel driver - T-Display S3
-//  Pins and init sequence match the official LilyGO T-Display-S3 factory
-//  code (TFT_eSPI Setup206_LilyGo_T_Display_S3.h). The panel is driven in
-//  its native portrait orientation; the 35-column CGRAM offset of the
-//  170x320 visible area inside the 240x320 panel is applied in the window
-//  math, which sidesteps all rotation/offset corner cases.
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
 
 #include <soc/soc.h>
@@ -230,9 +220,6 @@ namespace hexwallet
         HEXWALLET_LCD_PIN_D7,
     };
 
-    // Lookup tables: for every byte value the bit pattern to set/clear on the
-    // 8-bit data bus. All data pins live in GPIO 32..48 (OUT1), but the table is
-    // generic so the driver survives pin moves.
     static uint64_t s_st_set_pat[256];
     static uint64_t s_st_clr_pat[256];
 
@@ -381,14 +368,9 @@ namespace hexwallet
       return true;
     }
 
-//  Monochrome e-paper backend (GxEPD2) - T-Deck Max / T-Echo Lite
 #elif defined(HEXWALLET_HAS_DISPLAY) && defined(HEXWALLET_DISPLAY_KIND_EINK)
 
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-
-    // SSD1680 class panel driven directly by EinkPanel.cpp. The panel shares
-    // SCK/MOSI with the PN7161 but owns its own chip select, so every transfer is
-    // wrapped in one SPI transaction with CS held for the whole command+data pair.
     static bool epd_write_command(void *, uint8_t command, const uint8_t *data,
                                   size_t size)
     {
@@ -414,15 +396,37 @@ namespace hexwallet
 
     static bool epd_busy(void *)
     {
-      // SSD1680 asserts BUSY high while the waveform engine runs.
+#if HEXWALLET_EPD_PROFILE == 1
+      return digitalRead(HEXWALLET_EPD_PIN_BUSY) == LOW;
+#else
       return digitalRead(HEXWALLET_EPD_PIN_BUSY) == HIGH;
+#endif
+    }
+
+    static bool epd_write_data(void *, const uint8_t *data, size_t size)
+    {
+      SPI.beginTransaction(SPISettings(HEXWALLET_EPD_SPI_FREQ, MSBFIRST, SPI_MODE0));
+      digitalWrite(HEXWALLET_EPD_PIN_CS, LOW);
+      digitalWrite(HEXWALLET_EPD_PIN_DC, HIGH);
+      for (size_t i = 0; i < size; ++i)
+        SPI.transfer(data[i]);
+      digitalWrite(HEXWALLET_EPD_PIN_CS, HIGH);
+      SPI.endTransaction();
+      return true;
     }
 
     static void epd_delay(void *, uint32_t milliseconds) { delay(milliseconds); }
 
     static const EinkBus kEpdBus = {nullptr, epd_write_command, epd_set_reset,
-                                    epd_busy, epd_delay};
+                                    epd_busy, epd_delay, epd_write_data};
     static EinkPanel s_epd_native;
+#if defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS >= 4
+    constexpr EinkColorMode kEpdColorMode = EinkColorMode::FourColor;
+    constexpr uint8_t kEpdConvertDepth = 4;
+#else
+    constexpr EinkColorMode kEpdColorMode = EinkColorMode::Mono;
+    constexpr uint8_t kEpdConvertDepth = 1;
+#endif
 
     static bool epd_native_init()
     {
@@ -437,11 +441,23 @@ namespace hexwallet
       EinkPanelConfig config = {};
       config.width = HEXWALLET_EPD_WIDTH;
       config.height = HEXWALLET_EPD_HEIGHT;
-#ifdef HEXWALLET_EPD_PARTIAL_LUT
-      config.partial_lut = HEXWALLET_EPD_PARTIAL_LUT;
-      config.partial_lut_size = sizeof(HEXWALLET_EPD_PARTIAL_LUT);
+      config.color = kEpdColorMode;
+#if HEXWALLET_EPD_PROFILE == 1
+      config.controller = EinkController::Ssd1683;
+#if defined(HEXWALLET_EPD_COLOR_INIT)
+      static const EinkInitCommand kEpdColorInit[] = HEXWALLET_EPD_COLOR_INIT;
+      config.color_init = kEpdColorInit;
+      config.color_init_count = sizeof(kEpdColorInit) / sizeof(kEpdColorInit[0]);
 #endif
-      config.full_timeout_ms = 15000;
+#endif
+      if (kEpdColorMode == EinkColorMode::Mono)
+      {
+#if defined(HEXWALLET_EPD_PARTIAL_LUT)
+        config.partial_lut = HEXWALLET_EPD_PARTIAL_LUT;
+        config.partial_lut_size = sizeof(HEXWALLET_EPD_PARTIAL_LUT);
+#endif
+      }
+      config.full_timeout_ms = 45000;
       config.partial_timeout_ms = 4000;
       config.partial_budget = 8;
       return s_epd_native.begin(kEpdBus, config);
@@ -466,9 +482,9 @@ namespace hexwallet
 #endif
 #endif
 
-#endif // HEXWALLET_EPD_NATIVE_SSD1680
+#endif
 
-#endif // e-ink section
+#endif
 
 //  CST816S capacitive touch (I2C 0x15) - AMOLED Touch / T-Display S3 Touch
 #if defined(HEXWALLET_TOUCH_CST816S)
@@ -524,10 +540,9 @@ namespace hexwallet
         g_review_frame_pending = false;
       lv_display_flush_ready(disp);
     }
-#endif // color
+#endif
 
 #if defined(HEXWALLET_DISPLAY_KIND_EINK)
-    // 1bpp frame buffer for the e-paper (w*h/8 bytes).
     static uint8_t *s_eink_bw = nullptr;
     static bool s_eink_dirty = false;
     static uint32_t s_eink_dirty_ms = 0;
@@ -535,20 +550,20 @@ namespace hexwallet
     static EinkDamage s_eink_damage;
 #endif
 
-    static void eink_convert_to_bw(const uint8_t *frame16, uint16_t w, uint16_t h)
+#if !defined(HEXWALLET_EPD_NATIVE_SSD1680)
+    constexpr uint8_t kEpdConvertDepth = 1;
+#endif
+    static void eink_convert_frame(const uint8_t *frame16, uint16_t w, uint16_t h)
     {
-      eink_convert_rgb565(frame16, w, h, 1,
+      eink_convert_rgb565(frame16, w, h, kEpdConvertDepth,
 #if LV_COLOR_16_SWAP
                           true,
 #else
                           false,
 #endif
-                          s_eink_bw, eink_frame_size(w, h, 1));
+                          s_eink_bw, eink_frame_size(w, h, kEpdConvertDepth));
     }
 
-    // LVGL renders the whole frame into the direct buffer; flushing only marks it
-    // dirty. The actual panel update is coalesced here so a screen transition does
-    // not trigger several slow e-paper refreshes and never leaves a half frame.
     static void eink_service()
     {
       if (!s_eink_dirty)
@@ -559,16 +574,14 @@ namespace hexwallet
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
       if (s_eink_bw == nullptr || g_draw_buf == nullptr)
         return;
-      eink_convert_to_bw(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
-      const size_t size = eink_frame_bytes(HEXWALLET_EPD_WIDTH,
-                                           HEXWALLET_EPD_HEIGHT);
+      eink_convert_frame(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
+      const size_t size = s_epd_native.frame_bytes();
       EinkRefreshResult result = EinkRefreshResult::BusFault;
       EinkRect window = s_eink_damage.bounds();
-      // Byte-align both edges: the panel RAM window is addressed in whole bytes, so
-      // a sub-byte edge would shift every following pixel of that row.
       const uint32_t right = static_cast<uint32_t>(window.x) + window.width;
       window.x = static_cast<uint16_t>(window.x & ~static_cast<uint16_t>(7));
       window.width = static_cast<uint16_t>(((right + 7U) & ~7U) - window.x);
+
       const bool partial = s_epd_native.partial_supported() &&
                            !s_eink_damage.empty() &&
                            !s_epd_native.full_refresh_due() &&
@@ -588,8 +601,6 @@ namespace hexwallet
       s_eink_damage.reset(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
       if (result != EinkRefreshResult::Ok)
       {
-        // A failed refresh must never release the approval barrier: the user has
-        // not seen this screen.
         g_display_ready = false;
         return;
       }
@@ -597,19 +608,13 @@ namespace hexwallet
 #elif HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
       if (s_eink_bw == nullptr || g_draw_buf == nullptr)
         return;
-      eink_convert_to_bw(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
-      // GxEPD2 takes bitmap bytes through writeImage, not writeScreenBuffer
-      // (which fills RAM with one byte). Our mask uses 1=black; GxEPD2 uses 0=black.
+      eink_convert_frame(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
       s_epd.writeImageForFullRefresh(s_eink_bw, 0, 0,
                                      HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT, true, false, false);
-      // A full refresh is used on every committed screen. Partial refresh on a
-      // B/W panel ghosts text, which is unacceptable on an address/amount screen.
       s_epd.refresh(false);
       s_epd.powerOff();
       if (s_epd.busy())
       {
-        // GxEPD2 exposes no refresh error result. A still-active BUSY line is a
-        // detectable failure and must never release the approval barrier.
         g_display_ready = false;
         return;
       }
@@ -742,7 +747,7 @@ namespace hexwallet
 #endif
     }
 
-#endif // buttons
+#endif
 
     static bool lvgl_register_display(
         uint16_t width, uint16_t height, bool full_frame,
@@ -751,7 +756,6 @@ namespace hexwallet
       const size_t buf_px =
           full_frame ? size_t(width) * height
                      : size_t(width) * (size_t(height) / 10 < 16 ? 16 : size_t(height) / 10);
-      // RGB565: 2 bytes per pixel.
       uint8_t *buf = static_cast<uint8_t *>(board_alloc(buf_px * 2));
       if (buf == nullptr)
         return false;
@@ -759,7 +763,6 @@ namespace hexwallet
       lv_display_t *disp = lv_display_create(width, height);
       if (disp == nullptr)
         return false;
-      // buf_size is in bytes.
       lv_display_set_buffers(disp, buf, nullptr, buf_px * 2,
                              full_frame ? LV_DISPLAY_RENDER_MODE_DIRECT
                                         : LV_DISPLAY_RENDER_MODE_PARTIAL);
@@ -768,9 +771,9 @@ namespace hexwallet
       return true;
     }
 
-#endif // HEXWALLET_ENABLE_LVGL
+#endif
 
-  } // namespace
+  }
 
   //  Public board port API
   const char *board_name()
@@ -819,8 +822,6 @@ namespace hexwallet
   bool board_partial_refresh_supported()
   {
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-    // The native driver refuses partial updates until the board profile supplies a
-    // waveform LUT, so this answer is the one the UI should trust.
     return s_epd_native.partial_supported();
 #else
     return false;
@@ -922,8 +923,6 @@ namespace hexwallet
 #endif
 
 #ifndef HEXWALLET_SE051_I2C_ADDRESS
-    // SE05x default 7-bit address. Override through the board profile if the
-    // schematic uses the alternate strap.
     constexpr uint8_t kSecureElementAddress = 0x48;
 #else
     constexpr uint8_t kSecureElementAddress = HEXWALLET_SE051_I2C_ADDRESS;
@@ -936,16 +935,12 @@ namespace hexwallet
       if (!started)
       {
 #ifdef HEXWALLET_SE051_PIN_RESET
-        // Hardware reset first: a warm reboot can leave the card mid-session, and a
-        // card that answers an ATR from a stale session state is not a usable SE.
         pinMode(HEXWALLET_SE051_PIN_RESET, OUTPUT);
         digitalWrite(HEXWALLET_SE051_PIN_RESET, LOW);
         delay(10);
         digitalWrite(HEXWALLET_SE051_PIN_RESET, HIGH);
         delay(10);
 #endif
-        // Dedicated bus: a custody probe must never reconfigure the panel or touch
-        // bus, so this uses Wire1 and a board profile has to say so explicitly.
         started = Wire1.begin(kSecureElementSda, kSecureElementScl);
       }
       return started;
@@ -969,9 +964,6 @@ namespace hexwallet
       *size = 0;
     if (out != nullptr)
       secure_zero(out, capacity);
-    // SE051 ATR is obtained with NXP's T=1 reset exchange, not an arbitrary
-    // Wire.requestFrom(). Keep this legacy diagnostic unsupported until the
-    // session owner supplies its captured protocol response.
     return false;
   }
 
@@ -990,8 +982,6 @@ namespace hexwallet
   namespace
   {
 
-    // SCCB is I2C with 16-bit register addressing. OmniVision devices never drive a
-    // read without a preceding register write, so a read is write-then-repeated-start.
     bool camera_sccb_write(void *, uint8_t address, uint16_t reg, uint8_t value)
     {
       Wire.beginTransmission(address);
@@ -1016,7 +1006,7 @@ namespace hexwallet
       return true;
     }
 
-  } // namespace
+  }
 #endif
 
   CameraProbeState board_camera_probe()
@@ -1056,18 +1046,20 @@ namespace hexwallet
     g_display_ready = true;
 
 #elif defined(HEXWALLET_DISPLAY_KIND_EINK)
-#if defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS > 1
-    // The current backend writes a 1bpp native buffer. Refuse to drive a colour
-    // panel with a monochrome class: that would silently render the red/yellow
-    // accents as black and cannot be described as colour support.
-    Serial.println("ERR: HEXWALLET_EPD_COLORS>1 needs a matching GxEPD2 3C/4C "
-                   "driver class; refusing a monochrome fallback");
+#if defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS == 3
+    Serial.println("ERR: 3-color panels need the two-plane driver; not "
+                   "implemented in this build");
+    g_display_ready = false;
+    return false;
+#elif defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS > 4
+    Serial.println("ERR: only 1-color and 4-color e-paper profiles exist");
     g_display_ready = false;
     return false;
 #endif
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
     s_eink_bw = static_cast<uint8_t *>(
-        board_alloc(eink_frame_size(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT, 1)));
+        board_alloc(eink_frame_size(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
+                                    kEpdConvertDepth)));
     if (s_eink_bw == nullptr)
       return false;
     s_eink_damage.reset(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
@@ -1085,7 +1077,8 @@ namespace hexwallet
     g_display_ready = true;
 #elif HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
     s_eink_bw = static_cast<uint8_t *>(
-        board_alloc(eink_frame_size(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT, 1)));
+        board_alloc(eink_frame_size(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
+                                    kEpdConvertDepth)));
     if (s_eink_bw == nullptr)
       return false;
     SPI.begin(HEXWALLET_EPD_PIN_SCK, -1, HEXWALLET_EPD_PIN_MOSI, HEXWALLET_EPD_PIN_CS);
@@ -1098,8 +1091,6 @@ namespace hexwallet
     }
     g_display_ready = true;
 #else
-    // GxEPD2 (or the concrete panel class) is not available. Fail closed with
-    // an explicit reason instead of pretending the e-paper is live.
     Serial.println("WARN: e-paper target needs the GxEPD2 library (and, for "
                    "T-Echo Lite, a HEXWALLET_EPD_DRIVER_CLASS definition)");
     g_display_ready = false;
@@ -1144,8 +1135,6 @@ namespace hexwallet
   {
     g_review_frame_pending = true;
 #if HEXWALLET_ENABLE_LVGL && defined(HEXWALLET_DISPLAY_KIND_EINK)
-    // Discard a pending frame from the previous view; only a subsequent LVGL
-    // flush of the new view is allowed to release the barrier.
     s_eink_dirty = false;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
     s_eink_damage.reset(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
@@ -1158,4 +1147,4 @@ namespace hexwallet
     return g_display_ready && !g_review_frame_pending;
   }
 
-} // namespace hexwallet
+}

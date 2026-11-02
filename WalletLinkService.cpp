@@ -21,6 +21,7 @@
 #include "WalletSigning.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
+#include "WalletTotp.h"
 
 namespace hexwallet
 {
@@ -49,13 +50,8 @@ namespace hexwallet
     constexpr uint8_t kStatusInvalid = 4;
     constexpr uint8_t kStatusExpired = 5;
     constexpr uint8_t kStatusUnsupported = 6;
-    // 7 is reserved (was "no wallet"); "locked" is the precise state now.
     constexpr uint8_t kStatusNotApproved = 8;
-    // The device is paired and reachable, but no wallet session is unlocked, so
-    // no key material exists in RAM. The phone must ask the user to unlock.
     constexpr uint8_t kStatusLocked = 9;
-    // The transaction parsed but violates local spending policy (for example the
-    // Monero fee ceiling). Nothing was signed.
     constexpr uint8_t kStatusFeePolicy = 10;
 
     constexpr uint8_t kTxBitcoin = 1;
@@ -71,12 +67,7 @@ namespace hexwallet
     constexpr uint8_t kTxNear = 11;
     constexpr uint8_t kTxTezos = 12;
     constexpr uint8_t kTxXrp = 13;
-    // Shared envelope for the account-model adapters (VET, ICX, ...). The payload
-    // starts with the adapter's own magic and is never treated as opaque bytes.
     constexpr uint8_t kTxChain = 14;
-    // Dash plain payments. The payload is the compact review structure documented
-    // in docs/chain-protocols.md; special transaction types are refused by the
-    // adapter, not by the transport.
     constexpr uint8_t kTxDash = 15;
 
     Preferences preferences;
@@ -84,6 +75,8 @@ namespace hexwallet
     WalletNfcApdu apdu;
     bool service_ready = false;
     bool preferences_ready = false;
+    WalletLinkTransport transport_owner = WalletLinkTransport::None;
+    uint32_t transport_activity_ms = 0;
 
     struct Reader
     {
@@ -231,7 +224,7 @@ namespace hexwallet
 
     void show_pairing_code(void *, const uint8_t phone[32], uint32_t code)
     {
-      if (wallet_signing_active() || wallet_cli_review_active() ||
+      if (wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending() ||
           !board_has_display() || !wallet_ui_ready())
       {
         link.reset_pairing();
@@ -247,7 +240,7 @@ namespace hexwallet
 
     void clear_pairing_prompt(void *)
     {
-      if (wallet_signing_active() || wallet_cli_review_active())
+      if (wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending())
         return;
       wallet_ui_set_decision_callback(nullptr);
       wallet_ui_show_catalog();
@@ -276,8 +269,6 @@ namespace hexwallet
       const bool have_seed = wallet_session_load_seed(seed) == WalletError::Ok;
       SensitiveValue<DerivedAddress> derived_storage;
       auto &derived = derived_storage.get();
-      // Subaddress indices are only meaningful for CryptoNote; every other
-      // encoding keeps the plain BIP32 derivation.
       const WalletError result =
           (subaddress != nullptr && entry.network->encoding == AddressEncoding::CryptoNote)
               ? derive_cryptonote_subaddress(master, *entry.network, account, change,
@@ -331,7 +322,7 @@ namespace hexwallet
     // the serial CLI: it needs an unlocked wallet and a working trusted display.
     bool link_signing_allowed()
     {
-      if (wallet_cli_review_active() || link.pairing_pending())
+      if (wallet_cli_review_active() || link.pairing_pending() || wallet_totp_pending())
         return false;
       const WalletTransportState transport_state = {
           wallet_session_is_loaded(), true, board_has_display()};
@@ -378,7 +369,7 @@ namespace hexwallet
         return writer.u8(kStatusLocked);
       // Do not replace a transaction's trusted review with an address supplied in
       // a second host request. The caller must finish or cancel that review first.
-      if (wallet_signing_active() || wallet_cli_review_active() || link.pairing_pending())
+      if (wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending() || link.pairing_pending())
         return writer.u8(kStatusNotApproved);
       if (!board_has_display() || !wallet_ui_ready())
         return writer.u8(kStatusUnsupported);
@@ -698,7 +689,8 @@ namespace hexwallet
     size_t nfc_apdu_handler(const uint8_t *apdu_bytes, size_t apdu_size,
                             uint8_t *response, size_t response_capacity)
     {
-      return wallet_link_service_apdu(apdu_bytes, apdu_size, millis(), response,
+      return wallet_link_service_apdu(WalletLinkTransport::Nfc,
+                                      apdu_bytes, apdu_size, millis(), response,
                                       response_capacity);
     }
 
@@ -738,25 +730,63 @@ namespace hexwallet
     if (!service_ready)
       return;
     link.tick(now_ms);
+    if (transport_owner != WalletLinkTransport::None &&
+        static_cast<uint32_t>(now_ms - transport_activity_ms) >= kLinkSessionTimeoutMs)
+      wallet_link_service_reset();
     wallet_signing_tick(now_ms);
   }
 
-  size_t wallet_link_service_apdu(const uint8_t *apdu_bytes, size_t apdu_size,
+  size_t wallet_link_service_apdu(WalletLinkTransport transport,
+                                  const uint8_t *apdu_bytes, size_t apdu_size,
                                   uint32_t now_ms, uint8_t *response,
                                   size_t response_capacity)
   {
-    if (!service_ready)
+    if (!service_ready || response == nullptr || response_capacity < 2 ||
+        (transport != WalletLinkTransport::Usb && transport != WalletLinkTransport::Nfc))
       return 0;
-    return apdu.process(apdu_bytes, apdu_size, now_ms, response,
-                        response_capacity);
+    if (transport == WalletLinkTransport::Usb && !wallet_usb_data_enabled())
+      return 0;
+    if (transport_owner != WalletLinkTransport::None &&
+        static_cast<uint32_t>(now_ms - transport_activity_ms) >= kLinkSessionTimeoutMs)
+      wallet_link_service_reset();
+    if (transport_owner != WalletLinkTransport::None && transport_owner != transport)
+    {
+      response[0] = 0x69;
+      response[1] = 0x85;
+      return 2;
+    }
+    const size_t produced = apdu.process(apdu_bytes, apdu_size, now_ms, response,
+                                         response_capacity);
+    if (transport_owner == WalletLinkTransport::None && produced == 4 &&
+        apdu_bytes != nullptr && apdu_size >= 2 && apdu_bytes[0] == 0x00 &&
+        apdu_bytes[1] == 0xa4 && response[2] == 0x90 && response[3] == 0x00)
+      transport_owner = transport;
+    if (transport_owner == transport)
+      transport_activity_ms = now_ms;
+    return produced;
   }
 
   void wallet_link_service_field_lost()
   {
+    if (transport_owner != WalletLinkTransport::Nfc)
+      return;
+    wallet_link_service_reset();
+  }
+
+  void wallet_link_service_reset()
+  {
     if (!service_ready)
       return;
     apdu.field_lost();
+    link.reset_pairing();
+    transport_owner = WalletLinkTransport::None;
+    transport_activity_ms = 0;
     wallet_signing_clear();
+    if (!wallet_cli_review_active() && !wallet_totp_pending())
+    {
+      wallet_ui_set_decision_callback(nullptr);
+      wallet_ui_show_catalog();
+    }
   }
 
   bool wallet_link_service_ready()
@@ -772,7 +802,6 @@ namespace hexwallet
   bool wallet_link_service_confirm_pairing()
   {
 #if !HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
-    // Production pairing is confirmed only by pair_decision on the local UI.
     return false;
 #else
     if (!service_ready || !link.pairing_pending())
@@ -792,7 +821,7 @@ namespace hexwallet
     if (!service_ready)
       return;
     link.reset_pairing();
-    if (wallet_signing_active() || wallet_cli_review_active())
+    if (wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending())
       return;
     wallet_ui_set_decision_callback(nullptr);
     wallet_ui_show_catalog();
@@ -817,4 +846,4 @@ namespace hexwallet
     return nfc_port_state_text(nfc_port_state());
   }
 
-} // namespace hexwallet
+}

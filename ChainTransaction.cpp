@@ -1,4 +1,4 @@
-#include "ChainTransaction.h"
+﻿#include "ChainTransaction.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -27,6 +27,7 @@
 #include "VeChainTransaction.h"
 #include "SuiTransaction.h"
 #include "FilecoinTransaction.h"
+#include "ThetaTransaction.h"
 #include "WalletEngine.h"
 #include "WalletNetworks.h"
 
@@ -63,6 +64,10 @@ constexpr FamilyMap kFamilyMap[] = {
     {ChainFamily::Aptos, "apt"},
     {ChainFamily::QrlV2, "qrl2"},
     {ChainFamily::Starknet, "stark"},
+    // Native Theta SendTx. The EVM network id is the same string: EVM transfers of
+    // TFUEL go through the EVM adapter, native SendTx through this family, and the
+    // payload format decides which one runs.
+    {ChainFamily::Theta, "theta"},
 };
 
 bool review_equals(const ChainReview &left, const ChainReview &right) {
@@ -117,6 +122,7 @@ const char *chain_family_name(ChainFamily family) {
     case ChainFamily::Aptos: return "APT";
     case ChainFamily::InternetComputer: return "ICP";
     case ChainFamily::Starknet: return "STRK";
+    case ChainFamily::Theta: return "TFUEL";
     default: return "?";
   }
 }
@@ -233,6 +239,10 @@ ChainError chain_review_transaction(ChainFamily family, const uint8_t *payload,
       // from the class hash in the payload and proves it belongs to this key.
       error = starknet_review_payload(payload, size, derived.private_key,
                                       &out->review, out->digest);
+      break;
+    case ChainFamily::Theta:
+      error = theta_review_payload(payload, size, derived.address,
+                                   &out->review, out->digest);
       break;
     case ChainFamily::Ton:
       error = ton_review_payload(payload, size, derived.address, &out->review,
@@ -397,6 +407,11 @@ ChainError chain_sign_transaction(const ChainTransaction &transaction,
                                     transaction.payload_size,
                                     derived.private_key, out, in_out_size);
       break;
+    case ChainFamily::Theta:
+      error = theta_sign_payload(transaction.payload, transaction.payload_size,
+                                 derived.private_key, verified.review.sender, out,
+                                 in_out_size);
+      break;
     case ChainFamily::Ton:
       error = ton_sign_payload(transaction.payload, transaction.payload_size,
                                derived.private_key, out, in_out_size);
@@ -459,7 +474,8 @@ bool run_chain_self_tests() {
       chain_family_for_network("dot", &family) && family == ChainFamily::Polkadot &&
       chain_family_for_network("ksm", &family) && family == ChainFamily::Kusama &&
       chain_family_for_network("apt", &family) && family == ChainFamily::Aptos &&
-      chain_family_for_network("stark", &family) && family == ChainFamily::Starknet;
+      chain_family_for_network("stark", &family) && family == ChainFamily::Starknet &&
+      chain_family_for_network("theta", &family) && family == ChainFamily::Theta;
   return ada && vet && icx && dot && ton && sui && fil && dcr && ckb && hive &&
          erg && bls && clvm && chia && qrl && qrl_v2 && apt && stark &&
          admission;
@@ -491,6 +507,7 @@ void report_chain_self_tests() {
       {"qrl-v2", run_qrl_v2_self_tests},
       {"aptos", run_aptos_self_tests},
       {"starknet", run_starknet_self_tests},
+      {"theta", run_theta_self_tests},
   };
   for (size_t i = 0; i < sizeof(kTests) / sizeof(kTests[0]); ++i) {
     ::printf("  chain.%s=%s\n", kTests[i].name,

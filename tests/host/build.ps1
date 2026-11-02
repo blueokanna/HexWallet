@@ -1,4 +1,4 @@
-# Builds and runs the host-side self-tests for the extended crypto stack.
+﻿# Builds and runs the host-side self-tests for the extended crypto stack.
 # Uses MSVC (cl.exe from Visual Studio 2022) and the mbedtls headers bundled
 # with the ESP32 Arduino core; mbedtls_host.c provides the runtime for the
 # subset of mbedtls the firmware uses, so the API surface matches the device.
@@ -47,7 +47,7 @@ $cppSources = @(
   "StellarTransaction.cpp",
   "WalletEngine.cpp",
   "Blake2b.cpp",
-  "Blake256.cpp",
+  "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp",
   "CryptoExtended.cpp",
   "WalletLinkCrypto.cpp",
   "WalletLink.cpp",
@@ -73,7 +73,7 @@ $cppSources = @(
   "CryptoNoteSigning.cpp",
   "CryptoNoteMasari.cpp",
   "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp",
+  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "BitcoinTransaction.cpp",
   "KaspaTransaction.cpp",
   "TronTransaction.cpp",
@@ -158,7 +158,7 @@ $catalogSources = @(
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
   "CryptoPrimitives.cpp",
-  "Bls12381.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "QrlV2Transaction.cpp", "Blake2b.cpp", "Blake256.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
+  "Bls12381.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "QrlV2Transaction.cpp", "Blake2b.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
   "BlsG1.cpp", "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
   "CosmosTransaction.cpp", "StellarTransaction.cpp",
   "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp",
@@ -168,7 +168,7 @@ $catalogSources = @(
   "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
   "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
   "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp", "host_security.cpp"
+  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp", "host_security.cpp"
 )
 $catalogSources = @($catalogSources | Select-Object -Unique)
 $catalogObjs = @()
@@ -219,6 +219,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cl @common "/Fe$(Join-Path $PSScriptRoot 'stellar_probe.exe')" $probeObjs "$objDir/stellar_probe.obj" "$objDir/mbedtls_host.obj" /link
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-& $out
-exit $LASTEXITCODE
+# Masari fixtures are addressed relative to the repository root, so the
+# binary has to run there no matter where the script was invoked from.
+Push-Location $root
+try { & $out } finally { $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }; Pop-Location }
+exit $code
 

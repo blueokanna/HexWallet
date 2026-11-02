@@ -6,15 +6,20 @@
 
 namespace hexwallet {
 
+enum class WalletLinkTransport : uint8_t { None, Usb, Nfc };
+
 // Protocol adapter between the transport (PN7161 NFC / USB APDU) and the
 // wallet. It owns the device identity, the paired-phone store and the
 // application request dispatch. Private keys never leave the device.
 bool wallet_link_service_init();
 void wallet_link_service_tick(uint32_t now_ms);
-size_t wallet_link_service_apdu(const uint8_t *apdu, size_t apdu_size,
+size_t wallet_link_service_apdu(WalletLinkTransport transport,
+                                const uint8_t *apdu, size_t apdu_size,
                                 uint32_t now_ms, uint8_t *response,
                                 size_t response_capacity);
 void wallet_link_service_field_lost();
+// Lock/disconnect revokes queued APDU data, link keys, pairing and approvals.
+void wallet_link_service_reset();
 bool wallet_link_service_ready();
 bool wallet_link_service_pairing_pending();
 bool wallet_link_service_confirm_pairing();

@@ -25,7 +25,9 @@ namespace hexwallet
     constexpr uint8_t kCmdSetRamYCursor = 0x4F;
 
     constexpr uint8_t kUpdateFull = 0xF7;
-    constexpr uint8_t kUpdatePartial = 0xFF;
+    constexpr uint8_t kUpdatePartialOtp = 0xFF;
+    // Mode 2 using MCU-supplied registers, without reloading the OTP waveform.
+    constexpr uint8_t kUpdatePartialHost = 0xCF;
 
     constexpr uint8_t kBorderSetting = 0x05;
     constexpr uint8_t kDeepSleepMode = 0x01;
@@ -49,12 +51,32 @@ namespace hexwallet
 
   bool EinkPanel::begin(const EinkBus &bus, const EinkPanelConfig &config)
   {
+    stats_ = {};
+    config_ = {};
     if (bus.command == nullptr || bus.reset == nullptr || bus.busy == nullptr ||
-        bus.delay_ms == nullptr)
+        bus.delay_ms == nullptr || bus.data == nullptr)
     {
       return false;
     }
-    if (config.width == 0 || config.height == 0 || config.height > 4096)
+    if (config.width != kEink29Width || config.height != kEink29Height ||
+        config.full_timeout_ms == 0 || config.full_timeout_ms > 120000 ||
+        config.partial_timeout_ms > 120000 ||
+        (config.color != EinkColorMode::Mono && config.color != EinkColorMode::FourColor))
+      return false;
+    if (config.controller == EinkController::Ssd1683)
+    {
+      if (config.color != EinkColorMode::FourColor ||
+          config.color_init == nullptr || config.color_init_count == 0 || config.color_init_count > 32)
+        return false;
+      for (size_t i = 0; i < config.color_init_count; ++i)
+        if (config.color_init[i].size > sizeof(config.color_init[i].bytes))
+          return false;
+    }
+    else if (config.controller != EinkController::Ssd1680 || config.color != EinkColorMode::Mono)
+    {
+      return false;
+    }
+    else if (config.color_init != nullptr || config.color_init_count != 0)
       return false;
     // The mono RAM is addressed in whole bytes, the 4-color RAM in whole
     // pixels-per-byte, so the width granularity differs.
@@ -71,7 +93,11 @@ namespace hexwallet
     {
       return false;
     }
-    if (config.partial_lut != nullptr && config.partial_lut_size == 0)
+    // Mono always has a partial path (OTP or a board table), so its ghosting
+    // budget and BUSY timeout must be real numbers.
+    if (config.partial_timeout_ms == 0 || config.partial_budget == 0) return false;
+    if ((config.partial_lut != nullptr && config.partial_lut_size != 159) ||
+        (config.partial_lut == nullptr && config.partial_lut_size != 0))
     {
       return false;
     }
@@ -79,7 +105,7 @@ namespace hexwallet
     config_ = config;
     if (config_.color == EinkColorMode::FourColor)
     {
-      // SSD1683 4-color modules take black=00, white=01, red=11, yellow=10.
+      // SSD1683-class 2.9 inch modules take black=00, white=01, red=11, yellow=10.
       // A zero-initialised config gets that table; a board with a different
       // panel overrides it explicitly.
       bool all_zero = true;
@@ -95,6 +121,13 @@ namespace hexwallet
         config_.palette[kEinkPaletteRed] = 0x03;
         config_.palette[kEinkPaletteYellow] = 0x02;
       }
+      uint8_t seen = 0;
+      for (uint8_t code : config_.palette)
+      {
+        if (code > 3 || (seen & (1U << code)) != 0)
+          return false;
+        seen |= 1U << code;
+      }
     }
     memset(&stats_, 0, sizeof(stats_));
     if (!begin_panel())
@@ -105,12 +138,14 @@ namespace hexwallet
 
   bool EinkPanel::begin_panel()
   {
+    if (config_.controller == EinkController::Ssd1683)
+      return begin_four_color();
     bus_.reset(bus_.context, true);
     bus_.delay_ms(bus_.context, 10);
     bus_.reset(bus_.context, false);
     bus_.delay_ms(bus_.context, 10);
 
-    if (!bus_.command(bus_.context, kCmdSwReset, nullptr, 0))
+    if (!command(kCmdSwReset, nullptr, 0))
       return false;
     if (wait_idle(config_.full_timeout_ms) != EinkRefreshResult::Ok)
       return false;
@@ -118,30 +153,67 @@ namespace hexwallet
     const uint8_t output[3] = {
         static_cast<uint8_t>((config_.height - 1) & 0xFF),
         static_cast<uint8_t>((config_.height - 1) >> 8), 0x00};
-    if (!bus_.command(bus_.context, kCmdDriverOutput, output, sizeof(output)))
+    if (!command(kCmdDriverOutput, output, sizeof(output)))
     {
       return false;
     }
     const uint8_t entry = 0x03; // X increment, Y increment
-    if (!bus_.command(bus_.context, kCmdDataEntry, &entry, 1))
+    if (!command(kCmdDataEntry, &entry, 1))
       return false;
     const uint8_t border = kBorderSetting;
-    if (!bus_.command(bus_.context, kCmdBorderWaveform, &border, 1))
+    if (!command(kCmdBorderWaveform, &border, 1))
       return false;
-    // Standard SSD1680/SSD1683 init tail: use the panel's own temperature
+    // SSD1680 init tail: use the panel's own temperature
     // sensor and keep the update sequence in normal (non-inverted) mode. The
     // waveform tables assume the reading they take here.
     const uint8_t update_control[2] = {0x00, 0x80};
-    if (!bus_.command(bus_.context, kCmdUpdateControl, update_control,
+    if (!command(kCmdUpdateControl, update_control,
                       sizeof(update_control)))
     {
       return false;
     }
     const uint8_t temperature = 0x80;
-    if (!bus_.command(bus_.context, kCmdTemperatureSensor, &temperature, 1))
+    if (!command(kCmdTemperatureSensor, &temperature, 1))
       return false;
     const EinkRect whole = {0, 0, config_.width, config_.height};
     return set_window(whole);
+  }
+
+  bool EinkPanel::begin_four_color()
+  {
+    // SSD1683-class panel manual sections 7 and 8. The reset/transport
+    // protocol is independent of the module's analogue initialisation values.
+    bus_.reset(bus_.context, false);
+    bus_.delay_ms(bus_.context, 200);
+    bus_.reset(bus_.context, true);
+    bus_.delay_ms(bus_.context, 2);
+    bus_.reset(bus_.context, false);
+    bus_.delay_ms(bus_.context, 200);
+    if (wait_idle(config_.full_timeout_ms) != EinkRefreshResult::Ok)
+      return false;
+    for (size_t i = 0; i < config_.color_init_count; ++i)
+    {
+      const EinkInitCommand &s = config_.color_init[i];
+      if (!command(s.command, s.bytes, s.size))
+        return false;
+    }
+    return wait_idle(config_.full_timeout_ms) == EinkRefreshResult::Ok;
+  }
+
+  bool EinkPanel::command(uint8_t code, const uint8_t *bytes, size_t size)
+  {
+    if (bus_.command(bus_.context, code, bytes, size))
+      return true;
+    stats_.initialised = false;
+    return false;
+  }
+
+  bool EinkPanel::data(const uint8_t *bytes, size_t size)
+  {
+    if (bus_.data(bus_.context, bytes, size))
+      return true;
+    stats_.initialised = false;
+    return false;
   }
 
   bool EinkPanel::set_window(const EinkRect &window)
@@ -151,26 +223,26 @@ namespace hexwallet
     const uint8_t x[2] = {
         static_cast<uint8_t>(window.x / pixels_per_byte),
         static_cast<uint8_t>((window.x + window.width - 1) / pixels_per_byte)};
-    if (!bus_.command(bus_.context, kCmdSetRamX, x, sizeof(x)))
+    if (!command(kCmdSetRamX, x, sizeof(x)))
       return false;
     const uint16_t end_y = static_cast<uint16_t>(window.y + window.height - 1);
     const uint8_t y[4] = {static_cast<uint8_t>(window.y & 0xFF),
                           static_cast<uint8_t>(window.y >> 8),
                           static_cast<uint8_t>(end_y & 0xFF),
                           static_cast<uint8_t>(end_y >> 8)};
-    if (!bus_.command(bus_.context, kCmdSetRamY, y, sizeof(y)))
+    if (!command(kCmdSetRamY, y, sizeof(y)))
       return false;
     const uint8_t cursor_x = static_cast<uint8_t>(window.x / pixels_per_byte);
-    if (!bus_.command(bus_.context, kCmdSetRamXCursor, &cursor_x, 1))
+    if (!command(kCmdSetRamXCursor, &cursor_x, 1))
       return false;
     const uint8_t cursor_y[2] = {static_cast<uint8_t>(window.y & 0xFF),
                                  static_cast<uint8_t>(window.y >> 8)};
-    return bus_.command(bus_.context, kCmdSetRamYCursor, cursor_y,
+    return command(kCmdSetRamYCursor, cursor_y,
                         sizeof(cursor_y));
   }
 
   bool EinkPanel::push_window(const uint8_t *bitmap, size_t size,
-                              const EinkRect &window)
+                              const EinkRect &window, uint8_t ram_command)
   {
     if (bitmap == nullptr || size < eink_frame_bytes(config_.width,
                                                      config_.height))
@@ -181,6 +253,8 @@ namespace hexwallet
     const size_t start_byte = window.x / 8;
     const size_t width_bytes = eink_row_bytes(window.width);
     uint8_t chunk[kChunk];
+    if (!command(ram_command, nullptr, 0))
+      return false;
     for (uint16_t row = 0; row < window.height; ++row)
     {
       const uint8_t *source =
@@ -190,8 +264,9 @@ namespace hexwallet
       while (remaining != 0)
       {
         const size_t take = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
-        memcpy(chunk, cursor, take);
-        if (!bus_.command(bus_.context, kCmdWriteRam, chunk, take))
+        for (size_t i = 0; i < take; ++i)
+          chunk[i] = static_cast<uint8_t>(~cursor[i]);
+        if (!data(chunk, take))
           return false;
         cursor += take;
         remaining -= take;
@@ -217,6 +292,8 @@ namespace hexwallet
     const size_t start_byte = window.x / 4;
     const size_t width_bytes = window.width / 4;
     uint8_t chunk[kChunk];
+    if (!command(0x10, nullptr, 0))
+      return false;
     for (uint16_t row = 0; row < window.height; ++row)
     {
       const uint8_t *source =
@@ -237,13 +314,13 @@ namespace hexwallet
         chunk[produced++] = out;
         if (produced == sizeof(chunk))
         {
-          if (!bus_.command(bus_.context, kCmdWriteRam, chunk, produced))
+          if (!data(chunk, produced))
             return false;
           produced = 0;
         }
       }
       if (produced != 0 &&
-          !bus_.command(bus_.context, kCmdWriteRam, chunk, produced))
+          !data(chunk, produced))
       {
         return false;
       }
@@ -259,6 +336,7 @@ namespace hexwallet
       if (waited >= timeout_ms)
       {
         ++stats_.busy_timeouts;
+        stats_.initialised = false;
         return EinkRefreshResult::BusyTimeout;
       }
       bus_.delay_ms(bus_.context, 10);
@@ -276,6 +354,37 @@ namespace hexwallet
       return EinkRefreshResult::BufferTooSmall;
     }
     const EinkRect whole = {0, 0, config_.width, config_.height};
+    if (config_.controller == EinkController::Ssd1683)
+    {
+      if (!push_window_color(bitmap, size, whole))
+        return EinkRefreshResult::BusFault;
+      if (!command(0x04, nullptr, 0))
+        return EinkRefreshResult::BusFault;
+      bus_.delay_ms(bus_.context, 100);
+      const auto powered = wait_idle(config_.full_timeout_ms);
+      if (powered != EinkRefreshResult::Ok)
+        return powered;
+      const uint8_t zero = 0;
+      if (!command(0x12, &zero, 1))
+        return EinkRefreshResult::BusFault;
+      bus_.delay_ms(bus_.context, 100);
+      auto result = wait_idle(config_.full_timeout_ms);
+      if (result != EinkRefreshResult::Ok)
+        return result;
+      if (!command(0x02, &zero, 1))
+        return EinkRefreshResult::BusFault;
+      bus_.delay_ms(bus_.context, 100);
+      result = wait_idle(config_.full_timeout_ms);
+      if (result == EinkRefreshResult::Ok)
+      {
+        ++stats_.full_refreshes;
+        stats_.partials_since_full = 0;
+      }
+      return result;
+    }
+    // Restore full-refresh border/temperature/RAM mode after a partial cycle.
+    if (stats_.partials_since_full != 0 && !begin_panel())
+      return EinkRefreshResult::BusFault;
     if (!set_window(whole))
       return EinkRefreshResult::BusFault;
     const bool pushed = config_.color == EinkColorMode::FourColor
@@ -283,15 +392,18 @@ namespace hexwallet
                             : push_window(bitmap, size, whole);
     if (!pushed)
       return EinkRefreshResult::BusFault;
+    if (!set_window(whole) || !push_window(bitmap, size, whole, 0x26))
+      return EinkRefreshResult::BusFault;
     const uint8_t update = kUpdateFull;
-    if (!bus_.command(bus_.context, kCmdUpdateControl2, &update, 1))
+    if (!command(kCmdUpdateControl2, &update, 1))
     {
       return EinkRefreshResult::BusFault;
     }
-    if (!bus_.command(bus_.context, kCmdMasterActivation, nullptr, 0))
+    if (!command(kCmdMasterActivation, nullptr, 0))
     {
       return EinkRefreshResult::BusFault;
     }
+    bus_.delay_ms(bus_.context, 10);
     const EinkRefreshResult result = wait_idle(config_.full_timeout_ms);
     if (result != EinkRefreshResult::Ok)
       return result;
@@ -307,41 +419,64 @@ namespace hexwallet
       return EinkRefreshResult::NotInitialised;
     // A 4-color panel has no partial waveform at all: refuse before touching
     // BUSY, the LUT or RAM.
-    if (config_.color != EinkColorMode::Mono)
-      return EinkRefreshResult::PartialUnsupported;
-    if (config_.partial_lut == nullptr)
+    if (!partial_supported())
       return EinkRefreshResult::PartialUnsupported;
     if (!valid_rect(window, config_.width, config_.height))
     {
       return EinkRefreshResult::InvalidWindow;
     }
-    if ((window.x % 8) != 0)
+    if ((window.x % 8) != 0 || (window.width % 8) != 0)
       return EinkRefreshResult::InvalidWindow;
     if (bitmap == nullptr || size < frame_bytes())
     {
       return EinkRefreshResult::BufferTooSmall;
     }
-    if (!bus_.command(bus_.context, kCmdWriteLut, config_.partial_lut,
-                      config_.partial_lut_size))
+    // Differential waveforms require a known old frame. The first update and
+    // exhausted ghosting budget always establish a complete new baseline.
+    if (stats_.full_refreshes == 0 || full_refresh_due())
+      return full_refresh(bitmap, size);
+    // Complete WS layout from SSD1680 section 6.7. Voltage/end settings must
+    // travel with the LUT; an OTP load must not replace this register content.
+    if (config_.partial_lut != nullptr)
     {
-      return EinkRefreshResult::BusFault;
+      const uint8_t *ws = config_.partial_lut;
+      if (!command(kCmdWriteLut, ws, 153) ||
+          !command(0x3f, ws + 153, 1) ||
+          !command(0x03, ws + 154, 1) ||
+          !command(0x04, ws + 155, 3) ||
+          !command(0x2c, ws + 158, 1))
+        return EinkRefreshResult::BusFault;
     }
+    // Keep the OTP display-mode table intact. Writing zeroes to 0x37 would
+    // reclassify every stored waveform as mode 1 and break mode-2 lookup.
+    const uint8_t border = 0x80, power = 0xc0;
+    if (!command(kCmdBorderWaveform, &border, 1) ||
+        !command(kCmdUpdateControl2, &power, 1) ||
+        !command(kCmdMasterActivation, nullptr, 0))
+      return EinkRefreshResult::BusFault;
+    bus_.delay_ms(bus_.context, 10);
+    const auto powered = wait_idle(config_.partial_timeout_ms);
+    if (powered != EinkRefreshResult::Ok)
+      return powered;
     if (!set_window(window))
       return EinkRefreshResult::BusFault;
     if (!push_window(bitmap, size, window))
       return EinkRefreshResult::BusFault;
-    const uint8_t update = kUpdatePartial;
-    if (!bus_.command(bus_.context, kCmdUpdateControl2, &update, 1))
+    const uint8_t update = config_.partial_lut != nullptr ? kUpdatePartialHost : kUpdatePartialOtp;
+    if (!command(kCmdUpdateControl2, &update, 1))
     {
       return EinkRefreshResult::BusFault;
     }
-    if (!bus_.command(bus_.context, kCmdMasterActivation, nullptr, 0))
+    if (!command(kCmdMasterActivation, nullptr, 0))
     {
       return EinkRefreshResult::BusFault;
     }
+    bus_.delay_ms(bus_.context, 10);
     const EinkRefreshResult result = wait_idle(config_.partial_timeout_ms);
     if (result != EinkRefreshResult::Ok)
       return result;
+    if (!set_window(window) || !push_window(bitmap, size, window, 0x26))
+      return EinkRefreshResult::BusFault;
     ++stats_.partial_refreshes;
     if (stats_.partials_since_full < 0xFF)
       ++stats_.partials_since_full;
@@ -352,8 +487,23 @@ namespace hexwallet
   {
     if (!stats_.initialised)
       return EinkRefreshResult::NotInitialised;
+    if (config_.controller == EinkController::Ssd1683)
+    {
+      const uint8_t zero = 0, check = 0xa5;
+      if (!command(0x02, &zero, 1))
+        return EinkRefreshResult::BusFault;
+      bus_.delay_ms(bus_.context, 100);
+      const auto result = wait_idle(config_.full_timeout_ms);
+      if (result != EinkRefreshResult::Ok)
+        return result;
+      bus_.delay_ms(bus_.context, 20);
+      if (!command(0x07, &check, 1))
+        return EinkRefreshResult::BusFault;
+      stats_.initialised = false;
+      return EinkRefreshResult::Ok;
+    }
     const uint8_t mode = kDeepSleepMode;
-    if (!bus_.command(bus_.context, kCmdDeepSleep, &mode, 1))
+    if (!command(kCmdDeepSleep, &mode, 1))
     {
       return EinkRefreshResult::BusFault;
     }
@@ -445,6 +595,7 @@ namespace hexwallet
       uint8_t window_x[2];
       uint8_t window_y[4];
       uint8_t first_ram;
+      uint8_t active_command;
       bool have_ram;
       int busy_polls;
       bool fail_next;
@@ -463,6 +614,7 @@ namespace hexwallet
       {
         bus->commands[bus->command_count++] = command;
       }
+      bus->active_command = command;
       switch (command)
       {
       case 0x24:
@@ -486,6 +638,26 @@ namespace hexwallet
         break;
       default:
         break;
+      }
+      return true;
+    }
+
+    bool fake_data(void *context, const uint8_t *data, size_t size)
+    {
+      FakeBus *bus = static_cast<FakeBus *>(context);
+      if (bus->fail_next)
+      {
+        bus->fail_next = false;
+        return false;
+      }
+      if (bus->active_command == 0x24 || bus->active_command == 0x10)
+      {
+        if (!bus->have_ram && size != 0)
+        {
+          bus->first_ram = data[0];
+          bus->have_ram = true;
+        }
+        bus->ram_bytes += size;
       }
       return true;
     }
@@ -531,11 +703,12 @@ namespace hexwallet
     bool passed = true;
     static uint8_t frame[eink_frame_bytes(kEink29Width, kEink29Height)];
     memset(frame, 0xA5, sizeof(frame));
-    static uint8_t lut[153];
+    // 153 LUT bytes plus EOPT, VGH, VSH1, VSH2, VSL and VCOM.
+    static uint8_t lut[159];
     memset(lut, 0x11, sizeof(lut));
 
     FakeBus fake = {};
-    EinkBus bus = {&fake, fake_command, fake_reset, fake_busy, fake_delay};
+    EinkBus bus = {&fake, fake_command, fake_reset, fake_busy, fake_delay, fake_data};
     EinkPanelConfig config = {};
     config.width = kEink29Width;
     config.height = kEink29Height;
@@ -566,7 +739,7 @@ namespace hexwallet
     // Full refresh: window, 0x24 data, 0xF7 update control, 0x20 activation.
     fake = FakeBus{};
     passed = panel.full_refresh(frame, sizeof(frame)) == EinkRefreshResult::Ok && passed;
-    passed = fake.ram_bytes == sizeof(frame) && passed;
+    passed = fake.ram_bytes == sizeof(frame) && fake.first_ram == 0x5a && passed;
     passed = count_command(fake, 0x20) == 1 && passed;
     passed = panel.stats().full_refreshes == 1 && passed;
     // A short buffer is refused before anything is pushed.
@@ -574,13 +747,16 @@ namespace hexwallet
     passed = panel.full_refresh(frame, 10) == EinkRefreshResult::BufferTooSmall &&
              fake.ram_bytes == 0 && passed;
 
-    // Partial without a LUT must be refused and must not touch the panel.
+    // Without a board-supplied table the OTP waveform drives the update: no
+    // 0x32 write, but the window and the partial update value still apply.
     fake = FakeBus{};
+    passed = panel.partial_supported() && passed;
     passed = panel.partial_refresh(frame, sizeof(frame), {0, 0, 32, 16}) ==
-                 EinkRefreshResult::PartialUnsupported &&
+                 EinkRefreshResult::Ok &&
              passed;
-    passed = count_command(fake, 0x20) == 0 && passed;
-    passed = !panel.partial_supported() && passed;
+    passed = fake.lut_bytes == 0 && passed;
+    passed = count_command(fake, 0x20) == 2 && passed;
+    passed = panel.stats().partial_refreshes == 1 && passed;
 
     // With a LUT the sequence loads it, sets the window, writes only that window
     // and uses the partial update control value.
@@ -589,12 +765,16 @@ namespace hexwallet
     EinkPanel partial_panel;
     passed = partial_panel.begin(bus, config) && passed;
     passed = partial_panel.partial_supported() && passed;
+    passed = partial_panel.full_refresh(frame, sizeof(frame)) == EinkRefreshResult::Ok && passed;
     fake = FakeBus{};
     passed = partial_panel.partial_refresh(frame, sizeof(frame), {16, 32, 32, 16}) ==
                  EinkRefreshResult::Ok &&
              passed;
-    passed = fake.lut_bytes == sizeof(lut) && passed;
-    passed = count_command(fake, 0x20) == 1 && passed;
+    // Only the 153 waveform bytes go to 0x32; the tail travels as its own
+    // EOPT/VGH/VSH1/VSH2/VSL/VCOM commands.
+    passed = fake.lut_bytes == 153 && passed;
+    passed = count_command(fake, 0x3f) == 1 && count_command(fake, 0x04) == 1 && passed;
+    passed = count_command(fake, 0x20) == 2 && passed;
     passed = partial_panel.stats().partial_refreshes == 1 && passed;
     // The X window is expressed in bytes: 16..47 -> 2..5; Y is rows 32..47.
     passed = fake.window_x[0] == 2 && fake.window_x[1] == 5 && passed;
@@ -633,12 +813,12 @@ namespace hexwallet
     // A BUSY line that never releases is a fault, not a completed frame.
     FakeBus stuck = {};
     stuck.busy_polls = 100000;
-    EinkBus stuck_bus = {&stuck, fake_command, fake_reset, fake_busy, fake_delay};
+    EinkBus stuck_bus = {&stuck, fake_command, fake_reset, fake_busy, fake_delay, fake_data};
     EinkPanel stuck_panel;
     passed = !stuck_panel.begin(stuck_bus, config) && passed;
     EinkPanel busy_panel;
     FakeBus healthy = {};
-    EinkBus healthy_bus = {&healthy, fake_command, fake_reset, fake_busy, fake_delay};
+    EinkBus healthy_bus = {&healthy, fake_command, fake_reset, fake_busy, fake_delay, fake_data};
     passed = busy_panel.begin(healthy_bus, config) && passed;
     healthy.busy_polls = 100000;
     passed = busy_panel.full_refresh(frame, sizeof(frame)) ==
@@ -653,9 +833,21 @@ namespace hexwallet
       // 0b00 0b01 0b10 0b11 = black, white, red, yellow in the converter's
       // palette order.
       color_frame[0] = 0x1B;
-      memset(color_frame + 1, 0x55, sizeof(color_frame) - 1);  // all white
-      EinkPanelConfig color_config = config;
+      memset(color_frame + 1, 0x55, sizeof(color_frame) - 1); // all white
+      EinkPanelConfig color_config = {};
+      color_config.width = kEink29Width;
+      color_config.height = kEink29Height;
       color_config.color = EinkColorMode::FourColor;
+      color_config.controller = EinkController::Ssd1683;
+      color_config.full_timeout_ms = 4000;
+      color_config.partial_timeout_ms = 1500;
+      color_config.partial_budget = 8;
+      // A four-color panel is defined by its module's own register table; the
+      // driver refuses to guess analogue settings.
+      static const EinkInitCommand kColorInit[] = {{0x18, 1, {0x80}},
+                                                   {0x21, 1, {0x00}}};
+      color_config.color_init = kColorInit;
+      color_config.color_init_count = sizeof(kColorInit) / sizeof(kColorInit[0]);
       // A 4-color panel with a partial LUT is a configuration bug: the panel
       // physically cannot do it.
       EinkPanelConfig bad = color_config;
@@ -670,14 +862,13 @@ namespace hexwallet
 
       FakeBus color_fake = {};
       EinkBus color_bus = {&color_fake, fake_command, fake_reset, fake_busy,
-                           fake_delay};
+                           fake_delay, fake_data};
       passed = color_panel.begin(color_bus, color_config) && passed;
       passed = color_panel.color_mode() == EinkColorMode::FourColor && passed;
       passed = !color_panel.partial_supported() && passed;
       passed = color_panel.frame_bytes() == sizeof(color_frame) && passed;
       // The X window is expressed in 4-pixel bytes now.
-      passed = color_fake.window_x[0] == 0 &&
-               color_fake.window_x[1] == kEink29Width / 4 - 1 && passed;
+      passed = count_command(color_fake, 0x44) == 0 && passed;
 
       color_fake = FakeBus{};
       passed = color_panel.full_refresh(color_frame, sizeof(color_frame)) ==
@@ -686,7 +877,7 @@ namespace hexwallet
       passed = color_fake.ram_bytes == sizeof(color_frame) && passed;
       // black->00, white->01, red->11, yellow->10 gives 0b00 01 11 10 = 0x1E.
       passed = color_fake.have_ram && color_fake.first_ram == 0x1E && passed;
-      passed = count_command(color_fake, 0x20) == 1 && passed;
+      passed = count_command(color_fake, 0x12) == 1 && count_command(color_fake, 0x24) == 0 && passed;
       passed = color_panel.stats().full_refreshes == 1 && passed;
 
       // Partial refresh on a 4-color panel is refused before any bus traffic.

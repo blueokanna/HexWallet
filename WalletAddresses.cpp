@@ -6,6 +6,7 @@
 
 #include "base58.h"
 #include "CryptoPrimitives.h"
+#include "Groestl512.h"
 #include "local_segwit.h"
 
 namespace hexwallet {
@@ -40,6 +41,32 @@ WalletError base58check(const uint8_t *payload, size_t payload_size, bool ripple
   return ok ? WalletError::Ok : WalletError::BufferTooSmall;
 }
 
+// Groestlcoin's base58 checksum. This is the one place in the tree where a
+// 4-byte address checksum is not SHA-256 based; the mainnet address
+// Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W pins the choice of hash and of the
+// truncation (first four bytes of the second pass).
+WalletError base58check_groestl(const uint8_t *payload, size_t payload_size,
+                                char *out, size_t *in_out_size) {
+  if (payload == nullptr || out == nullptr || in_out_size == nullptr ||
+      payload_size > kMaximumBase58PayloadSize) {
+    return WalletError::InvalidArgument;
+  }
+  uint8_t encoded[kMaximumBase58CheckedSize];
+  uint8_t digest[kGroestl512Digest];
+  if (!groestl512(payload, payload_size, digest) ||
+      !groestl512(digest, sizeof(digest), digest)) {
+    secure_zero(encoded, sizeof(encoded));
+    secure_zero(digest, sizeof(digest));
+    return WalletError::CryptoFailure;
+  }
+  memcpy(encoded, payload, payload_size);
+  memcpy(encoded + payload_size, digest, kBase58ChecksumSize);
+  const bool ok = b58enc(out, in_out_size, encoded, payload_size + kBase58ChecksumSize);
+  secure_zero(encoded, sizeof(encoded));
+  secure_zero(digest, sizeof(digest));
+  return ok ? WalletError::Ok : WalletError::BufferTooSmall;
+}
+
 }  // namespace
 
 WalletError address_p2pkh(const UtxoAddressProfile &profile,
@@ -56,6 +83,23 @@ WalletError address_p2pkh(const UtxoAddressProfile &profile,
   }
   const WalletError result = base58check(payload, sizeof(payload), profile.ripple_alphabet,
                                          out, in_out_size);
+  secure_zero(payload, sizeof(payload));
+  return result;
+}
+
+WalletError address_p2pkh_groestl(const UtxoAddressProfile &profile,
+                                  const uint8_t public_key[kCompressedPublicKeySize],
+                                  char *out, size_t *in_out_size) {
+  if (public_key == nullptr) {
+    return WalletError::InvalidArgument;
+  }
+  uint8_t payload[kVersionedHash160Size];
+  payload[0] = profile.p2pkh_version;
+  if (!crypto_hash160(public_key, kCompressedPublicKeySize, payload + 1)) {
+    secure_zero(payload, sizeof(payload));
+    return WalletError::CryptoFailure;
+  }
+  const WalletError result = base58check_groestl(payload, sizeof(payload), out, in_out_size);
   secure_zero(payload, sizeof(payload));
   return result;
 }
@@ -179,6 +223,37 @@ WalletError address_from_script(const UtxoAddressProfile &profile,
                                          out, &encoded_size);
   secure_zero(payload, sizeof(payload));
   return result;
+}
+
+bool run_groestl_address_self_tests() {
+  // Payload of the mainnet address Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W:
+  // version 0x24 and the hash160 of a real P2PKH output. If the checksum hash,
+  // its truncation or the base58 alphabet were wrong, this string would not
+  // come back byte for byte.
+  static const uint8_t kPayload[21] = {
+      0x24, 0x35, 0xEA, 0xD4, 0x8B, 0x3F, 0xAE, 0x1C, 0x20, 0xDA, 0x5E,
+      0x3F, 0x37, 0x49, 0x05, 0xF1, 0x01, 0x25, 0x16, 0xFC, 0x43};
+  char address[64] = {};
+  size_t size = sizeof(address);
+  bool ok = base58check_groestl(kPayload, sizeof(kPayload), address, &size) ==
+                WalletError::Ok &&
+            strcmp(address, "Fa5oaNLoshov4C6HtcnwVYnGamYJ7qXN9W") == 0;
+  // A single flipped bit must change the address, otherwise the checksum is
+  // being computed over the wrong bytes.
+  uint8_t tampered[21];
+  memcpy(tampered, kPayload, sizeof(tampered));
+  tampered[10] ^= 0x01;
+  char other[64] = {};
+  size_t other_size = sizeof(other);
+  ok = ok && base58check_groestl(tampered, sizeof(tampered), other, &other_size) ==
+                 WalletError::Ok &&
+       strcmp(other, address) != 0;
+  // An undersized buffer is refused instead of truncated.
+  char tight[8] = {};
+  size_t tight_size = sizeof(tight);
+  ok = ok && base58check_groestl(kPayload, sizeof(kPayload), tight, &tight_size) ==
+                 WalletError::BufferTooSmall;
+  return ok;
 }
 
 }  // namespace hexwallet

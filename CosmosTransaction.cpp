@@ -9,6 +9,7 @@
 
 #include "CryptoExtended.h"
 #include "CryptoPrimitives.h"
+#include "WalletNetworks.h"
 #include "local_bech32.h"
 #include "src/BytesText.h"
 
@@ -26,6 +27,12 @@ namespace hexwallet
         {"atom", "cosmos", "cosmoshub-", "uatom", "ATOM", 6},
         {"osmo", "osmo", "osmosis-", "uosmo", "OSMO", 6},
         {"tia", "celestia", "celestia", "utia", "TIA", 6},
+        // Kava's Cosmos zone and both Terra networks share the bank MsgSend
+        // encoding with the three above; only the bech32 prefix, chain-id prefix
+        // and display denom differ, so they are parameters, not new code paths.
+        {"kava", "kava", "kava_2222-", "ukava", "KAVA", 6},
+        {"terra", "terra", "phoenix-", "uluna", "LUNA", 6},
+        {"terraclassic", "terra", "columbus-", "uluna", "LUNC", 6},
     };
 
     struct PayloadReader
@@ -443,6 +450,57 @@ namespace hexwallet
     }
 
   } // namespace
+
+  // Table-level invariants. Every registered Cosmos row has to agree with the
+  // network registry (id, bech32 human-readable part) and the chain-id prefix
+  // has to be a real prefix, otherwise a chain-id check silently accepts or
+  // rejects the wrong network.
+  bool cosmos_chain_table_is_consistent()
+  {
+    for (const CosmosChainParams &chain : kCosmosChains)
+    {
+      if (chain.network_id == nullptr || chain.hrp == nullptr ||
+          chain.chain_prefix == nullptr || chain.denom == nullptr ||
+          chain.symbol == nullptr)
+      {
+        return false;
+      }
+      if (chain.denom[0] == '\0' || chain.hrp[0] == '\0' ||
+          chain.chain_prefix[0] == '\0' || chain.decimals > 18)
+      {
+        return false;
+      }
+      for (const char *cursor = chain.hrp; *cursor != '\0'; ++cursor)
+      {
+        const char value = *cursor;
+        const bool lower = value >= 'a' && value <= 'z';
+        const bool digit = value >= '0' && value <= '9';
+        if (!lower && !digit)
+          return false;
+      }
+      const NetworkProfile *network = find_network_profile(chain.network_id);
+      if (network == nullptr ||
+          network->encoding != AddressEncoding::Bech32Cosmos ||
+          network->alt_hrp == nullptr ||
+          strcmp(network->alt_hrp, chain.hrp) != 0)
+      {
+        return false;
+      }
+      // Duplicate ids would make the first match win silently.
+      for (const CosmosChainParams &other : kCosmosChains)
+      {
+        if (&other != &chain && strcmp(other.network_id, chain.network_id) == 0)
+          return false;
+        if (&other != &chain && strcmp(other.denom, chain.denom) == 0 &&
+            strcmp(other.chain_prefix, chain.chain_prefix) == 0 &&
+            other.decimals == chain.decimals && strcmp(other.symbol, chain.symbol) == 0)
+        {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
 
   const CosmosChainParams *cosmos_chain_params(const char *network_id)
   {
@@ -886,7 +944,6 @@ namespace hexwallet
                           vector.digest_hex);
       if (passed && vector.extra_to != nullptr)
       {
-        // Every extra row must be shown with its own recipient and amount.
         passed = strcmp(transaction.review.to[1], vector.extra_to) == 0 &&
                  transaction.review.amounts[1] ==
                      strtoull(vector.extra_amount, nullptr, 10) &&
@@ -1002,7 +1059,6 @@ namespace hexwallet
     }
     secure_zero(private_key, sizeof(private_key));
     secure_zero(public_key, sizeof(public_key));
-    return passed;
+    return passed && cosmos_chain_table_is_consistent();
   }
-
-} // namespace hexwallet
+}

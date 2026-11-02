@@ -222,7 +222,9 @@ namespace hexwallet
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3
                   return UiPolicy{DisplayKind::Color, 0UL, true, 170, 320};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_DECK_MAX
-                  return UiPolicy{DisplayKind::MonoEink, 900UL, false, 800, 480};
+                  return UiPolicy{DisplayKind::MonoEink, 900UL, false, 240, 320};
+#elif HEXWALLET_BOARD == HEXWALLET_BOARD_ESP32P4_EINK
+                  return UiPolicy{DisplayKind::MonoEink, 900UL, false, 128, 296};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_T_ECHO_LITE
                   return UiPolicy{DisplayKind::MonoEink, 900UL, false, 176, 192};
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS

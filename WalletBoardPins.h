@@ -203,6 +203,25 @@
 // Native SSD1680 driver (EinkPanel.cpp) instead of the GxEPD2 backend.
 #define HEXWALLET_EPD_NATIVE_SSD1680 1
 
+// 0: SSD1680 mono, 1: 2.9 inch 4-color 128x296, 2: SSD1680 mono V2 variant.
+// Partial refresh always runs on the controller's OTP waveform; a board that
+// needs a tuned table defines HEXWALLET_EPD_PARTIAL_LUT (159 bytes) itself.
+// Profile 1 additionally needs HEXWALLET_EPD_COLOR_INIT: the driver will not
+// invent the module's analogue settings.
+#ifndef HEXWALLET_EPD_PROFILE
+#define HEXWALLET_EPD_PROFILE 0
+#endif
+#if HEXWALLET_EPD_PROFILE == 1
+#ifndef HEXWALLET_EPD_COLORS
+#define HEXWALLET_EPD_COLORS 4
+#endif
+#elif HEXWALLET_EPD_PROFILE != 0 && HEXWALLET_EPD_PROFILE != 2
+#error "Unknown 2.9 inch panel profile"
+#endif
+#if HEXWALLET_EPD_PROFILE != 1 && defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS != 1
+#error "A mono profile requires 1bpp; use profile 1 only for the 4-color panel"
+#endif
+
 #define HEXWALLET_EPD_WIDTH 128
 #define HEXWALLET_EPD_HEIGHT 296
 #define HEXWALLET_EPD_PIN_SCK 7    // pad 7

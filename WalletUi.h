@@ -55,6 +55,9 @@ void wallet_ui_show_catalog();
 // means there is no working trusted display; callers must not claim verification.
 bool wallet_ui_show_address(const char *network, const char *address,
                             const char *path);
+bool wallet_ui_show_otp(const char *issuer, const char *account, const char *code,
+                        uint64_t expires_unix);
+void wallet_ui_hide_otp();
 void wallet_ui_show_transaction(const WalletUiTransactionReview &review);
 
 // Trusted-verification tie between the panel and the signer.
