@@ -9,6 +9,9 @@ namespace hexwallet
   namespace
   {
     constexpr UtxoAddressProfile kUtxoBitcoin = {0x00, 0x05, "bc", false};
+    // Pearl mainnet, official node chaincfg at d7c517d267f10f5bcbbdc366f3e603942f9a5ab5.
+    // Legacy version bytes are unused: the transaction policy only admits P2TR.
+    constexpr UtxoAddressProfile kUtxoPearl = {0x00, 0x00, "prl", false};
     constexpr UtxoAddressProfile kUtxoLitecoin = {0x30, 0x32, "ltc", false};
     constexpr UtxoAddressProfile kUtxoDogecoin = {0x1e, 0x16, nullptr, false};
     constexpr UtxoAddressProfile kUtxoDash = {0x4c, 0x10, nullptr, false};
@@ -37,6 +40,7 @@ namespace hexwallet
       {"btc49", "BTC", "Bitcoin Nested SegWit", 0, 0, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
       {"btc44", "BTC", "Bitcoin Legacy", 0, 0, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
       {"btc86", "BTC", "Bitcoin Taproot (BIP86)", 0, 0, 86, DerivationStyle::Bip44, AddressEncoding::P2tr, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
+      {"prl", "PRL", "Pearl", 808276, 808276, 86, DerivationStyle::Bip44, AddressEncoding::P2tr, kUtxoPearl, 0, 0, 0, 0, nullptr},
       {"ltc", "LTC", "Litecoin Legacy", 2, 2, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoLitecoin, 0, 0, 0, 0, nullptr},
       {"ltc49", "LTC", "Litecoin Nested SegWit", 2, 2, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoLitecoin, 0, 0, 0, 0, nullptr},
       {"ltc84", "LTC", "Litecoin Native SegWit", 2, 2, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoLitecoin, 0, 0, 0, 0, nullptr},
@@ -241,6 +245,7 @@ namespace hexwallet
       {"btc49", SighashFamily::Bitcoin, 0},
       {"btc44", SighashFamily::Bitcoin, 0},
       {"btc86", SighashFamily::Bitcoin, 0},
+      {"prl", SighashFamily::Bitcoin, 0},
       {"ltc", SighashFamily::Bitcoin, 0},
       {"ltc49", SighashFamily::Bitcoin, 0},
       {"ltc84", SighashFamily::Bitcoin, 0},
@@ -280,9 +285,7 @@ namespace hexwallet
       sizeof(kNetworkSigningPolicies) / sizeof(kNetworkSigningPolicies[0]);
 
   const ZcashNetworkPolicy kZcashNetworkPolicies[] = {
-      // NU6.2 (zcash/src/consensus/upgrades.cpp, mainnet activation 3364600).
       {"zec", 0x5437f330, 21000000ULL * 100000000ULL},
-      // COSMOS epoch (activated at height 620450); 17,000,000 ZER total supply.
       {"zer", 0x7361707a, 17000000ULL * 100000000ULL},
   };
 

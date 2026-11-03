@@ -1,4 +1,5 @@
 #include "WalletSigning.h"
+#include "BitcoinReview.h"
 
 #include <Arduino.h>
 #include "RandomSource.h"
@@ -622,21 +623,15 @@ namespace hexwallet
       wallet_ui_show_transaction(review);
     }
 
-    void show_bitcoin_review(const BitcoinSigningRequest &request)
+    bool show_bitcoin_review(const BitcoinSigningRequest &request)
     {
-      WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
-      const size_t count = request.output_count > kWalletUiMaxTransactionOutputs
-                               ? kWalletUiMaxTransactionOutputs
-                               : request.output_count;
-      for (size_t index = 0; index < count; ++index)
-      {
-        const BitcoinOutput &output = request.outputs[index];
-        outputs[index] = {output.value, nullptr, output.address,
-                          output.change ? "CHANGE" : (output.wallet_owned ? "WALLET" : "EXTERNAL")};
-      }
-      show_review(request.chain.network_id, request.fee,
-                  request.estimated_vbytes == 0 ? 0 : request.fee / request.estimated_vbytes,
-                  nullptr, outputs, count);
+      BitcoinReviewText text = {};
+      WalletUiTransactionReview review = {};
+      if (!bitcoin_prepare_review(request, &text, &review)) return false;
+      review.show_decision_buttons = true;
+      wallet_ui_set_decision_callback(decision_callback);
+      wallet_ui_show_transaction(review);
+      return true;
     }
 
     bool show_evm_review(const EvmSigningRequest &request)
@@ -1458,7 +1453,11 @@ namespace hexwallet
       switch (active.kind)
       {
       case WalletSigningKind::Bitcoin:
-        show_bitcoin_review(active.request.bitcoin);
+        if (!show_bitcoin_review(active.request.bitcoin))
+        {
+          wallet_signing_clear();
+          return WalletSigningError::InvalidArgument;
+        }
         break;
       case WalletSigningKind::Evm:
         if (!show_evm_review(active.request.evm))

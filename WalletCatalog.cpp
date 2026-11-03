@@ -33,6 +33,7 @@ namespace hexwallet
         {"btc49", "BTC", "Bitcoin Nested SegWit", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc49", "P2SH-P2WPKH PSBT signing"},
         {"btc44", "BTC", "Bitcoin Legacy", 0, WalletCapabilityAddress, "btc44", "P2PKH address only; signing requires verified non_witness_utxo support"},
         {"btc86", "BTC", "Bitcoin Taproot (BIP86)", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc86", "P2TR key-path: bech32m address over TapTweak(internal key), SIGHASH_DEFAULT/ALL, no script tree"},
+        {"prl", "PRL", "Pearl", 808276, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "prl", "Mainnet BIP86 P2TR key-path PSBT v0/v2, DEFAULT/ALL; no P2MR, XMSS or script-path signing"},
         {"ltc", "LTC", "Litecoin Legacy", 2, WalletCapabilityAddress, "ltc", "P2PKH address and Bitcoin-sighash signing"},
         {"ltc49", "LTC", "Litecoin Nested SegWit", 2, WalletCapabilityAddress, "ltc49", "P2SH-P2WPKH address and BIP143 signing"},
         {"ltc84", "LTC", "Litecoin Native SegWit", 2, WalletCapabilityAddress, "ltc84", "P2WPKH address and BIP143 signing"},
@@ -176,10 +177,6 @@ namespace hexwallet
       if (network != nullptr && network->encoding == AddressEncoding::Evm)
       {
         capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
-        // Every EVM domain admits arbitrary calldata and contract creation: the
-        // device cannot decode unknown code, so it shows the bytes and their hash
-        // instead of pretending to understand them. The text only has to state
-        // which envelopes the chain accepts.
         status = network_supports_eip2930(*network)
                      ? "EIP-155/EIP-2930/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256"
                  : network_supports_eip1559(*network)
@@ -191,7 +188,12 @@ namespace hexwallet
       if (policy != nullptr)
       {
         capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
-        if (network != nullptr && network->encoding == AddressEncoding::P2wpkh)
+        if (network != nullptr && network->encoding == AddressEncoding::P2tr)
+        {
+          // Preserve the explicit key-path-only scope from this network's row.
+          status = seed.status;
+        }
+        else if (network != nullptr && network->encoding == AddressEncoding::P2wpkh)
         {
           status = policy->family == SighashFamily::GroestlLegacy
                        ? "BIP84 native SegWit PSBT signing (BIP143) with Groestlcoin's single SHA-256 on every hash"
@@ -279,9 +281,6 @@ namespace hexwallet
       return (*a == *b) ? 0 : (*a == '\0' ? -1 : 1);
     }
 
-    // A-Z presentation order, built once with an insertion sort (the table is
-    // static and small). Kept out of the seed table so lookups stay O(n) by id and
-    // the grouped-by-family source layout stays readable.
     const uint16_t *sorted_order()
     {
       static uint16_t order[sizeof(kCatalog) / sizeof(kCatalog[0])];
@@ -349,7 +348,7 @@ namespace hexwallet
       if (!equals_ignore_case(entry.symbol, id_or_symbol))
         continue;
       if (found)
-        return false; // A shared ticker cannot identify a network.
+        return false;
       match = entry;
       found = true;
     }

@@ -80,19 +80,20 @@ Ethereum、BSC、Polygon、Arbitrum 和 KAIA 的 ERC-721/1155 唯一 selector �
 三个生成文件与 `tools/fork_registry.json`，并断言 FLUX/MSR/QUBIC 不会回流；矿池表
 的每一行还必须指向目录里真实存在的条目，否则测试失败。
 
-### 只登记地址的链：还差什么
+### THETA、BEAM 与 Pearl：实际范围和剩余接入
 
-THETA、BEAM、PRL 只登记地址（或不登记）。把它们变成“可发送”，需要下面这些**缺一不可**的
-工程件；只加一条 `SIGN` 标记会让用户在不知情的情况下签出无效交易，所以不做。
+PRL 已确认指 [Pearl](https://pearlresearch.ai/)，BEAM 指 [beam.mw 隐私链](https://www.beam.mw/)。
+THETA 已有原生 SendTx 适配器；Pearl 接入范围是 BIP86 单密钥花费。BEAM 尚无本机签名适配器。
+这三者的当前状态不能概括成“只有地址”，也不能概括成“全功能支持”。
 
 | 链 | 缺的东西 | 验收标准 |
 | --- | --- | --- |
-| THETA | THETA（治理币）**不是 EVM 资产**：theta-go 的 `eth_tx_utils.go` 把以太坊交易翻译成 `SmartContractTx` 时 `ThetaWei = 0`、`TFuelWei = value`，也就是说 EVM 交易只能搬 TFUEL。原生 THETA 转账必须走 Theta 自己的 `SendTx`（`Fee`/`Inputs`/`Outputs` 的 RLP + `chainID` 前缀的 `SignBytes` + `addPrefixForSignBytes`）。而 TFUEL 可以由现有 EVM 适配器签 | 用一条真实主网 `SendTx` 的原始 RLP 反推 `SignBytes` 并验签通过；`Coins` 的 RLP 布局与 `addPrefixForSignBytes` 前缀字节以官方实现为准逐字节比对 |
-| BEAM | 交互式 Mimblewimble：花费要经过 slate/BBS 多轮状态机，链上没有静态收款地址；签名是 Schnorr 内核签名 + rangeproof + 内核承诺，需要对方 slate 才能构造 | 用官方 wallet 做 oracle 完成一次 slate 交换并验证内核签名；在此之前连“地址”都不成立 |
-| PRL（Pearl） | 官方 `pearl-research-labs/pearl` 是 Taproot-only 的 Bitcoin 分叉，并在仓库内自带 XMSS 实现；主网 HRP 为 `prl`。接入需要以官方 wallet/node 为 oracle 固定：密钥派生、Taproot tweak、sighash、完整签名交易以及 XMSS 状态管理 | 用官方 wallet 生成地址与签名交易逐字节复现；没有这些，只改 Bitcoin 地址前缀就是假的 |
+| THETA | 已有 `ThetaTransaction` 原生 SendTx 与独立 TFUEL EVM 路径；staking、多签等操作需要分别接入。EVM 的 `value` 不能当作 THETA 治理币金额 | 原生路径的具体交易范围和向量见下方 THETA 条目；整机确认与节点接收仍须独立验收 |
+| BEAM | 官方已有 `hw_crypto/KeyKeeper`、交易汇总确认及离线交易机制。需要移植 KDF、承诺/rangeproof、内核签名、付款证明、nonce slot 持久化和多阶段确认；不能用 Bitcoin Schnorr 签名接口替代 | 对照固定上游版本完成交互与离线交易，验证汇总金额/资产/费用/对端；测试掉电、重放、nonce 重用和第二阶段替换。详见 [接入审计](pearl-beam-audit-2026-11-03.md) |
+| PRL（Pearl） | 主网 `m/86'/808276'/account'/change/index`，HRP `prl`，PSBT v0/v2 单密钥 DEFAULT/ALL；仅接入 P2TR 输入与输出。P2MR、XMSS、脚本树、多签未接入 | 固定官方 node 生成地址、摘要和完整签名交易，由官方脚本引擎检查；固件逐字节比对。脚本引擎检查不等于 mempool、主网或实机验收 |
 
-这三项都不是“再接一条链”，而是各自独立的密码学/协议工程；在没有硬件与上游
-向量的情况下写出来只会是“看起来支持”。
+BEAM 的链上承诺隐藏金额，不代表设备无法核对自己派生的金额，也不代表它没有收款端点。
+[官方硬件钱包说明](https://www.beam.mw/docs/hardware-wallet)明确区分交互式标准交易与不需要收款方在线参与的离线/max-privacy 交易。
 
 每条链仍需确定支持的交易类型、派生路径、网络域、序列化规则、签名算法、设备显示字段、费用/重放策略和上游独立向量，再完成链路集成及节点验收。不能仅增加 ticker、复用 Bitcoin sighash 或套用 EVM profile。
 
@@ -287,8 +288,8 @@ REGISTERED 表示已登记并连接现有签名路径；不是主网验收结果
 | BTC | Bitcoin | REGISTERED | btc（原生） |
 | BTC | X Layer | MISSING | X Layer 上的 BTC 是桥接封装，合约地址未取证 |
 | BTC | Lightning | MISSING | 需要通道状态协议，不是普通转账 |
-| BEAM | Beam | MISSING | Mimblewimble：没有地址、没有可显示的输入输出，交易靠双方在线交换部分签名构造；硬件钱包在这里无法诚实审阅，故不接入 |
-| PRL | Perle / Pearl / Parallel | MISSING | 叫 PRL 的至少有三种资产，链参数（地址前缀、coin type、是否 EVM）各不相同；拿到确切项目与官方链参数后再加 profile |
+| BEAM | Beam（beam.mw） | MISSING | 项目已确认；官方支持硬件密钥与离线交易。本机尚缺 KeyKeeper 移植、nonce 持久化、付款证明与完整确认流程 |
+| PRL | Pearl（pearlresearch.ai） | PARTIAL | 已接入主网 BIP86 单密钥 PSBT v0/v2；未接入 P2MR、XMSS、脚本树与多签；节点和实机验收未完成 |
 | BTC | Stacks | MISSING | STX 是独立链（c32check 地址、anchored/Nakamoto 交易格式、Clarity post-condition），不能当 EVM profile 或 UTXO 冒充；未实现 |
 | BTC | Rootstock | REGISTERED | `rsk`（chain 30，原生 RBTC，EIP-155）；BTC 侧无桥接签名 |
 | xBTC | Aptos / Sui / Solana | MISSING | 三条链都没有自研代币注册表 |

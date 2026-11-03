@@ -174,7 +174,7 @@ bool crypto_double_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256S
   return ok;
 }
 
-bool crypto_double_sha256_segments(const uint8_t *a, size_t a_size,
+bool crypto_sha256_segments(const uint8_t *a, size_t a_size,
                                    const uint8_t *b, size_t b_size,
                                    const uint8_t *c, size_t c_size,
                                    uint8_t out[kSha256Size]) {
@@ -184,16 +184,25 @@ bool crypto_double_sha256_segments(const uint8_t *a, size_t a_size,
   }
   const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   if (info == nullptr) return false;
-  uint8_t first[kSha256Size];
   mbedtls_md_context_t context;
   mbedtls_md_init(&context);
   bool ok = mbedtls_md_setup(&context, info, 0) == 0 && mbedtls_md_starts(&context) == 0;
   if (ok && a_size != 0) ok = mbedtls_md_update(&context, a, a_size) == 0;
   if (ok && b_size != 0) ok = mbedtls_md_update(&context, b, b_size) == 0;
   if (ok && c_size != 0) ok = mbedtls_md_update(&context, c, c_size) == 0;
-  if (ok) ok = mbedtls_md_finish(&context, first) == 0;
+  if (ok) ok = mbedtls_md_finish(&context, out) == 0;
   mbedtls_md_free(&context);
-  if (ok) ok = crypto_sha256(first, sizeof(first), out);
+  return ok;
+}
+
+bool crypto_double_sha256_segments(const uint8_t *a, size_t a_size,
+                                   const uint8_t *b, size_t b_size,
+                                   const uint8_t *c, size_t c_size,
+                                   uint8_t out[kSha256Size]) {
+  if (out == nullptr) return false;
+  uint8_t first[kSha256Size];
+  const bool ok = crypto_sha256_segments(a, a_size, b, b_size, c, c_size, first) &&
+                  crypto_sha256(first, sizeof(first), out);
   mbedtls_platform_zeroize(first, sizeof(first));
   return ok;
 }
@@ -377,4 +386,4 @@ bool run_crypto_self_tests() {
   return passed;
 }
 
-}  // namespace hexwallet
+}

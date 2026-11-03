@@ -23,6 +23,10 @@ bool crypto_sha224_local(const uint8_t *data, size_t size,
 bool crypto_double_sha256(const uint8_t *data, size_t size, uint8_t out[kSha256Size]);
 // Concatenates up to three segments before hashing.  Needed to compute the
 // txid of a segwit previous transaction without materialising a stripped copy.
+bool crypto_sha256_segments(const uint8_t *a, size_t a_size,
+                           const uint8_t *b, size_t b_size,
+                           const uint8_t *c, size_t c_size,
+                           uint8_t out[kSha256Size]);
 bool crypto_double_sha256_segments(const uint8_t *a, size_t a_size,
                                    const uint8_t *b, size_t b_size,
                                    const uint8_t *c, size_t c_size,

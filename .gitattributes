@@ -2,4 +2,6 @@
 # not normalise their line endings.
 tests/fixtures/**/*.bin -text
 tests/fixtures/**/*.inc -text
+tests/host/pearl_audit/vectors.txt -text
+tests/host/taproot_audit/bip341-wallet-test-vectors.json -text
 src/generated/**/*.inc -text
