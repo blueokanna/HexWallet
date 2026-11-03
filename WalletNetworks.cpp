@@ -36,6 +36,7 @@ namespace hexwallet
       {"btc", "BTC", "Bitcoin Native SegWit", 0, 0, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
       {"btc49", "BTC", "Bitcoin Nested SegWit", 0, 0, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
       {"btc44", "BTC", "Bitcoin Legacy", 0, 0, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
+      {"btc86", "BTC", "Bitcoin Taproot (BIP86)", 0, 0, 86, DerivationStyle::Bip44, AddressEncoding::P2tr, kUtxoBitcoin, 0, 0, 0, 0, nullptr},
       {"ltc", "LTC", "Litecoin Legacy", 2, 2, 44, DerivationStyle::Bip44, AddressEncoding::P2pkh, kUtxoLitecoin, 0, 0, 0, 0, nullptr},
       {"ltc49", "LTC", "Litecoin Nested SegWit", 2, 2, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoLitecoin, 0, 0, 0, 0, nullptr},
       {"ltc84", "LTC", "Litecoin Native SegWit", 2, 2, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoLitecoin, 0, 0, 0, 0, nullptr},
@@ -239,6 +240,7 @@ namespace hexwallet
       {"btc", SighashFamily::Bitcoin, 0},
       {"btc49", SighashFamily::Bitcoin, 0},
       {"btc44", SighashFamily::Bitcoin, 0},
+      {"btc86", SighashFamily::Bitcoin, 0},
       {"ltc", SighashFamily::Bitcoin, 0},
       {"ltc49", SighashFamily::Bitcoin, 0},
       {"ltc84", SighashFamily::Bitcoin, 0},
@@ -716,6 +718,7 @@ namespace hexwallet
       const bool utxo_family = network->encoding == AddressEncoding::P2pkh ||
                                network->encoding == AddressEncoding::P2shP2wpkh ||
                                network->encoding == AddressEncoding::P2wpkh ||
+                               network->encoding == AddressEncoding::P2tr ||
                                network->encoding == AddressEncoding::P2pkhGroestl;
       const bool cashaddr_family = network->encoding == AddressEncoding::CashAddr &&
                                    network->alt_hrp != nullptr;

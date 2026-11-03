@@ -64,6 +64,8 @@ KeyScheme key_scheme_for(const NetworkProfile &network) {
       return KeyScheme::MlDsa87;
     case AddressEncoding::StarknetKey:
       return KeyScheme::StarkEcdsa;
+    case AddressEncoding::P2tr:
+      return KeyScheme::TaprootSchnorr;
     case AddressEncoding::P2pkh:
     case AddressEncoding::P2shP2wpkh:
     case AddressEncoding::P2wpkh:
@@ -100,6 +102,12 @@ CustodyPlan plan_key_custody(const NetworkProfile &network,
       plan.reason = plan.se_can_sign
         ? "target supports ECDSA; software derivation/import still exposes key in MCU RAM"
         : "no secp256k1 ECDSA backend; key stays in MCU RAM";
+      break;
+    case KeyScheme::TaprootSchnorr:
+      plan.key_can_live_in_se = false;
+      plan.se_can_sign = false;
+      plan.mcu_must_hold_key = true;
+      plan.reason = "BIP86 requires even-Y normalization, TapTweak and BIP340; no verified SE key-handle implementation";
       break;
     case KeyScheme::KaspaSchnorr:
       // The curve is secp256k1, but Kaspa verifies BIP340 Schnorr signatures.

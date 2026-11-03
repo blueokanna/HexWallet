@@ -407,6 +407,18 @@ WalletError derive_address_ex(const HdPrivateNode &master, const uint8_t *seed,
           result = address_p2wpkh(network.utxo, public_key, out->address,
                                   sizeof(out->address));
           break;
+        case AddressEncoding::P2tr:
+          {
+            uint8_t output_key[kPrivateKeySize] = {};
+            result = taproot_bip86_output_key(public_key + 1, output_key);
+            if (result == WalletError::Ok) {
+              result = address_p2tr_from_output_key(network.utxo, output_key,
+                                                    out->address,
+                                                    sizeof(out->address));
+            }
+            secure_zero(output_key, sizeof(output_key));
+            break;
+          }
         case AddressEncoding::P2shP2wpkh:
           {
             size_t output_size = sizeof(out->address);

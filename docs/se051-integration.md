@@ -1,6 +1,6 @@
 # SE051C2HQ1：实现与验收边界
 
-当前固件不能作为已验收的生产钱包交付。板子尚未打样、配钥或完成实机测试；SE051 的安全通道也没有与钱包的派生、恢复和交易签名贯通。
+当前固件不能作为已验收的生产钱包交付。用户已有开发板，SE051 尚未接入，尚未配钥或完成实卡测试；SE051 的安全通道也没有与钱包的派生、恢复和交易签名贯通。
 
 ## 已实现
 
@@ -123,7 +123,7 @@ CLA/INS/P1/P2 与 TLV 布局都能逐行核对。`Se051Apdu.h/.cpp` 就是照这
 （`INS_CRYPTO` + `P1_MAC` + `P2_GENERATE_ONESHOT`），所以"缺 applet 的 HMAC 命令"这一条
 现在只剩 PIN 会话接续和实卡验证。
 
-卡内 BIP32 派生的设计是：主种子前 32 字节作 `k_par`、后 32 字节作 `c_par`，`c_par` 写入
+BIP32 主节点必须先计算 `I = HMAC-SHA512("Bitcoin seed", seed)`，校验左半部为有效标量，再将 `I_L` 用作主私钥、`I_R` 用作 chain code，不能直接拆分原始种子。候选卡内方案将 `c_par` 写入
 `P1_HMAC_KEY` 并绑定 UserID（PIN 认证对象），每次派生子密钥前先 `VerifySessionUserID` 再用
 `INS_CRYPTO` 做 HMAC-SHA512；PIN 错误次数由卡片硬件计数，超过 `MaxAttempts` 锁死槽位。
 命令帧已经具备（`se051_apdu_session_create`、`se051_apdu_session_policy`、
@@ -131,7 +131,7 @@ CLA/INS/P1/P2 与 TLV 布局都能逐行核对。`Se051Apdu.h/.cpp` 就是照这
 实现并有主机测试。**会话接续本身没有做完**：真卡上 `CreateSession` 的应答里带回 session id，
 后续命令要用它，而"PIN 验证失败后同一个会话还能不能用"取决于 applet 的 policy，公开资料
 没有说明，所以这里既不猜、也不假装续得上——没认证的会话里 `se051_pin_hmac()` 在本地就
-拒绝。这条没通，托管门就不会开。
+拒绝。这条没通，托管门就不会开。另一个独立缺口是 CKDpriv 的标量加法：HMAC 只产生 `I_L/I_R`，还必须在卡内完成 `(I_L + k_par) mod n`、无效子节点检查和非导出对象创建。单次 HMAC APDU 不能证明支持完整卡内 BIP32。
 
 ## 原理图记录
 
@@ -147,7 +147,7 @@ CLA/INS/P1/P2 与 TLV 布局都能逐行核对。`Se051Apdu.h/.cpp` 就是照这
 | --- | --- |
 | SSS/SCP03 | SCP03 通道已实现并主机自检（KDF、卡/主机 cryptogram、C-MAC 包裹、R-MAC 校验与解锁、计数推进、篡改即清会话）；缺的是 applet 的 INS 表与实卡互验、设备独有配钥、主机密钥保护、完整 Arduino 库链接 |
 | 曲线装载 | 帧与参数都已按 plug-and-trust 逐字节实现；`Se051Curves` 提供 `se051_install_curve()`（CreateECCurve + 五条 SetECCurveParam）与 `se051_curve_present()`，参数块由自检对照 `src/EcdsaCurve.h` 重算校验，并已接上策略层（`se051_curve_query`/`se051_curve_provision`）。缺的是实卡互验：某料号是否出厂已带曲线、装载权限是否受平台 SCP 约束，只有实卡能回答 |
-| 卡内派生 | 设计已定：BIP32 子密钥由 SE051 用 HMAC-SHA512 在卡内完成，主种子前 32 字节作 `k_par`、后 32 字节作 `c_par`，`c_par` 进 `P1_HMAC_KEY` 并绑定 UserID；会话状态机（`Se051PinSession`）、单次 HMAC 与 `0x63Cx` 重试计数已实现并有主机测试，缺 PIN 派生（PBKDF2/PIN 加密）与实卡验证，因此当前仍由 MCU 派生，托管门保持关闭 |
+| 卡内派生 | 方案未完成：需要 BIP32 主节点 HMAC、卡内子节点 HMAC 与标量加法、无效节点检查和非导出对象创建，不能直接拆分种子，也不能把 HMAC 当成完整 BIP32；会话状态机（`Se051PinSession`）、单次 HMAC 与 `0x63Cx` 重试计数已实现并有主机测试，缺 PIN 派生（PBKDF2/PIN 加密）与实卡验证，因此当前仍由 MCU 派生，托管门保持关闭 |
 | 钱包托管 | 非导出对象句柄贯通派生、签名与恢复；禁止回退到明文 MCU 私钥；签名前绑定已审阅交易。托管门本身已改成五个事实合取（见上），并有逐条伪证的自检；缺的是让 `wallet_uses_handles` 真的能成立的句柄派生/签名路径 |
 | Chia | 替换 G1/G2 和标量运算的可变时间路径；验证 EIP-2333、synthetic key、AugScheme 与标准 puzzle 的上游向量；P4 侧信道和资源验证 |
 | QRL | 完整 XMSS 签名及交易编码；按公钥绑定的不可回滚 OTS 预留；预留先于签名，取消、断电与结果丢失均不归还叶索引；跨设备恢复防重用 |

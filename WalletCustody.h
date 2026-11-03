@@ -27,6 +27,7 @@ enum class KeyScheme : uint8_t {
   ErgoSchnorr,       // Ergo Sigma Schnorr; not ECDSA or BIP340
   NemKeccakEd25519,  // NEM Keccak variant; not RFC 8032 Ed25519
   StarkEcdsa,        // Stark curve (2^251+17*2^192+1) ECDSA over a BIP32 child
+  TaprootSchnorr,    // BIP86 even-Y normalization + TapTweak + BIP340
   Unsupported,
 };
 

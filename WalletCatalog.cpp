@@ -32,6 +32,7 @@ namespace hexwallet
         {"btc", "BTC", "Bitcoin", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc", "P2WPKH PSBT signing"},
         {"btc49", "BTC", "Bitcoin Nested SegWit", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc49", "P2SH-P2WPKH PSBT signing"},
         {"btc44", "BTC", "Bitcoin Legacy", 0, WalletCapabilityAddress, "btc44", "P2PKH address only; signing requires verified non_witness_utxo support"},
+        {"btc86", "BTC", "Bitcoin Taproot (BIP86)", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc86", "P2TR key-path: bech32m address over TapTweak(internal key), SIGHASH_DEFAULT/ALL, no script tree"},
         {"ltc", "LTC", "Litecoin Legacy", 2, WalletCapabilityAddress, "ltc", "P2PKH address and Bitcoin-sighash signing"},
         {"ltc49", "LTC", "Litecoin Nested SegWit", 2, WalletCapabilityAddress, "ltc49", "P2SH-P2WPKH address and BIP143 signing"},
         {"ltc84", "LTC", "Litecoin Native SegWit", 2, WalletCapabilityAddress, "ltc84", "P2WPKH address and BIP143 signing"},

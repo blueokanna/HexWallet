@@ -108,6 +108,14 @@ WalletError taproot_bip86_private_key(const uint8_t private_key[kPrivateKeySize]
   return WalletError::CryptoFailure;
 }
 
+WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
+                                    uint8_t out_seed[kSeedSize]) {
+  (void)mnemonic;
+  (void)passphrase;
+  (void)out_seed;
+  return WalletError::CryptoFailure;
+}
+
 }  // namespace hexwallet
 
 void esp_fill_random(void *buffer, size_t length) {

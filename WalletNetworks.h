@@ -19,6 +19,7 @@ namespace hexwallet
     P2pkh,                   // base58check with 1-byte p2pkh/p2sh versions (BTC, LTC, DOGE, DASH, BTG, RVN, VTC, AXE)
     P2shP2wpkh,              // base58check p2sh of witness program (BIP49)
     P2wpkh,                  // bech32 witness v0 (BIP84 / native segwit)
+    P2tr,                    // bech32m witness v1 of the BIP86 tweaked x-only key
     Evm,                     // keccak-256 hex 0x... account
     Tron,                    // keccak-256 base58check with 0x41 version
     CryptoNote,              // Monero/Masari keccak-reduce standard address

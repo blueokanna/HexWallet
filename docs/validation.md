@@ -858,3 +858,365 @@ uint256 GetHash() { ctx.Finalize(result.begin()); /* GRS ctx.Reset()... */ retur
 - SE051 实卡互验、曲线装载权限、PIN 派生（PIN → user id）、PIN 会话接续；托管门已经会用这些事实，但它们目前都还不成立。
 - `Ed25519` 的 PKCS#8/SPKI 导入、P-256 密钥协商未做。
 - 手机端 X25519 同步改造在固件之外。
+
+## 2026-11-02（七）：PSBT v2 与 ZERO
+
+### PSBT 只有两个版本，第三个不存在
+
+要求里写的是"PSBT v1 和 v2"。线上没有 v1：BIP370 自己的脚注交代得很清楚，这个编号被跳过了，因为 v0 在设计阶段一直被口头叫作"版本 1"，定稿时干脆改成 2 以免混淆。所以这里做的是 **v0 与 v2**，并且明确拒绝 `PSBT_GLOBAL_VERSION = 1`——接受一个不存在的版本号，等于替对手方定义共识。
+
+v0 把整笔交易塞在 `PSBT_GLOBAL_UNSIGNED_TX` 里；v2 把它拆开：全局放交易版本、兜底 locktime、输入/输出条数，每个输入 map 自带 outpoint 与 sequence，每个输出 map 自带金额与脚本。两套读取器最后汇到同一个 `BitcoinSigningRequest`，所以**审阅和签名只有一条路径**，不存在"v2 走了另一段代码"这种事。
+
+自检里最硬的一条不是"两个都能解析"，而是**同一笔交易分别编码成 v0 和 v2，必须签出逐字节相同的交易**。结构一致只说明字段读对了；签名一致才说明摘要、脚本、vsize、手续费判定全部落在同一个结论上。
+
+字段顺序在 BIP370 里没有规定，所以读取器从不假设顺序：non-witness UTXO 要等整个输入 map 读完，才拿 outpoint 去校验前一交易；输出的 BIP32 派生要等脚本出现才应用。这两种"逆序"在自检里都真的写了一遍。
+
+拒绝规则逐条独立，每条有自己的错误码，构造器的 bug 因此是可定位的，而不是被悄悄重新解释：v2 带 unsigned tx → `NonCanonical`；v0 带任何 v2 专有全局 → `NonCanonical`；v2 缺 tx version / 输入数 / 输出数 → `MissingField`；`PSBT_GLOBAL_TX_MODIFIABLE` 任一位置位 → `Unsupported`（构造器还没定稿的交易不签）；required time locktime < 500000000 或 height ≥ 500000000 → `NonCanonical`（把一个高度当时间戳收下，等于悄悄换了交易语义）；同时存在"只要高度"和"只要时间"的输入 → `Unsupported`。
+
+`PSBT_GLOBAL_XPUB` 接受但忽略：本机每个签名密钥都由设备种子派生，主机塞进来的账户 xpub 影响不了任何签名，拒绝它只会把正常构造器挡在门外。其它未知或专有全局一律拒绝——签名器看不懂的字段，不该出现在它即将授权的花费里。
+
+顺带修掉一个真问题：`run_bitcoin_transaction_self_test()` 之前**只在设备上跑**（`HexWallet.ino` 与 `selftest` 命令），CI 的主机套件从来没碰过 PSBT。现在 `chain_probe` 增加 `bitcoin-tx-selftest` 模式并接进 `build_chain_native.ps1`，用真 mbedtls、真 BIP32、真曲线，PSBT v0 与 v2 的解析和签名每次 CI 都真的执行。失败时它打印 `bitcoin-stage=N`（`bitcoin_self_test_stage()`）：设备上没有可读控制台，这一步把"比特币测试挂了"变成"挂在第 120 步"。
+
+### ZERO（ZER）
+
+`zerocurrency.io` 指向的 ZERO 是 Zcash 的分叉，节点源码在 `github.com/zerocurrencycoin/Zero`。新网络不是靠"看起来像 Zcash"加进去的，是照着它自己的 `chainparams.cpp` 与 `consensus/upgrades.cpp` 抄的：
+
+- 透明地址版本字节 `0x1CB8` / `0x1CBD`（与 Zcash 相同），只有 P2PKH/P2SH，没有 segwit；
+- 网络升级表 Sprout → Overwinter `0x6f76727a` → Sapling/Cosmos `0x7361707a` → Blossom `0x2bb40e60`，主网 `vUpgrades` 里 Blossom 是 `NO_ACTIVATION_HEIGHT`，COSMOS 在高度 620450 激活，所以 ZIP-243 的 branch id 是 `0x7361707a`；
+- SLIP-0044 323，总量 17,000,000 ZER。
+
+这几条让 ZER 落在既有的 ZIP-243 引擎上，而不是复制一份 Zcash 代码。网络自检里专门加了一条：两条链**共用地址字节但不共用 branch id**。这一条值得单独写，因为把 Zcash 的分支 ID 和 ZERO 的地址拼在一起，能签出一个"本地验得过、链上没人收"的签名——"它签出来了"这类测试永远发现不了这种错。
+
+屏蔽地址（z/zs）两条链都不支持：花屏蔽池需要 Sapling 证明与 note 追踪，看不见 note 的设备没有资格声称审阅过这笔花费。Ledger 和 Trezor 对 Zcash 画的也是这条线。
+
+### 没做的，写在这里
+
+- **BIP86 / Taproot**：地址派生、BIP341 key-path 摘要、BIP340 签名是三块活，其中 BIP341 摘要要按脚本公钥、金额、annex 逐段哈希，并对着 BIP341 的 wallet test vectors 校准。本轮没有动：半套 taproot 比没有更危险——能算出地址却签不对摘要，或者反过来。
+- **Stacks（STX）**：c32check 地址、anchored/Nakamoto 交易格式、Clarity post-condition 是独立一条链的工作量，不能拿 EVM profile 或 UTXO 交易冒充。
+- **Lightning**：链下通道，硬件钱包在这里没有"普通转账"可签；没有 validating signer（通道状态机）就无从谈起，Trezor/Ledger 也只做通道开启/关闭这类链上交易。
+- 要求的 EVM 网络（BSC、Polygon、Flare、Arbitrum One、AVAX C-Chain、Arc、Aurora、Fantom、Bitlayer、Base、X Layer、Rootstock、opBNB）在 `WalletNetworks.cpp` 里**本来就已经全部存在**，chain id 也都对得上（56/137/14/42161/43114/5042/1313161554/250/200901/8453/196/30/204）。这轮做的是逐个核对，不是新增。
+
+### 结果
+
+- `build.ps1`：67 项 pass；
+- `build_chain_native.ps1`：`wallet-selftest`、`bitcoin-tx-selftest`、`chain/zcash/cosmos/dash/evm/stark` 与 `production_policy` 全 pass；
+- `psbt_audit`（独立审计程序）：64 项检查 0 失败；
+- `build_clang_ubsan.ps1`、`policy_check.ps1`、`device_compile_check.ps1`（esp32 与 esp32p4）通过。
+
+## 2026-11-03（八）：BIP86 Taproot 单密钥花费打通
+
+### 先纠正一个说法
+
+"BIP341 签名摘要"和"BIP371 的 PSBT 字段"不是两件独立的事：BIP341 定的是摘要怎么算，BIP371 定的是 PSBT 里怎么表达一棵脚本树的承诺。本轮做的是 **BIP86 单密钥 key-path 花费**：没有脚本树，所以 BIP371 只需要 `PSBT_IN_TAP_BIP32_DERIVATION`(0x16) 与 `PSBT_IN_TAP_INTERNAL_KEY`(0x17)，`PSBT_IN_TAP_MERKLE_ROOT`(0x18) 出现即拒绝——有 merkle root 就说明输出键不是 BIP86 的 tweak，本机签不了。
+
+### TapTweak 与地址
+
+`taproot_bip86_output_key()` 与 `taproot_bip86_private_key()`（`WalletSecurity.cpp`，走仓库内 secp256k1）：`t = TaggedHash("TapTweak", xonly(P))`，`Q = P + t·G`；私钥侧先把 k 归一到偶 Y（`k' = n - k`，当 P 的 Y 是奇数），再 `k_Q = k' + t`。地址是 bech32m(witness v1, 32 字节 Q)，编码放在 `WalletAddresses`，tweak 留在 `WalletSecurity`——地址层不该拿到曲线运算。
+
+对 BIP86 官方向量跑通：助记词 `abandon … about`、路径 `m/86'/0'/0'/0/0`，内部键 `cc8a4bc6…6fc115`、输出键 `a60869f0…dc684c`、地址 `bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr` 三者逐字节一致。
+
+### BIP341 摘要
+
+`bitcoin_sighash_taproot()` 实现完整的 SigMsg：epoch `0x00`、hash type、nVersion、nLockTime、`sha_prevouts`/`sha_amounts`/`sha_scriptpubkeys`/`sha_sequences`、`sha_outputs`（SIGHASH_SINGLE 时改为 `sha_single_output`）、spend_type、input_index，外加可选 annex。**完整的六种 hash type 都实现**，因为 BIP341 的官方向量用的正是 `SIGHASH_SINGLE`——只实现钱包自己要签的那两种，就等于给自己判卷。
+
+验证用的是 BIP341 `wallet-test-vectors.json` 的第一组：9 输入 2 输出、`hashType=3`。三条独立检查同时成立：
+
+1. 本机算出的摘要必须等于向量公布的 `sigHash`（`2514a627…5526d555`）；
+2. 向量公布的签名必须能被本机的 BIP340 验签通过（说明摘要是签名者真正签的那一个）；
+3. 用向量公布的内部键重算 TapTweak，必须得到该 UTXO 的 `scriptPubKey`（说明 tweak 也没错）。
+
+顺带把 `kBitcoinMaxInputs` 从 8 提到 16：BIP341 的向量就是 9 个输入，原来的上限让"逐字节核对上游向量"这件事根本做不到。内存代价是一个 `BitcoinSigningRequest` 多几百字节，换来的是上游向量可复现。
+
+一个坑值得记下来：`secp256k1_schnorr_detail::tagged_hash()` 的输入有 96 字节上限（它是为 BIP340 的 32 字节消息写的）。BIP341 的 SigMsg 有 175 字节，直接复用会静默返回 `CryptoFailure`。现在摘要函数自己拼 `SHA256(tag)||SHA256(tag)||SigMsg`，没有这个上限。
+
+### 端到端：PSBT v2 花掉一个 BIP86 输出
+
+自检里有一条完整链路：用同一个助记词派生 `m/86'/0'/0'/0/0`，构造一个 PSBTv2（witness_utxo = `5120||Q`、`0x16` 带 leaf-count=0 的派生、`0x17` 内部键），解析 → 签名 → 检查最终交易：
+
+- witness 恰好是 **1 项 64 字节**（SIGHASH_DEFAULT 不追加 sighash 字节）；
+- 把那一项取出来，用输出键对本机重算的摘要做 BIP340 验签，必须通过。
+
+这条路径上有三个"顺序无关"的细节是真的写进去过的：non-witness UTXO 在 outpoint 之前、输出的 BIP32 派生在脚本之前、`0x16` 派生在 witness_utxo 之前。任何一条读错，签出来的东西自己验不过。
+
+### 明确不做的部分
+
+- **脚本树 / 多签 / Lightning 通道签名**：BIP341 的 script-path 需要 leaf script 的承诺、control block 校验和脚本解释器（至少 CHECKSIG/CHECKSIGADD/multi_a 的语义），那是"在设备上跑一个受限解释器"的工程量，不是补几个字段。Lightning 通道签名更是长期在线状态机（revocation、commitment 编号、数据丢失保护），Trezor/Ledger 也没有在设备上做。
+- **Taproot 多签**：需要 MuSig2 nonce 管理（两次交互、nonce 复用即致命），以及 `PSBT_IN_TAP_SCRIPT_SIG`/`TAP_LEAF_SCRIPT` 的准入策略。
+- BEAM、PRL：见下。
+
+### BEAM 与 PRL
+
+**BEAM** 是 Mimblewimble：没有地址、没有"输入→输出"的交易，只有交互式构造的 kernel 与 rangeproof，双方要在线交换部分签名。硬件钱包在这里能做的只有存密钥并参与交互，而"审阅一笔交易"这件事本身不成立——屏上显示不了没有地址、没有接收方、金额还被承诺隐藏的交易。这里不做，是因为做不到诚实，不是因为难。
+
+**PRL**：CoinGecko 上叫 PRL 的至少有三个（Perle、Parallel Governance、Pearl 的桥接 WPRL），地址格式、coin type、是否 EVM 各不相同。没有官方链参数就加一条网络，等于编一个地址出来。等拿到确切项目（官网或区块浏览器），一个 profile + 一条签名策略就能接上。
+
+### 结果
+
+- `build.ps1`：67 项 pass；
+- `build_chain_native.ps1`：`bitcoin-tx=pass`（BIP341 向量 + BIP86 地址 + BIP86 端到端签名）、`wallet-selftest`、chain/zcash/cosmos/dash/evm/stark、`production_policy` 全 pass；
+- `psbt_audit`：64 项检查 0 失败；
+- `build_clang_ubsan.ps1`、`policy_check.ps1`、`device_compile_check.ps1`（esp32 与 esp32p4）通过。
+
+### 仍未做
+
+- Taproot script-path、多签、Lightning 通道签名（见上）。
+- SE051 实卡：曲线装载权限、PIN 派生、会话接续、托管门——全是实卡才能定的问题。
+- Kaspa/Zcash/Monero 的确切边界仍按各自文档：KAS 只签原生转账，ZEC/ZER 只签透明，XMR 只签标准地址单笔；不宣称全面生产可用。
+- Stacks（STX）与 Lightning 仍未接入。
+
+## 2026-11-03（九）：Taproot 与 BIP371 的对抗性审计，以及为什么 Lightning / Stacks 这一轮没有进代码
+
+### 本轮做了什么
+
+上一轮把 BIP86 单密钥花费打通了，但"能签出正确的东西"和"会拒绝错误的东西"是两件事。这一轮补的是后者：每一行都对应一条会被伪造者利用的规则，测试的期望值是**拒绝**。
+
+新增的对抗性用例（都在 `run_bitcoin_transaction_self_test()` 里，真曲线上跑）：
+
+| 伪造方式 | 期望结果 |
+| --- | --- |
+| v2 输出 map 只有脚本、没有金额 | `MissingField` |
+| v2 输出 map 两个必需字段都没有 | `MissingField` |
+| `0x16` 派生里 leaf-count = 1（即脚本树） | `Unsupported` |
+| PSBT 自带 `0x13`（主机收集的 taproot 签名） | `Unsupported` |
+| 带 `0x18` merkle root（输出键不是 BIP86 tweak） | `Unsupported` |
+| 非 taproot 输入带 taproot 专有字段 | `Unsupported` |
+| taproot 输入的 sighash 声明为 2 | `Unsupported` |
+| `0x17` 内部键与路径派生结果不一致 | `WrongWallet` |
+| `SIGHASH_SINGLE` 但 input_index ≥ 输出数 | `InvalidArgument` |
+| annex 首字节不是 `0x50` | `InvalidArgument` |
+| hash type 0x04 / 0x84（保留位） | `InvalidArgument` |
+| hash type 0x83（ANYONECANPAY\|SINGLE） | `Ok`（合法组合必须仍能算） |
+
+写这些用例的过程中暴露了一个测试自身的陷阱，值得记下来：`0x84 & 0x7f = 4`，所以 0x84 是**非法**的 hash type，而 `ANYONECANPAY|SINGLE` 是 `0x83`。差点把非法值写成"合法"的期望——如果那条断言通过了，恰恰说明实现漏了保留位检查。
+
+另外确认了一件此前没有明说的事：`SIGHASH_SINGLE` 在 input_index 超出输出数时，BIP341 要求**失败**而不是套用 Bitcoin legacy 的 "hash 等于 1" 特例。代码原本就是 `InvalidArgument`，现在有测试钉住。
+
+### 顺带核对：v2 输出 map 的"提前返回"问题
+
+2026-11-02 的独立审计记录里提到过 v2 输出 map 在遇到 map 终止符时提前 `return`，导致 `!has_amount || !has_script` 的检查不可达。当前代码里这个位置是对的：
+
+```cpp
+if (result != TransactionError::Ok)
+  return result;
+if (end)
+  break;
+```
+
+本轮把它写进了测试（"只有脚本没有金额"这条），这条路径以后不会再退化。
+
+### Lightning：为什么不是"再补几个字段"
+
+硬件钱包能在 Lightning 里签的唯一**链上**交易是通道开启的 funding transaction，以及协作关停的 closing transaction。这两笔本身是普通 Bitcoin 交易，funding 输出是 `P2WSH 2-of-2`，closing 输出是 `P2WPKH`——也就是说，**要先把 P2WSH 多签的准入和签名做出来**，Lightning 的链上部分才谈得上。
+
+真正的通道签名（commitment 与 HTLC 的 `SIGHASH_SINGLE|ANYONECANPAY`）不是交易签名，是一个长期在线的状态机：commitment 编号单调递增、revocation secret 必须保存到确认对手方已失去旧状态、数据丢失时要用 `option_data_loss_protect` 恢复。Trezor 和 Ledger 都不在设备侧实现它，正是因为它需要持久化状态与在线交互，而这两样恰好是"离线签名设备"的反面。
+
+所以 Lightning 的正确顺序是：P2WSH 多签 → funding/closing 交易 → （若要做）通道状态机。本轮没有动，因为它前面那一层还没做。
+
+### Stacks：能验证的部分和不能验证的部分
+
+本轮把 SIP-005 读到可以动手的深度，也拉了真实主网交易做对照，结论是**不能就这样进代码**：
+
+- 能从真实数据确认的：`chain_id` 实际是 `0x00000001`（SIP-005 正文写的是 `0x00000000`，已经过时，以链上为准）；标准单签的 hash mode 是 `0x00`、地址版本 22（`SP`）；`0x04` 授权、`0x03` anchor、`0x02` post-condition mode、`0x00` 载荷、`0x05` 收款方类型这些字段位置与 API 报出的 nonce/fee/收款地址逐字节吻合。
+- **不能**确认的：`presign-sighash` 的具体构造。按 SIP-005 描述（`sha256(h1 ‖ 0x04 ‖ fee_be ‖ nonce_be)`）从主网交易反推，恢复出的公钥 hash160 与发送方地址对不上；`/extended/v1/tx/{id}/raw` 返回的字节算出的 sha256 也不等于该交易的 txid，说明那个接口给的不是签名字节的原像。
+
+一段签不出、也验不了的 Stacks 代码，比没有更危险：地址看着对，签名上不了链，用户的钱就卡在"能收不能花"。所以本轮不写。需要的是一条能对上 txid 的原始字节，或者官方 SDK（`@stacks/transactions`）生成的固定向量——拿到任一条，c32check 与 SIP-005 编码就能一次做完并钉死。
+
+### BEAM 与 PRL
+
+同上一轮的结论，且这一轮没有变化：BEAM 是 Mimblewimble，没有地址、没有可显示的输入输出，交易靠双方在线交换部分签名构造，硬件钱包在这里连"审阅"都不成立；PRL 至少有三种资产共用这个代号（Perle、Parallel Governance、Pearl 的桥接 WPRL），链参数各不相同，没有官方链参数就加 profile 等于编一个地址出来。
+
+### 结果
+
+- `build.ps1`：67 项 pass；
+- `build_chain_native.ps1`：`bitcoin-tx=pass`（BIP341 向量、BIP86 地址、BIP86 端到端签名、12 条对抗性用例）、`wallet-selftest`、chain/zcash/cosmos/dash/evm/stark、`production_policy` 全 pass；
+- `psbt_audit`：**90 项检查 0 失败**（上一轮是 64 项）；
+- `build_clang_ubsan.ps1`、`policy_check.ps1`、`device_compile_check.ps1`（esp32 与 esp32p4）通过。
+
+### 并发审计在我这版代码里找出的五个真缺陷
+
+同一时间另一路审计用 BIP341 官方向量和自造的 annex 边界向量跑了我上一轮写的 `bitcoin_sighash_taproot()`，发现五处实打实的错误，全部已修：
+
+1. **`SIGHASH_NONE` 仍然提交了输出集合**。BIP341 只在 hash type 既不是 NONE 也不是 SINGLE 时才把 `sha_outputs` 放进 SigMsg，我写成了 `output_type != 3`，漏掉 NONE（2）。
+2. **`ANYONECANPAY` 没有提交当前输入的 outpoint/金额/scriptPubKey/sequence**。ACP 省略的是那四个聚合值，代之以当前输入自身的这四个字段；只省不补，等于签了一个不绑定自己输入的摘要。
+3. **annex 少了 CompactSize 长度前缀**。BIP341 定义的是 `SHA256(CompactSize(len) || annex)`，我直接哈希了 annex 本身，1–252 与 ≥253 字节两种编码因此都不对。
+4. **SigMsg 缓冲区容量不够**。annex 长度前缀最长 3 字节，原容量把这种情形算漏了。
+5. **`0x80` 这种未定义的 hash type 没被拒绝**，而 `SIGHASH_DEFAULT` 在非 taproot 输入上被解析接受、签名时又悄悄当成 ALL。
+
+第 1、2 条尤其说明"照着自己的理解实现一遍再自测"是不够的：这两处用自造向量永远测不出来，因为自造向量也是按同样的误解构造的。只有拿官方钱包向量逐字节比对才会暴露。
+
+独立回归（`tests/host/taproot_audit/`）：七组官方 key-path 摘要 + 三组 annex 边界 + 非法参数，**13/13 通过**，用的是未修改的上游向量文件并校验源码 SHA-256。
+
+### 明确的边界
+
+- BIP86 key-path 可签；**脚本树、多签、Lightning 通道签名未实现**。
+- Stacks、Lightning 未接入。
+- SE051：曲线装载权限、PIN 派生、会话接续、托管门仍只有实卡能定。
+- KAS / ZEC / ZER / XMR：仍是各自的受限路径（KAS 原生转账、ZEC/ZER 仅透明、XMR 标准地址单笔），不宣称全面生产可用。
+
+## 2026-11-03（十）：P2WSH 多签的密码学地基，用 BIP143 自己的 6-of-6 向量锚住
+
+这一轮做的正是原计划的第一步：**先把能对上 BIP143 官方向量的那部分做完**。签名准入没开——原因在最后一节。
+
+### 一个必须先纠正的映射错误
+
+BIP143 的 hash type 是 `ALL=1 / NONE=2 / SINGLE=3`，不是 `0/1/2`。我第一版独立复算时按 `0/1/2` 写，结果六组官方向量里只有两组 ANYONECANPAY 的对上——因为 ACP 恰好把 `hashPrevouts`/`hashSequence` 全置零，掩盖了错位。把映射改对之后六组全中。
+
+这件事的教训比代码本身重要：**如果只实现钱包自己要签的那一种 hash type，这个错误永远不会暴露**。正是因为照抄了向量里的全部六种，`NONE` 和 `SINGLE` 才会逼出"hashSequence 在 NONE/SINGLE 下也要置零"这条规则——BIP143 写的是 "$hashSequence$ is the double SHA256 of the serialization of all input nSequence ... **unless** ANYONECANPAY, SINGLE, or NONE is set"。这一条我第一版也漏了。
+
+### 新增的密码学原语
+
+`BitcoinTransaction.h` 里三个纯函数，都不碰密钥：
+
+- `bitcoin_sighash_witness_v0(request, index, hash_type, script_code, script_code_size, out)` —— 通用 witness-v0 摘要，`scriptCode` 由调用方给（P2WPKH 是 25 字节 P2PKH 脚本，P2WSH 是整个 witnessScript）。支持 ALL/NONE/SINGLE × ANYONECANPAY，因为向量就是这么给的。`scriptCode` 按 CompactSize 前缀序列化，这是 BIP143 的原始要求，P2WSH 的 witnessScript 长度不是 25。
+- `bitcoin_multisig_script()` / `bitcoin_parse_multisig_script()` —— 规范的 `OP_m <33 字节公钥>… OP_n OP_CHECKMULTISIG`，只用 `OP_1..OP_16` 小整数操作码。用 `OP_PUSHBYTES_1 0x06` 代替 `OP_6` 在 VM 里等价，但本机解析器拒绝：**设备复现不出逐字节相同的脚本，就没有资格把它当成自己的脚本显示**。
+- `bitcoin_p2wsh_program()` / `bitcoin_p2sh_p2wsh_redeem()` —— `sha256(witnessScript)` 与 `0x0020||sha256(witnessScript)`。
+
+`bip143_digest()` 重构成 `witness_v0_digest()` 的薄包装，自己拼 25 字节 P2PKH scriptCode。行为不变，但**顺带修好了 `hashSequence` 在 NONE/SINGLE 下忘记置零**这个问题（此前 `valid_digest_request` 只放行 ALL，所以没被触发过，属于潜伏 bug）。
+
+### 用官方向量钉住
+
+拿 BIP143 的 **P2SH-P2WSH 6-of-6** 那组（一个输入、两个输出、`SIGHASH_*` 六种各签一次），逐项断言：
+
+| 断言 | 值 |
+| --- | --- |
+| 6 个公钥重建 witnessScript | 与向量 207 字节逐字节相同 |
+| `sha256(witnessScript)` | `a16b5755…0dcb54` |
+| redeemScript `0x0020‖…` | `0020a16b…0dcb54` |
+| `hash160(redeemScript)`（P2SH 地址载荷） | `9993a429037b5d912407a71c252019287b8d27a5` |
+| 六组摘要 | `185c0be5…`/`e9733bc6…`/`1e1f1c30…`/`2a67f03e…`/`781ba15f…`/`511e8e52…` 全部命中 |
+
+另外两条否定用例：`SINGLE` 但 `input_index ≥ output_count` 必须 `InvalidArgument`；非规范多签脚本（`OP_PUSHBYTES_1 0x01` 当 OP_1）必须解析失败。
+
+### 为什么签名准入还没开
+
+`bitcoin_sign_request()` 返回的是**完整已签交易**，而多签的本质是"设备签一份，别的签名者签其余"。要让多签真正可用，需要的是**返回部分签名**（逐输入签名 + 保留其它输入的现有 witness），也就是一次输出格式的改动：现在 `bitcoin_sign_request` 会重建整笔交易并把自己的签名塞进每个输入，多签场景下这会把别人已经收集好的签名丢掉。
+
+这不是"再写几个函数"，而是产品形态的选择：Ledger 的 `signPsbt` 是就地更新 PSBT，Trezor 是返回 serialized tx 加 `signatures` 数组。这个决策要一次做对，所以本轮先把摘要、脚本、program 这三块**可独立验证**的地基打牢，而不是先接一个会丢签名的半成品。
+
+下一步（顺序不变）：`bitcoin_sign_request_psbt()` 逐输入签名 + 部分结果回填 → P2WSH 2-of-2 准入 → Lightning funding/closing 交易。通道状态机仍在最后，理由见上一轮。
+
+### 结果
+
+- `build_chain_native.ps1`：`bitcoin-tx=pass`（BIP341 官方七组、BIP86 地址与端到端签名、BIP143 P2SH-P2WSH 6-of-6 六组摘要、12 条 taproot 对抗用例、4 条多签脚本用例）；
+- `build.ps1` 67 项 pass；`psbt_audit` 90/90；`taproot_audit` 13/13；
+- `build_clang_ubsan.ps1`、`policy_check.ps1`、`device_compile_check.ps1`（esp32 与 esp32p4）通过。
+
+### 仍未做
+
+- 多签的**部分签名输出格式**与准入（见上）。
+- Lightning funding/closing 与通道状态机。
+- Stacks：仍等一条能对上 txid 的原始字节，或官方 SDK 生成的固定向量。
+- SE051 实卡项（曲线装载权限、PIN 派生、会话接续、托管门）。
+
+## 2026-11-03（十一）：PSBT in / PSBT out —— 部分签名回填
+
+### 为什么先做这一层
+
+`bitcoin_sign_request()` 返回的是一笔**完整已签交易**。多签的本质是"设备签一份、别人签其余"，所以在它能用之前，必须先有一个能表达"我签了，但还差别人"的输出格式。这一轮做的就是这个格式，以及它需要的写入路径。
+
+### `bitcoin_sign_psbt()`
+
+```cpp
+TransactionError bitcoin_sign_psbt(const uint8_t *psbt, size_t psbt_size,
+                                   const HdPrivateNode &master,
+                                   const BitcoinChainParams &chain,
+                                   uint8_t *out_psbt, size_t out_capacity,
+                                   size_t *out_size,
+                                   BitcoinPsbtSignSummary *summary);
+```
+
+契约三句话：
+
+1. **只加自己那一条**。每个输入写入 `0x02 || 33 字节压缩公钥 → DER ‖ sighash` 一条（taproot 是 `0x13`）。全局 map、其它输入、所有输出 map 全部**原样拷贝**，不重新序列化字段——构造函数放进去的东西（包括本固件只是"容忍"的字段）不会被改写。
+2. **别人的签名不动**。输入 map 里已有的、key 不是我们的 `0x02` 条目原样保留。这是多签能协作的前提。
+3. **同 key 同值幂等，同 key 异值拒绝**。`ECDSASign` 走 RFC 6979、BIP340 也确定性，所以重复调用会得到逐字节相同的结果，此时返回 `unchanged_inputs=1` 且输出与输入相同；如果同一个 key 下已有一条值不同的条目，返回 `DuplicateField` 而不是覆盖——覆盖等于扔掉别人（或另一次我们自己）的签名。
+
+实现上没有重新拼装 PSBT，而是先**扫描出三段的字节区间**（global / 每个 input / 每个 output，含各自的 `0x00` 终止符），然后逐段原样拷贝、只在输入段终止符前插入新条目。这样"不碰别人东西"是结构保证，而不是靠枚举已知字段。
+
+同时把逐输入签名抽成 `sign_one_input()`，让完整交易路径和 PSBT 路径**共用同一段代码**——两条路径若各自复制一份，迟早会签出不同的字节。
+
+### 顺带修掉一个真 bug：解析器拒绝已经带签名的 PSBT
+
+写测试时第一次跑就撞上：`bitcoin_sign_psbt()` 的输出**自己解析不了**。原因是输入 map 解析器只认识它枚举过的 key，遇到 `0x02`（partial signature）直接 `Unsupported`。也就是说，**任何已经被别人签过的 PSBT 都进不了这台设备**——多签流程第一步就断在这里。
+
+现在 v0 与 v2 两套输入 map 都接受 `0x02`：要求 key 是 `0x02 || 33 字节`、值长度 2..73，并且限制单个输入的条目数。这里只校验形状，**不校验别人的签名是否正确**——那是验证者的事，而且本机不该因为别人签名格式瑕疵就拒绝整笔（它仍会照常拒签自己没有密钥的输入）。
+
+### 测试钉住的四件事
+
+| 断言 | 含义 |
+| --- | --- |
+| 签名后 PSBT 仍能被 `bitcoin_parse_psbt` 接受，且手续费不变 | 输出是合法 PSBT，不是自发明的格式 |
+| 我们那条 `0x02` 存在，值末字节是 sighash | 条目形状正确 |
+| 构造时预置的**外来** `0x02`（另一个公钥、另一段值）在签名后逐字节仍在 | 别人的签名没被抹掉 |
+| 第二次调用：`unchanged=1`、输出与第一次逐字节相同；把我们的值改一位后调用 → `DuplicateField` | 幂等与冲突拒绝 |
+
+### 结果
+
+- `build_chain_native.ps1`：`bitcoin-tx=pass`（BIP341 官方七组、BIP86 地址与端到端、BIP143 6-of-6、12 条 taproot 对抗用例、4 条多签脚本用例、4 条 PSBT 回填用例）；
+- `build.ps1` 67 项 pass；`psbt_audit` 90/90；`taproot_audit` 13/13；
+- `build_clang_ubsan.ps1`、`policy_check.ps1`、`device_compile_check.ps1`（esp32 与 esp32p4）通过。
+
+### 下一步（顺序不变）
+
+1. **P2WSH 2-of-2 准入**：解析 `PSBT_IN_WITNESS_SCRIPT`(0x05) 与嵌套时的 `PSBT_IN_REDEEM_SCRIPT`(0x04)，允许**多条** `0x06` 派生（其中至少一条属于本机），用 `bitcoin_parse_multisig_script()` 逐字节重建脚本并核对 `sha256` / `hash160`。这里的关键约束是：脚本必须能被设备**完整复现并显示**，否则不签。
+2. Lightning funding/closing 交易（形状就是 P2WSH 2-of-2 的花费）。
+3. 通道状态机——仍在最后，它要求持久化状态与在线交互，与离线签名设备的前提相反。
+
+### 仍未做
+
+- 多签准入与部分签名的 witness 组装（本轮只把格式和写入打通，解析器仍要求每个输入都是本机的单签密钥）。
+- Lightning funding/closing 与通道状态机。
+- Stacks（等一条能对上 txid 的向量，或授权用官方 SDK 生成固定 fixture）。
+- SE051 实卡项。
+
+## 2026-11-03（十二）：多签准入的尝试失败并回退——一次诚实的记录
+
+### 做了什么，为什么退回来
+
+这一轮的目标是把多签准入接上：解析 `PSBT_IN_WITNESS_SCRIPT`(0x05)、允许多条 `0x06` 派生、用 `bitcoin_parse_multisig_script()` 重建脚本并核对 `sha256`/`hash160`。
+
+改动写完了，编译通过，然后 `bitcoin-tx` 立刻红了：**上一轮已经验证通过的 BIP86 端到端用例失败**。原因是把"每次遇到 `0x06`/`0x16` 就地解析"改成"先收集、map 结束再解析"之后，taproot 输入走的单签分支拿到的公钥偏移错了（`0x16` 的键是 33 字节 `0x16 ‖ x-only`，我按 34 字节 `0x06 ‖ 压缩键` 去还原，随后又用 `public_key + 1` 取 x-only，多错了一位）。修了两次仍停在 `WrongWallet`。
+
+到这一步只剩两个选择：继续在 12 分钟里盲改一个安全关键的状态机，或者退回。**退回**——因为一个"看着支持多签、实际把 taproot 弄坏"的解析器，比完全没有多签更危险。当前工作树已回到上一轮结束时的状态，全部检查重新变绿：
+
+- `build.ps1` 67 项 pass；
+- `build_chain_native.ps1`：`bitcoin-tx=pass`（BIP341 官方七组、BIP86 地址与端到端、BIP143 6-of-6、12 条 taproot 对抗用例、4 条多签脚本用例、4 条 PSBT 回填用例）；
+- `psbt_audit` 90/90、`taproot_audit` 13/13；
+- UBSan、policy、esp32、esp32p4 全通过。
+
+### 这次失败暴露的真问题
+
+**`BitcoinInput` 只有一个 `path`/`public_key` 字段，这是多签的结构性障碍。** 单签的模型是"一个输入 = 一把钥匙"，而多签是"一个输入 = 一个脚本 + 其中若干把钥匙属于我"。把后者的信息硬塞进前者的字段里，就必然要在解析顺序上做假设（先看到脚本还是先看到派生），而 BIP174 的 map 是无序的。
+
+正确的做法是**先把数据模型改对**，而不是先改解析器：
+
+```cpp
+struct BitcoinInput {
+  ...
+  // 一个输入可能引用多把本机钥匙，每把都有自己的脚本位置与派生路径
+  uint8_t device_key_count;
+  uint8_t device_key_index[kMaxDeviceKeys];      // 在 witnessScript 中的位置
+  uint32_t device_key_path[kMaxDeviceKeys][kMaxPathDepth];
+  uint8_t device_key_path_depth[kMaxDeviceKeys];
+  uint8_t witness_script[kMaxWitnessScript];     // 逐字节保留，witness 按脚本顺序组装
+  uint8_t witness_script_size;
+  uint8_t multisig_threshold;
+};
+```
+
+而且这个结构的体积决定了准入上限：`kMaxWitnessScript` 取多大，就直接决定能签 2-of-3 还是 6-of-6，也决定 `BitcoinSigningRequest` 能不能塞进任务栈（现在 `bitcoin_parse_psbt()` 用的是**局部变量**，ESP32-P4 的默认任务栈只有 8 KB）。120 字节的脚本上限 + 每个输入两把本机钥匙，是能同时满足"2-of-2/2-of-3 + Lightning funding"和栈预算的取值——但这必须先算清楚，再动解析器。
+
+### 下一步的做法（这次先设计再动手）
+
+1. 先把 `BitcoinInput` 的多签字段定下来，并把 `bitcoin_parse_psbt()` 的局部 `BitcoinSigningRequest` 改成写入调用方提供的目标对象（现在它在栈上复制一整份，加了多签字段后必然溢出）。
+2. 再改 v0 与 v2 两个解析器，**一次只改一个**，每改完立刻跑 `bitcoin-tx`。派生收集必须在 map 结束时解析，且 `0x06`（34 字节键）与 `0x16`（33 字节键）必须各自保留自己的键长与偏移。
+3. 最后接签名：`bitcoin_sign_psbt()` 每个本机钥匙写一条 `0x02`；`bitcoin_sign_request()` 只在本机钥匙数 ≥ 阈值时组装完整 witness（dummy 空项 + 按脚本顺序的签名 + 脚本）。
+
+### 仍未做（与前几轮一致）
+
+- 多签准入与 multisig witness 组装；
+- Lightning funding/closing 与通道状态机；
+- Stacks；
+- SE051 实卡项。
+
+这一轮唯一的产出是一份"什么不该做"的记录，以及一个仍然全绿的树。写下来是因为下一轮（或下一个人）会再次想从解析器下手——而这次失败说明那不是最短路径。

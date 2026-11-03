@@ -54,6 +54,88 @@ signature; refusing the field would only reject ordinary constructors. Every
 other unknown or proprietary key is refused, because a field the signer cannot
 interpret has no business in a spend it is about to authorize.
 
+## Bitcoin Taproot: BIP86 key-path only
+
+`btc86` derives at `m/86'/0'/0'/0/i` and signs a single-key P2TR output. What the
+device commits to is `SIGHASH_DEFAULT` (a 64-byte witness item, no sighash byte)
+or an explicit `SIGHASH_ALL` (65 bytes); every other hash type is refused at
+signing time even though `bitcoin_sighash_taproot()` can compute all six, because
+a host-chosen hash type would let the constructor decide which outputs the
+review covered.
+
+The pieces, and where each boundary sits:
+
+| Step | Code | Boundary |
+| --- | --- | --- |
+| `t = TaggedHash("TapTweak", xonly(P))`, `Q = P + t?G` | `taproot_bip86_output_key()` | needs the curve, so it lives in `WalletSecurity` |
+| private tweak `k_Q = (k or n-k) + t` | `taproot_bip86_private_key()` | same, and the parity normalisation is what makes the signature verify under `Q` rather than `P` |
+| bech32m(v1, Q) | `address_p2tr_from_output_key()` | pure encoding, so it lives in `WalletAddresses` |
+| SigMsg and digest | `bitcoin_sighash_taproot()` | full hash-type set plus annex, because BIP341's own vectors use `SIGHASH_SINGLE` |
+| PSBT fields | `parse_input_map*()` | BIP371 0x16/0x17 accepted, 0x18 refused |
+
+PSBT rules for a taproot input:
+
+- `PSBT_IN_TAP_BIP32_DERIVATION` (0x16): key is `0x16 || x-only internal key`, value
+  is the leaf-hash count (must be **0** for BIP86), the master fingerprint and the
+  path. A non-zero leaf count means a script tree, which this wallet does not sign.
+- `PSBT_IN_TAP_INTERNAL_KEY` (0x17): must equal the x-only key derived from the
+  path. It is recorded during the map walk and compared at the end, so field order
+  cannot matter.
+- `PSBT_IN_TAP_MERKLE_ROOT` (0x18) and `PSBT_IN_TAP_KEY_SIG` (0x13): refused. The
+  first says the output is not a BIP86 tweak; the second is a signature the host
+  collected, and this device signs what it reviewed.
+
+What is refused, and the test that proves it:
+
+| Field / shape | Result | Why |
+| --- | --- | --- |
+| `0x16` with leaf-hash count > 0 | `Unsupported` | a script tree is a different output key |
+| `0x17` not equal to the derived x-only key | `WrongWallet` | the constructor and the path disagree |
+| `0x18` merkle root | `Unsupported` | BIP86 commits to no script tree |
+| `0x13` tap-key signature supplied by the host | `Unsupported` | this device signs what it reviewed |
+| taproot field on a non-taproot input | `Unsupported` | mixed spend types in one map |
+| taproot sighash 2 or above | `Unsupported` | only DEFAULT (0) and ALL (1) are signed |
+| `SIGHASH_SINGLE` with `input_index >= output_count` | `InvalidArgument` | BIP341 requires failure, not Bitcoin's legacy "hash is one" |
+| annex not starting with `0x50` | `InvalidArgument` | BIP341 ?Extending with annex |
+| hash type with a reserved bit (e.g. `0x04`, `0x84`) | `InvalidArgument` | only bits 0-1 and bit 7 are defined; `0x83` is the valid ANYONECANPAY\|SINGLE |
+
+Out of scope, deliberately: script-path spends (leaf scripts, control blocks, a
+script interpreter), MuSig2 multi-signature (nonce management), and Lightning
+channel signing (a long-running state machine with revocation). Those are not
+"a few more PSBT fields"; treating them as such is how a wallet ends up signing
+something it never displayed. The Lightning funding transaction itself is an
+ordinary on-chain spend of a P2WSH 2-of-2 output, so P2WSH multisig is the
+prerequisite ? that is the order this work has to happen in.
+
+## PSBT in, PSBT out
+
+`bitcoin_sign_request()` assembles a complete transaction, which cannot express a
+spend that still needs another signer. `bitcoin_sign_psbt()` is the other
+contract: the same PSBT comes back with one partial signature per input this
+device owns.
+
+- **Only our entry is added.** Global map, every other input map and every output
+  map are copied as raw byte ranges, so fields the constructor wrote - including
+  ones this firmware merely tolerates - are never re-encoded.
+- **Other signers' signatures survive.** An existing `0x02` entry under a
+  different public key is left untouched; that is what makes collaboration
+  possible at all.
+- **Idempotent by construction.** ECDSA here is RFC 6979 and BIP340 signing is
+  deterministic, so re-signing the same PSBT produces the same bytes
+  (`unchanged_inputs`). A *different* value under our key returns
+  `DuplicateField` instead of overwriting: overwriting would discard a signature
+  this device did not produce.
+- **Taproot writes `0x13`**, ECDSA writes `0x02 || <33-byte compressed key>`.
+
+Both the v0 and v2 input maps now *accept* pre-existing `0x02` entries (shape
+only: `0x02 || 33 bytes`, value 2..73 bytes, bounded count). Before that, any
+PSBT that another party had already signed was rejected outright - a
+multi-signature flow could not start.
+
+`sign_one_input()` is shared by both output paths on purpose: two copies of
+"derive, verify the public key, hash, sign" is how a wallet ends up producing
+different bytes depending on which entry point the host called.
+
 ## Account-model chain signing (VET / ICX / TON / DCR / CKB)
 
 *Merged from docs/chain-signing.md.*

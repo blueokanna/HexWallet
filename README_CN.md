@@ -46,7 +46,7 @@ HexWallet 是运行在 ESP32-S3 上的离线钱包固件基础工程。它提供
 - 自定义记录只是标签，不是授权：真正签名的永远是链上携带的 base unit 整数，设备只做显示换算；用记录换算出的金额会标 `USER-DECLARED`/`UNVERIFIED`，并在提示里说明标签来自本机而不是发行方。已登记代币优先，用户记录绝不遮蔽它们。没有记录时显示原文（`1500000 raw`），不猜小数位。设备侧命令：`token custom-list`、`token custom-add <network> <id-hex> <symbol> <name> <decimals>`、`token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals>`、对应的 `custom-remove`。
 - 显式的安全芯片托管策略 `WalletCustody`：SE051C2HQ1 **目标**档案声明 secp256k1 + ECDSA + Ed25519 + seed 封装（目标能力，未经实机验证）；托管门由"后端已注册、通道已认证、用户已认证、密钥不出卡、钱包层走句柄"五个事实合取推导，逐条都有自检伪证，因此没有任何单一改动能把它打开。Kaspa Schnorr 和 BLS/XMSS 私钥保留在 MCU RAM。
 - 查询已登记 EVM Token 的合约地址、精度和账户地址。XAUT（6 位）、PAXG（18 位）和 MANA（Ethereum/Polygon，18 位）已登记；未登记 ERC-20 仍默认拒绝，不做盲签。
-- 审查并签名受限的 Bitcoin PSBT v0。
+- 审查并签名受限的 Bitcoin PSBT v0 与 v2（BIP370）。
 - 审查并签名 Zcash Overwinter/Sapling v4 透明交易（t1 P2PKH 与 t3 P2SH-P2PK 输入、t1/t3 输出）：`zec inspect <ZEC4|ZEC5-payload-hex>` / `zec sign <code>`，ZIP-243 BLAKE2b-256 摘要、主网 NU6.2 分支 ID `0x5437f330`、`SIGHASH_ALL`。t3 花费要求 redeem script 恰好是单个压缩公钥加 `OP_CHECKSIG`，设备会把它当作 `scriptCode` 重新哈希并与地址比对，多签或其他 redeem 形式、屏蔽交易、JoinSplit、v3/v5 和带已有 scriptSig 的请求一律拒绝；官方 ZIP-243 透明测试向量在自检中校验。
 - 审查并签名已登记 EVM 网络上的原生转账和已登记 ERC-20 合约。ERC-721 `safeTransferFrom`（`0x42842e0e`）和 ERC-1155 `safeTransferFrom`（`0xf242432a`）等唯一 selector 可在无合约注册表时审阅：设备显示合约地址、标准和明确的未登记警告，但无法离线验证合约身份或 NFT 元数据。ERC-20 必须登记 decimals/symbol；与 ERC-20 共享 selector 的 `transferFrom`、批量转移和 receiver hook 一律拒绝。TRON 的 TRC-721/1155 只有解码器、没有合约注册表，请求一律拒绝，详见 [TRON 范围与证据](docs/chain-protocols.md) 与 [adapter-status.md](docs/chain-support.md)。
 
@@ -628,9 +628,10 @@ ERC-20 Token 使用所属 EVM 网络的同一个账户地址，不要把 Token �
 前置条件：
 
 - 已认证并加载钱包。
-- 输入是十六进制 PSBT v0。
+- 输入是十六进制 PSBT，v0（全局 unsigned tx）与 v2（`PSBT_GLOBAL_VERSION=2`）都接受；同一笔交易两种封装必须签出逐字节相同的交易，这一点由 `chain_probe bitcoin-tx-selftest` 在真曲线下校验。
 - 网络必须在 `kNetworkSigningPolicies` 中有显式签名策略行（Bitcoin、Litecoin、Dogecoin、DigiByte、Bitcoin Gold、Ravencoin、Namecoin、Vertcoin、Axe、BCH、eCash、BSV、Sugarchain、e-Gulden、LBRY、MazaCoin、Myriad、NewYorkCoin、Auroracoin、Bitcore、CPUchain、DigitalCoin、Einsteinium、Feathercoin、GoByte、Monacoin、Ritocoin、VIVO，以及各自的 SegWit profile）。生成器只接受带 `sighash_source`、且上游 `chainparams.cpp` 与 `script/interpreter.cpp` 已完成来源核对的 `legacy` 行；fork-id 和 `nTime` sighash 链不会套用 Bitcoin legacy 签名。共享的 legacy/BIP143 算法由 Bitcoin 向量覆盖，但策略行不代表已经在对应主网广播验证。
-- 输入属于该网络支持的 BIP44 P2PKH、BIP49 P2SH-P2WPKH 或 BIP84 P2WPKH 地址。
+- 输入属于该网络支持的 BIP44 P2PKH、BIP49 P2SH-P2WPKH、BIP84 P2WPKH 或 BIP86 P2TR 地址（`btc86`）。
+- Taproot 只做 **BIP86 单密钥 key-path**：地址是 `TapTweak(internal)` 之后的 bech32m，签名是 `SIGHASH_DEFAULT`（64 字节 witness，不追加 sighash 字节）或显式 `SIGHASH_ALL`。PSBT 里 `0x16` 的 leaf-hash 计数必须为 0，`0x17` 内部键必须与派生键一致，`0x18`/`0x13` 直接拒绝。脚本树、多签与 Lightning 通道签名不在范围内。
 - legacy 输入必须带 `non_witness_utxo`，其 txid 会与 outpoint 校验。这是 BIP-174 的强制要求；缺少它，恶意 PSBT 可以伪造被花费金额，从而污染手续费审查。
 - 交易满足金额、费率、输入输出和 sighash 限制（Bitcoin 系为 `SIGHASH_ALL`，BCH/eCash/BSV 为 `SIGHASH_FORKID`）。
 - 默认需要可信显示器。

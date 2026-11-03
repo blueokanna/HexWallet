@@ -975,6 +975,7 @@ const char *key_scheme_text(KeyScheme scheme) {
   switch (scheme) {
     case KeyScheme::Secp256k1Ecdsa: return "secp256k1-ecdsa";
     case KeyScheme::KaspaSchnorr: return "secp256k1-schnorr";
+    case KeyScheme::TaprootSchnorr: return "bip86-taptweak-schnorr";
     case KeyScheme::Ed25519Eddsa: return "ed25519-eddsa";
     case KeyScheme::CryptoNoteEdwards: return "cryptonote-edwards";
     case KeyScheme::Bls12381G1: return "bls12-381-g1";

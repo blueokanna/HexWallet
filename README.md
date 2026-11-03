@@ -29,7 +29,7 @@ The public wallet catalog is filtered by the configured signing policies. This f
 
 | Family | Receive | Review + sign | Scope |
 | --- | --- | --- | --- |
-| Bitcoin | BIP44/BIP49/BIP84 | PSBT v0, `SIGHASH_ALL` | Native SegWit, nested SegWit, legacy P2PKH |
+| Bitcoin | BIP44/BIP49/BIP84/BIP86 | PSBT v0 and v2 (BIP370), `SIGHASH_ALL`, taproot `SIGHASH_DEFAULT`/`ALL` | Native SegWit, nested SegWit, legacy P2PKH, P2TR key-path (no script tree) |
 | Bitcoin-family forks | P2PKH / SegWit profiles | Legacy sighash or BIP143 + `SIGHASH_FORKID` | Litecoin, Dogecoin, Dash, DigiByte, Bitcoin Gold, Ravencoin, Namecoin, Vertcoin, Axe, BCH, BSV, XEC, Sugarchain, e-Gulden, LBRY, MazaCoin, Myriad, NewYorkCoin, Auroracoin, Bitcore, CPUchain, DigitalCoin, Einsteinium, Feathercoin, GoByte, Monacoin, Ritocoin, VIVO, and other source-verified generated profiles |
 | EVM | BIP44 secp256k1 | EIP-155 / EIP-1559, native and whitelisted token calls | 69 registered networks; BSC BEP-20 registry has 26 RPC-checked contracts |
 | XRP | BIP44 secp256k1, `m/44'/144'/0'/0/i` | Native Payment, canonical XRPL binary, SHA-512Half, secp256k1 DER | No issued currency, paths, memo, partial payments or multisig |
@@ -154,7 +154,7 @@ Generated fork profiles are admitted only after the upstream chainparams were ch
 | `QrCode` | Byte-mode QR v1-3 (L/M) encoder and 1bpp renderer |
 | `CoinIcons` | 32x32 I1 coin marks for the review header, packed from CC0 artwork with no decoder in flash |
 | `QrlOtsJournal` | Durable one-time-signature index reservation: two redundant slots, read-back proof, torn-write skip, refuse-when-unknown |
-| `BitcoinTransaction` | PSBT v0, legacy/BIP143/fork-id sighash, serialization |
+| `BitcoinTransaction` | PSBT v0 and v2 (BIP370), legacy/BIP143/fork-id sighash, serialization |
 | `EvmTransaction` | RLP, EIP-155/EIP-1559, token-call review and signing |
 | `KaspaTransaction` | BLAKE2b sighash, KIP-0009 mass, BIP340 signing, protobuf |
 | `ZcashTransaction` | v4 transparent parser, ZIP-243 digest, t1 P2PKH and t3 P2SH-P2PK signing, t1/t3 output rendering |
@@ -203,7 +203,7 @@ wallet address <id> [index]
 wallet custody <id>
 wallet token <id> [index]
 wallet addresses [index]
-tx inspect [<coin>] <psbt-v0-hex> | tx sign <code>
+tx inspect [<coin>] <psbt-hex> | tx sign <code>
 evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code>
 kaspa inspect <payload-hex> | kaspa sign <code>
 zec inspect <ZEC4-payload-hex> | zec sign <code>

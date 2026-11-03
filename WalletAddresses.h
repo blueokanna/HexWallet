@@ -38,6 +38,12 @@ namespace hexwallet
   WalletError address_p2wpkh(const UtxoAddressProfile &profile,
                              const uint8_t public_key[kCompressedPublicKeySize],
                              char *out, size_t out_size);
+  // taproot (BIP86): bech32m witness v1 over the 32-byte x-only OUTPUT key.
+  // The TapTweak step lives in WalletSecurity because it needs the curve; this
+  // function only encodes, so the address layer stays free of key maths.
+  WalletError address_p2tr_from_output_key(const UtxoAddressProfile &profile,
+                                           const uint8_t output_key[32],
+                                           char *out, size_t out_size);
   WalletError address_evm(const uint8_t public_key[kUncompressedPublicKeySize],
                           char *out, size_t out_size);
   WalletError address_keccak_base58(uint8_t version,

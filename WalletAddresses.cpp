@@ -153,6 +153,21 @@ WalletError address_p2wpkh(const UtxoAddressProfile &profile,
   return WalletError::Ok;
 }
 
+WalletError address_p2tr_from_output_key(const UtxoAddressProfile &profile,
+                                        const uint8_t output_key[32],
+                                        char *out, size_t out_size) {
+  if (output_key == nullptr || out == nullptr || profile.bech32_hrp == nullptr ||
+      out_size == 0) {
+    return WalletError::InvalidArgument;
+  }
+  const std::vector<uint8_t> program(output_key, output_key + 32);
+  const std::string address = segwit_address::encode(profile.bech32_hrp, 1, program);
+  if (address.empty()) return WalletError::CryptoFailure;
+  if (address.size() + 1 > out_size) return WalletError::BufferTooSmall;
+  memcpy(out, address.c_str(), address.size() + 1);
+  return WalletError::Ok;
+}
+
 WalletError address_evm(const uint8_t public_key[kUncompressedPublicKeySize],
                         char *out, size_t out_size) {
   constexpr size_t kAddressBytes = 20;

@@ -24,6 +24,8 @@ static HdPrivateNode master;
 static Bytes pub, script, derivation;
 static BitcoinChainParams chain = {"btc", nullptr, kBitcoinMainnet, SighashFamily::Bitcoin, 0};
 struct Options {
+  bool tap=false, internal=false, bad_internal=false, duplicate_internal=false, leaf=false;
+  int tap_hash=-1;
   bool v2=true, amount=true, output_script=true, output_key=false;
   bool bad_output_key=false, duplicate_amount=false, duplicate_input=false;
   bool mix_versions=false, explicit_v0=false, trailing=false, script_key_data=false, zero_height=false;
@@ -47,7 +49,14 @@ static Bytes fixture(const Options &o) {
   b.push_back(0);
   for(int i=0;i<(o.duplicate_input?2:1);++i) {
     Bytes utxo=le(100000,8); utxo.push_back(uint8_t(script.size())); append(utxo,script);
-    field(b,{1},utxo); Bytes key={6}; append(key,pub); field(b,key,derivation);
+    field(b,{1},utxo); Bytes key={uint8_t(o.tap?0x16:6)};
+    append(key,o.tap?Bytes(pub.begin()+1,pub.end()):pub);
+    Bytes d=derivation; if(o.tap) d.insert(d.begin(),o.leaf?1:0); field(b,key,d);
+    if(o.internal) {
+      Bytes x(pub.begin()+1,pub.end()); if(o.bad_internal) x[0]^=1;
+      field(b,{0x17},x); if(o.duplicate_internal) field(b,{0x17},x);
+    }
+    if(o.tap_hash>=0) field(b,{3},le(o.tap_hash,4));
     if(o.v2) {
       field(b,{14},Bytes(32,0x42)); field(b,{15},le(0,4));
       field(b,{16},le(o.sequence,4)); if(o.height || o.zero_height) field(b,{18},le(o.height,4));
@@ -60,8 +69,10 @@ static Bytes fixture(const Options &o) {
     if(o.output_script) field(b,o.script_key_data ? Bytes{4,1} : Bytes{4},script);
   }
   if(o.output_key) {
-    Bytes key={2}; append(key,pub); Bytes d=derivation;
-    if(o.bad_output_key) d[0]^=1; field(b,key,d);
+    Bytes key={uint8_t(o.tap?7:2)}; append(key,o.tap?Bytes(pub.begin()+1,pub.end()):pub); Bytes d=derivation;
+    if(o.bad_output_key) d[0]^=1;
+    if(o.tap) d.insert(d.begin(),0); field(b,key,d);
+    if(o.tap) field(b,{5},Bytes(pub.begin()+1,pub.end()));
   }
   b.push_back(0); if(o.trailing) b.push_back(0); return b;
 }
@@ -72,6 +83,36 @@ static void check(const char *name, bool ok) {
 static TransactionError parse(const Options &o, BitcoinSigningRequest *r) {
   const Bytes b=fixture(o); return bitcoin_parse_psbt(b.data(),b.size(),master,chain,r);
 }
+static void taproot_checks() {
+  HdPrivateNode child={}; uint8_t pk[33], output[32], digest[32];
+  if(hd_private_derive_path(&master,"m/86'/0'/0'/1/0",&child)!=WalletError::Ok ||
+     public_key_from_private(child.private_key,pk)!=WalletError::Ok ||
+     taproot_bip86_output_key(pk+1,output)!=WalletError::Ok) { check("Taproot derive",false); return; }
+  pub.assign(pk,pk+33); script={0x51,32}; script.insert(script.end(),output,output+32);
+  derivation.resize(4); for(uint32_t n:{0x80000056U,0x80000000U,0x80000000U,1U,0U}) append(derivation,le(n,4));
+  for(bool version2:{false,true}) {
+    Options o; o.tap=true; o.v2=version2; o.internal=true; o.output_key=true;
+    for(int hash:{-1,0,1}) {
+      o.tap_hash=hash; BitcoinSigningRequest req={};
+      const bool parsed=parse(o,&req)==TransactionError::Ok;
+      check("BIP371 v0/v2 change ownership",parsed && req.outputs[0].wallet_owned && req.outputs[0].change);
+      uint8_t signed_tx[512]; size_t size=sizeof(signed_tx);
+      const bool signed_ok=parsed && bitcoin_sign_request(req,master,signed_tx,&size)==TransactionError::Ok;
+      check("BIP86 v0/v2 signature verifies",signed_ok && size>70 &&
+        bitcoin_sighash_taproot(req,0,hash==1?1:0,nullptr,0,digest)==TransactionError::Ok &&
+        secp256k1_schnorr_verify(output,digest,signed_tx+size-4-(hash==1?65:64)));
+    }
+    o.tap_hash=2; BitcoinSigningRequest req={}; check("reject unsafe tap sighash",parse(o,&req)==TransactionError::Unsupported);
+    o.tap_hash=-1;o.bad_internal=true; check("reject wrong internal key",parse(o,&req)==TransactionError::WrongWallet);
+    o.bad_internal=false;o.duplicate_internal=true; check("reject duplicate internal key",parse(o,&req)==TransactionError::DuplicateField);
+    o.duplicate_internal=false;o.leaf=true;check("reject unsupported leaf derivation",parse(o,&req)!=TransactionError::Ok);
+    o.leaf=false;o.bad_output_key=true;check("reject false Taproot change",parse(o,&req)==TransactionError::WrongWallet);
+    o.bad_output_key=false;chain.network_id="ltc";
+    check("reject unadmitted chain Taproot",parse(o,&req)!=TransactionError::Ok);chain.network_id="btc";
+  }
+  secure_zero(&child,sizeof(child));
+}
+
 static Bytes rlp(const Bytes &value, bool list=false) {
   if (!list && value.size()==1 && value[0]<128) return value;
   Bytes out;
@@ -181,6 +222,8 @@ int main() {
   o=base;o.zero_height=true;check("reject zero required height",parse(o,&v2)==TransactionError::NonCanonical);
   o=base;o.script_key_data=true;check("reject script key data",parse(o,&v2)==TransactionError::NonCanonical);
   o=base;o.sequence=0xffffffffU;check("final sequence without constraint allowed",parse(o,&v2)==TransactionError::Ok);
+  o=base;o.tap_hash=0;check("reject DEFAULT sighash on non-Taproot v2",parse(o,&v2)==TransactionError::Unsupported);
+  o.v2=false;check("reject DEFAULT sighash on non-Taproot v0",parse(o,&v2)==TransactionError::Unsupported);
   // A failed parse must not partially overwrite a previously approved request.
   memset(&v2,0xa5,sizeof(v2)); BitcoinSigningRequest before=v2;
   o=base;o.psbt_version=1;parse(o,&v2);
@@ -201,6 +244,7 @@ int main() {
   check("custom token storage regressions",run_custom_token_self_tests());
   check("token calldata regressions",run_token_calldata_self_tests());
   nft_checks();
+  taproot_checks();
   check("Bitcoin internal regressions",run_bitcoin_transaction_self_test());
   std::printf("Bitcoin stage: %d\n", bitcoin_self_test_stage());
   check("EVM internal regressions",run_evm_transaction_self_test());
