@@ -1220,3 +1220,57 @@ struct BitcoinInput {
 - SE051 实卡项。
 
 这一轮唯一的产出是一份"什么不该做"的记录，以及一个仍然全绿的树。写下来是因为下一轮（或下一个人）会再次想从解析器下手——而这次失败说明那不是最短路径。
+## 2026-11-03（十三）：多签准入第二次回退——换一个顺序
+
+上一节写下的"先设计再动手"清单，这一轮照做了：先定 `BitcoinInput` 的多签字段，再改解析器，最后接签名。结果**仍然红**，并且这次暴露出一个与解析无关的独立缺陷。两次失败在同一处，说明问题不在细节而在顺序，所以这一节的价值主要是把顺序定下来。
+
+### 这一轮实际写了什么
+
+- `BitcoinSpendType::P2wshMultisig`，`BitcoinInput` 增加 `witness_script_hash[32]` / `witness_script[105]` / `witness_script_size` / `multisig_threshold` / `multisig_key_count` / `device_key_count` / `device_key_index[2]` / `device_key_path[2][10]` / `device_key_path_depth[2]`；
+- v2 解析器：`0x05` 读入脚本，`0x06` 收集进 `PendingDerivation[]`，map 结束时 `resolve_multisig_keys()` 用 `bitcoin_parse_multisig_script()` 重建脚本、核对 `sha256` 与 `hash160`，再记账"第 i 把钥匙是本机的、第几个槽位"；
+- `bitcoin_sign_request()`：按槽位逐个 `SIGHASH_ALL` 签，witness 组装成 `dummy ‖ 按脚本顺序的签名 ‖ witnessScript`，vsize 按 `threshold` 重算；
+- `bitcoin_sign_psbt()`：每把本机钥匙写一条 `0x02`；
+- 一个 2-of-2 native P2WSH 端到端用例（两把钥匙都从 mnemonic 派生）。
+
+编译干净，然后 `bitcoin-tx=FAIL`、`bitcoin-stage=801`。
+
+### 801 说明什么，以及我为什么停下来
+
+801 = `800 + (int)ms_sign`，即 `bitcoin_sign_request()` 返回 `InvalidArgument`。而这个函数里能返回 `InvalidArgument` 的只有开头那一个 guard，和 `sign_multisig_key()` 自己的 guard——按用例传进去的 `input_count=1`、`output_count=1`、`version=2`、非空指针、`slot < device_key_count`，这两处**都不该触发**。
+
+也就是说：**我对"解析器最后交给我什么"的判断是错的**，而且错在我看不见的地方。这和上一节那次失败是同一类错误——不是算错了某个字节，而是默认了某个中间状态成立。连续两轮都栽在同一个假设上，再改一版大概率还是栽。
+
+### 独立发现的真缺陷（这条本身就足以回退）
+
+签名路径里我写了：
+
+```cpp
+uint8_t signatures[kBitcoinMaxInputs][kBitcoinMaxDeviceKeys][kBitcoinMaxDerSignatureSize + 1];
+```
+
+展开是 `16 × 2 × 74 = 2368` 字节，**无条件**分配在 `bitcoin_sign_request()` 的栈上——单签交易也一样付这个代价。ESP32-P4 的默认任务栈是 8 KB，`BitcoinSigningRequest` 本身已经占掉一大块。这一行会把"多签支持"直接变成"所有 Bitcoin 签名的栈预算被吃掉四分之一"。
+
+安全关键路径上的栈溢出不会给你一个错误码，它会给你一次随机复位，或者更糟：在别处崩。这类改动不该混在一个还没跑通的特性里进来。
+
+### 所以：回退，但换顺序
+
+工作树已回到上一版（`bitcoin-tx=pass`，`psbt_audit` 90/90，`taproot_audit` 13/13，UBSan/esp32/esp32p4 全绿）。这一轮的 diff 没有丢，存成了补丁：`files/multisig-attempt-v2.patch`（444 插入 / 37 删除），下一轮可以直接读，不用重写。
+
+下一轮**不再从解析器下手**，顺序反过来：
+
+1. **先写一个不碰 PSBT 的纯内存用例**：手工填一个 `BitcoinSigningRequest`（2-of-2 native P2WSH，两把钥匙都本机），断言 `bitcoin_sign_request()` 产出的 witness 逐字节正确、`txid` 与独立算出来的一致。想上 BIP143 官方 6-of-6 向量也可以——`bitcoin_sighash_witness_v0()` 已经对齐那六条摘要，缺的只是 witness 组装。
+2. 签名路径跑通后，再把 `bitcoin_sign_psbt()` 的"每把钥匙一条 `0x02`"接上，用第一步的请求对象驱动，**PSBT 只作为输入源参与一次**。
+3. **最后**才是解析器：`0x05`/`0x06` 的收集与解析。到这一步，任何失败都只剩"解析出来的字段对不对"，而字段对不对可以在第 1 步那个已知正确的请求对象上逐字段比对。
+
+这样做还有一个好处：第 1 步和第 2 步完全在主机上可测，不依赖 PSBT 编码，一旦红了，搜索范围只有 witness 序列化和 sighash——现在这个范围是"解析器 + 请求模型 + 签名 + 组装"四件事一起。
+
+### 仍未做（与上几轮一致，不再重复理由）
+
+- 多签准入与 multisig witness 组装；
+- Lightning funding/closing 与通道状态机；
+- Stacks（等一条能对上 txid 的向量，或授权用官方 SDK 生成固定 fixture）；
+- SE051 实卡项。
+
+### 顺带说明为什么这轮没有别的产出
+
+用户这一轮要的四件事里，三件依赖多签准入（Lightning funding/closing 就是 P2WSH 2-of-2 的花费），Stacks 缺可验证向量，SE051 缺实卡。多签不通过，其余三件没有可交付的部分——与其把 `bitcoin_sign_psbt()` 的 `0x02` 写入说成"多签已支持"（它只写了自己那把钥匙的签名，组装不出完整 witness，广播必然失败），不如留着这个空档。
