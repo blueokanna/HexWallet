@@ -93,14 +93,6 @@ namespace hexwallet
       return state;
     }
 
-    // Both slots receive the same record. That redundancy is what makes a
-    // single corrupted slot harmless: whichever one survives proves the same
-    // mark, so the counter can never regress and no leaf can be reused.
-    //
-    // A torn pair (slot 0 committed, slot 1 not) leaves the mark one higher
-    // than the index the caller was told about, so the leaf in flight is
-    // skipped instead of reused. The caller is told the reservation failed and
-    // receives no index.
     QrlOtsError write_journal(QrlOtsStorage &storage,
                               const QrlOtsRecord &record)
     {
@@ -115,7 +107,7 @@ namespace hexwallet
       return QrlOtsError::Ok;
     }
 
-  } // namespace
+  }
 
   QrlOtsError qrl_ots_high_water(QrlOtsStorage &storage,
                                  const uint8_t tag[kQrlOtsTagSize],
@@ -299,7 +291,6 @@ namespace hexwallet
       passed = passed && reserve_is(storage, kTagA, 3);
     }
 
-    // Power loss: each slot lost in turn must not move the mark backwards.
     {
       FakeOtsStorage storage;
       passed = passed && qrl_ots_initialise(storage, kTagA) == QrlOtsError::Ok;
@@ -337,9 +328,6 @@ namespace hexwallet
                qrl_ots_reserve(storage, kTagA, &index) == QrlOtsError::Unknown;
       passed = passed && qrl_ots_initialise(storage, kTagA) == QrlOtsError::Ok;
     }
-
-    // A corrupted record counts as absent, and the survivor still protects the
-    // leaves it knows about.
     {
       FakeOtsStorage storage;
       passed = passed && qrl_ots_initialise(storage, kTagA) == QrlOtsError::Ok &&
@@ -393,4 +381,4 @@ namespace hexwallet
     return passed;
   }
 
-} // namespace hexwallet
+}

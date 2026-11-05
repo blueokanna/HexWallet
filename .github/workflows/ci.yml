@@ -6,7 +6,7 @@ on:
     paths-ignore:
       - 'README.md'
       - 'README_CN.md'
-      - 'docs/**'
+      - 'wiki/**'
   pull_request:
   workflow_dispatch:
 

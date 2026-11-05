@@ -1,6 +1,6 @@
 param(
   [string]$Catalog = 'tests/host/catalog_dump.exe',
-  [string]$Output = 'docs/native-chain-capabilities.md'
+  [string]$Output = 'wiki/native-chain-capabilities.md'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -20,8 +20,8 @@ if ($rows.Count -eq 0 -or @($rows.Id | Select-Object -Unique).Count -ne $rows.Co
 $groups = @($rows | Group-Object Domain | Sort-Object Name)
 $signing = @($groups | Where-Object { @($_.Group | Where-Object { ($_.Caps -band 4) -ne 0 }).Count -gt 0 }).Count
 $lines = @('# Native network capabilities', '',
-  'Generated from the compiled, resolved catalog by `tools/native_coverage.ps1`. No token contract registry is read.', '',
-  "Profiles: $($rows.Count). Distinct execution/address domains: $($groups.Count). Domains with a signing-code claim: $signing.", '',
+  'Generated from the compiled, resolved catalog by `tools/native_coverage.ps1`. Do not edit by hand.', '',
+  "Catalog entries: $($rows.Count). Distinct execution/address domains: $($groups.Count). Domains with a signing-code claim: $signing.", '',
   'EVM domains use chain ID; Bitcoin-family address variants merge when coin type and both Base58 versions agree (legacy rows may omit the SegWit HRP). Other adapters keep their explicit network IDs. These are conservative catalog groups, not independently attested chain identities. A domain is not necessarily an independent L1 or a distinct native coin: for example, several rollups use ETH.', '',
   '**SIGN means a registered code path, not complete protocol support, node acceptance or hardware certification.** Production custody, display and boot policies still apply. ADDRESS has no admitted signing path.', '',
   '| Domain | Profiles | Native asset | Code capability | Implemented scope |',
@@ -35,4 +35,4 @@ foreach ($group in $groups) {
   $lines += "| $($group.Name) | $ids | $symbols | $cap | $scope |"
 }
 [IO.File]::WriteAllLines((Join-Path $root $Output), $lines, (New-Object Text.UTF8Encoding $false))
-Write-Output "native coverage: $($rows.Count) profiles, $($groups.Count) domains, $signing signing-code claims"
+Write-Output "native coverage: $($rows.Count) catalog entries, $($groups.Count) domains, $signing signing-code claims"

@@ -61,7 +61,7 @@ namespace hexwallet
       {"grs49", "GRS", "Groestlcoin Nested SegWit", 17, 17, 49, DerivationStyle::Bip44, AddressEncoding::P2shP2wpkh, kUtxoGroestlcoin, 0, 0, 0, 0, nullptr},
       {"grs84", "GRS", "Groestlcoin Native SegWit", 17, 17, 84, DerivationStyle::Bip44, AddressEncoding::P2wpkh, kUtxoGroestlcoin, 0, 0, 0, 0, nullptr},
       // --- EVM networks ------------------------------------------------------
-      // Official network references and supported envelopes: docs/chain-protocols.md.
+      // Official network references and supported envelopes: wiki/chain-protocols.md.
       {"xlayer", "OKB", "X Layer", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 196, 0, 0, nullptr},
       {"zksync", "ETH", "zkSync Era", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 324, 0, 0, nullptr},
       {"eth", "ETH", "Ethereum", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 1, 0, 0, nullptr},

@@ -277,8 +277,9 @@
 // interface. Select with HEXWALLET_BOARD_HEADLESS (6), e.g. pass
 // `-DHEXWALLET_BOARD=6` as a build flag, or drop a `build_opt.h` containing
 // `-DHEXWALLET_BOARD=6` next to HexWallet.ino in the Arduino IDE.
-// LVGL is auto-disabled and HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION defaults
-// to 1 so transaction approval prints a confirm code over Serial.
+// LVGL is auto-disabled. Signing over Serial additionally requires
+// -DHEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION=1 (off by default): without it the
+// transport policy refuses a request that no trusted display can approve.
 // ---------------------------------------------------------------------------
 #elif HEXWALLET_BOARD == HEXWALLET_BOARD_HEADLESS
 

@@ -249,6 +249,19 @@ namespace hexwallet
       return true;
     }
 
+    // A review is only useful when the transport policy will accept the approval
+    // it produces. Printing a confirm code that the matching sign command must
+    // refuse is worse than refusing the review now.
+    bool prepare_approval(char approval[7])
+    {
+      const WalletTransportState state = {true, false, display_is_available};
+      if (!wallet_transport_allows(WalletTransport::SerialUsb,
+                                   WalletTransportOperation::ApprovalResponse, state))
+        return false;
+      snprintf(approval, 7, "%06lu", static_cast<unsigned long>(transaction_approval));
+      return true;
+    }
+
     bool load_master(HdPrivateNode *master)
     {
       if (!wallet_session_is_loaded())
@@ -1447,7 +1460,12 @@ namespace hexwallet
       pending_transaction_kind = PendingTransactionKind::Bitcoin;
       print_transaction_review();
       char approval[7];
-      snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+      if (!prepare_approval(approval))
+      {
+        clear_pending_transaction();
+        Serial.println("ERR approval-unavailable; review-cleared");
+        return;
+      }
       if (display_is_available)
       {
         Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
@@ -1739,7 +1757,12 @@ namespace hexwallet
       Serial.println();
       Serial.println("END TRANSACTION REVIEW");
       char approval[7];
-      snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+      if (!prepare_approval(approval))
+      {
+        clear_pending_transaction();
+        Serial.println("ERR approval-unavailable; review-cleared");
+        return;
+      }
       if (display_is_available)
       {
         Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
@@ -1963,7 +1986,12 @@ namespace hexwallet
       Serial.println();
       Serial.println("END TRANSACTION REVIEW");
       char approval[7];
-      snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+      if (!prepare_approval(approval))
+      {
+        clear_pending_transaction();
+        Serial.println("ERR approval-unavailable; review-cleared");
+        return;
+      }
       if (display_is_available)
       {
         Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
@@ -2206,8 +2234,12 @@ namespace hexwallet
       Serial.println();
       Serial.println("END TRANSACTION REVIEW");
       char approval[7];
-      snprintf(approval, sizeof(approval), "%06lu",
-               static_cast<unsigned long>(transaction_approval));
+      if (!prepare_approval(approval))
+      {
+        clear_pending_transaction();
+        Serial.println("ERR approval-unavailable; review-cleared");
+        return;
+      }
       if (display_is_available)
       {
         Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
@@ -2613,7 +2645,12 @@ namespace hexwallet
       pending_transaction_kind = PendingTransactionKind::Chain;
       print_chain_review(pending_chain_transaction);
       char approval[7];
-      snprintf(approval, sizeof(approval), "%06lu", static_cast<unsigned long>(transaction_approval));
+      if (!prepare_approval(approval))
+      {
+        clear_pending_transaction();
+        Serial.println("ERR approval-unavailable; review-cleared");
+        return;
+      }
       if (display_is_available)
       {
         wallet_ui_set_status("Confirm the amount and address on screen");

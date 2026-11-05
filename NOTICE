@@ -3,7 +3,7 @@ HexWallet third-party notices
 
 Firmware and documentation
 --------------------------
-Copyright (c) 2024-2026 Blueokanna. Distributed under the terms in LICENSE.
+Copyright (c) 2024-2027 Blueokanna and HyphenTeam. Distributed under the terms in LICENSE.
 
 Monero reference vectors
 ------------------------
@@ -40,8 +40,39 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-CryptoNote / Masari fixtures
+CryptoNote fixtures
 ----------------------------
 tests/fixtures/masari/tx2.bin is an upstream transaction used as a parser
 regression fixture. Masari is not a supported wallet; see the security notes in
-docs/security.md.
+wiki/Security-Model.md and the dated review in
+wiki/record-security-review-2026-10-28.md.
+
+Coin icons
+----------
+src/generated/CoinIcons.inc is packed from spothq/cryptocurrency-icons
+(32x32 PNG, one file per ticker), dedicated to the public domain under CC0 1.0.
+The upstream dedication is kept verbatim in assets/icons/LICENSE.
+
+External libraries (not vendored)
+---------------------------------
+LVGL 9.5.0 (MIT, Copyright (c) 2025 LVGL Kft) is linked into display builds.
+Mbed TLS 3.6.5 is dual-licensed Apache-2.0 OR GPL-2.0-or-later; this project
+relies on the Apache-2.0 option. It comes from the ESP32 Arduino core on device
+and from a pinned checkout in CI.
+nayuki/QR-Code-generator (MIT) is a test-only oracle for
+tests/host/qr_cross_check.cpp and is never linked into firmware.
+NXP plug-and-trust is checked out at a pinned commit for the SE051 transport
+compile check; no NXP source is redistributed here.
+NXP SE051 APDU constants were cross-checked against the public generated APDU
+layer in that repository; the applet specification itself is not public.
+
+GxEPD2 (T-Deck Max only) - licensing conflict, read before distributing
+----------------------------------------------------------------------
+Board 4 (HEXWALLET_BOARD_T_DECK_MAX) compiles against GxEPD2 by Jean-Marc
+Zingg, which is licensed GPL-3.0. GxEPD2 is not vendored; it is an external
+Arduino library. A firmware image that links it is a combined work and must
+satisfy GPL-3.0 for that combination, which is incompatible with the
+non-commercial terms of LICENSE. Do not distribute a board-4 image until this is
+resolved: either replace the backend with an in-tree driver or obtain compatible
+terms from the GxEPD2 author. The ESP32-P4 e-paper path uses the in-tree SSD1680
+driver (EinkPanel.cpp) and does not link GxEPD2.

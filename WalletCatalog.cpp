@@ -3,6 +3,8 @@
 #include <ctype.h>
 #include <string.h>
 
+#include <atomic>
+
 #include "ChainTransaction.h"
 #include "CosmosTransaction.h"
 #include "CryptoNoteReview.h"
@@ -166,12 +168,11 @@ namespace hexwallet
     WalletCatalogEntry resolved_entry(size_t index)
     {
       const CatalogSeed &seed = kCatalog[index];
-      static const NetworkProfile *network_cache[sizeof(kCatalog) / sizeof(kCatalog[0])] = {};
-      if (network_cache[index] == nullptr && seed.network_id != nullptr)
-      {
-        network_cache[index] = find_network_profile(seed.network_id);
-      }
-      const NetworkProfile *network = network_cache[index];
+      // Deliberately uncached: the UI task and the signing worker can resolve
+      // entries on different cores, and a mutable table here was a data race
+      // for a lookup that costs one strcmp scan over a compile-time table.
+      const NetworkProfile *network =
+          seed.network_id == nullptr ? nullptr : find_network_profile(seed.network_id);
       uint8_t capabilities = seed.capabilities;
       const char *status = seed.status;
       if (network != nullptr && network->encoding == AddressEncoding::Evm)
@@ -281,11 +282,24 @@ namespace hexwallet
       return (*a == *b) ? 0 : (*a == '\0' ? -1 : 1);
     }
 
+    // Sorted view of the catalog, built once. The UI task renders the list
+    // while the worker task signs, so the one-time build is published with an
+    // atomic state instead of a plain `static bool` flag.
     const uint16_t *sorted_order()
     {
+      enum : uint8_t
+      {
+        kOrderEmpty = 0,
+        kOrderBuilding = 1,
+        kOrderReady = 2,
+      };
       static uint16_t order[sizeof(kCatalog) / sizeof(kCatalog[0])];
-      static bool ready = false;
-      if (!ready)
+      static std::atomic<uint8_t> state{kOrderEmpty};
+      if (state.load(std::memory_order_acquire) == kOrderReady)
+        return order;
+      uint8_t expected = kOrderEmpty;
+      if (state.compare_exchange_strong(expected, kOrderBuilding,
+                                        std::memory_order_acq_rel))
       {
         const size_t count = wallet_catalog_count();
         for (size_t index = 0; index < count; ++index)
@@ -302,7 +316,15 @@ namespace hexwallet
           }
           order[position] = key;
         }
-        ready = true;
+        state.store(kOrderReady, std::memory_order_release);
+      }
+      else
+      {
+        // Another core is building the same immutable table; the sort is
+        // bounded by the catalog size and runs once per boot.
+        while (state.load(std::memory_order_acquire) != kOrderReady)
+        {
+        }
       }
       return order;
     }

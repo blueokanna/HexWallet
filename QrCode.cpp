@@ -16,14 +16,12 @@ namespace hexwallet
     {
       uint8_t version;
       uint8_t size;
-      // Block layout: group 1 and group 2 block counts with their data codewords
-      // per block, then the EC codewords every block carries.
       uint8_t blocks_g1;
       uint8_t data_g1;
       uint8_t blocks_g2;
       uint8_t data_g2;
       uint8_t ec_per_block;
-      uint8_t ecc_bits; // format-information value for the level
+      uint8_t ecc_bits;
       uint16_t total_codewords;
     };
 
@@ -363,8 +361,6 @@ namespace hexwallet
       }
     }
 
-    // 18-bit version information: 6 data bits followed by a BCH(18, 6) remainder
-    // modulo x^12 + x^11 + x^10 + x^9 + x^8 + x^5 + x^2 + 1 (0x1F25).
     uint32_t version_info_bits(uint8_t version)
     {
       uint32_t value = static_cast<uint32_t>(version) << 12;
@@ -420,8 +416,6 @@ namespace hexwallet
         set_module(code, 8, static_cast<uint8_t>(14 - index),
                    ((bits >> index) & 1U) != 0);
       }
-      // Second copy: bits 0-7 along row 8 from the right edge inwards, bits 8-14
-      // down column 8 from (size-7) to the bottom.
       for (uint8_t index = 0; index < 8; ++index)
       {
         set_module(code, 8, static_cast<uint8_t>(size - 1 - index),
@@ -461,9 +455,6 @@ namespace hexwallet
       }
     }
 
-    // Zigzag placement: two-module-wide columns from the right, skipping column 6.
-    // Modules left over after the last codeword bit are remainder bits and stay 0,
-    // which is what the standard requires.
     uint16_t place_data(QrCode *code, const uint8_t *codewords, size_t count,
                         uint8_t mask)
     {
@@ -558,7 +549,6 @@ namespace hexwallet
           }
         }
       }
-      // Finder-like 1:1:3:1:1 patterns in rows and columns.
       for (uint8_t row = 0; row < size; ++row)
       {
         for (uint8_t column = 0; column + 6 < size; ++column)
@@ -586,8 +576,8 @@ namespace hexwallet
         }
       }
       return total;
-    } // Splits the data codewords into the version's blocks, appends each block's EC
-    // codewords and interleaves both halves the way the standard prescribes.
+    }
+
     bool build_codewords(const VersionSpec &spec, const uint8_t *data,
                          uint8_t *out)
     {
@@ -784,8 +774,6 @@ namespace hexwallet
         *chosen = level;
       return true;
     }
-    // Below M there is no fallback: a symbol that survives one scratch is not a
-    // wallet address.
     return false;
   }
 
@@ -834,10 +822,6 @@ namespace hexwallet
 
   namespace
   {
-
-    // Minimal reader used only by the self-test. It re-derives the layout instead of
-    // reusing encoder state, so a wrong zigzag, mask, block split or interleave
-    // shows up as a syndrome that is not zero.
     bool decode_check(const QrCode &code, const uint8_t *payload, size_t size)
     {
       const VersionSpec *spec = find_spec(code.version, code.ecc);
@@ -882,7 +866,6 @@ namespace hexwallet
       if (first != expected_format || second != expected_format)
         return false;
 
-      // Version information must decode back to the version it was built for.
       if (code.version >= 7)
       {
         const uint32_t expected_version = version_info_bits(code.version);
@@ -903,7 +886,6 @@ namespace hexwallet
           return false;
       }
 
-      // Read the data modules back through the same zigzag and unmask.
       const size_t total_bits = static_cast<size_t>(spec->total_codewords) * 8;
       uint8_t stream[kMaxTotalCodewords];
       memset(stream, 0, sizeof(stream));
@@ -999,9 +981,6 @@ namespace hexwallet
         }
       }
 
-      // Byte-mode header and payload round-trip through the de-interleaved data
-      // codewords, in block order: a payload can span blocks, so reading only the
-      // first block would fail for every multi-block version.
       uint8_t head[kMaxDataCodewords];
       size_t head_size = 0;
       for (size_t index = 0; index < block; ++index)
@@ -1044,8 +1023,6 @@ namespace hexwallet
   {
     bool passed = true;
 
-    // Every spec row must be internally consistent: data + blocks * ec equals the
-    // version's total codeword count, and the module count matches 17 + 4v.
     for (const VersionSpec &spec : kSpecs)
     {
       const size_t ec_total = total_blocks(spec) * spec.ec_per_block;
@@ -1080,8 +1057,6 @@ namespace hexwallet
     passed = code.version == 3 && code.size == 29 && passed;
     passed = decode_check(code, kBtcAddress, sizeof(kBtcAddress) - 1) && passed;
 
-    // 96 bytes land in v6-M, whose four blocks are interleaved; 110 bytes push
-    // into v7-M, the first version that carries a version-information block.
     static uint8_t synthetic[kMaxDataCodewords];
     for (size_t index = 0; index < sizeof(synthetic); ++index)
     {
@@ -1095,9 +1070,6 @@ namespace hexwallet
     passed = code.version == 7 && passed;
     passed = decode_check(code, synthetic, 110) && passed;
 
-    // Every supported version/level must round-trip a payload of exactly its
-    // capacity, which also exercises the terminator, padding and (v10) the 16-bit
-    // length field.
     for (uint8_t version = 1; version <= kQrMaxVersion; ++version)
     {
       static const QrEcc kLevels[4] = {QrEcc::Low, QrEcc::Medium, QrEcc::Quartile,
@@ -1118,8 +1090,6 @@ namespace hexwallet
       }
     }
 
-    // One byte past the largest supported symbol must be refused, never
-    // truncated. (Smaller versions simply grow, which the loop above proves.)
     passed = !qr_encode(synthetic, qr_capacity(kQrMaxVersion, QrEcc::Low) + 1,
                         QrEcc::Low, &code) &&
              passed;
@@ -1128,7 +1098,6 @@ namespace hexwallet
     passed = !qr_encode(kShort, 0, QrEcc::Low, &code) && passed;
     passed = !qr_encode_masked(kShort, sizeof(kShort) - 1, QrEcc::Low, 8, &code) && passed;
 
-    // Wallet policy: start at H, degrade to Q then M, never to L, refuse beyond M.
     QrEcc chosen = QrEcc::Low;
     passed = qr_encode_best(kShort, sizeof(kShort) - 1, &code, &chosen) && passed;
     passed = chosen == QrEcc::High && passed;
@@ -1150,8 +1119,6 @@ namespace hexwallet
                              &code, &chosen) &&
              passed;
 
-    // Renderer geometry: the symbol is drawn at the requested scale and reports
-    // clipping instead of writing outside the buffer.
     static uint8_t canvas[eink_frame_bytes(128, 296)];
     memset(canvas, 0, sizeof(canvas));
     QrCode small = {};
@@ -1165,4 +1132,4 @@ namespace hexwallet
     return passed;
   }
 
-} // namespace hexwallet
+}

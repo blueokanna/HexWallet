@@ -16,7 +16,8 @@ namespace hexwallet
     constexpr size_t kBlockSize = 32;
     constexpr size_t kKeySize = 32;
     constexpr uint32_t kReseedInterval = 1U << 20;
-    constexpr uint8_t kRepetitionCutoff = 3;
+    constexpr uint8_t kMaxIdenticalBlocks = 3;
+    constexpr size_t kMaxRequestSize = 4096;
 
     struct Drbg
     {
@@ -27,12 +28,16 @@ namespace hexwallet
     };
 
     Drbg g_drbg;
-    RandomStats g_stats = {0, 0, 0, 0, true};
+    RandomStats g_stats = {0, 0, 0, 0, 0, true};
+    struct HealthState
+    {
+      uint8_t previous[kBlockSize];
+      uint8_t previous_two[kBlockSize];
+      uint8_t recorded;
+      uint8_t repeats;
+    };
 
-    uint8_t g_previous[kBlockSize];
-    uint8_t g_previous_two[kBlockSize];
-    uint8_t g_repeat_count;
-    bool g_have_previous;
+    HealthState g_health;
 
 #if !defined(HEXWALLET_HOST_TEST)
     std::atomic_flag g_lock = ATOMIC_FLAG_INIT;
@@ -100,36 +105,32 @@ namespace hexwallet
       return ones >= 64 && ones <= 192;
     }
 
-    bool health_test(const uint8_t block[kBlockSize])
+    bool health_test(HealthState &state, const uint8_t block[kBlockSize])
     {
       if (!block_looks_random(block))
-      {
-        ++g_stats.health_failures;
         return false;
-      }
-      if (g_have_previous && memcmp(block, g_previous, kBlockSize) == 0)
-      {
-        ++g_repeat_count;
-        if (g_repeat_count >= kRepetitionCutoff)
-        {
-          ++g_stats.health_failures;
-          return false;
-        }
-      }
+      const bool matches_previous =
+          state.recorded >= 1 && memcmp(block, state.previous, kBlockSize) == 0;
+      const bool matches_previous_two =
+          state.recorded >= 2 && memcmp(block, state.previous_two, kBlockSize) == 0;
+      if (matches_previous)
+        ++state.repeats;
       else
-      {
-        g_repeat_count = 0;
-      }
-      memcpy(g_previous_two, g_previous, kBlockSize);
-      memcpy(g_previous, block, kBlockSize);
-      g_have_previous = true;
+        state.repeats = 0;
+      if (static_cast<uint8_t>(state.repeats + 1) >= kMaxIdenticalBlocks ||
+          matches_previous_two)
+        return false;
+      memcpy(state.previous_two, state.previous, kBlockSize);
+      memcpy(state.previous, block, kBlockSize);
+      if (state.recorded < 2)
+        ++state.recorded;
       return true;
     }
 
     bool read_entropy(uint8_t out[kBlockSize])
     {
       esp_fill_random(out, kBlockSize);
-      if (!health_test(out))
+      if (!health_test(g_health, out))
       {
         g_stats.healthy = false;
         secure_zero(out, kBlockSize);
@@ -145,7 +146,7 @@ namespace hexwallet
       if (!read_entropy(entropy))
         return false;
       esp_fill_random(nonce, sizeof(nonce));
-      if (!health_test(nonce))
+      if (!health_test(g_health, nonce))
       {
         g_stats.healthy = false;
         secure_zero(entropy, sizeof(entropy));
@@ -220,11 +221,12 @@ namespace hexwallet
   {
     if (out == nullptr || size == 0)
       return;
-    if (size > 4096)
+    if (size > kMaxRequestSize)
     {
-      // No wallet operation needs this much; refuse instead of looping.
+      // No wallet operation needs this much. Refuse the request, but do not
+      // latch the source unhealthy: a caller bug is not an entropy failure.
       secure_zero(out, size);
-      g_stats.healthy = false;
+      ++g_stats.oversized_requests;
       return;
     }
     Lock lock;
@@ -282,6 +284,7 @@ namespace hexwallet
     passed = random_stats().requests >= 2 && passed;
 
     // Reseeding must change the following output.
+    // Reseeding must change the following output.
     uint8_t before[32];
     uint8_t after[32];
     random_fill(before, sizeof(before));
@@ -291,10 +294,22 @@ namespace hexwallet
     passed = random_stats().reseeds >= 2 && passed;
 
     // Zero-length and oversized requests must not corrupt the stream or the gate.
+    // Zero-length and oversized requests must not corrupt the stream or the gate.
     random_fill(nullptr, 16);
     random_fill(first, 0);
-    passed = random_healthy() && passed;
+    uint8_t oversized[kMaxRequestSize + 1];
+    memset(oversized, 0xa5, sizeof(oversized));
+    random_fill(oversized, sizeof(oversized));
+    bool cleared = true;
+    for (size_t index = 0; index < sizeof(oversized); ++index)
+      cleared = cleared && oversized[index] == 0;
+    passed = cleared && random_healthy() && random_stats().oversized_requests == 1 && passed;
+    secure_zero(oversized, sizeof(oversized));
 
+    // The health test itself: a stuck block, a fixed block and a skewed block are
+    // all rejected; a plausible block is accepted. These run against the private
+    // predicate through crafted inputs, so a regression in the rule is caught
+    // even when the hardware source is fine.
     // The health test itself: a stuck block, a fixed block and a skewed block are
     // all rejected; a plausible block is accepted. These run against the private
     // predicate through crafted inputs, so a regression in the rule is caught
@@ -316,6 +331,24 @@ namespace hexwallet
         0x8e, 0xf1, 0x47, 0xb2, 0x29, 0x9d, 0x60, 0x34, 0xcb, 0x15, 0xe8,
         0x72, 0x4a, 0xbf, 0x08, 0xd6, 0x3c, 0x97, 0x61, 0x2b, 0x84};
     passed = block_looks_random(plausible) && passed;
+
+    // Repetition rules, exercised on a local history so the live entropy state is
+    // untouched. A source that repeats one block must fail on the third block; a
+    // source that alternates between two blocks must fail on the third.
+    HealthState history = {};
+    uint8_t alternating_b[kBlockSize] = {
+        0x2e, 0x71, 0xc4, 0x0b, 0x96, 0x3d, 0xa8, 0x52, 0xef, 0x18, 0x64,
+        0xbb, 0x07, 0xd2, 0x49, 0x85, 0x3a, 0xcd, 0x16, 0xf3, 0x5c, 0x92,
+        0x27, 0xe6, 0x4b, 0x81, 0x0d, 0xba, 0x53, 0x9c, 0x28, 0x75};
+    passed = health_test(history, plausible) && passed;
+    passed = health_test(history, plausible) && passed;
+    passed = !health_test(history, plausible) && passed;
+    memset(&history, 0, sizeof(history));
+    passed = health_test(history, plausible) && passed;
+    passed = health_test(history, alternating_b) && passed;
+    passed = !health_test(history, plausible) && passed;
+    secure_zero(alternating_b, sizeof(alternating_b));
+    secure_zero(&history, sizeof(history));
 
     secure_zero(stuck, sizeof(stuck));
     secure_zero(zeros, sizeof(zeros));

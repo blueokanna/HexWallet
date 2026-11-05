@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     printf("catalog=%s mining=%s tokens=%s custom-tokens=%s\n",
            catalog ? "pass" : "FAIL", mining ? "pass" : "FAIL",
            tokens ? "pass" : "FAIL", custom ? "pass" : "FAIL");
-    printf("native-profiles=%zu token-deployments=%zu custom-token-capacity=%zu\n",
+    printf("catalog-entries=%zu token-deployments=%zu custom-token-capacity=%zu\n",
            hexwallet::wallet_catalog_count(), hexwallet::kTokenProfileCount, hexwallet::kCustomTokenMax);
     return catalog && mining && tokens && custom ? 0 : 1;
   }

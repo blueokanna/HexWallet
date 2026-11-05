@@ -75,8 +75,8 @@ namespace hexwallet
   {
     bool backup_due;
     bool phone_linked;
-    bool working;        // a signing or verification job is running
-    uint16_t battery_mv; // 0 when the board has no fuel gauge
+    bool working;
+    uint16_t battery_mv;
   };
 
   struct MascotStats

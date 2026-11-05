@@ -16,10 +16,13 @@ namespace hexwallet {
 //   raw 32-byte blocks -> continuous health tests -> SP 800-90A HMAC-SHA256
 //   DRBG -> caller
 //
-// Health tests (per raw block, and over the last four blocks):
+// Health tests (per raw block, against the two previous raw blocks):
 //   * reject an all-0x00 or all-0xFF block
 //   * reject a block with fewer than 64 or more than 192 set bits (>= 8 sigma)
-//   * reject three consecutive identical blocks
+//   * reject the third consecutive identical block
+//   * reject a block equal to the block before the previous one (a source that
+//     alternates between two values would otherwise pass a "same as last"
+//     check forever)
 // A failed test latches `healthy` false for the rest of the boot: there is no
 // "try again and hope" path, because a source that produced one stuck block is
 // not a source. Key generation refuses to run while it is false.
@@ -33,6 +36,7 @@ struct RandomStats {
   uint32_t reseeds;
   uint32_t entropy_failures;
   uint32_t health_failures;
+  uint32_t oversized_requests;
   bool healthy;
 };
 

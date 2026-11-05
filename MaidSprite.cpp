@@ -85,7 +85,7 @@ namespace hexwallet
       sparkle(pixels, stride, 57, 8 + frame, 1 + ((frame + 1U) & 1U));
       break;
     case MascotMood::Alert:
-      for (int y = 6; y < 11 + (frame & 1U); ++y)
+      for (int y = 6; y < 11 + static_cast<int>(frame & 1U); ++y)
         dot(pixels, stride, 56, y);
       dot(pixels, stride, 56, 14);
       break;
