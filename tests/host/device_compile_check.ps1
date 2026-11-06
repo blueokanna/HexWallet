@@ -11,7 +11,14 @@
 # Requires the esp32 core 3.3.10 installed under Arduino15. Override the
 # toolchain/include roots with HEXWALLET_ESP32_LIBS (esp32-libs tool dir) and
 # HEXWALLET_ESP32_CORE (core hardware dir) if they are not at the defaults.
-param([ValidateSet("esp32", "esp32p4")][string]$Target = "esp32")
+param(
+  [ValidateSet("esp32", "esp32p4")][string]$Target = "esp32",
+  # Compile the sources with -fstack-usage and fail when a loop-task frame
+  # exceeds this many bytes. 0 disables the check. The suggested value is one
+  # sixth of the 32 KB loop stack the sketch configures through
+  # SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE).
+  [int]$StackBudget = 0
+)
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $PSScriptRoot "esp32_paths.ps1")
@@ -42,6 +49,7 @@ $includes = @(
   (Join-Path $core "cores\esp32"),
   (Join-Path $libs "include"),
   (Join-Path $libs "include\esp_hw_support\include"),
+  (Join-Path $libs "include\bootloader_support\include"),
   $mbedtlsInclude,
   $mbedtlsPort,
   (Join-Path $libs "include"),
@@ -59,11 +67,15 @@ $includes = @(
 $sources = @(
   "CryptoPrimitives.cpp", "Bls12381.cpp",
   "SolanaTransaction.cpp",
-  "Blake2b.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
+  "Blake2b.cpp", "Blake3.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
+  "WalletCliPolicy.cpp", "BatteryMonitor.cpp", "KangarooTwelve.cpp", "AeternityTransaction.cpp", "AlephiumTransaction.cpp", "QuaiTransaction.cpp",
+  "QuantusAccount.cpp", "QuantusTransaction.cpp",
+  "BeamAddress.cpp", "BeamOutput.cpp", "BeamPayment.cpp", "src/beam/core/ecc.cpp", "src/beam/core/ecc_bulletproof.cpp",
+  "src/beam/core/uintBig.cpp", "src/beam/core/numeric_utils.cpp",
   "WalletLinkCrypto.cpp", "WalletLink.cpp", "WalletNfcApdu.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "CryptoNoteMasari.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
+  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
   "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
   "WalletSecurity.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",
@@ -78,15 +90,19 @@ New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 $incArgs = foreach ($i in $includes) { "-I$i" }
 $log = Join-Path $objDir "compile.log"
 $fail = 0
+# The loop-task sources are compiled with -fstack-usage as well, so the budget
+# check below sees every frame and not only the Arduino-parity four.
+$curatedStackFlags = @()
+if ($StackBudget -gt 0) { $curatedStackFlags += "-fstack-usage" }
 foreach ($s in $sources) {
   $src = Join-Path $root $s
   if (-not (Test-Path $src)) { throw "Missing required source: $s" }
-  $obj = Join-Path $objDir ($s -replace '\.cpp$', '.o')
+  $obj = Join-Path $objDir (($s -replace '[/\\]', '_') -replace '\.cpp$', '.o')
   # Windows PowerShell wraps stderr warnings as non-terminating errors.
   # Judge native compilation by its exit status, not by the presence of stderr.
   $global:LASTEXITCODE = $null
   $ErrorActionPreference = "Continue"
-  & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter -DMBEDTLS_ALLOW_PRIVATE_ACCESS $incArgs -c $src -o $obj *> $log
+  & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter @curatedStackFlags -DMBEDTLS_ALLOW_PRIVATE_ACCESS $incArgs -c $src -o $obj *> $log
   $rc = $global:LASTEXITCODE
   $ErrorActionPreference = "Stop"
   Write-Output ("  {0} => rc={1}" -f $s, $rc)
@@ -103,7 +119,7 @@ foreach ($s in $sources) {
 # which the Arduino core does not ship, and nothing here compiled that branch.
 # These sources are therefore also compiled exactly the way arduino-cli does it:
 # every component include directory plus -DARDUINO.
-$paritySources = @("TrustAnchor.cpp", "QrlOtsStore.cpp", "WalletCustomTokensNvs.cpp", "WalletCli.cpp")
+$paritySources = @("TrustAnchor.cpp", "QrlOtsStore.cpp", "WalletCustomTokensNvs.cpp", "WalletCli.cpp", "BeamCli.cpp", "BatteryMonitor.cpp")
 # arduino-cli builds its include path from the SDK's flags/includes file, which
 # is a list of "-iprefix + iwithprefixbefore" pairs. Reproducing that exact
 # mechanism here turned out to be fragile, so this step spells the same directory
@@ -160,6 +176,8 @@ $parityRsp = Join-Path $objDir "parity-includes.rsp"
 ($parityArgs | ForEach-Object { $_ -replace '\\', '/' }) |
     Set-Content $parityRsp -Encoding ASCII
 $parityRspArg = "@" + ($parityRsp -replace '\\', '/')
+$stackUsageFlags = @()
+if ($StackBudget -gt 0) { $stackUsageFlags += "-fstack-usage" }
 foreach ($s in $paritySources) {
   $src = Join-Path $root $s
   $obj = Join-Path $objDir ($s -replace '\.cpp$', '.arduino.o')
@@ -170,7 +188,7 @@ foreach ($s in $paritySources) {
   # branches, so the UI is switched off instead of pointing at a missing header.
   & $gcc @architectureFlags -std=c++17 -O2 -Wall -Wno-unused-parameter `
       -DARDUINO=10819 -DARDUINO_ARCH_ESP32 -DESP_PLATFORM -DHEXWALLET_ENABLE_LVGL=0 `
-      -DMBEDTLS_ALLOW_PRIVATE_ACCESS $parityRspArg -c $src -o $obj *> $log
+      -DMBEDTLS_ALLOW_PRIVATE_ACCESS @stackUsageFlags $parityRspArg -c $src -o $obj *> $log
   $rc = $global:LASTEXITCODE
   $ErrorActionPreference = "Stop"
   Write-Output ("  [arduino-parity] {0} => rc={1}" -f $s, $rc)
@@ -178,6 +196,65 @@ foreach ($s in $paritySources) {
     $fail++
     Write-Output "----- $s [arduino-parity] compiler output -----"
     Get-Content $log | Select-Object -First 40 | ForEach-Object { Write-Output $_ }
+  }
+}
+
+# Production firmware must not reference the self-test suites. The serial CLI used
+# to call all of them, which kept ~500 KB of test scratch in .bss and every
+# vector table in flash, because the linker can only drop a function that nobody
+# calls. WalletCli.cpp is compiled here with HEXWALLET_DEVICE_SELF_TESTS=0, so any
+# remaining `run_*_self_test*` undefined symbol means the gate was reopened.
+$nmTool = Get-ChildItem $toolRoot -Recurse -Filter ($compilerName -replace 'g\+\+', 'nm') |
+          Select-Object -First 1 -ExpandProperty FullName
+$cliObject = Join-Path $objDir "WalletCli.arduino.o"
+if ($nmTool -and (Test-Path $cliObject)) {
+  $testRefs = & $nmTool -u $cliObject | Where-Object { $_ -match 'self_test' }
+  if (@($testRefs).Count -gt 0) {
+    Write-Output "----- production CLI still references self-tests -----"
+    $testRefs | ForEach-Object { Write-Output ("  " + $_.Trim()) }
+    $fail++
+  } else {
+    Write-Output "  [size] WalletCli.cpp pulls in no self-test code"
+  }
+}
+
+if ($StackBudget -gt 0) {
+  # gcc writes <object>.su next to each object. The budget applies to the sources
+  # that execute on the Arduino loop task, where the stack is shared with the
+  # phone link and the UI; the vector-heavy self-test suites run on their own
+  # task (HEXWALLET_SELFTEST_STACK_BYTES) and are measured there, not here.
+  $loopTaskSources = @("WalletCli", "BeamCli", "WalletCliPolicy", "WalletLinkService", "WalletLink", "Totp")
+  $overBudget = @()
+  $measured = 0
+  $worstBytes = 0
+  $worstName = ""
+  foreach ($file in Get-ChildItem $objDir -Filter "*.su" -ErrorAction SilentlyContinue) {
+    $isLoopTask = $false
+    foreach ($prefix in $loopTaskSources) {
+      if ($file.BaseName -like "$prefix*") { $isLoopTask = $true; break }
+    }
+    if (-not $isLoopTask) { continue }
+    # Windows PowerShell 5.1 resolves a FileInfo passed to Get-Content against the
+    # current directory, so the full path is spelled out here.
+    foreach ($line in Get-Content $file.FullName) {
+      $fields = $line -split "`t"
+      if ($fields.Count -lt 2) { continue }
+      $bytes = 0
+      if (-not [int]::TryParse(($fields[1] -replace '[^0-9]', ''), [ref]$bytes)) { continue }
+      $measured++
+      if ($bytes -gt $worstBytes) {
+        $worstBytes = $bytes
+        $worstName = $fields[0]
+      }
+      if ($bytes -gt $StackBudget) { $overBudget += ("{0} = {1} bytes" -f $fields[0], $bytes) }
+    }
+  }
+  if ($overBudget.Count -gt 0) {
+    Write-Output "----- loop-task stack budget exceeded (limit $StackBudget bytes) -----"
+    $overBudget | ForEach-Object { Write-Output ("  " + $_) }
+    $fail++
+  } else {
+    Write-Output ("  [stack] {0} loop-task frames, worst {1} bytes ({2})" -f $measured, $worstBytes, $worstName)
   }
 }
 

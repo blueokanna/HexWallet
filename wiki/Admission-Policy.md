@@ -51,14 +51,50 @@ Zano are there today. What is not allowed is `sign` with a hand-written table an
 
 ## Withdrawal
 
-Chains get removed. MASARI (MSR) was withdrawn on 2026-10-24: it had a signing path, but the
-subaddress and RCT type-3 semantics could not be tied to mainnet vectors, so the entries were pulled
-instead of left in place with a warning. Qubic was removed outright rather than mapping its FourQ/K12
-identity onto Ed25519, and Flux stays out because the MiningPoolStats snapshot lists it under
-GRAVEYARD.
+Retired networks are excluded from the device catalog and transaction dispatcher.
 
 Withdrawal is deliberately unglamorous: delete the catalog entry, delete the adapter, add a policy
 test that the network id no longer resolves, and leave the record that says why.
+
+## Admission by chain
+
+The catalog records address generation and signing separately. WalletAdmission and the host policy tests enforce exclusions.
+
+| Chain | SLIP-0044 | Model | Blocker |
+| --- | --- | --- | --- |
+| Beam | 1533 | Mimblewimble | Native single-input interactive BEAM transfers, complete output proofs and optional change are implemented. Generic wallet admission awaits secure custody, unspent-output tracking and two-device node acceptance. [Protocol and tests](Beam-zh) |
+| Alephium | 1234 | sUTXO, group-sharded | Native ALPH P2PKH transfers with one recipient, optional wallet change and reviewed gas. The transaction ID and signature match Alephium SDK 3.0.5. |
+| Iron Fish | 1338 | Sapling-style shielded notes | Note decryption, nullifier derivation and zk proof generation. Not viable on this MCU, and a signer without them is signing blind |
+| Quai | 994 | Cyprus-1 account ledger | Mainnet type 0 transfers on chain ID 9 between local Quai accounts, with empty calldata and access list. [Signed fixture](https://quaiscan.io/tx/0x00060019fdf877647e4a9bab684b0c51732b590cb0ffebc058fb29702fe87f97) |
+| Qubic | 83293 | FourQ + KangarooTwelve | KangarooTwelve is now in the tree ([KangarooTwelve.cpp](https://github.com/blueokanna/HexWallet/blob/main/KangarooTwelve.cpp), pinned to the official XKCP vectors including the 24 MB case), but identity is still a FourQ point hashed with K12 and signatures are SchnorrQ over FourQ. An Ed25519/SHA3 substitute produces a different key, so there is no honest shortcut; FourQ and SchnorrQ are still missing |
+| Xelis | unverified | Confidential accounts | English and Simplified Chinese native recovery, Ristretto255 accounts and Schnorr primitives are implemented. The device can validate external mainnet addresses. Custody, confidential balance synchronization and transfer proofs are pending. |
+| Quantus | 189189 | ML-DSA-87 | Mainnet runtime 153/6. Transparent ML-DSA-87 accounts, SS58 prefix 189 and signed v4 balances transfers with nonce, tip and era review. |
+| Qubitcoin | — | Qtum fork (claimed) | Out of scope by owner decision. The advertised site returns 404 and two unrelated projects publish under the ticker QTC, so even the chain identity was unresolved; that decision is recorded here so it is not rediscovered as an open task |
+| Aion | 425 | EVM-era L1 | Out of scope by decision; the chain is dormant |
+
+The table is not only documentation: `coin why <id>` prints the same four fields from the device
+(`OK refused id=beam name="Beam" slip44=1533` plus `blocker=` and `requires=`), so a support answer
+cannot drift from the code. For a chain that is shipping, the same command reports
+`OK supported id=...` and points at `coin show`.
+
+The "no SLIP-0044" rows are refused by the same rule that keeps Swap, Evolution and VeriBlock out:
+deriving a chain's keys from another chain's coin type silently puts two domains on one key. That
+is not a compatibility shortcut, it is a collision.
+
+A chain leaves this table only in the same commit that adds its adapter, its vectors and its
+capability row — never by editing the catalog alone.
+
+## Zephyr left this table
+
+Zephyr is the first chain to be promoted out, and the record matters more than the row. What came
+in: a network profile, a catalog entry, and the upstream address vector from `src/cryptonote_config.h`
+(`prefix 0x6241d18c0`, 12 decimals) plus `tests/unit_tests/base58.cpp`, reproduced byte for byte by
+`run_cryptonote_address_self_tests()` — 73 bytes, 101 characters, `ZEPHYR3baX…QuP1u4V`.
+
+What did not come in: a coin type. Upstream SLIP-0044 does not list ZEPH, so the owner made the one
+decision this table cannot make for them and accepted Monero's 128. That is a recorded trade-off,
+not a precedent: account 0/index 0 yields the same spend and view keys as XMR, and only the prefix
+makes the address different. The Zephyr adapter reviews native ZPH-only version 3 transactions and uses CLSAG. Its mainnet regression checks the exact wire bytes, transaction ID and balance. Conversions require separate review rules.
 
 ## What does not count as admission
 

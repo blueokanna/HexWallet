@@ -9,6 +9,11 @@
     "name": "Aeternity",
     "catalog_id": "ae"
   },
+  "alephium": {
+    "symbol": "ALPH",
+    "name": "Alephium",
+    "catalog_id": "alph"
+  },
   "auroracoin-groestl": {
     "symbol": "AUR",
     "name": "Auroracoin",
@@ -439,10 +444,30 @@
     "name": "Palladium",
     "catalog_id": "fork_utxo_palladium"
   },
+  "quai-kawpow": {
+    "symbol": "QUAI",
+    "name": "Quai",
+    "catalog_id": "quai"
+  },
+  "quai-scrypt": {
+    "symbol": "QUAI",
+    "name": "Quai",
+    "catalog_id": "quai"
+  },
+  "quai-sha": {
+    "symbol": "QUAI",
+    "name": "Quai",
+    "catalog_id": "quai"
+  },
   "quantumrl": {
     "symbol": "QRL",
     "name": "Quantum R L",
     "catalog_id": "qrl"
+  },
+  "quantus": {
+    "symbol": "QTC",
+    "name": "Quantus",
+    "catalog_id": "quantus"
   },
   "quarkcoin": {
     "symbol": "QRK",
@@ -568,6 +593,11 @@
     "symbol": "ZEC",
     "name": "Zcash",
     "catalog_id": "zec"
+  },
+  "zephyr": {
+    "symbol": "ZEPH",
+    "name": "Zephyr",
+    "catalog_id": "zeph"
   },
   "zeroonecoin": {
     "symbol": "ZOC",

@@ -430,6 +430,18 @@ namespace hexwallet
     return ok ? WalletError::Ok : WalletError::BufferTooSmall;
   }
 
+  WalletError address_alephium(const uint8_t public_key[kCompressedPublicKeySize],
+                               char *out, size_t out_size)
+  {
+    if (!public_key || !out || (public_key[0] != 2 && public_key[0] != 3))
+      return WalletError::InvalidArgument;
+    uint8_t script[33] = {};  // P2PKH lockup-script discriminator followed by the key hash.
+    if (!crypto_blake2b(public_key, kCompressedPublicKeySize, script + 1, 32))
+      return WalletError::CryptoFailure;
+    return b58enc(out, &out_size, script, sizeof(script)) ? WalletError::Ok
+                                                          : WalletError::BufferTooSmall;
+  }
+
   WalletError address_kaspa(const uint8_t public_key[kCompressedPublicKeySize],
                             char *out, size_t out_size)
   {
@@ -519,27 +531,32 @@ namespace hexwallet
     return WalletError::Ok;
   }
 
-  WalletError address_ss58(uint8_t prefix, const uint8_t public_key[32],
+  WalletError address_ss58(uint16_t prefix, const uint8_t public_key[32],
                            char *out, size_t out_size)
   {
-    if (public_key == nullptr || out == nullptr || out_size == 0 || prefix > 63)
+    if (public_key == nullptr || out == nullptr || out_size == 0 || prefix > 16383)
       return WalletError::InvalidArgument;
     static const char kSs58Prefix[] = "SS58PRE";
-    uint8_t payload[1 + 32 + 2];
-    payload[0] = prefix;
-    memcpy(payload + 1, public_key, 32);
-    uint8_t preimage[7 + 1 + 32];
+    uint8_t payload[2 + 32 + 2];
+    size_t prefix_size = 1;
+    if (prefix < 64) payload[0] = static_cast<uint8_t>(prefix);
+    else {
+      prefix_size = 2;
+      payload[0] = 0x40 | ((prefix >> 2) & 63);
+      payload[1] = static_cast<uint8_t>((prefix >> 8) | ((prefix & 3) << 6));
+    }
+    memcpy(payload + prefix_size, public_key, 32);
+    uint8_t preimage[7 + 2 + 32];
     memcpy(preimage, kSs58Prefix, 7);
-    memcpy(preimage + 7, payload, 33);
+    memcpy(preimage + 7, payload, prefix_size + 32);
     uint8_t checksum[64];
-    if (!crypto_blake2b(preimage, sizeof(preimage), checksum, sizeof(checksum)))
+    if (!crypto_blake2b(preimage, 7 + prefix_size + 32, checksum, sizeof(checksum)))
     {
       return WalletError::CryptoFailure;
     }
-    payload[33] = checksum[0];
-    payload[34] = checksum[1];
+    memcpy(payload + prefix_size + 32, checksum, 2);
     size_t encoded_size = out_size;
-    const bool ok = b58enc(out, &encoded_size, payload, sizeof(payload));
+    const bool ok = b58enc(out, &encoded_size, payload, prefix_size + 34);
     secure_zero(checksum, sizeof(checksum));
     secure_zero(payload, sizeof(payload));
     secure_zero(preimage, sizeof(preimage));
@@ -1032,6 +1049,16 @@ namespace hexwallet
     passed = selftest_report("cosmos celestia", address_cosmos_bech32("celestia", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "celestia1w508d6qejxtdg4y5r3zarvary0c5xw7kthx244") == 0) && passed;
     passed = selftest_report("avax", address_avalanche_xp("avax", kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "X-avax1qp63uahgrxged4z5jswyt5dn5v3lzsem6cl7ra9f") == 0) && passed;
     passed = selftest_report("kaspa pk1", address_kaspa(kPkOne, address, sizeof(address)) == WalletError::Ok && strcmp(address, "kaspa:qpumuen7l8wthtz45p3ftn58pvrs9xlumvkuu2xet8egzkcklqtes4ypce9sf") == 0) && passed;
+    // alephium/alephium-web3 @ c457e9f3959423b22ffa3e18dd0e14b1e26dcf20
+    // packages/web3/src/address/address.test.ts, "should compute address from public key".
+    static const uint8_t kAlphPublicKey[] = {
+        0x03, 0x0f, 0x9f, 0x04, 0x2a, 0x94, 0x10, 0x96, 0x9f, 0x18, 0x86,
+        0xf8, 0x5f, 0xa2, 0x0f, 0x6e, 0x43, 0x17, 0x6a, 0xe2, 0x3f, 0xc5,
+        0xe6, 0x4d, 0xb1, 0x5b, 0x37, 0x67, 0xc8, 0x4c, 0x5d, 0xb2, 0xdc};
+    passed = selftest_report("alephium P2PKH",
+        address_alephium(kAlphPublicKey, address, sizeof(address)) == WalletError::Ok &&
+        strcmp(address, "1ACCkgFfmTif46T3qK12znuWjb5Bk9jXpqaeWt2DXx8oc") == 0 &&
+        address_alephium(kAlphPublicKey, address, 44) == WalletError::BufferTooSmall) && passed;
     // Official rusty-kaspa address vectors (crypto/addresses/src/lib.rs).
     static const uint8_t kKaspaZero[32] = {};
     passed = selftest_report("kaspa zero", kaspa_bech32_encode("kaspa", 0, kKaspaZero, 32, address, sizeof(address)) && strcmp(address, "kaspa:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkx9awp4e") == 0) && passed;

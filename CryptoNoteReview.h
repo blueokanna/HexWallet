@@ -9,14 +9,10 @@
 
 namespace hexwallet
 {
-  enum class CryptoNoteReviewNetwork : uint8_t
-  {
-    MoneroMainnet,
-    MasariMainnet
-  };
   struct CryptoNoteReviewPolicy
   {
     CryptoNoteReviewNetwork network;
+    const char *id;
     uint64_t max_fee_atomic;
     uint16_t ring_size;
     uint8_t max_inputs;

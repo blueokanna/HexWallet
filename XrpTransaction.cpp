@@ -301,8 +301,6 @@ namespace hexwallet
       return XrpError::CryptoFailure;
     }
     XrpTransaction verified = {};
-    // The reviewed unsigned bytes are the source of truth; rebuild the public key
-    // binding and signing hash before touching the curve.
     verified.review = transaction.review;
     uint8_t source[kXrpAccountSize] = {};
     uint8_t hash[kXrpHashSize] = {};
@@ -394,8 +392,6 @@ namespace hexwallet
 
   bool run_xrp_self_tests()
   {
-    // The full SDK vector is compiled by the generator below; keep this check
-    // honest even if the host has no secp256k1 signer.
     static const uint8_t kTestPubkey[kXrpPublicKeySize] = {
         0x03, 0x6d, 0x6c, 0xaa, 0xc2, 0x48, 0xaf, 0x96, 0xf6, 0xaf, 0xa7, 0xf9, 0x04, 0xf5, 0x50, 0x25,
         0x3a, 0x0f, 0x3e, 0xf3, 0xf5, 0xaa, 0x2f, 0xe6, 0x83, 0x8a, 0x95, 0xb2, 0x16, 0x69, 0x14, 0x68,
@@ -420,4 +416,4 @@ namespace hexwallet
     return ok;
   }
 
-} // namespace hexwallet
+}

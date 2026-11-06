@@ -11,7 +11,7 @@ Every page exists in English and Chinese; the `中文` link at the top of each p
 
 The code is real, tested and unfinished. Specifically:
 
-- The host suite passes (67 named checks) and CI compiles every board profile. That is what the
+- The host suite passes (72 named checks) and CI compiles every board profile. That is what the
   green badges mean.
 - No board in this repository has a recorded hardware acceptance run. No chain has been accepted
   against a live node. There is no third-party audit.
@@ -43,13 +43,13 @@ These are produced from the compiled tables by `tests/host/catalog_dump.exe` and
 
 | Fact | Value |
 | --- | --- |
-| Wallet entries exposed by the catalog | 211 |
-| Compiled network profiles | 243 |
+| Wallet entries exposed by the catalog | 215 |
+| Compiled network profiles | 247 |
 | EVM networks | 63 |
 | Generated UTXO fork profiles | 105 |
 | Pinned token records | 78 |
-| Native chain adapters | 22 |
-| MiningPoolStats entries resolved | 115 of 520 active |
+| Native chain adapters | 24 |
+| MiningPoolStats entries resolved | 121 of 520 active |
 
 A catalog entry means "derivation path plus a review/sign policy". It does not mean the chain works
 against a node, and it does not mean anybody has run it on hardware.

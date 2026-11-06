@@ -23,7 +23,6 @@ namespace hexwallet
       Fp c1;
     };
 
-    // p = 0x1a0111ea...ffffaaab, little-endian limbs.
     constexpr uint32_t kP[12] = {
         0xffffaaab, 0xb9feffff, 0xb153ffff, 0x1eabfffe, 0xf6b0f624, 0x6730d2a0,
         0xf38512bf, 0x64774b84, 0x434bacd7, 0x4b1ba7b6, 0x397fe69a, 0x1a0111ea};
@@ -34,18 +33,15 @@ namespace hexwallet
     constexpr uint32_t kR2[12] = {
         0x1c341746, 0xf4df1f34, 0x09d104f1, 0x0a76e6a6, 0x4c95b6d5, 0x8de5476c,
         0x939d83c0, 0x67eb88a9, 0xb519952d, 0x9a793e85, 0x92cae3aa, 0x11988fe5};
-    // R mod p, i.e. one in Montgomery form.
     constexpr uint32_t kOne[12] = {
         0x0002fffd, 0x76090000, 0xc40c0002, 0xebf4000b, 0x53c758ba, 0x5f489857,
         0x70525745, 0x77ce5853, 0xa256ec6d, 0x5c071a97, 0xfa80e493, 0x15f65ec3};
-    // (p + 1) / 4, the square-root exponent because p == 3 (mod 4).
     constexpr uint32_t kSqrtExp[12] = {
         0xffffeaab, 0xee7fbfff, 0xac54ffff, 0x07aaffff, 0x3dac3d89, 0xd9cc34a8,
         0x3ce144af, 0xd91dd2e1, 0x90d2eb35, 0x92c6e9ed, 0x8e5ff9a6, 0x0680447a};
     // -p^-1 mod 2^32.
     constexpr uint32_t kMontgomeryN0 = 0xfffcfffd;
 
-    // Group order r and the G2 effective cofactor (RFC 9380 section 8.8.2).
     constexpr uint32_t kR[8] = {0x00000001, 0xffffffff, 0xfffe5bfe, 0x53bda402,
                                 0x09a1d805, 0x3339d808, 0x299d7d48, 0x73eda753};
     constexpr uint32_t kHeff[20] = {
@@ -63,9 +59,6 @@ namespace hexwallet
         0x46c5e7e1, 0x0caa2329, 0xa2888ae4, 0xd03cc744, 0x2c04b3ed, 0x00db18cb,
         0xd5d00af6, 0xfcf5e095, 0x741d8ae4, 0xa09e30ed, 0xe3aaa0f1, 0x08b3f481};
 
-    // 3-isogeny map constants (RFC 9380 appendix E.3), each an Fp2 pair
-    // (real, imaginary). Order: k(1,0)..k(1,3), k(2,0)..k(2,1),
-    // k(3,0)..k(3,3), k(4,0)..k(4,2).
     constexpr uint32_t kIsoReal[13][12] = {
         {0xaaaa97d6, 0x6238aaaa, 0x43d9c71c, 0x5c2638e3, 0xc50ae15d, 0x88b58423,
          0xfd3a042a, 0x32c52d39, 0x47d7ed85, 0xbb5b7a9a, 0x7e8e333e, 0x05c75950},
@@ -324,7 +317,6 @@ namespace hexwallet
       fp_pow(out, a, kPm2);
     }
 
-    // Reads a 48-byte big-endian value; rejects values >= p.
     bool fp_read_canonical(Fp &out, const uint8_t in[48])
     {
       uint32_t raw[12];
@@ -1289,9 +1281,6 @@ namespace hexwallet
                      (static_cast<uint32_t>(tail[2]) << 8) |
                      static_cast<uint32_t>(tail[3]);
       }
-      // Branch-free comparison with r: the borrow is set exactly when the value
-      // is below the group order. A secret key must not leak its bit length
-      // through an early-exit limb comparison.
       uint64_t borrow = 0;
       for (size_t index = 0; index < 8; ++index)
       {

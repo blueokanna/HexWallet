@@ -99,6 +99,14 @@ const TokenProfile kTokenProfiles[] = {
     {"matic-usdc-e", "matic", "USDC.e", "Bridged USD Coin", TokenStandard::Erc20,
      "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "Registered ERC-20 transfer; network-bound contract review required"},
+    // Ethereum mainnet deployments published at https://docs.ens.domains/learn/deployments/
+    // Collection labels identify the contract. Individual names require the actual token ID.
+    {"eth-ens-registrar", "eth", "ENS-NAME", "ENS Base Registrar", TokenStandard::Erc721,
+     "0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85", 0, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-721 transfers and approvals by token ID"},
+    {"eth-ens-wrapper", "eth", "ENS-WRAP", "ENS Name Wrapper", TokenStandard::Erc1155,
+     "0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401", 0, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
+     "ERC-1155 transfers and collection operator approvals"},
     {"eth-usdc", "eth", "USDC", "USD Coin", TokenStandard::Erc20,
      "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", 6, TokenCapabilityAccountAddress | TokenCapabilityTransferSigning,
      "ERC-20 account address and transfer signing supported"},

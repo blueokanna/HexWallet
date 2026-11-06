@@ -176,8 +176,7 @@ namespace hexwallet
     void finish_review_seal(const RenderedReviewLines &lines)
     {
       uint8_t nonce[kReviewSealNonceSize] = {};
-      random_fill(nonce, sizeof(nonce));
-      review_seal_valid = random_healthy() && lines.valid && lines.count != 0 &&
+      review_seal_valid = random_fill_checked(nonce, sizeof(nonce)) && lines.valid && lines.count != 0 &&
                           review_seal_build(&review_seal, nonce, lines.text, lines.count, millis(),
                                             kReviewSealWindowMs);
       if (!review_seal_valid || screen_content == nullptr)

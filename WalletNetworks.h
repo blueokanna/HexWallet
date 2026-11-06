@@ -22,7 +22,7 @@ namespace hexwallet
     P2tr,                    // bech32m witness v1 of the BIP86 tweaked x-only key
     Evm,                     // keccak-256 hex 0x... account
     Tron,                    // keccak-256 base58check with 0x41 version
-    CryptoNote,              // Monero/Masari keccak-reduce standard address
+    CryptoNote,              // Monero keccak-reduce standard address
     ZcashTransparent,        // 2-byte-version base58check t1/t3 (ZEC)
     CashAddr,                // CashAddr base32 with poly-mod checksum (BCH, XEC)
     Ed25519Base58,           // ed25519 pubkey base58 (SOL)
@@ -57,6 +57,9 @@ namespace hexwallet
     QrlMlDsa,               // QRL v2: SHAKE256(010000 || ML-DSA-87 pk), 'Q' + 128 hex
     StarknetKey,            // Starknet: 0x + 64 hex x-coordinate of grindKey(BIP32 child) * G
     P2pkhGroestl,           // base58check p2pkh whose checksum is Grøstl-512 twice (GRS)
+    AlephiumP2pkh,          // Base58(0x00 || BLAKE2b-256(compressed SEC1 key))
+    QuaiCyprus1,
+    QuantusMlDsa87,
   };
 
   // BIP32-style derivation policy per network. `derive_address` selects the path
@@ -94,7 +97,7 @@ namespace hexwallet
     uint16_t cryptonote_subaddress_prefix;
     bool explicit_only_derivation;
     uint32_t ton_wallet_id;
-    // Optional 64-bit CryptoNote profile. Monero/Masari keep their prefixes in
+    // Optional 64-bit CryptoNote profile. Monero keep their prefixes in
     // the legacy fields above; Ryo, Zano and similar chains carry three-byte
     // varint prefixes here because they do not fit in a uint16_t.
     const CryptoNoteAddressProfile *cryptonote_profile;

@@ -11,7 +11,7 @@ powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 ```
 
 用 MSVC 配合"指定版本 ESP32 core 的 mbedTLS 头文件"编译固件源码，然后跑 `host_test.exe`。
-67 项具名检查各打一行，例如：
+72 项具名检查各打一行，例如：
 
 ```text
 crypto-primitives=pass      bip39=pass              bip32=pass
@@ -19,6 +19,8 @@ bip84=pass                  evm-derive=pass         address=pass
 sighash=pass                kaspa=pass              zcash=pass
 dash=pass                   cryptonote-clsag=pass   bulletproof-plus=pass
 cryptonote-review=pass      cryptonote-signing=pass cryptonote-mainnet=pass
+blake3=pass                 blake2b=pass            groestl512=pass
+cli-policy=pass             battery=pass            kangarootwelve=pass
 qrl-xmss=pass               qrl-ots=pass            ml-dsa-87=pass
 starknet-crypto=pass        solana=pass             xrp=pass
 cosmos=pass                 stellar=pass            algorand=pass
@@ -35,7 +37,7 @@ random-source=pass          catalog=pass            mining-catalog=pass
 | --- | --- |
 | `build_clang_ubsan.ps1` | 同一份源码在 clang + UBSan 下能编；跑到的路径里出现未定义行为会被报出来 |
 | `build_chain_native.ps1` | 链代码链接的是真正的 mbedTLS 3.6.5，不是 host shim |
-| `device_compile_check.ps1` | 每个纯 C++ 固件文件都能为 Xtensa（S3）编译；加 `-Target esp32p4` 则编 RISC-V |
+| `device_compile_check.ps1` | 每个纯 C++ 固件文件都能为 Xtensa（S3）编译；加 `-Target esp32p4` 则编 RISC-V；加 `-StackBudget 5120` 时，跑在 32 KB Arduino loop 任务上的帧一旦超过该栈的六分之一就失败；同时检查生产版 CLI 目标文件里不再引用任何自检代码（这个引用过去把 546 KB 测试缓冲区留在 `.bss` 里） |
 | `p4_runtime_compile_check.ps1` | worker 与签名编排在 P4 上能编 |
 | `board_port_compile_check.ps1` | `WalletBoardPort.cpp` + `WalletUi.cpp` 在所有板型上对真实 LVGL 9.5 头文件编译 |
 | `epd_driver_compile_check.ps1` | GxEPD2 路径能对固定提交编译 |
@@ -43,7 +45,8 @@ random-source=pass          catalog=pass            mining-catalog=pass
 | `ui_check.ps1` | LVGL 对象生命周期、审查渲染、精灵动画回归 |
 | `qr_cross_check.ps1` | 所有版本/等级/掩码矩阵与 nayuki/QR-Code-generator 一致 |
 | `evm_access_list_check.ps1` | 独立生成的 EIP-2930 向量 |
-| `policy_check.ps1` | GRAVEYARD 排除、撤链钉死、mining 解析、无网络栈、托管拒绝、无界拷贝基线 |
+| `policy_check.ps1` | 已撤回资产 排除、撤链钉死、mining 解析、无网络栈、托管拒绝、无界拷贝基线 |
+| host 套件里的 `admission=` | `WalletAdmission.cpp` 里被拒绝的身份，不会解析出网络配置或目录条目；开机自检同样会跑 |
 | `policy_check_test.ps1` | 策略检查器本身在应该失败时会失败 |
 | `tests/host/auth`（CMake） | TOTP、传输矩阵与本地批准 |
 | `mining_catalog_test.py` | 钉死的 MiningPoolStats 身份映射 |

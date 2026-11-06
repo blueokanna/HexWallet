@@ -38,62 +38,7 @@ $common = @(
 & cl @common /std:c11 /c (Join-Path $PSScriptRoot "mbedtls_host.c") "/Fo$objDir\mbedtls_host.obj"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$cppSources = @(
-  "CryptoPrimitives.cpp",
-  "Bls12381.cpp",
-  "MlDsa87.cpp",
-  "StarknetCrypto.cpp",
-  "SolanaTransaction.cpp",
-  "StellarTransaction.cpp",
-  "WalletEngine.cpp",
-  "Blake2b.cpp",
-  "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp",
-  "CryptoExtended.cpp",
-  "WalletLinkCrypto.cpp",
-  "WalletLink.cpp",
-  "WalletNfcApdu.cpp",
-  "Ed25519.cpp",
-  "BlsG1.cpp",
-  "base58.cpp",
-  "local_bech32.cpp",
-  "local_segwit.cpp",
-  "keccak256.cpp",
-  "local_ripemd160.cpp",
-  "WalletAddresses.cpp",
-  "WalletAltAddresses.cpp",
-  "WalletNetworks.cpp",
-  "WalletCatalog.cpp",
-  "WalletMiningCatalog.cpp",
-  "WalletTokens.cpp",
-  "CryptoNoteAddress.cpp",
-  "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteSpend.cpp",
-  "CryptoNoteTransaction.cpp",
-  "CryptoNoteBulletproofPlus.cpp",
-  "CryptoNoteReview.cpp",
-  "CryptoNoteSigning.cpp",
-  "CryptoNoteMasari.cpp",
-  "QrlXmss.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp",
-  "BitcoinTransaction.cpp",
-  "KaspaTransaction.cpp",
-  "TronTransaction.cpp",
-  "CosmosTransaction.cpp",
-  "AlgorandTransaction.cpp",
-  "ChainCommon.cpp", "ChainTransaction.cpp",
-  "VeChainTransaction.cpp", "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp",
-  "TonCell.cpp", "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp",
-  "NearTransaction.cpp", "TezosTransaction.cpp",
-  "Totp.cpp",
-  "EinkFrame.cpp",
-  "XrpTransaction.cpp",
-  "TokenCalldata.cpp",
-  "ZcashTransaction.cpp",
-        "DashTransaction.cpp",
-        "CoinIcons.cpp",
-        "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "QrlV2Transaction.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp",
-  "host_security.cpp",
-  "host_test_main.cpp"
-)
+$cppSources = & (Join-Path $PSScriptRoot "host_sources.ps1")
 
 $cppObjs = @()
 foreach ($s in $cppSources) {
@@ -154,40 +99,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # Resolved-catalog dump used by tools/native_coverage.ps1. It links the
 # real WalletCatalog/WalletNetworks objects, so the report reflects what the
 # firmware actually exposes instead of what the source text looks like.
-$catalogSources = @(
-  "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
-  "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoPrimitives.cpp",
-  "Bls12381.cpp", "MlDsa87.cpp", "StarknetCrypto.cpp", "QrlV2Transaction.cpp", "Blake2b.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "RandomSource.cpp", "Ed25519.cpp",
-  "BlsG1.cpp", "WalletNetworks.cpp", "WalletCatalog.cpp", "WalletTokens.cpp",
-  "WalletMiningCatalog.cpp", "WalletCustomTokens.cpp",
-  "CosmosTransaction.cpp", "StellarTransaction.cpp",
-  "ChainCommon.cpp", "ChainTransaction.cpp", "VeChainTransaction.cpp",
-  "IconTransaction.cpp", "PolkadotTransaction.cpp", "SuiTransaction.cpp", "FilecoinTransaction.cpp", "TonCell.cpp",
-  "TonTransaction.cpp", "DecredTransaction.cpp", "CkbTransaction.cpp", "HiveTransaction.cpp", "CardanoDerivation.cpp", "CardanoTransaction.cpp", "HederaTransaction.cpp", "SiaTransaction.cpp", "NemTransaction.cpp", "IcpTransaction.cpp", "ErgoTransaction.cpp", "Clvm.cpp", "ChiaTransaction.cpp", "BlsG2.cpp", "WalletEngine.cpp", "QrlXmss.cpp", "QrlOtsJournal.cpp", "QrlOtsStore.cpp", "QrlTransaction.cpp", "AptosTransaction.cpp", "StarknetTransaction.cpp", "WalletCustomTokens.cpp",
-  "AlgorandTransaction.cpp", "NearTransaction.cpp", "TezosTransaction.cpp",
-  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp",
-  "CryptoNoteTransaction.cpp", "CryptoNoteBulletproofPlus.cpp",
-  "CryptoNoteSpend.cpp", "CryptoNoteReview.cpp",
-  "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp", "CameraPort.cpp", "TrustAnchor.cpp", "Mascot.cpp", "MaidSprite.cpp", "host_security.cpp"
-)
-$catalogSources = @($catalogSources | Select-Object -Unique)
-$catalogObjs = @()
-foreach ($s in $catalogSources) {
-  $src = Join-Path $root $s
-  if (-not (Test-Path $src)) { $src = Join-Path $PSScriptRoot $s }
-  $obj = Join-Path $objDir ("cat_" + ($s -replace '\.cpp$', '.obj'))
-  & cl @common /std:c++17 /EHsc /utf-8 /c $src "/Fo$obj"
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  $catalogObjs += $obj
-}
+$probeObjs = @($cppObjs | Where-Object { (Split-Path $_ -Leaf) -ne 'host_test_main.obj' })
 & cl @common /std:c++17 /EHsc /utf-8 /c (Join-Path $PSScriptRoot "catalog_dump.cpp") "/Fo$objDir\catalog_dump.obj"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& cl @common "/Fe$(Join-Path $PSScriptRoot 'catalog_dump.exe')" $catalogObjs "$objDir\catalog_dump.obj" (Join-Path $objDir "mbedtls_host.obj") /link
+& cl @common "/Fe$(Join-Path $PSScriptRoot 'catalog_dump.exe')" $probeObjs "$objDir\catalog_dump.obj" (Join-Path $objDir "mbedtls_host.obj") /link
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Independent BP+ fixture consumer (links only wallet objects).
-$probeObjs = @($cppObjs | Where-Object { (Split-Path $_ -Leaf) -ne 'host_test_main.obj' })
 & cl @common /std:c++17 /EHsc /utf-8 /c (Join-Path $PSScriptRoot 'bp_plus_probe.cpp') "/Fo$objDir/bp_plus_probe.obj"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cl @common "/Fe$(Join-Path $PSScriptRoot 'bp_plus_probe.exe')" $probeObjs "$objDir/bp_plus_probe.obj" "$objDir/mbedtls_host.obj" /link
@@ -220,8 +138,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cl @common "/Fe$(Join-Path $PSScriptRoot 'stellar_probe.exe')" $probeObjs "$objDir/stellar_probe.obj" "$objDir/mbedtls_host.obj" /link
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Masari fixtures are addressed relative to the repository root, so the
-# binary has to run there no matter where the script was invoked from.
+# Run the fixture suite from the repository root.
 Push-Location $root
 try { & $out } finally { $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }; Pop-Location }
 exit $code

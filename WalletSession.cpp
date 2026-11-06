@@ -100,8 +100,6 @@ namespace hexwallet
 #else
 namespace hexwallet
 {
-  // Device sessions contain no plaintext mnemonic store or seed derivation.
-  // A real SE handle backend must replace these refusals, not enable host code.
   bool wallet_session_is_loaded() { return false; }
   bool wallet_session_custody_available() { return false; }
   WalletError wallet_session_generate() { return WalletError::CustodyUnavailable; }

@@ -4,7 +4,7 @@
 *.exe
 *.elf
 *.bin
-# Test fixtures that are intentionally raw binary (Masari transaction vector).
+# Verified binary transaction fixtures.
 !tests/fixtures/**/*.bin
 *.map
 *.a

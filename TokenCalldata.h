@@ -69,6 +69,7 @@ enum class TokenFunction : uint8_t {
   TransferValueToAddress,
   TransferValueToToken,
   Execute,
+  Approve,
   Unknown,
 };
 

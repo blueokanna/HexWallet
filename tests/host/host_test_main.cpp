@@ -10,11 +10,14 @@
 #include "../../CryptoNoteBulletproofPlus.h"
 #include "../../CryptoNoteReview.h"
 #include "../../CryptoNoteSigning.h"
-#include "../../CryptoNoteMasari.h"
 #include "../../CryptoPrimitives.h"
 #include "../../BitcoinTransaction.h"
 #include "../../PeercoinSighash.h"
 #include "../../Blake2b.h"
+#include "../../Blake3.h"
+#include "../../WalletCliPolicy.h"
+#include "../../BatteryMonitor.h"
+#include "../../KangarooTwelve.h"
 #include "../../Groestl512.h"
 #include "../../ThetaTransaction.h"
 #include "../../WalletAddresses.h"
@@ -46,6 +49,7 @@
 #include "../../CoinIcons.h"
 #include "../../QrlOtsJournal.h"
 #include "../../WalletAltAddresses.h"
+#include "../../WalletAdmission.h"
 #include "../../WalletCatalog.h"
 #include "../../WalletMiningCatalog.h"
 #include "../../WalletCustody.h"
@@ -79,7 +83,6 @@ int main()
   const bool bulletproof_plus_reference = hexwallet::run_bulletproof_plus_reference_vector_self_test();
   const bool cryptonote_review = hexwallet::run_cryptonote_review_self_tests();
   const bool cryptonote_signing = hexwallet::run_cryptonote_signing_self_tests();
-  const bool masari = hexwallet::run_masari_self_tests();
   const bool cryptonote_mainnet = hexwallet::run_cryptonote_mainnet_vector_self_test();
   const bool cryptonote_clsag = hexwallet::run_cryptonote_clsag_self_test();
   const bool qrl = hexwallet::run_qrl_xmss_self_tests();
@@ -101,6 +104,10 @@ int main()
   const bool sighash = hexwallet::run_bitcoin_sighash_self_tests() && peercoin && hexwallet::run_groestlcoin_sighash_self_tests();
   const bool kaspa = hexwallet::run_kaspa_self_tests();
   const bool blake2b = hexwallet::run_blake2b_self_tests();
+const bool blake3 = hexwallet::run_blake3_self_tests();
+const bool cli_policy = hexwallet::run_wallet_cli_policy_self_test();
+const bool battery = hexwallet::run_battery_monitor_self_test();
+const bool k12 = hexwallet::run_kangaroo_twelve_self_tests();
   const bool groestl512 = hexwallet::run_groestl512_self_tests();
   const bool grs_address = hexwallet::run_groestl_address_self_tests();
   const bool theta = hexwallet::run_theta_self_tests();
@@ -118,6 +125,7 @@ int main()
   const bool xrp = hexwallet::run_xrp_self_tests();
   const bool zcash = hexwallet::run_zcash_sighash_self_tests();
   const bool dash = hexwallet::run_dash_self_tests();
+  const bool admission = hexwallet::run_admission_self_tests();
   const bool coin_icons = hexwallet::run_coin_icon_self_tests();
   const bool qrl_ots = hexwallet::run_qrl_ots_self_tests();
   const bool ml_dsa = hexwallet::run_ml_dsa_87_self_tests();
@@ -151,9 +159,6 @@ int main()
   printf("cryptonote-signing=%s\n", cryptonote_signing ? "pass" : "FAIL");
   if (!cryptonote_signing)
     printf("cryptonote-signing-stage=%d error=%d\n", hexwallet::cryptonote_signing_last_stage(), hexwallet::cryptonote_signing_last_error());
-  printf("masari=%s\n", masari ? "pass" : "FAIL");
-  if (!masari)
-    printf("masari-stage=%d error=%d\n", hexwallet::masari_last_stage(), hexwallet::masari_last_error());
   printf("cryptonote-mainnet=%s\n", cryptonote_mainnet ? "pass" : "FAIL");
   printf("bulletproof-plus-mainnet=%s\n", bulletproof_plus_mainnet ? "accepted" : "rejected");
   printf("qrl-xmss=%s\n", qrl ? "pass" : "FAIL");
@@ -175,6 +180,10 @@ int main()
   printf("sighash=%s\n", sighash ? "pass" : "FAIL");
   printf("kaspa=%s\n", kaspa ? "pass" : "FAIL");
   printf("blake2b=%s\n", blake2b ? "pass" : "FAIL");
+  printf("blake3=%s\n", blake3 ? "pass" : "FAIL");
+  printf("cli-policy=%s\n", cli_policy ? "pass" : "FAIL");
+  printf("battery=%s\n", battery ? "pass" : "FAIL");
+  printf("kangarootwelve=%s\n", k12 ? "pass" : "FAIL");
   printf("groestl512=%s\n", groestl512 ? "pass" : "FAIL");
   printf("grs-address=%s\n", grs_address ? "pass" : "FAIL");
   printf("theta=%s\n", theta ? "pass" : "FAIL");
@@ -196,6 +205,7 @@ int main()
   printf("xrp=%s\n", xrp ? "pass" : "FAIL");
   printf("zcash=%s\n", zcash ? "pass" : "FAIL");
   printf("dash=%s\n", dash ? "pass" : "FAIL");
+  printf("admission=%s\n", admission ? "pass" : "FAIL");
   printf("coin-icons=%s\n", coin_icons ? "pass" : "FAIL");
   printf("qrl-ots=%s\n", qrl_ots ? "pass" : "FAIL");
   printf("ml-dsa-87=%s\n", ml_dsa ? "pass" : "FAIL");
@@ -211,5 +221,5 @@ int main()
   printf("link-crypto=%s\n", link_crypto ? "pass" : "FAIL");
   printf("wallet-link=%s\n", wallet_link ? "pass" : "FAIL");
   printf("nfc-apdu=%s\n", nfc_apdu ? "pass" : "FAIL");
-  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && masari && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && scp03 && se051_provisioning && se051_apdu && airgap && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && groestl512 && grs_address && theta && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && coin_icons && qrl_ots && ml_dsa && solana && starknet && p256 && ecdsa_curve && x25519 && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
+  return (output_scan && amounts && cryptonote_tx && cryptonote_spend && cryptonote_mainnet && cryptonote_review && cryptonote_signing && cryptonote_bp_plus && bulletproof_plus_mainnet && bulletproof_plus_reference && primitives && extended && addresses && cryptonote && cryptonote_ringct && cryptonote_clsag && qrl && custody && secure_element && scp03 && se051_provisioning && se051_apdu && airgap && random_source && eink_panel && qr_code && camera_port && trust_anchor && mascot && networks && sighash && kaspa && blake2b && blake3 && cli_policy && battery && k12 && groestl512 && grs_address && theta && blake256 && calldata && tron && cosmos && stellar && algorand && chain && near && tezos && totp && eink && xrp && zcash && dash && admission && coin_icons && qrl_ots && ml_dsa && solana && starknet && p256 && ecdsa_curve && x25519 && catalog && mining && tokens && custom_tokens && link_crypto && wallet_link && nfc_apdu) ? 0 : 1;
 }

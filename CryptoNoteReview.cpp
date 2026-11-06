@@ -16,9 +16,9 @@ namespace hexwallet
   namespace
   {
     const CryptoNoteReviewPolicy kPolicies[] = {
-        {CryptoNoteReviewNetwork::MoneroMainnet, HEXWALLET_XMR_MAX_FEE_ATOMIC, 16, kCryptoNoteMaxTxInputs,
+        {CryptoNoteReviewNetwork::MoneroMainnet, "xmr", HEXWALLET_XMR_MAX_FEE_ATOMIC, 16, kCryptoNoteMaxTxInputs,
          kCryptoNoteMaxTxOutputs},
-        {CryptoNoteReviewNetwork::MasariMainnet, HEXWALLET_MSR_MAX_FEE_ATOMIC, 16, kCryptoNoteMaxTxInputs,
+        {CryptoNoteReviewNetwork::ZephyrMainnet, "zeph", HEXWALLET_ZEPH_MAX_FEE_ATOMIC, 16, kCryptoNoteMaxTxInputs,
          kCryptoNoteMaxTxOutputs},
     };
   } // namespace
@@ -27,10 +27,8 @@ namespace hexwallet
   {
     if (network_id == nullptr)
       return nullptr;
-    if (strcmp(network_id, "xmr") == 0)
-      return &kPolicies[0];
-    // MSR was withdrawn from product support; the enum policy remains solely
-    // for isolated legacy regression tests, never host protocol selection.
+    for (const auto &policy : kPolicies)
+      if (!strcmp(network_id, policy.id)) return &policy;
     return nullptr;
   }
 
@@ -196,14 +194,14 @@ namespace hexwallet
       if (output_count == 0 || output_count > kCryptoNoteMaxTxOutputs)
         return CryptoNoteTxError::TooManyItems;
       REVIEW_STAGE(7);
-      if (tx.version != 2 || tx.rct.type != 6)
+      if (!cryptonote_transaction_version_valid(tx.network, tx.version) || tx.rct.type != 6)
         return CryptoNoteTxError::Unsupported;
       const CryptoNoteReviewPolicy *policy =
-          cryptonote_review_policy(CryptoNoteReviewNetwork::MoneroMainnet);
+          cryptonote_review_policy(tx.network);
       if (policy == nullptr)
         return CryptoNoteTxError::Unsupported;
       const CryptoNoteTxError fee_policy = cryptonote_review_fee_policy(
-          CryptoNoteReviewNetwork::MoneroMainnet, tx.rct.fee);
+          tx.network, tx.rct.fee);
       if (fee_policy != CryptoNoteTxError::Ok)
         return fee_policy;
       REVIEW_STAGE(8);
@@ -1108,10 +1106,10 @@ namespace hexwallet
                                      HEXWALLET_XMR_MAX_FEE_ATOMIC) != CryptoNoteTxError::Ok ||
         cryptonote_review_fee_policy(CryptoNoteReviewNetwork::MoneroMainnet,
                                      HEXWALLET_XMR_MAX_FEE_ATOMIC + 1) != CryptoNoteTxError::FeePolicy ||
-        cryptonote_review_fee_policy(CryptoNoteReviewNetwork::MasariMainnet,
-                                     HEXWALLET_MSR_MAX_FEE_ATOMIC) != CryptoNoteTxError::Ok ||
-        cryptonote_review_fee_policy(CryptoNoteReviewNetwork::MasariMainnet,
-                                     HEXWALLET_MSR_MAX_FEE_ATOMIC + 1) != CryptoNoteTxError::FeePolicy)
+        cryptonote_review_fee_policy(CryptoNoteReviewNetwork::ZephyrMainnet,
+                                     HEXWALLET_ZEPH_MAX_FEE_ATOMIC) != CryptoNoteTxError::Ok ||
+        cryptonote_review_fee_policy(CryptoNoteReviewNetwork::ZephyrMainnet,
+                                     HEXWALLET_ZEPH_MAX_FEE_ATOMIC + 1) != CryptoNoteTxError::FeePolicy)
       return false;
     CryptoNoteReviewResult result = {};
 

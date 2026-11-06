@@ -593,6 +593,16 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     DecodedTokenCalldata decoded = {};
     if (!token_decode_calldata(data->data, data->size, standard, &decoded)) {
       secure_zero(native_value, sizeof(native_value));
+      // A malformed permission change at a registered contract must not
+      // fall through to a second attempt as opaque calldata.
+      constexpr TokenFunction permissions[] = {TokenFunction::Approve, TokenFunction::SetApprovalForAll};
+      for (TokenFunction permission : permissions) {
+        const auto *known = find_token_selector(standard, permission);
+        if (known && data->size >= 4 &&
+            known->selector == ((uint32_t(data->data[0]) << 24) | (uint32_t(data->data[1]) << 16) |
+                                (uint32_t(data->data[2]) << 8) | data->data[3]))
+          return EvmTransactionError::NonCanonical;
+      }
       return EvmTransactionError::Unsupported;
     }
     // Fungible amounts need the registered symbol and decimals; an unknown
@@ -664,7 +674,7 @@ EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
     if ((decoded.standard == EvmTokenStandard::Erc20 ||
          decoded.standard == EvmTokenStandard::LayerZeroOft ||
          decoded.standard == EvmTokenStandard::LayerZeroOnft) &&
-        is_zero(parsed.amount, sizeof(parsed.amount))) {
+        decoded.function != TokenFunction::Approve && is_zero(parsed.amount, sizeof(parsed.amount))) {
       secure_zero(native_value, sizeof(native_value));
       return EvmTransactionError::InvalidAmount;
     }
@@ -789,9 +799,28 @@ EvmTransactionError evm_parse_for_review(const uint8_t *transaction, size_t size
   return error;
 }
 
+bool evm_review_amount(const EvmSigningRequest &r, const char *asset, char *out, size_t capacity) {
+  if (!asset || !out || !capacity) return false;
+  int n;
+  if (r.has_call && r.call.function == TokenFunction::SetApprovalForAll)
+    n = snprintf(out, capacity, "%s collection access", r.call.approval_for_all ? "Grant" : "Revoke");
+  else if (r.has_call && r.call.function == TokenFunction::Approve && r.call.has_token_id)
+    n = snprintf(out, capacity, "Approval for %s #%s", asset, r.token_id_text);
+  else if (r.has_call && r.call.function == TokenFunction::Approve)
+    n = snprintf(out, capacity, "Allowance %s %s", r.amount_text, asset);
+  else if (r.call.has_token_id)
+    n = snprintf(out, capacity, "%s %s #%s", r.amount_text, asset, r.token_id_text);
+  else
+    n = snprintf(out, capacity, "%s %s", r.amount_text, asset);
+  return n >= 0 && size_t(n) < capacity;
+}
+
 const char *evm_operation_text(const EvmSigningRequest &request) {
   if (request.contract_creation) return "CONTRACT CREATION";
   if (request.opaque) return "UNDECODED CONTRACT CALL";
+  if (request.has_call && request.call.function == TokenFunction::SetApprovalForAll)
+    return request.call.approval_for_all ? "GRANT COLLECTION ACCESS" : "REVOKE COLLECTION ACCESS";
+  if (request.has_call && request.call.function == TokenFunction::Approve) return "TOKEN APPROVAL";
   return request.has_call ? "DECODED CONTRACT CALL" : "NATIVE TRANSFER";
 }
 
@@ -1072,6 +1101,22 @@ bool evm_review_details(const EvmSigningRequest &request, char *out, size_t size
         append("%s\n%s\n", label, address);
       }
     };
+    if (request.call.function == TokenFunction::Approve ||
+        request.call.function == TokenFunction::SetApprovalForAll) {
+      address_text(request.call.recipient, address);
+      append("SPENDER / OPERATOR\n%s\n", address);
+      if (request.call.function == TokenFunction::SetApprovalForAll) {
+        append("%s ALL TOKENS IN THIS COLLECTION\n", request.call.approval_for_all ? "GRANT ACCESS TO" : "REVOKE ACCESS TO");
+      } else if (request.call.has_token_id) {
+        append("%s NFT #%s\n", is_zero(request.call.recipient,20) ? "REVOKE APPROVAL FOR" : "AUTHORIZE TRANSFER OF", request.token_id_text);
+      } else {
+        bool unlimited = true;
+        for (uint8_t b : request.call.amount) if (b != 0xff) unlimited = false;
+        if (unlimited) append("UNLIMITED TOKEN ALLOWANCE\n");
+        else if (is_zero(request.call.amount,32)) append("REVOKE TOKEN ALLOWANCE\n");
+        else append("TOKEN ALLOWANCE %s %s\n", request.amount_text, request.token ? request.token->symbol : "base units");
+      }
+    }
     address_field("SOURCE / OWNER", request.call.secondary);
     address_field("REFUND ADDRESS", request.call.tertiary);
     address_field("FEE PAYMENT ADDRESS", request.call.payment_address);

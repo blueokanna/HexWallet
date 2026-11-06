@@ -19,7 +19,7 @@ enum class KeyScheme : uint8_t {
   Secp256k1Ecdsa,    // BIP32 child secp256k1 + ECDSA (BTC/LTC/ETH/Cosmos/...)
   KaspaSchnorr,      // BIP32 child secp256k1 + BIP340 Schnorr (Kaspa)
   Ed25519Eddsa,      // standard seed-based Ed25519 (SOL/ALGO/XTZ/...)
-  CryptoNoteEdwards, // Keccak-reduced Edwards25519 (XMR/MSR)
+  CryptoNoteEdwards, // Keccak-reduced Edwards25519 (XMR/ZEPH)
   Bls12381G1,        // EIP-2333 BLS12-381 G1 (XCH)
   XmssShake256,      // stateful hash-based XMSS (QRL)
   MlDsa87,           // FIPS 204 ML-DSA-87 signature over a 32-byte seed (QRL v2)

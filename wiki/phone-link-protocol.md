@@ -1,6 +1,5 @@
 > Wire-level protocol record. Current documentation: [Phone-Link](Phone-Link) / [Phone-Link-zh](Phone-Link-zh). Protocol version is 2.
 
-> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](chain-protocols.md)。TRON 使用 kind=7，payload 为原始 `raw_data`，详见 [tron-signing.md](chain-protocols.md)。Cosmos（ATOM/OSMO/TIA）使用 kind=8，payload 为紧凑审阅结构，返回完整 `TxRaw`，详见 [cosmos-signing.md](chain-protocols.md)。Stellar 使用 kind=9；Algorand kind=10；NEAR kind=11；Dash 使用 kind=15，VET/ICX/TON/DCR/CKB 使用 kind=14，详见 [chain-signing.md](chain-protocols.md)。
 
 # 手机 ↔ 硬件钱包链路协议（v1）
 
@@ -8,9 +7,8 @@
 手机只拿到**公钥/地址**和**已签名的交易字节**；私钥、助记词、种子永不离开设备。
 
 > 现状：BTC/LTC/RVN 家族的 UTXO（PSBT）、EVM（EIP-155/1559 + 白名单合约）、Kaspa（BIP340 v0）、
-> Zcash（v4 透明 ZIP-243）以及 XMR/MSR（CryptoNote type-5/`kind=5`）已经走通
+> Zcash（v4 透明 ZIP-243）以及 XMR（CryptoNote type-5/`kind=5`）已经走通
 > “手机请求 → 设备审阅 → 按键批准 → 设备签名 → 返回给手机”。
-> XMR/MSR 的剩余限制（MSR 子地址、Masari RCT type 3、诱饵链上存在性）见文末“CryptoNote 限制”。
 
 ## 1. 传输层
 
@@ -149,7 +147,7 @@ request_id(4) | status(1) | 数据...
 | 0x06 | RESULT | review_id(8) | 未批准时 `pending`；批准后 status + len(2) + 已签名交易 |
 | 0x07 | CANCEL | review_id(8) | rejected |
 
-`kind`：1=UTXO/PSBT，2=EVM，3=Kaspa，4=Zcash（`coin_id=zec`，payload 为 `ZEC4`，花费 t3 P2SH-P2PK 时用带 redeem 记录的 `ZEC5`），5=CryptoNote（XMR；MSR 已移除），
+`BEGIN_SIGN` 的 `kind` 取值为 1=UTXO/PSBT、2=EVM、3=Kaspa、4=Zcash、5=CryptoNote（`xmr` 或 `zeph`），
 6=Solana，7=TRON（payload 为 `raw_data`，返回 `r||s||v` 65 字节签名），
 8=Cosmos（ATOM/OSMO/TIA，payload 为 [Cosmos 范围与证据](chain-protocols.md) 定义的紧凑结构：
 v1 为原生 denom、无 memo，v2 追加 denom 与 memo，返回完整 `TxRaw`），9=Stellar（`coin_id=xlm`，主网网络哈希与 unsigned envelope XDR，返回完整 signed envelope；详见 [stellar-signing.md](chain-protocols.md)），
@@ -168,7 +166,7 @@ v1 为原生 denom、无 memo，v2 追加 denom 与 memo，返回完整 `TxRaw`�
 APDU/链路分片已按此调整；超过上限返回 `invalid`，不会截断解析。
 `address_index` 同时用于派生地址与派生签名密钥，两者必须同源（`m/44'/128'/0'/0/<index>`），
 子地址输入消费已接入；XMR 子地址目的地只接受本节定义的 `R=rD` 或
-payload v3 additional-key 绑定，未绑定输出与 MSR 子地址仍拒绝。
+payload v3 additional-key 绑定，拒绝未绑定输出。
 
 `ADDRESS` 只返回公钥/地址，永远不返回私钥；`QrlXmss` 等密钥生成代价高的网络在链路上直接拒绝。
 末尾追加 `major(4)、minor(4)` 时返回 CryptoNote 子地址（`path` 会带 `+major/minor` 后缀）；旧客户端不带这两个字段，行为保持不变。
@@ -226,91 +224,6 @@ payload v3 additional-key 绑定，未绑定输出与 MSR 子地址仍拒绝。
    **尚未在实机上做射频与协议一致性验证**；上板前必须用 PN7161 EVK 与读卡器逐项核验。
    如果模组的 NFCC 固件需要开机补丁，需先用厂商工具刷入，然后本驱动才能通信。
 
-## 7. CryptoNote（XMR / MSR）
+## 7. CryptoNote
 
-`kind=5`，`address_index` 为 `m/44'/128'/0'/0/<index>` 的子索引。XMR
-payload 版本 3 支持子地址目的地；版本 2（以及仅标准地址的版本 1）仍被接受：
-
-```
-u8   version = 1, 2 或 3
-u16  tx_len
-u8[] tx                     已序列化但未签名的交易（XMR: RCT type 6 / MSR: RCT 1-3）
-u8[32] tx_secret            主交易私钥；标准交易为 R=rG，单一子地址目的地为 R=rD
-if version >= 3:
-  u8   additional_tx_key_count
-  u8[32] additional_tx_secret[additional_tx_key_count]
-u8   input_count
-u8   output_count
-u8   flags                  bit0 表示每个输出附带 mask（仅 MSR）；其余位必须为 0
-input[input_count]
-output[output_count]
-```
-
-每个 input：
-
-```
-u64  amount                 本机输出金额（atomic）
-u16  real_index             本机输出在 ring 中的位置
-u16  ring_size              XMR 固定 16；MSR 取自交易
-u8[32] original_tx_public   产生该输出的历史交易一次性公钥
-u64  output_index           该输出在历史交易中的序号
-u8[32] pseudo_out_mask      主机提供的伪输出掩码 z
-u32  subaddress_major       拥有该输出的子地址主索引（0/0 = 标准地址）
-u32  subaddress_minor
-ring_size x u64  ring_offsets   必须与序列化交易逐字节一致且严格递增
-ring_size x { u8[32] dest, u8[32] mask }
-```
-
-每个 output：
-
-```
-u8   out_flags              bit0 找零；bit1 子地址；其余位必须为 0
-u8[32] spend_public
-u8[32] view_public
-u64  amount
-u32  subaddress_major       找零输出所属子地址（外部输出必须为 0/0）
-u32  subaddress_minor
-u8[32] mask                 仅请求头 flags bit0 == 1 时存在
-if version >= 3:
-  u8   tx_key_index          0 = tx_secret；非零为 additional_tx_secret 的一基索引
-```
-
-`tx_key_index` 属于当前 output 记录，必须在该记录的 `mask`（若存在）之后立即出现；
-不能把所有 output 的 selector 集中放在 output 列表末尾。
-
-子地址语义：
-
-- 设备用 `b + Hs("SubAddr" || a || major || minor)` 作为该输入的消费私钥，再派生一次性私钥；标准地址（0/0）保持不变。
-- XMR 的单一子地址目的地使用 `R=rD`，不带 additional key；混合标准地址/子地址或多个子地址目的地必须使用版本 3。版本 3 的 `tx_extra` 必须包含一个 additional-public-keys 向量，长度必须等于输出数，且第 `i` 个 additional secret 的公钥必须逐字节匹配该向量第 `i` 项。
-- 对外部子地址，`tx_key_index` 必须为 `i+1`（输出索引 `i` 的一基索引）；标准地址和找零必须使用主交易私钥（索引 0）。additional 公钥按 Monero 规则验证为 `s_i*C_i`（子地址）或 `s_i*G`（标准地址），并重新计算 output key、金额密文、view tag 和 commitment。
-- 外部子地址的 `major/minor` 必须为零，因为设备根据已验证的 spend/view 公钥重新编码并显示完整地址；只有找零可以携带索引，且设备会从本钱包 spend/view secret 重新派生并核对。
-- MSR 仍只接受标准地址；其 legacy/RCT 路径没有 XMR additional-key 语义。XMR 子地址输入消费与目的地址构造分别验证，不能只凭公钥所有权放行。
-
-设备行为：
-
-- 先按 `HEXWALLET_XMR_MAX_FEE_ATOMIC` / `HEXWALLET_MSR_MAX_FEE_ATOMIC` 判手续费，超限直接返回 `10 fee-policy`；
-- 再重算一次性公钥、金额密文、view tag、承诺、key image、`D`、ring offsets，任何不一致返回 `4 invalid`；
-- ring 内成员不得重复，输入之间 key image 不得重复（否则 `4 invalid`）；
-- 全通过后在可信屏幕显示输出金额/地址、找零、手续费、总支出与“诱饵由手机提供”的提示；
-- 用户批准后逐输入签名并序列化，`RESULT` 返回完整已签交易。
-
-设备硬上限（超过返回 `6 unsupported`，不会截断或“尽力而为”）：
-
-| 项目 | XMR | MSR |
-| --- | --- | --- |
-| 输入 | 8 | 4 |
-| 输出 | 16 | 4 |
-| ring 成员 | 16（固定） | 16 |
-| 序列化交易字节 | 6144 | 16384 |
-| `BEGIN_SIGN` payload | 16384 | 16384 |
-
-单个 `BEGIN_SIGN` 必须同时满足输入数与 payload 上限：8 输入 + 16 输出会超出 16 KiB，应按笔拆分；典型 8 输入 / 2 输出的清扫交易仍可一次完成。
-
-返回缓冲不够时返回 `4 invalid`（绝不返回被截断的交易）；交易本身超出设备上限（输入/输出数量等）由签名器返回 `6 unsupported`。
-
-### 7.1 CryptoNote 限制（如实告知）
-
-- **诱饵链上存在性**：设备只能证明 ring 内部一致、包含本机输出、offsets 与交易一致，不能证明诱饵真的在链上。手机被信任“提供活跃诱饵”，但永远不被信任金额、手续费、目的地址。
-- **Masari RCT type 3（标准 Bulletproofs）**：验证器已实现，但还没有主网向量，默认 `HEXWALLET_MSR_ENABLE_RCT_TYPE3=0` 并返回 `6 unsupported`。验证路径：`python tools/fetch_masari_bulletproof_vector.py --hash <txid> --url <masari-daemon>` 生成 `tests/fixtures/masari/tx3.bin`，主机自检会解析该交易、校验 Bulletproof 并拒绝单字节篡改；通过后才可用 `-DHEXWALLET_MSR_ENABLE_RCT_TYPE3=1` 构建。
-- **子地址目的地址/找零**：XMR 单一子地址和版本 3 additional-key 目的地会验证；MSR 仍拒绝。子地址输入消费与目的地址构造是不同路径。
-- **全节点验收**：本地审阅/签名回归不是链上接收证明，广播后仍需手机侧节点验收。
+手机通过 `kind=5` 和 `coin_id` 选择网络。设备按币种解释交易前缀，验证输出归属、找零、矿工费和签名。线格式和测试向量见[链交易载荷](Chain-Payloads-zh.md)。

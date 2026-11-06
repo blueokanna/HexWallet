@@ -630,18 +630,13 @@ namespace hexwallet
     static const char kExpectedAddress[] =
         "44yQXfkWZNmJ8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmJ7suhUXwdrD"
         "J8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmCYrSgjJ";
-    static const char kExpectedMasariAddress[] =
-        "5jz8fjwSe3wJ8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmJ7suhUXwdrD"
-        "J8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmCWb1XQW";
-    // RyoCurrency long address. Prefix 0x2ce192 is a three-byte varint; the
-    // address body is the ordinary spend||view CryptoNote pair.
     static const char kExpectedRyoAddress[] =
         "RYoLsf1ZfL1J8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmJ8QgRi53VSoD7Th5"
         "uvYfnv515NzRee8GfQrgiaX2hgd4c5HWHiUwLbD";
-    // Zano's own unit-test vector (tests/unit_tests/base58.cpp). The key bytes
-    // are the 64-byte account address body; the 0x00 flag byte in the test
-    // blob selects the classic 2-key address and is not serialized.
-    static const uint8_t kZanoSpendKey[kCryptoNotePublicKeySize] = {
+    static const char kExpectedZephyrAddress[] =
+        "ZEPHYR3baXVGTeRXgtmtH813WZgwKt9jyEazzfP4BcA2QfrCpAVom6QJVx9UE"
+        "genLP9MjPeQczwaLJCf5FvEkv2hXvpYSAQuP1u4V";
+    static const uint8_t kUpstreamSpendKey[kCryptoNotePublicKeySize] = {
         0xf7,
         0x24,
         0xbc,
@@ -675,7 +670,7 @@ namespace hexwallet
         0x01,
         0xe9,
     };
-    static const uint8_t kZanoViewKey[kCryptoNotePublicKeySize] = {
+    static const uint8_t kUpstreamViewKey[kCryptoNotePublicKeySize] = {
         0x22,
         0x09,
         0x39,
@@ -734,10 +729,6 @@ namespace hexwallet
                                     sizeof(address)) == WalletError::Ok &&
         strcmp(address, kExpectedAddress) == 0;
     passed = passed &&
-             cryptonote_standard_address(kMasariMainnet, kBasePoint, kBasePoint, address,
-                                         sizeof(address)) == WalletError::Ok &&
-             strcmp(address, kExpectedMasariAddress) == 0;
-    passed = passed &&
              cryptonote_address_from_public_keys(kRyoMainnet.standard_address_prefix,
                                                  kBasePoint,
                                                  kExpectedThreeTimesBasePoint,
@@ -746,10 +737,16 @@ namespace hexwallet
              strcmp(address, kExpectedRyoAddress) == 0;
     passed = passed &&
              cryptonote_address_from_public_keys(kZanoMainnet.standard_address_prefix,
-                                                 kZanoSpendKey, kZanoViewKey,
+                                                 kUpstreamSpendKey, kUpstreamViewKey,
                                                  address, sizeof(address)) ==
                  WalletError::Ok &&
              strcmp(address, kExpectedZanoAddress) == 0;
+    passed = passed &&
+             cryptonote_address_from_public_keys(kZephyrMainnet.standard_address_prefix,
+                                                 kUpstreamSpendKey, kUpstreamViewKey,
+                                                 address, sizeof(address)) ==
+                 WalletError::Ok &&
+             strcmp(address, kExpectedZephyrAddress) == 0;
 
     uint8_t derived_spend[kCryptoNoteScalarSize];
     passed = passed &&
@@ -834,134 +831,6 @@ namespace hexwallet
                                            sizeof(address)) == WalletError::Ok &&
              strcmp(address, kExpectedIntegrated) == 0;
 
-    {
-      static const uint8_t kMasariSpend[kCryptoNotePublicKeySize] = {
-          0x9b,
-          0xe9,
-          0x0d,
-          0x9f,
-          0x8e,
-          0xca,
-          0x22,
-          0x75,
-          0x08,
-          0x39,
-          0x01,
-          0x8b,
-          0xff,
-          0x70,
-          0xf0,
-          0x94,
-          0x52,
-          0x1a,
-          0x09,
-          0xf7,
-          0xc7,
-          0x75,
-          0xb0,
-          0xa7,
-          0x0b,
-          0x59,
-          0x61,
-          0x97,
-          0x8c,
-          0x26,
-          0xf4,
-          0xe1,
-      };
-      static const uint8_t kMasariView[kCryptoNotePublicKeySize] = {
-          0xbf,
-          0x10,
-          0x5d,
-          0xf5,
-          0x2f,
-          0x9c,
-          0x82,
-          0x0c,
-          0x30,
-          0x76,
-          0xa2,
-          0x85,
-          0x3b,
-          0xc2,
-          0x7d,
-          0xff,
-          0xf7,
-          0xe9,
-          0x61,
-          0xf6,
-          0x1f,
-          0xe4,
-          0x08,
-          0x0f,
-          0xb9,
-          0x0d,
-          0x84,
-          0x68,
-          0x02,
-          0xa6,
-          0x8a,
-          0xe2,
-      };
-      static const uint8_t kMasariViewSecret[kCryptoNoteScalarSize] = {
-          0x99,
-          0xe2,
-          0x1e,
-          0x00,
-          0xcc,
-          0xe0,
-          0x73,
-          0xc1,
-          0x26,
-          0xe9,
-          0xae,
-          0xd8,
-          0x00,
-          0xc9,
-          0xe2,
-          0xe8,
-          0x25,
-          0x18,
-          0x53,
-          0x4b,
-          0x39,
-          0x24,
-          0xb0,
-          0x35,
-          0xa2,
-          0x94,
-          0x36,
-          0xff,
-          0x4f,
-          0x75,
-          0xbc,
-          0x0c,
-      };
-      static const char kMasariDonation[] =
-          "5nYWvcvNThsLaMmrsfpRLBRou1RuGtLabUwYH7v6b88bem2J4aUwsoF33FbJuqMDgQjpDRTSpLCZu3dXpqXicE2uSWS4LUP";
-      static const char kMasariSubaddress01[] =
-          "9nqWtaQ7CTbcLS6Xz8EWym9chYuT3iyGp9CXCqgiFHMtWBgyZNRL1wAV2JjS2NftZyEcTLowQKCmcAT3e6PkrhSbM5NL1rp";
-      static const char kMasariSubaddress10[] =
-          "9ppu34ocgmeZiv4nS2FyQTFLL5wBFQZkhAfph7wGcnFkc8fkCgTJqxnXuBkaw1v2BrUW7iMwKoQy2HXRXzDkRE76Cz7WXkD";
-      uint8_t check[kCryptoNotePublicKeySize];
-      passed = passed &&
-               cryptonote_public_key_from_scalar(kMasariViewSecret, check) ==
-                   WalletError::Ok &&
-               crypto_constant_time_equal(check, kMasariView, sizeof(check)) &&
-               cryptonote_standard_address(kMasariMainnet, kMasariSpend, kMasariView,
-                                           address,
-                                           sizeof(address)) == WalletError::Ok &&
-               strcmp(address, kMasariDonation) == 0 &&
-               cryptonote_subaddress_address(kMasariMainnet, kMasariSpend,
-                                             kMasariViewSecret, 0, 1, address,
-                                             sizeof(address)) == WalletError::Ok &&
-               strcmp(address, kMasariSubaddress01) == 0 &&
-               cryptonote_subaddress_address(kMasariMainnet, kMasariSpend,
-                                             kMasariViewSecret, 1, 0, address,
-                                             sizeof(address)) == WalletError::Ok &&
-               strcmp(address, kMasariSubaddress10) == 0;
-      secure_zero(check, sizeof(check));
-    }
     secure_zero(public_view, sizeof(public_view));
     secure_zero(public_spend, sizeof(public_spend));
     secure_zero(derived_spend, sizeof(derived_spend));
@@ -974,4 +843,4 @@ namespace hexwallet
     return passed;
   }
 
-} // namespace hexwallet
+}

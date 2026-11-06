@@ -46,11 +46,42 @@
 
 ## 撤链
 
-链是会被撤掉的。MASARI（MSR）在 2026-10-24 撤出：它本来有签名路径，但子地址和 RCT type-3 语义无法用主网
-向量钉死，于是整条撤掉，而不是留着加个警告。Qubic 直接把 profile 删了，没有把 FourQ/K12 身份硬套到
-Ed25519 上；Flux 留在外面，因为 MiningPoolStats 快照把它列在 GRAVEYARD。
+退出准入的网络同时移除目录、签名入口和专用适配器。
 
 撤链刻意做得很朴素：删目录条目、删适配器、加一条"这个网络 id 不再解析"的策略测试，并留下说明原因的记录。
+
+## 各链准入范围
+
+目录按能力区分收款地址和签名。尚未准入的链由设备端 WalletAdmission 和主机策略测试共同检查。
+
+| 链 | SLIP-0044 | 模型 | 阻塞点 |
+| --- | --- | --- | --- |
+| Beam | 1533 | Mimblewimble | [原生交互转账](Beam-zh)已接入单输入、收款输出及找零。设备生成完整范围证明并核对对手方签名。通用钱包准入仍需安全托管、链上未花费输出跟踪和双机节点验收。 |
+| Alephium | 1234 | sUTXO、分组分片 | P2PKH 原生 ALPH 转账。检查每个输入的公钥或复用前一解锁脚本，审阅一个外部收款方、可选本机找零及 gas 费用。测试与 Alephium 官方 SDK 3.0.5 的交易哈希和签名字节一致。 |
+| Iron Fish | 1338 | Sapling 式屏蔽票据 | 票据解密、nullifier 派生、zk 证明生成。这颗 MCU 上不可行，没有这些的签名器等于盲签 |
+| Quai | 994 | Cyprus-1 账户链 | 支持主网 type 0 普通转账，链 ID 9，同区 Quai 账户，空 calldata 和访问列表。[签名向量](https://quaiscan.io/tx/0x00060019fdf877647e4a9bab684b0c51732b590cb0ffebc058fb29702fe87f97) |
+| Qubic | 83293 | FourQ + KangarooTwelve | KangarooTwelve 已经进树（[KangarooTwelve.cpp](https://github.com/blueokanna/HexWallet/blob/main/KangarooTwelve.cpp)，钉住 XKCP 官方向量，含 24 MB 那一例），但身份仍是被 K12 哈希的 FourQ 点，签名是 FourQ 上的 SchnorrQ。用 Ed25519/SHA3 顶替会得到另一把钥匙，没有诚实的捷径；FourQ 与 SchnorrQ 仍然缺 |
+| Xelis | 待核实 | 机密账户 | 已实现英、中原生助记词恢复、Ristretto255 地址和 Schnorr 签名原语。设备可检查外部主网地址。密钥托管、密文余额、转账证明及链上恢复待接入。 |
+| Quantus | 189189 | ML-DSA-87 | 主网 runtime 153/6。透明账户使用 ML-DSA-87 和 SS58 前缀 189，支持普通余额转账。设备审阅收款方、金额、小费、nonce 和有效期，生成完整 v4 extrinsic。 |
+| Qubitcoin | — | 声称是 Qtum 分叉 | 按 owner 决定移出范围。宣传站点返回 404，而且两个互不相关的项目共用 QTC 这个 ticker，连链身份都没确定；把决定记在这里，别让它以后又被当成待办捡回来 |
+| Aion | 425 | EVM 时代 L1 | 按决定排除，链已停摆 |
+
+"无 SLIP-0044"这几行遵循与 Swap、Evolution、VeriBlock 相同的规则：用别家 coin type 派生本链密钥，
+等于把两个域放到同一把钥匙上。这不是兼容捷径，是碰撞。
+
+一条链只有在同一个提交里带来适配器、向量和能力行时才能离开这张表——绝不能只靠改目录。
+
+## Zephyr 已经离开这张表
+
+Zephyr 是第一条被准入出去的链，记录比那一行更重要。带进来的东西：网络配置、目录条目，以及上游
+`src/cryptonote_config.h`（前缀 `0x6241d18c0`、12 位小数）与 `tests/unit_tests/base58.cpp` 的地址向量，
+由 `run_cryptonote_address_self_tests()` 逐字节复现——73 字节、101 字符、`ZEPHYR3baX…QuP1u4V`。
+
+没带进来的是 coin type。上游 SLIP-0044 没有 ZEPH，所以这里由 owner 做了这张表替不了的决定：用
+Monero 的 128。这是有记录的取舍，不是先例——account 0/index 0 得到的 spend、view key 与 XMR 完全
+相同，只有前缀让地址不同。设备按 Zephyr v3 解析原生 ZPH 交易，验证输出、费用及 CLSAG。资产转换不会进入这条签名路径。
+
+可推广的结论：缺 coin type 是该上报的决策点，不是可以造一个出来的障碍。
 
 ## 什么不算准入
 

@@ -40,18 +40,23 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-CryptoNote fixtures
-----------------------------
-tests/fixtures/masari/tx2.bin is an upstream transaction used as a parser
-regression fixture. Masari is not a supported wallet; see the security notes in
-wiki/Security-Model.md and the dated review in
-wiki/record-security-review-2026-10-28.md.
-
 Coin icons
 ----------
 src/generated/CoinIcons.inc is packed from spothq/cryptocurrency-icons
 (32x32 PNG, one file per ticker), dedicated to the public domain under CC0 1.0.
 The upstream dedication is kept verbatim in assets/icons/LICENSE.
+
+Beam cryptography (vendored)
+----------------------------
+The ECC and Bulletproof implementation under src/beam/core and the supporting
+headers under src/beam/utility are from BeamMW/beam, revision
+90a8be3ba2bed3e3adac748867658e9381b3f462 (Apache License 2.0).
+See src/beam/LICENSE and the source copyright notices. HexWallet changed
+include paths, entropy and error handling, lazy generator initialization,
+precomputation table size, temporary storage and TLS access for the MCU.
+The secp256k1 headers are from the Beam-pinned BeamMW/secp256k1 submodule,
+revision 3ac4050e7bf914c59677c22aa4b9dba95cc40944 (MIT).
+See src/beam/secp256k1/COPYING.
 
 External libraries (not vendored)
 ---------------------------------
@@ -76,3 +81,13 @@ non-commercial terms of LICENSE. Do not distribute a board-4 image until this is
 resolved: either replace the backend with an in-tree driver or obtain compatible
 terms from the GxEPD2 author. The ESP32-P4 e-paper path uses the in-tree SSD1680
 driver (EinkPanel.cpp) and does not link GxEPD2.
+XELIS native accounts
+---------------------
+The English and Simplified Chinese recovery dictionaries come from
+xelis-project/xelis-blockchain, revision db59b5c246ab0e40386d6c241dcd77f0aea84b10.
+The upstream BSD-3-Clause license is in src/xelis/LICENSE.
+The portable Ristretto255 field and scalar code is from jedisct1/libsodium
+1.0.20-RELEASE, revision 9511c982fb1d046470a8b42aa36556cdb7da15de.
+The field implementation uses the upstream 10-limb configuration. Local
+changes select that configuration and adjust includes for Arduino's build.
+The upstream license is in src/xelis/ref10/LICENSE.

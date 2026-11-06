@@ -10,29 +10,6 @@
 
 namespace hexwallet
 {
-
-  // Dash plain payments. Dash encodes the transaction type in the high 16 bits
-  // of nVersion; only nType == 0 (an ordinary payment) is modelled here. The
-  // special types - ProRegTx/ProUpServTx/ProUpRegTx/ProUpRevTx, CbTx, quorum
-  // commitments, asset locks and asset unlocks - all carry an opaque
-  // `extraPayload` that this adapter cannot decode, so a device that showed a
-  // recipient and amount for them would be inventing the review. They are
-  // refused instead.
-  //
-  // Wire format, taken from live mainnet bytes rather than from documentation:
-  //   int32  nVersion | (nType << 16)   (plain: 2 or 3, nType always 0)
-  //   vin, vout
-  //   uint32 nLockTime
-  //   -- and nothing else: a plain transaction has no extraPayload field --
-  // The digest is Bitcoin's legacy algorithm over that exact serialization.
-  // `dash_legacy_sighash` is pinned against two mainnet signature digests
-  // (one v3, one v2) in `run_dash_self_tests`.
-  //
-  // InstantSend adds no bytes to a transaction. A masternode quorum locks the
-  // inputs out of band; the wallet's only obligation is to emit byte-correct
-  // transactions and to never claim a lock it cannot see. Lock state is
-  // reported by the phone or the node, never asserted by the firmware.
-
   constexpr size_t kDashMaxInputs = 4;
   constexpr size_t kDashMaxOutputs = 8;
   constexpr size_t kDashMaxScriptSize = 34;
@@ -49,6 +26,8 @@ namespace hexwallet
   constexpr uint32_t kDashVersion = 3;
   constexpr uint32_t kDashCoinType = 5;
   constexpr uint32_t kDashMaxLockTime = 0x7fffffffUL;
+  constexpr uint8_t kDashFlagInstantSend = 0x01;
+  constexpr uint8_t kDashKnownFlags = kDashFlagInstantSend;
 
   enum class DashError : uint8_t
   {
@@ -80,19 +59,12 @@ namespace hexwallet
     uint32_t previous_index;
     uint32_t sequence;
     uint64_t value;
-    // Previous output scriptPubKey, exactly the canonical 25-byte P2PKH form.
-    // The signer re-derives the key and refuses unless HASH160(pubkey) is the
-    // hash this script pays, so the host cannot aim a signature at a script the
-    // device does not own.
     uint8_t script[kDashP2pkhScriptSize];
     uint8_t script_size;
-    // m/44'/5'/account'/change/index.
     uint32_t account;
     uint8_t change;
     uint32_t address_index;
     char address[kAddressTextSize];
-    // Full non-witness transaction: the signer verifies its txid, output index,
-    // amount and script. Legacy sighash alone does not commit the input amount.
     uint8_t previous_transaction[kDashMaxPreviousTransactionSize];
     uint16_t previous_transaction_size;
   };
@@ -102,8 +74,6 @@ namespace hexwallet
     uint64_t value;
     uint8_t script[kDashMaxScriptSize];
     uint8_t script_size;
-    // Rendered from `script`, never from host text, so the trusted display and
-    // the signed bytes cannot disagree.
     char address[kAddressTextSize];
   };
 
@@ -121,10 +91,16 @@ namespace hexwallet
     uint64_t fee;
     uint32_t estimated_vbytes;
     uint8_t payload_hash[kSha256Size];
+    uint8_t flags;
+    // True only when every input carried its funding transaction and that
+    // transaction provably pays this input's txid, index, value and script.
+    // A request without it is refused before any key is derived, because a
+    // host-supplied amount is exactly how a fee gets hidden.
+    bool funding_verified;
   };
 
   // Review payload layout (little-endian throughout):
-  //   magic "DAS2" (4 bytes)
+  //   magic "DAS2" or "DAS3" (4 bytes)
   //   u32 lock_time                       (<= kDashMaxLockTime)
   //   u8  input_count                     (1..kDashMaxInputs)
   //   input_count * { u8[32] previous_txid, u32 previous_index, u32 sequence,
@@ -133,13 +109,31 @@ namespace hexwallet
   //   u8  output_count                    (1..kDashMaxOutputs)
   //   output_count * { u64 value, u8 script_size + script }
   //   input_count * { u16 previous_transaction_size, previous_transaction }
-  // The payload must end exactly after the last previous transaction; trailing bytes are a
+  //   [u8 flags]                          (DAS3 only; DAS2 implies flags = 0)
+  // The payload must end exactly after the last record; trailing bytes are a
   // parse error, not ignored padding.
-  // Legacy "DASH" payloads have no previous transactions. They remain parseable
-  // for diagnostics, but dash_sign_transaction rejects them with MissingField.
+  //
+  // Each funding transaction must be a type-0 Dash transaction whose
+  // double-SHA256 equals `previous_txid` and whose `previous_index` output pays
+  // exactly `value` and `script`. Otherwise the parser fails with WrongWallet:
+  // the device would otherwise be signing a fee it was told rather than one it
+  // computed.
+  //
+  // Legacy "DASH" payloads carry no funding transactions. They stay parseable
+  // so an old host gets a precise diagnostic, and every signing entry point
+  // refuses them with MissingField.
   DashError dash_parse_review_payload(const uint8_t *data, size_t size,
                                       const DashChainParams &chain,
                                       DashTransaction *out);
+
+  // True when the payload magic is a shape this firmware can sign. One source
+  // of truth for the signing layer, so the magic cannot be accepted by one
+  // layer and rejected by the parser.
+  bool dash_payload_is_signable(const uint8_t *data, size_t size);
+
+  // InstantSend intent declared by the host. Advisory: it changes what the
+  // screen says, never what is signed.
+  bool dash_instant_send_requested(const DashTransaction &request);
 
   // Sign every input and emit the network serialization. Each input is signed
   // with SIGHASH_ALL over the legacy digest of its own P2PKH scriptCode, which
@@ -170,6 +164,6 @@ namespace hexwallet
   // Device-only: full BIP32 derivation, ECDSA signing and round-trip parse.
   bool run_dash_signature_self_test();
 
-} // namespace hexwallet
+}
 
 #endif

@@ -490,8 +490,7 @@ namespace hexwallet
 
     int random_callback(void *, unsigned char *output, size_t length)
     {
-      random_fill(output, length);
-      return 0;
+      return random_fill_checked(output, length) ? 0 : -1;
     }
 
     size_t der_integer(const mbedtls_mpi &value, uint8_t *out)
@@ -674,8 +673,6 @@ namespace hexwallet
         }
         else
         {
-          // P2SH scriptSig pushes the signature and then the redeem script;
-          // P2PKH pushes the signature and the public key.
           const bool redeem_input = input.redeem_size != 0;
           const size_t pushed_size =
               redeem_input ? input.redeem_size : kCompressedPublicKeySize;
@@ -1176,17 +1173,11 @@ namespace hexwallet
         return ZcashError::NonCanonical;
       if (prevout_is_p2sh)
       {
-        // A t3 prevout needs the redeem script that the address commits to.
-        // Without it the device could neither hash the correct scriptCode nor
-        // build a spendable scriptSig.
         if (input.redeem_size == 0)
           return ZcashError::Unsupported;
         if (!zcash_p2sh_redeem_commits(script, *script_size, input.redeem,
                                        input.redeem_size))
         {
-          // A canonical single-key redeem script that does not match the
-          // address is a wrong-wallet request; any other form is unsupported
-          // rather than something to guess at.
           return p2pk_redeem_script(input.redeem, input.redeem_size)
                      ? ZcashError::InvalidArgument
                      : ZcashError::Unsupported;
@@ -1370,8 +1361,6 @@ namespace hexwallet
         secure_zero(unsigned_transaction, sizeof(unsigned_transaction));
         return ZcashError::WrongWallet;
       }
-      // P2SH spends commit the redeem script as scriptCode; P2PKH commits the
-      // prevout script itself.
       const uint8_t *script_code = request.inputs[index].script;
       size_t script_code_size = request.inputs[index].script_size;
       if (request.inputs[index].redeem_size != 0)
@@ -1477,9 +1466,6 @@ namespace hexwallet
         0x3d, 0x5e, 0xdf, 0xe7, 0xa8, 0x50, 0xf5, 0xfd,
         0x39, 0x23, 0x4f, 0x80, 0xb5, 0x42, 0x9d, 0x3a,
         0x57, 0xed, 0xcc, 0x11, 0xe3, 0x4c, 0x58, 0x5b};
-    // The boot self-test runs on the loop task's 32 KiB stack. Keep the large
-    // review buffers in BSS; the signing selftest still has the full stack for
-    // mbedtls.
     static uint8_t transaction[4096];
     static uint8_t scratch[4096];
     size_t transaction_size = 0;
@@ -1493,8 +1479,6 @@ namespace hexwallet
                  ZcashError::Ok &&
              crypto_constant_time_equal(digest, kExpectedDigest,
                                         sizeof(kExpectedDigest));
-    // Published zcash-test-vectors rows 2-4 additionally exercise
-    // NOT_AN_INPUT, SIGHASH_NONE, shielded spend/output hashing and JoinSplits.
     for (size_t index = 0; index < sizeof(kZip243Vectors) / sizeof(kZip243Vectors[0]); ++index)
     {
       const ZcashSighashVector &vector = kZip243Vectors[index];
@@ -1509,9 +1493,6 @@ namespace hexwallet
                                           kSha256Size);
       secure_zero(vector_digest, sizeof(vector_digest));
     }
-    // Rebuild the same transaction without a scriptSig so it is a valid signing
-    // request. The branch id is not serialized in v4; the chain policy supplies
-    // the currently active one.
     const ZcashChainParams chain = {
         "zec", 0x1cb8, 0x1cbd, 0x5437f330, 133};
     static const uint8_t kPrevout[36] = {
@@ -1550,10 +1531,6 @@ namespace hexwallet
                  write_compact_size(&unsigned_writer, 0) &&
                  write_compact_size(&unsigned_writer, 0) &&
                  write_compact_size(&unsigned_writer, 0);
-    // No official ZIP-243 vector covers P2SH, so this digest was produced by a
-    // separate Python BLAKE2b implementation of ZIP-243 that first reproduced
-    // the official transparent vector above byte for byte. It pins the t3 rule:
-    // the scriptCode is the redeem script, not the previous scriptPubKey.
     static const uint8_t kP2shScriptCode[kZcashMaxRedeemScriptSize] = {
         0x21, 0x02, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
         0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
@@ -1602,8 +1579,6 @@ namespace hexwallet
              parsed.fee == 245 && parsed.estimated_vbytes == 246 &&
              parsed.outputs[0].address[0] == 't' &&
              parsed.outputs[1].address[0] == 't';
-    // ZEC5 t3 prevout. The redeem script travels in the request and must hash
-    // to the scriptPubKey; the fee budget grows by the larger scriptSig.
     static uint8_t p2sh_script_pubkey[kP2shScriptSize] = {0xa9, 0x14};
     uint8_t redeem_hash[kRipemd160Size] = {};
     bool redeem_ready =
@@ -1646,8 +1621,6 @@ namespace hexwallet
              p2sh_parsed.inputs[0].redeem_size == kZcashMaxRedeemScriptSize &&
              p2sh_parsed.estimated_vbytes == 248;
     clear_zcash_request(&p2sh_parsed);
-    // ZEC4 cannot express a t3 prevout: signing it without the redeem script
-    // would commit the wrong scriptCode.
     size_t probe_size = 0;
     passed = passed && redeem_ready &&
              build_redeem_payload(kZcashPayloadMagic, p2sh_script_pubkey,
@@ -1655,7 +1628,6 @@ namespace hexwallet
                                   &probe_size) &&
              zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
                  ZcashError::Unsupported;
-    // A canonical redeem script for a different key cannot match the address.
     uint8_t wrong_redeem[kZcashMaxRedeemScriptSize];
     memcpy(wrong_redeem, kP2shScriptCode, sizeof(wrong_redeem));
     wrong_redeem[5] ^= 0x01;
@@ -1666,7 +1638,6 @@ namespace hexwallet
              zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
                  ZcashError::InvalidArgument;
     secure_zero(wrong_redeem, sizeof(wrong_redeem));
-    // Anything that is not single-key CHECKSIG is refused, not guessed at.
     uint8_t multisig_redeem[kZcashMaxRedeemScriptSize] = {0x51, 0x21};
     passed = passed && redeem_ready &&
              build_redeem_payload(kZcashPayloadMagicRedeem, p2sh_script_pubkey,
@@ -1675,7 +1646,6 @@ namespace hexwallet
              zcash_parse_review_payload(scratch, probe_size, chain, &rejected) ==
                  ZcashError::Unsupported;
     secure_zero(multisig_redeem, sizeof(multisig_redeem));
-    // A P2PKH prevout must not smuggle a redeem script in.
     passed = passed && redeem_ready &&
              build_redeem_payload(kZcashPayloadMagicRedeem, kScriptCode,
                                   sizeof(kScriptCode), kP2shScriptCode,
@@ -1684,8 +1654,6 @@ namespace hexwallet
                  ZcashError::NonCanonical;
     secure_zero(redeem_hash, sizeof(redeem_hash));
     secure_zero(p2sh_script_pubkey, sizeof(p2sh_script_pubkey));
-    // Redeem/address binding over synthetic key material: pure hashing, so the
-    // rule is pinned on every build even though key derivation is device-only.
     {
       uint8_t synthetic_pubkey[kCompressedPublicKeySize] = {0x02};
       for (size_t index = 1; index < kCompressedPublicKeySize; ++index)
@@ -1705,7 +1673,6 @@ namespace hexwallet
                                          sizeof(synthetic_script),
                                          synthetic_redeem,
                                          sizeof(synthetic_redeem));
-      // The same address with a different key must not pass.
       synthetic_redeem[5] ^= 0x01;
       passed = passed && !zcash_p2sh_redeem_commits(synthetic_script,
                                                     sizeof(synthetic_script),
@@ -1733,8 +1700,6 @@ namespace hexwallet
       secure_zero(synthetic_script, sizeof(synthetic_script));
       secure_zero(multisig_like, sizeof(multisig_like));
     }
-    // The published signed transaction must be refused by the signing parser
-    // because a review payload may never carry an existing scriptSig.
     Writer signed_writer = {scratch, sizeof(scratch), 0};
     built = write_bytes(&signed_writer, kZcashPayloadMagic,
                         sizeof(kZcashPayloadMagic)) &&
@@ -1754,7 +1719,6 @@ namespace hexwallet
                                         chain, &signed_parse) ==
                  ZcashError::Unsupported;
     secure_zero(scratch, sizeof(scratch));
-    // Failure paths: magic, branch id, truncation, fee cap, shielded balance.
     ZcashSigningRequest unused;
     memcpy(scratch, payload, payload_size);
     scratch[0] = 'X';
@@ -1791,8 +1755,6 @@ namespace hexwallet
              zcash_parse_review_payload(scratch, payload_size, chain, &unused) ==
                  ZcashError::FeePolicy;
     secure_zero(scratch, sizeof(scratch));
-    // A transparent script larger than the 34-byte review buffer must not reach
-    // the memcpy in the output loop.
     uint8_t oversized_tx[128];
     Writer oversized_writer = {oversized_tx, sizeof(oversized_tx), 0};
     static const uint8_t kOversizedScript[35] = {
@@ -1865,7 +1827,6 @@ namespace hexwallet
 
   bool run_zcash_transaction_self_test()
   {
-    // Deterministic BIP32 master used only by this self-test.
     HdPrivateNode master = {};
     for (size_t index = 0; index < kPrivateKeySize; ++index)
     {
@@ -1961,8 +1922,6 @@ namespace hexwallet
         }
       }
     }
-    // t3 P2SH spend of the same key: the redeem script is the scriptCode, and
-    // the scriptSig must push the signature followed by that redeem script.
     if (passed)
     {
       ZcashSigningRequest p2sh = request;
@@ -2026,8 +1985,6 @@ namespace hexwallet
       secure_zero(redeem_hash, sizeof(redeem_hash));
       clear_zcash_request(&p2sh);
     }
-    // A t3 prevout without a redeem script, or with a redeem script that does
-    // not hash to the address, must never be signed.
     if (passed)
     {
       ZcashSigningRequest no_redeem = request;
@@ -2098,4 +2055,4 @@ namespace hexwallet
     return passed;
   }
 
-} // namespace hexwallet
+}

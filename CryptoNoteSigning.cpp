@@ -144,7 +144,6 @@ namespace hexwallet
     const CryptoNoteReviewPolicy *policy = cryptonote_review_policy(network_id);
     if (policy == nullptr)
       return CryptoNoteTxError::Unsupported;
-    const bool monero = policy->network == CryptoNoteReviewNetwork::MoneroMainnet;
 
     memset(state, 0, sizeof(*state));
     Reader reader = {payload, payload_size, 0, true};
@@ -166,26 +165,10 @@ namespace hexwallet
       return CryptoNoteTxError::Truncated;
 
     SIGNING_STAGE(2);
-    CryptoNoteTxError error;
-    uint16_t chain_inputs = 0;
-    uint16_t chain_outputs = 0;
-    uint16_t chain_ring_size = 0;
-    if (monero)
-    {
-      error = cryptonote_parse_transaction(tx_bytes, tx_size, &state->chain.monero);
-      chain_inputs = state->chain.monero.input_count;
-      chain_outputs = state->chain.monero.output_count;
-      chain_ring_size = state->chain.monero.rct.ring_size;
-    }
-    else
-    {
-      error = masari_parse_transaction(tx_bytes, tx_size, &state->chain.masari);
-      chain_inputs = state->chain.masari.input_count;
-      chain_outputs = state->chain.masari.output_count;
-      chain_ring_size = state->chain.masari.input_count == 0
-                            ? 0
-                            : state->chain.masari.inputs[0].offset_count;
-    }
+    CryptoNoteTxError error = cryptonote_parse_transaction(tx_bytes, tx_size, &state->transaction, policy->network);
+    const uint16_t chain_inputs = state->transaction.input_count;
+    const uint16_t chain_outputs = state->transaction.output_count;
+    const uint16_t chain_ring_size = state->transaction.rct.ring_size;
     if (error != CryptoNoteTxError::Ok)
     {
       cryptonote_signing_clear(state);
@@ -244,8 +227,7 @@ namespace hexwallet
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::InvalidArgument;
     }
-    const bool output_masks = (flags & 0x01) != 0;
-    if ((flags & ~0x01u) != 0 || (monero && output_masks))
+    if (flags != 0)
     {
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::NonCanonical;
@@ -361,15 +343,6 @@ namespace hexwallet
         cryptonote_signing_clear(state);
         return CryptoNoteTxError::Truncated;
       }
-      if (output_masks)
-      {
-        if (!reader.bytes(&field, kCryptoNoteKeySize))
-        {
-          cryptonote_signing_clear(state);
-          return CryptoNoteTxError::Truncated;
-        }
-        memcpy(output.mask, field, kCryptoNoteKeySize);
-      }
       if (has_additional_tx_keys &&
           !reader.u8(&output.tx_key_index))
       {
@@ -429,12 +402,6 @@ namespace hexwallet
         cryptonote_signing_clear(state);
         return CryptoNoteTxError::InvalidArgument;
       }
-      if (!monero &&
-          (state->additional_tx_key_count != 0 || output.tx_key_index != 0))
-      {
-        cryptonote_signing_clear(state);
-        return CryptoNoteTxError::Unsupported;
-      }
     }
     // Subaddress inputs and destinations use the same device-derived public
     // keys; the Monero review below additionally binds each output to its
@@ -472,85 +439,27 @@ namespace hexwallet
       memcpy(review_outputs[index].view_public, output.view_public,
              kCryptoNoteKeySize);
       review_outputs[index].amount = output.amount;
-      memcpy(review_outputs[index].mask, output.mask, kCryptoNoteKeySize);
       review_outputs[index].subaddress_major = output.subaddress_major;
       review_outputs[index].subaddress_minor = output.subaddress_minor;
     }
 
     SIGNING_STAGE(6);
-    if (monero)
+    CryptoNoteReviewResult result;
+    error = cryptonote_review_transaction_with_additional_keys(
+        state->transaction, view_secret, spend_secret, state->tx_secret,
+        state->additional_tx_secrets, state->additional_tx_key_count,
+        review_inputs, input_count, review_outputs, output_count, &result);
+    if (error == CryptoNoteTxError::Ok)
     {
-      CryptoNoteReviewResult result;
-      error = cryptonote_review_transaction_with_additional_keys(
-          state->chain.monero, view_secret, spend_secret, state->tx_secret,
-          state->additional_tx_secrets, state->additional_tx_key_count,
-          review_inputs, input_count, review_outputs, output_count, &result);
-      if (error == CryptoNoteTxError::Ok)
-      {
-        memcpy(state->signing_mask, result.signing_mask,
-               sizeof(state->signing_mask));
-        state->summary = result.summary;
-      }
-      secure_zero(&result, sizeof(result));
+      memcpy(state->signing_mask, result.signing_mask,
+             sizeof(state->signing_mask));
+      state->summary = result.summary;
     }
-    else
-    {
-      MasariReviewInput masari_inputs[kCryptoNoteMaxSignInputs];
-      MasariReviewOutput masari_outputs[kCryptoNoteMaxSignOutputs];
-      memset(masari_inputs, 0, sizeof(masari_inputs));
-      memset(masari_outputs, 0, sizeof(masari_outputs));
-      for (uint8_t index = 0; index < input_count; ++index)
-      {
-        masari_inputs[index].amount = state->inputs[index].amount;
-        masari_inputs[index].real_index = state->inputs[index].real_index;
-        masari_inputs[index].ring_size = state->inputs[index].ring_size;
-        memcpy(masari_inputs[index].original_tx_public,
-               state->inputs[index].original_tx_public, kCryptoNoteKeySize);
-        masari_inputs[index].output_index = state->inputs[index].output_index;
-        masari_inputs[index].ring = state->inputs[index].ring;
-        masari_inputs[index].key_offsets = state->inputs[index].key_offsets;
-        memcpy(masari_inputs[index].pseudo_out_mask,
-               state->inputs[index].pseudo_out_mask, kCryptoNoteKeySize);
-        masari_inputs[index].subaddress_major =
-            state->inputs[index].subaddress_major;
-        masari_inputs[index].subaddress_minor =
-            state->inputs[index].subaddress_minor;
-      }
-      for (uint8_t index = 0; index < output_count; ++index)
-      {
-        masari_outputs[index].change = state->outputs[index].change;
-        masari_outputs[index].address_type = state->outputs[index].address_type;
-        memcpy(masari_outputs[index].spend_public,
-               state->outputs[index].spend_public, kCryptoNoteKeySize);
-        memcpy(masari_outputs[index].view_public,
-               state->outputs[index].view_public, kCryptoNoteKeySize);
-        masari_outputs[index].amount = state->outputs[index].amount;
-        memcpy(masari_outputs[index].mask, state->outputs[index].mask,
-               kCryptoNoteKeySize);
-        masari_outputs[index].subaddress_major =
-            state->outputs[index].subaddress_major;
-        masari_outputs[index].subaddress_minor =
-            state->outputs[index].subaddress_minor;
-      }
-      MasariReviewResult result;
-      error = masari_review_transaction(
-          &state->chain.masari, view_secret, spend_secret, state->tx_secret,
-          masari_inputs, input_count, masari_outputs, output_count, &result);
-      if (error == CryptoNoteTxError::Ok)
-      {
-        memcpy(state->signing_mask, result.signing_mask,
-               sizeof(state->signing_mask));
-        state->summary = result.summary;
-      }
-      secure_zero(&result, sizeof(result));
-      secure_zero(masari_inputs, sizeof(masari_inputs));
-      secure_zero(masari_outputs, sizeof(masari_outputs));
-    }
+    secure_zero(&result, sizeof(result));
     if (error != CryptoNoteTxError::Ok)
     {
       g_signing_error = static_cast<int>(error);
-      g_signing_stage = 100 + (monero ? cryptonote_review_last_stage()
-                                      : masari_last_stage());
+      g_signing_stage = 100 + cryptonote_review_last_stage();
       cryptonote_signing_clear(state);
       return map_tx_error(error);
     }
@@ -601,52 +510,11 @@ namespace hexwallet
       return CryptoNoteTxError::InvalidArgument;
     }
     if (state->input_count == 0 || state->input_count > kCryptoNoteMaxSignInputs ||
-        (state->network != CryptoNoteReviewNetwork::MoneroMainnet &&
-         state->network != CryptoNoteReviewNetwork::MasariMainnet))
+        (!cryptonote_review_policy(state->network) || state->network != state->transaction.network))
     {
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::InvalidArgument;
     }
-    if (state->network != CryptoNoteReviewNetwork::MoneroMainnet)
-    {
-      cryptonote_signing_clear(state);
-      return CryptoNoteTxError::Unsupported;
-    }
-
-    if (state->network == CryptoNoteReviewNetwork::MasariMainnet)
-    {
-      MasariReviewInput review_inputs[kCryptoNoteMaxSignInputs];
-      memset(review_inputs, 0, sizeof(review_inputs));
-      for (uint8_t index = 0; index < state->input_count; ++index)
-      {
-        review_inputs[index].amount = state->inputs[index].amount;
-        review_inputs[index].real_index = state->inputs[index].real_index;
-        review_inputs[index].ring_size = state->inputs[index].ring_size;
-        memcpy(review_inputs[index].original_tx_public,
-               state->inputs[index].original_tx_public, kCryptoNoteKeySize);
-        review_inputs[index].output_index = state->inputs[index].output_index;
-        review_inputs[index].ring = state->inputs[index].ring;
-        review_inputs[index].key_offsets = state->inputs[index].key_offsets;
-        memcpy(review_inputs[index].pseudo_out_mask,
-               state->inputs[index].pseudo_out_mask, kCryptoNoteKeySize);
-        review_inputs[index].subaddress_major =
-            state->inputs[index].subaddress_major;
-        review_inputs[index].subaddress_minor =
-            state->inputs[index].subaddress_minor;
-      }
-      MasariReviewResult review;
-      memset(&review, 0, sizeof(review));
-      memcpy(review.signing_mask, state->signing_mask, sizeof(review.signing_mask));
-      memcpy(review.message, state->chain.masari.message, kCryptoNoteKeySize);
-      const CryptoNoteTxError error = masari_sign_transaction(
-          &state->chain.masari, review, view_secret, spend_secret,
-          review_inputs, state->input_count, nonce_seed, out, in_out_size);
-      secure_zero(&review, sizeof(review));
-      secure_zero(review_inputs, sizeof(review_inputs));
-      cryptonote_signing_clear(state);
-      return error;
-    }
-
     CryptoNoteTxError error = CryptoNoteTxError::Ok;
     for (uint8_t index = 0; index < state->input_count && error == CryptoNoteTxError::Ok; ++index)
     {
@@ -697,7 +565,7 @@ namespace hexwallet
       else
       {
         error = cryptonote_sign_input(
-            &state->chain.monero, index, input.real_index, input.ring, one_time_secret,
+            &state->transaction, index, input.real_index, input.ring, one_time_secret,
             state->signing_mask[index], input_nonce);
       }
       secure_zero(derivation, sizeof(derivation));
@@ -707,7 +575,7 @@ namespace hexwallet
     }
 
     if (error == CryptoNoteTxError::Ok)
-      error = cryptonote_serialize_transaction(state->chain.monero, out, in_out_size);
+      error = cryptonote_serialize_transaction(state->transaction, out, in_out_size);
 
     cryptonote_signing_clear(state);
     return error;
@@ -1055,6 +923,34 @@ namespace hexwallet
     if (cryptonote_parse_transaction(signed_tx, signed_size, &reparsed) !=
         CryptoNoteTxError::Ok)
       return false;
+
+    {
+      CryptoNoteTransaction zeph = tx;
+      zeph.network = CryptoNoteReviewNetwork::ZephyrMainnet;
+      zeph.version = 3;
+      static uint8_t request[kCryptoNoteMaxSigningPayload];
+      size_t wire_size = sizeof(request) - 3;
+      if (cryptonote_serialize_transaction(zeph, request + 3, &wire_size) != CryptoNoteTxError::Ok)
+        return false;
+      const size_t suffix = offset - 3 - tx_size;
+      if (wire_size + suffix + 3 > sizeof(request)) return false;
+      request[0] = payload[0];
+      request[1] = static_cast<uint8_t>(wire_size);
+      request[2] = static_cast<uint8_t>(wire_size >> 8);
+      memcpy(request + 3 + wire_size, payload + 3 + tx_size, suffix);
+      const size_t length = wire_size + suffix + 3;
+      if (cryptonote_signing_prepare_with_keys("xmr", request, length, view_secret, spend_secret, &state) ==
+            CryptoNoteTxError::Ok ||
+          cryptonote_signing_prepare_with_keys("zeph", request, length, view_secret, spend_secret, &state) !=
+            CryptoNoteTxError::Ok || state.summary.fee != kFee || state.summary.change != kChangeAmount)
+        return false;
+      size_t signed_length = sizeof(request);
+      if (cryptonote_signing_sign_with_keys(&state, view_secret, spend_secret, nonce_seed,
+            request, &signed_length) != CryptoNoteTxError::Ok ||
+          cryptonote_parse_transaction(request, signed_length, &zeph,
+            CryptoNoteReviewNetwork::ZephyrMainnet) != CryptoNoteTxError::Ok)
+        return false;
+    }
 
     // Version 3 carries the additional transaction secrets needed for a
     // mixed standard/subaddress destination set. Exercise the complete

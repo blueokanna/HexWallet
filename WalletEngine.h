@@ -10,6 +10,8 @@
 #include "WalletSecurity.h"
 
 namespace hexwallet {
+  CryptoNoteAddressProfile cryptonote_profile_for(const NetworkProfile &network);
+
 
 constexpr size_t kDerivationPathTextSize = 48;
 // QRL v2 is the widest account text: 'Q' plus 128 checksummed hex digits.

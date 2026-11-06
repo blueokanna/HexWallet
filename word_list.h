@@ -1,7 +1,7 @@
 #ifndef WORD_LIST_H
 #define WORD_LIST_H
 
-const char *english_word_list[2048] = {
+static const char *const english_word_list[2048] = {
   "abandon",
   "ability",
   "able",
@@ -2052,7 +2052,7 @@ const char *english_word_list[2048] = {
   "zoo"
 };
 
-const char *chinese_sim_word_list[2048] = {
+static const char *const chinese_sim_word_list[2048] = {
   "的",
   "一",
   "是",
@@ -4103,7 +4103,7 @@ const char *chinese_sim_word_list[2048] = {
   "歇"
 };
 
-const char *french_word_list[2048] = {
+static const char *const french_word_list[2048] = {
   "abaisser",
   "abandon",
   "abdiquer",

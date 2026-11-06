@@ -14,7 +14,8 @@ set(WALLET_SOURCES
   WalletAltAddresses.cpp WalletNetworks.cpp WalletCatalog.cpp WalletMiningCatalog.cpp
   WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp Bls12381.cpp base58.cpp
   local_bech32.cpp local_segwit.cpp keccak256.cpp local_ripemd160.cpp
-  Groestl512.cpp ThetaTransaction.cpp BitcoinTransaction.cpp BitcoinTransaction.cpp
+  Groestl512.cpp ThetaTransaction.cpp BitcoinTransaction.cpp AeternityTransaction.cpp AlephiumTransaction.cpp
+  Blake3.cpp WalletAdmission.cpp QuaiTransaction.cpp QuantusAccount.cpp QuantusTransaction.cpp
   ChainCommon.cpp ChainTransaction.cpp VeChainTransaction.cpp IconTransaction.cpp
   PolkadotTransaction.cpp SuiTransaction.cpp FilecoinTransaction.cpp TonTransaction.cpp TonCell.cpp
   DecredTransaction.cpp CkbTransaction.cpp ZcashTransaction.cpp CardanoDerivation.cpp CardanoTransaction.cpp HiveTransaction.cpp HederaTransaction.cpp SiaTransaction.cpp NemTransaction.cpp IcpTransaction.cpp ErgoTransaction.cpp Clvm.cpp ChiaTransaction.cpp BlsG2.cpp EvmTransaction.cpp TokenCalldata.cpp
@@ -25,6 +26,12 @@ set(WALLET_SOURCES
   CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp)
 list(TRANSFORM WALLET_SOURCES PREPEND "${WALLET_ROOT}/")
 add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp)
+target_sources(chain_probe PRIVATE
+  "${WALLET_ROOT}/XelisAccount.cpp" "${WALLET_ROOT}/src/xelis/Port.c"
+  "${WALLET_ROOT}/src/xelis/ref10/ed25519_ref10.c"
+  "${WALLET_ROOT}/BeamOutput.cpp" "${WALLET_ROOT}/BeamPayment.cpp" "${WALLET_ROOT}/BeamAddress.cpp"
+  "${WALLET_ROOT}/src/beam/core/ecc.cpp" "${WALLET_ROOT}/src/beam/core/ecc_bulletproof.cpp"
+  "${WALLET_ROOT}/src/beam/core/uintBig.cpp" "${WALLET_ROOT}/src/beam/core/numeric_utils.cpp")
 target_include_directories(chain_probe PRIVATE . "${WALLET_ROOT}" "${WALLET_ROOT}/tests/host" "${WALLET_ROOT}/tests/host/mock")
 target_compile_definitions(chain_probe PRIVATE MBEDTLS_ALLOW_PRIVATE_ACCESS
   HEXWALLET_HOST_TEST=1 HEXWALLET_REAL_MBEDTLS=1 HEXWALLET_LEGACY_SUBSTRATE_TEST_ONLY=1
@@ -38,10 +45,10 @@ target_link_libraries(chain_probe PRIVATE mbedcrypto bcrypt)
 # This target also exercises the production secure-custody requirement.
 add_executable(production_policy ${WALLET_SOURCES}
   production_policy.cpp platform.cpp)
-target_include_directories(production_policy PRIVATE . "${WALLET_ROOT}"
+target_include_directories(production_policy PRIVATE entropy . "${WALLET_ROOT}"
   "${WALLET_ROOT}/tests/host" "${WALLET_ROOT}/tests/host/mock")
 target_compile_definitions(production_policy PRIVATE MBEDTLS_ALLOW_PRIVATE_ACCESS
-  HEXWALLET_REAL_MBEDTLS=1 HEXWALLET_REQUIRE_SECURE_CUSTODY=1
+  HEXWALLET_REAL_MBEDTLS=1 HEXWALLET_REQUIRE_SECURE_CUSTODY=1 HEXWALLET_TEST_BOOT_ENTROPY=1
   HEXWALLET_ENABLE_LVGL=0 HEXWALLET_BOARD=0 _CRT_SECURE_NO_WARNINGS)
 if(MSVC)
   target_compile_options(production_policy PRIVATE /utf-8 /W3)

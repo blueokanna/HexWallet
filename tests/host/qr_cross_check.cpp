@@ -20,57 +20,75 @@
 
 using namespace hexwallet;
 
-namespace {
+namespace
+{
 
-qrcodegen::QrCode::Ecc reference_level(QrEcc ecc) {
-  switch (ecc) {
-    case QrEcc::Low: return qrcodegen::QrCode::Ecc::LOW;
-    case QrEcc::Medium: return qrcodegen::QrCode::Ecc::MEDIUM;
-    case QrEcc::Quartile: return qrcodegen::QrCode::Ecc::QUARTILE;
-    case QrEcc::High: return qrcodegen::QrCode::Ecc::HIGH;
+  qrcodegen::QrCode::Ecc reference_level(QrEcc ecc)
+  {
+    switch (ecc)
+    {
+    case QrEcc::Low:
+      return qrcodegen::QrCode::Ecc::LOW;
+    case QrEcc::Medium:
+      return qrcodegen::QrCode::Ecc::MEDIUM;
+    case QrEcc::Quartile:
+      return qrcodegen::QrCode::Ecc::QUARTILE;
+    case QrEcc::High:
+      return qrcodegen::QrCode::Ecc::HIGH;
+    }
+    return qrcodegen::QrCode::Ecc::LOW;
   }
-  return qrcodegen::QrCode::Ecc::LOW;
+
 }
 
-}  // namespace
-
-int main() {
+int main()
+{
   static uint8_t payload[kMaxDataCodewords];
   int checked = 0;
   int mismatches = 0;
   int size_mismatches = 0;
 
-  for (uint8_t version = 1; version <= kQrMaxVersion; ++version) {
-    for (QrEcc ecc : {QrEcc::Low, QrEcc::Medium, QrEcc::Quartile, QrEcc::High}) {
+  for (uint8_t version = 1; version <= kQrMaxVersion; ++version)
+  {
+    for (QrEcc ecc : {QrEcc::Low, QrEcc::Medium, QrEcc::Quartile, QrEcc::High})
+    {
       const size_t capacity = qr_capacity(version, ecc);
-      for (size_t index = 0; index < capacity; ++index) {
+      for (size_t index = 0; index < capacity; ++index)
+      {
         payload[index] = static_cast<uint8_t>('A' + (index % 26));
       }
       const std::vector<uint8_t> data(payload, payload + capacity);
       const std::vector<qrcodegen::QrSegment> segments{
           qrcodegen::QrSegment::makeBytes(data)};
-      for (uint8_t mask = 0; mask < 8; ++mask) {
+      for (uint8_t mask = 0; mask < 8; ++mask)
+      {
         QrCode mine = {};
-        if (!qr_encode_masked(payload, capacity, ecc, mask, &mine)) {
+        if (!qr_encode_masked(payload, capacity, ecc, mask, &mine))
+        {
           printf("FAIL encode v%u lvl%u mask%u\n", version,
                  (int)ecc, mask);
           return 2;
         }
         const qrcodegen::QrCode reference = qrcodegen::QrCode::encodeSegments(
             segments, reference_level(ecc), version, version, mask, false);
-        if (reference.getSize() != mine.size) {
+        if (reference.getSize() != mine.size)
+        {
           printf("FAIL size v%u lvl%u mask%u\n", version,
                  (int)ecc, mask);
           ++size_mismatches;
           continue;
         }
         int differing = 0;
-        for (int y = 0; y < reference.getSize(); ++y) {
-          for (int x = 0; x < reference.getSize(); ++x) {
+        for (int y = 0; y < reference.getSize(); ++y)
+        {
+          for (int x = 0; x < reference.getSize(); ++x)
+          {
             const bool theirs = reference.getModule(x, y);
             const bool ours = mine.modules[static_cast<size_t>(y) * mine.size + x] != 0;
-            if (theirs != ours) {
-              if (differing < 4) {
+            if (theirs != ours)
+            {
+              if (differing < 4)
+              {
                 printf("  module row=%d col=%d reference=%d ours=%d\n", y, x,
                        theirs ? 1 : 0, ours ? 1 : 0);
               }
@@ -78,7 +96,8 @@ int main() {
             }
           }
         }
-        if (differing != 0) {
+        if (differing != 0)
+        {
           printf("FAIL v%u lvl%u mask%u modules=%d\n", version,
                  (int)ecc, mask, differing);
           ++mismatches;

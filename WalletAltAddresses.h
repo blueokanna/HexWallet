@@ -13,7 +13,7 @@ namespace hexwallet {
 // secp256k1 inputs are compressed unless the declaration explicitly requests
 // a 65-byte uncompressed key (Filecoin/VET/ICON); Ed25519 inputs are 32 bytes.
 
-// Zcash/Flux transparent t1/t3: base58check with a 2-byte version.
+// Zcash transparent t1/t3: base58check with a 2-byte version.
 WalletError address_zcash_transparent(uint16_t p2pkh_version,
                                       uint16_t p2sh_version,
                                       const uint8_t public_key[kCompressedPublicKeySize],
@@ -78,6 +78,9 @@ WalletError address_avalanche_xp(const char *hrp,
                                  const uint8_t public_key[kCompressedPublicKeySize],
                                  char *out, size_t out_size);
 
+WalletError address_alephium(const uint8_t public_key[kCompressedPublicKeySize],
+                             char *out, size_t out_size);
+
 // Kaspa: bech32(hrp, version 0 || x-only secp256k1 pubkey) with the Kaspa
 // poly-mod checksum.
 WalletError address_kaspa(const uint8_t public_key[kCompressedPublicKeySize],
@@ -102,7 +105,7 @@ WalletError address_icon(const uint8_t public_key[kUncompressedPublicKeySize],
 
 // Substrate SS58 for a 32-byte Ed25519 public key. Prefix 0 = Polkadot,
 // 2 = Kusama. Only single-byte prefixes (0..63) are admitted.
-WalletError address_ss58(uint8_t prefix, const uint8_t public_key[32],
+WalletError address_ss58(uint16_t prefix, const uint8_t public_key[32],
                          char *out, size_t out_size);
 
 // TON wallet v4R2 user-friendly address for a 32-byte Ed25519 public key.

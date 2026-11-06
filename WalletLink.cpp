@@ -348,7 +348,7 @@ WalletLinkStatus WalletLinkDevice::handle_pair_request(
   memcpy(payload + offset, phone_nonce, 32);
   offset += 32;
   uint8_t device_nonce[32];
-  random_fill(device_nonce, sizeof(device_nonce));
+  if (!random_fill_checked(device_nonce, sizeof(device_nonce))) return WalletLinkStatus::RequestFailed;
   memcpy(payload + offset, device_nonce, 32);
   offset += 32;
   uint8_t signed_fields_response[32 + 32 + 32 + 32];
@@ -400,8 +400,11 @@ WalletLinkStatus WalletLinkDevice::handle_hello_request(
   uint8_t device_ephemeral_seed[32];
   uint8_t device_ephemeral[32];
   uint8_t device_nonce[32];
-  random_fill(device_ephemeral_seed, sizeof(device_ephemeral_seed));
-  random_fill(device_nonce, sizeof(device_nonce));
+  if (!random_fill_checked(device_ephemeral_seed, sizeof(device_ephemeral_seed)) ||
+      !random_fill_checked(device_nonce, sizeof(device_nonce))) {
+    secure_zero(device_ephemeral_seed, sizeof(device_ephemeral_seed));
+    return WalletLinkStatus::RequestFailed;
+  }
   uint8_t device_ephemeral_scalar[32];
   bool ok = ed25519_seed_to_x25519(device_ephemeral_seed, device_ephemeral_scalar) &&
             x25519_public_key(device_ephemeral_scalar, device_ephemeral);

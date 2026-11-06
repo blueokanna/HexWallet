@@ -21,4 +21,10 @@ bool keccak_final(SHA3_CTX *context, uint8_t result[kKeccak256DigestBytes]);
 
 void keccak_permute(uint64_t state[kKeccak256StateLanes]);
 
+// Keccak-p[1600, rounds] as defined by the Keccak reference: the last `rounds`
+// of the 24 round constants are applied, so rounds == 12 is Keccak-p[1600,12]
+// (what KangarooTwelve and TurboSHAKE use) and rounds == 24 is the full
+// permutation SHA3 builds on. `rounds` must be 1..24; anything else is a no-op.
+void keccak_p1600(uint64_t state[kKeccak256StateLanes], size_t rounds);
+
 #endif

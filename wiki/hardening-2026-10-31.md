@@ -23,7 +23,7 @@
 | --- | --- |
 | `tests/host/build.ps1` | 退出码 0；`chain`/`catalog`/`networks` 全通过，含新增 `chain.qrl`、`chain.aptos` |
 | `tests/host/qrl_oracle_check.ps1` | 与 qrllib `xmss_Signmsg` 逐字节一致（h=4/6/10，索引 0/1/末叶） |
-| `tests/host/policy_check.ps1` | 143 个 graveyard 身份、五张注册表、无界字符串拷贝基线通过 |
+| `tests/host/policy_check.ps1` | 143 个 已撤回资产 身份、五张注册表、无界字符串拷贝基线通过 |
 | `tests/host/device_compile_check.ps1 -Target esp32p4` | 全部固件源 + blst C 单元 + NVS 分支编译通过；不是整包链接 |
 | `tests/host/p4_runtime_compile_check.ps1` | WalletSigning / LinkService / CLI / 草图对真实 P4 头文件编译通过 |
 | `tools/native_coverage.ps1` | 重新生成 `native-chain-capabilities.md` |

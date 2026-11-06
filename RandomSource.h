@@ -8,10 +8,8 @@ namespace hexwallet {
 
 // One entropy path for the whole firmware.
 //
-// The ESP32-P4 hardware RNG (esp_fill_random) is a true random source, but a
-// hardware RNG is exactly the component that fails silently: a stuck output, a
-// rail that is not up yet, or a clock gated during light sleep all produce
-// plausible-looking bytes. So the raw source is never handed to callers:
+// The offline board enables the SAR ADC entropy source before its peripherals
+// start. Only that exclusive boot window supplies physical seed material.
 //
 //   raw 32-byte blocks -> continuous health tests -> SP 800-90A HMAC-SHA256
 //   DRBG -> caller
@@ -27,9 +25,8 @@ namespace hexwallet {
 // "try again and hope" path, because a source that produced one stuck block is
 // not a source. Key generation refuses to run while it is false.
 //
-// The DRBG is HMAC-SHA256 (SP 800-90A 10.1.2) with reseed every 2^20 requests
-// or on demand. This is a defence-in-depth construction, not a certified
-// module; the point is that a single bad entropy read cannot reach a key.
+// An offline board requires another boot after 2^20 requests. The host
+// backend can obtain additional entropy while running.
 
 struct RandomStats {
   uint32_t requests;
@@ -40,21 +37,25 @@ struct RandomStats {
   bool healthy;
 };
 
-// Fills `out` with `size` bytes. With a failed health test the buffer is zeroed
-// and the caller's key material will fail its own checks; check random_healthy()
-// before generating a seed.
+// Call from setup before using the ADC or starting wallet services.
+bool random_init_at_boot();
+
+// Legacy wrapper. Callers making a signing or key-generation decision should
+// check the return value of random_fill_checked for the specific request.
 void random_fill(void *out, size_t size);
+// Reports success for this request while holding the generator lock.
+bool random_fill_checked(void *out, size_t size);
 
 uint32_t random_u32();
 
 // False after the first health-test or entropy failure of this boot.
 bool random_healthy();
 
-// Forces a fresh entropy read and DRBG reseed. Call after wake from deep sleep
-// and before a long signing session.
+// Reseed only when a fresh entropy source is available. The offline device
+// returns false after setup, when the ADC belongs to the board peripherals.
 bool random_reseed();
 
-const RandomStats &random_stats();
+RandomStats random_stats();
 
 // Health tests, DRBG determinism/separation and fail-closed behaviour.
 bool run_random_source_self_tests();

@@ -71,9 +71,11 @@ namespace
 
 } // namespace
 
-void keccak_permute(uint64_t state[kLaneCount])
+void keccak_p1600(uint64_t state[kLaneCount], size_t rounds)
 {
-  for (size_t round = 0; round < kRoundCount; ++round)
+  if (rounds == 0 || rounds > kRoundCount)
+    return;
+  for (size_t round = kRoundCount - rounds; round < kRoundCount; ++round)
   {
     uint64_t column[5];
     uint64_t delta[5];
@@ -114,6 +116,11 @@ void keccak_permute(uint64_t state[kLaneCount])
   }
 }
 
+void keccak_permute(uint64_t state[kLaneCount])
+{
+  keccak_p1600(state, kRoundCount);
+}
+
 namespace
 {
 
@@ -126,7 +133,7 @@ namespace
     keccak_permute(context->state);
   }
 
-} // namespace
+}
 
 void keccak_init(SHA3_CTX *context)
 {

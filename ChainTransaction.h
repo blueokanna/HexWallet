@@ -9,6 +9,7 @@
 namespace hexwallet
 {
   constexpr size_t kChainMaxPayload = 2048;
+  constexpr size_t kChainMaxSignedSize = 8192; // Includes ML-DSA signatures and public keys.
   // Shelley base addresses are 103 chars; QRL v2 is 'Q' + 128 hex digits.
   constexpr size_t kChainMaxAddress = 136;
   constexpr size_t kChainMaxAmount = 64;
@@ -44,6 +45,10 @@ namespace hexwallet
     QrlV2,
     Starknet,
     Theta,
+    Aeternity,
+    Quai,
+    Alephium,
+    Quantus,
   };
 
   enum class ChainError : uint8_t

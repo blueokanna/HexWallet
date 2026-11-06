@@ -5,7 +5,7 @@
 #   powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1
 #
 # Covered here because they must not depend on a test runtime:
-#   1. no GRAVEYARD identity in any registry that can reach a user
+#   1. no retired identity in any registry that can reach a user
 #   2. withdrawn chains stay withdrawn
 #   3. the mining table only points at catalog entries that actually ship
 #   4. the firmware does not include a network stack
@@ -31,25 +31,22 @@ function Read-Text([string]$relative) {
 }
 
 # ---------------------------------------------------------------------------
-# 1 + 2. GRAVEYARD identities
-# ---------------------------------------------------------------------------
-$snapshotPath = Join-Path $root "tools/miningpoolstats_graveyard.json"
-if (-not (Test-Path $snapshotPath)) { throw "missing graveyard snapshot" }
-$snapshot = Get-Content -Raw -Path $snapshotPath | ConvertFrom-Json
-if ($snapshot.exceptions.Count -ne 0) {
-  Fail "graveyard policy must not carry per-coin exceptions"
+# 1 + 2. Check the same pinned source snapshot used by the catalog generator.
+$source = Get-Content -Raw -Encoding UTF8 -Path (Join-Path $root "tools/miningpoolstats_coin_list.json") | ConvertFrom-Json
+$retired = @{}
+$retiredIds = @{}
+foreach ($coin in $source.GRAVEYARD.PSObject.Properties) {
+  $key = $coin.Value.n.Trim().ToLowerInvariant() + "|" + $coin.Value.s.ToUpperInvariant()
+  $retired[$key] = $true
+  $retiredIds[$coin.Name] = $true
 }
-$graveyard = @{}
-foreach ($coin in $snapshot.coins.PSObject.Properties) {
-  $key = ($coin.Value.n.Trim().ToLowerInvariant()) + "|" + ($coin.Value.s.ToUpperInvariant())
-  $graveyard[$key] = $true
-}
-if ($graveyard.Count -lt 100) {
-  Fail "graveyard snapshot parsed only $($graveyard.Count) identities; refusing to treat that as clean"
-}
-if (-not $graveyard.ContainsKey("flux|FLUX")) {
-  Fail "graveyard snapshot no longer lists Flux; the snapshot may be stale or truncated"
-}
+[string[]]$sortedKeys = $retired.Keys
+[Array]::Sort($sortedKeys, [StringComparer]::Ordinal)
+$hash = [Security.Cryptography.SHA256]::Create()
+try {
+  $digest = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes(($sortedKeys -join "`n")))).Replace("-", "").ToLowerInvariant()
+} finally { $hash.Dispose() }
+if ($digest -ne "1472528b52f8ccc7fbfdc4976000f7312acaaac6e5d0341616362a191d60625d") { Fail "retired identity set differs from the reviewed snapshot" }
 
 # nameIndex/symbolIndex select the display name and ticker of each row layout.
 $registries = @(
@@ -66,6 +63,16 @@ function Registry-Identity([string]$name, [string]$symbol) {
   $base = $name.Trim() -replace '\s+(Native SegWit|Nested SegWit|Legacy)$', ''
   return $base.ToLowerInvariant() + '|' + $symbol.ToUpperInvariant()
 }
+function Test-RetiredIdentity([string]$name, [string]$symbol) {
+  # A suffix such as a chain or address variant must not bypass a name/ticker match.
+  while ($name) {
+    if ($retired.ContainsKey((Registry-Identity $name $symbol))) { return $true }
+    $split = $name.LastIndexOf(' ')
+    if ($split -lt 0) { break }
+    $name = $name.Substring(0,$split)
+  }
+  return $false
+}
 foreach ($registry in $registries) {
   $text = Read-Text $registry.File
   foreach ($line in ($text -split "`n")) {
@@ -74,8 +81,9 @@ foreach ($registry in $registries) {
     $fields = [regex]::Matches($line, '"([^"]*)"') | ForEach-Object { $_.Groups[1].Value }
     if ($fields.Count -le [Math]::Max($registry.Name, $registry.Symbol)) { continue }
     $identity = Registry-Identity $fields[$registry.Name] $fields[$registry.Symbol]
-    if ($graveyard.ContainsKey($identity)) {
-      Fail "$($registry.File): graveyard identity listed -> $($line.Trim())"
+    if ((Test-RetiredIdentity $fields[$registry.Name] $fields[$registry.Symbol]) -or
+        ($registry.Name -eq 2 -and $retiredIds.ContainsKey($fields[0]))) {
+      Fail "$($registry.File): retired identity listed -> $($line.Trim())"
     }
     if ($registry.Catalog) {
       $catalogIds[$fields[0]] = $true
@@ -86,21 +94,45 @@ foreach ($registry in $registries) {
 $forkRegistry = Get-Content -Raw -Path (Join-Path $root "tools/fork_registry.json") | ConvertFrom-Json
 foreach ($row in $forkRegistry.profiles) {
   $identity = $row.name.Trim().ToLowerInvariant() + "|" + $row.symbol.ToUpperInvariant()
-  if ($graveyard.ContainsKey($identity)) {
-    Fail "tools/fork_registry.json: graveyard identity '$($row.network)'"
+  if (Test-RetiredIdentity $row.name $row.symbol) {
+    Fail "tools/fork_registry.json: retired identity '$($row.network)'"
   }
 }
 
-foreach ($forbidden in @('"msr", "MSR", "Masari"', '{"flux",', '{"qubic",', '"flux", SighashFamily', '0x76b809bb')) {
-  if ((Read-Text "WalletNetworks.cpp").Contains($forbidden)) {
-    Fail "WalletNetworks.cpp still contains withdrawn chain marker: $forbidden"
+if ((Read-Text "WalletNetworks.cpp").Contains('0x76b809bb')) {
+  Fail "obsolete consensus branch id in network registry"
+}
+
+# 2b. Identities the project deliberately does not carry. Every one was
+# examined against its own upstream; the reasons are in
+# WalletCatalog.cpp (kRefusedChains) and wiki/Admission-Policy.md. Pinning the
+# absence here keeps a profile, a catalog row or a mining mapping from
+# appearing ahead of the implementation.
+$refused = @(
+  @{ Id = 'aion';      Symbol = 'AION' },
+  @{ Id = 'beam';      Symbol = 'BEAM' },
+  @{ Id = 'ironfish';  Symbol = 'IRON' },
+  @{ Id = 'xelis';     Symbol = 'XEL' },
+  @{ Id = 'qubitcoin'; Symbol = 'QTC' },
+  @{ Id = 'qubic';     Symbol = 'QUBIC' }
+)
+foreach ($chain in $refused) {
+  $id = $chain.Id
+  foreach ($marker in @("{`"$id`"", "`"$id`", SighashFamily")) {
+    if ((Read-Text "WalletNetworks.cpp").Contains($marker)) {
+      Fail "WalletNetworks.cpp carries refused chain '$id': $marker"
+    }
   }
-}
-if ((Read-Text "WalletCatalog.cpp").Contains('"flux", "FLUX"')) {
-  Fail "WalletCatalog.cpp still lists FLUX"
-}
-if ((Read-Text "src/generated/WalletMiningCatalog.inc").Contains('"FLUX"')) {
-  Fail "mining catalog still lists FLUX"
+  if ((Read-Text "WalletCatalog.cpp").Contains("`"$id`"")) {
+    Fail "WalletCatalog.cpp lists refused chain '$id'"
+  }
+  # Mining rows carry the source slug and the wallet id. Quantus and
+  # Qubitcoin share QTC, so the ticker alone cannot identify a refused row.
+  $miningRows = Read-Text "src/generated/WalletMiningCatalog.inc"
+  if ($miningRows.Contains("`"$id`"") -or
+      ($id -ne 'qubitcoin' -and $miningRows.Contains("`"$($chain.Symbol)`""))) {
+    Fail "mining catalog maps refused identity '$id'"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -186,7 +218,7 @@ if ($failures.Count -ne 0) {
   exit 1
 }
 $scope = if ($RegistryOnly) { 'registry-policy' } else { 'policy' }
-Write-Output "graveyard-identities=$($graveyard.Count) registries=$($registries.Count) $scope=pass"
+Write-Output "retired-identities=$($retired.Count) registries=$($registries.Count) $scope=pass"
 # --- 6. Unbounded string copies may not grow -------------------------------
 # strcpy/strcat/sprintf carry no length. Every remaining occurrence is either a
 # string literal into a larger buffer, or preceded by an explicit strlen check

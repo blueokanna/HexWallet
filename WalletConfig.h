@@ -7,16 +7,9 @@
 #define HEXWALLET_XMR_MAX_FEE_ATOMIC 100000000000ULL
 #endif
 
-// Masari has the same 12-decimal coin unit; 0.1 MSR is the local ceiling.
-#ifndef HEXWALLET_MSR_MAX_FEE_ATOMIC
-#define HEXWALLET_MSR_MAX_FEE_ATOMIC 100000000000ULL
-#endif
-
-// Masari's RCTTypeBulletproof (type 3) verifier is implemented but has not
-// yet been validated against a mainnet transaction vector. It stays disabled
-// by default so a malformed proof can never be treated as accepted.
-#ifndef HEXWALLET_MSR_ENABLE_RCT_TYPE3
-#define HEXWALLET_MSR_ENABLE_RCT_TYPE3 0
+// Local maximum fee for an ordinary native ZPH transfer, in atomic units.
+#ifndef HEXWALLET_ZEPH_MAX_FEE_ATOMIC
+#define HEXWALLET_ZEPH_MAX_FEE_ATOMIC 100000000000ULL
 #endif
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -93,6 +86,14 @@
 
 #ifndef HEXWALLET_WORKER_STACK_BYTES
 #define HEXWALLET_WORKER_STACK_BYTES (24 * 1024)
+#endif
+
+// The vector-heavy self-test suites reach ~36 KB of frame (measured with
+// -fstack-usage on the xtensa toolchain), which is more than the 24 KB worker
+// task and more than the 32 KB loop task provide, so bench builds run the suite
+// on its own task and that memory is returned when the suite finishes.
+#ifndef HEXWALLET_SELFTEST_STACK_BYTES
+#define HEXWALLET_SELFTEST_STACK_BYTES (96 * 1024)
 #endif
 
 #ifndef HEXWALLET_SOL_MAX_FEE_LAMPORTS

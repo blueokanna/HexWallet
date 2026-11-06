@@ -121,7 +121,7 @@ foreach ($line in Get-Content $registry) {
 
 $checked = 0; $failed = 0; $skipped = 0; $warned = 0; $unreachable = 0
 foreach ($row in $rows) {
-  if ($row.standard -notin @('Erc20', 'Bep20')) { continue }
+  if ($row.standard -notin @('Erc20', 'Bep20', 'Erc721', 'Erc1155')) { continue }
   if ($Network -and $row.network -ne $Network) { continue }
   if (-not $rpc.ContainsKey($row.network)) {
     Write-Output ("  SKIP    {0,-18} {1,-8} no RPC configured for network '{2}'" -f $row.id, $row.symbol, $row.network)
@@ -131,6 +131,19 @@ foreach ($row in $rows) {
   $url = $rpc[$row.network]
   Start-Sleep -Milliseconds $DelayMs
   try {
+    if ($row.standard -in @('Erc721', 'Erc1155')) {
+      $id = if ($row.standard -eq 'Erc721') { '80ac58cd' } else { 'd9b67a26' }
+      $answer = Invoke-Call $url $row.contract ('0x01ffc9a7' + $id + ('0' * 56)) $TimeoutSeconds
+      if ($null -eq $answer) { throw 'Missing ERC-165 response' }
+      ++$checked
+      if ($answer -eq ('0x' + ('0' * 63) + '1')) {
+        Write-Output "  OK      $($row.id) $($row.standard) interface=$id"
+      } else {
+        ++$failed
+        Write-Output "  MISMATCH $($row.id) interface=$id"
+      }
+      continue
+    }
     $symbolHex = Invoke-Call $url $row.contract '0x95d89b41' $TimeoutSeconds
     $decimalsHex = Invoke-Call $url $row.contract '0x313ce567' $TimeoutSeconds
     $nameHex = Invoke-Call $url $row.contract '0x06fdde03' $TimeoutSeconds

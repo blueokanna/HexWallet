@@ -114,6 +114,10 @@ Response.payload = request_id(4) | status(1) | 数据…
 HIVE、SUI、FIL、DOT、KSM）、15 Dash。`BEGIN_SIGN` 最多 16384 字节，超出返回 `invalid`，绝不截断。
 审查有效期 120 秒。
 
+kind 15 接收 `DAS2` 或 `DAS3` 载荷。两者都必须带每个输入的资助交易；`DAS3` 多一个 flags 字节，
+bit0 表示 InstantSend 意图。设备会显示这个声明，说明锁是它无法验证的 quorum 决定，并且两种情况
+签出的字节完全相同。见 [载荷格式](Chain-Payloads-zh#dash)。
+
 派生地址和签名都要求钱包会话已解锁。解锁走 USB CLI（`auth begin`、`auth unlock`），链路本身永远不传 PIN。
 `ADDRESS` 永远不返回私钥；密钥生成代价太高的适配器在链路上直接拒绝。
 

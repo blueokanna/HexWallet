@@ -6,10 +6,15 @@
 
 | 登记表 | 规模 | 来源 | 生成 / 检查 |
 | --- | --- | --- | --- |
-| 网络配置 | 243 | `WalletNetworks.cpp` + `src/generated/WalletForkProfiles.inc` | `tools/fork_registry.json`，由 `policy_check.ps1` 校验 |
-| 钱包目录 | 211 条 | `WalletCatalog.cpp` + 生成的分叉目录 | `tests/host/catalog_dump.exe` |
-| Token 记录 | 18 条网络共 78 条 | `WalletTokens.cpp` | `tools/token_audit.ps1`、`tests/host/evm_access_list_check.ps1` |
-| 矿池身份 | 520 条列表中的 115 条 | `src/generated/WalletMiningCatalog.inc` | `tools/generate_mining_catalog.py --check` |
+| 网络配置 | 247 | `WalletNetworks.cpp` + `src/generated/WalletForkProfiles.inc` | `tools/fork_registry.json`，由 `policy_check.ps1` 校验 |
+| 钱包目录 | 215 条 | `WalletCatalog.cpp` + 生成的分叉目录 | `tests/host/catalog_dump.exe` |
+| Token 记录 | 19 条网络共 80 条 | `WalletTokens.cpp` | `tools/token_audit.ps1`、`tests/host/evm_access_list_check.ps1` |
+| 矿池身份 | 520 条列表中的 121 条 | `src/generated/WalletMiningCatalog.inc` | `tools/generate_mining_catalog.py --check` |
+
+密码学原语遵循同一条规则：`src/generated/Blake3VectorsTest.inc` 是从随仓库保存的
+`tools/blake3_test_vectors.json` 重新编码出来的 35 条官方 BLAKE3 用例（hash、keyed hash、`derive_key`
+各 131 字节）；`tools/generate_blake3_vectors.py --check` 在 include 与它不一致时直接失败，
+`Blake3Kat.inc` 把其中三条留在固件里，让设备也校验自己的压缩函数。
 
 ## 网络与目录
 
@@ -23,7 +28,7 @@
 
 ## Token
 
-- **固定记录**（`WalletTokens.cpp`）：合约地址、精度、符号、名称；18 条网络共 78 条。合约逐字节匹配
+- **固定记录**（`WalletTokens.cpp`）：合约地址、精度、符号、名称；19 条网络共 80 条。合约逐字节匹配
   才会解码该调用。
 - **用户自加记录**：最多 64 个资产（`kCustomTokenMax`），以 `HXCT` 版本 2 + 摘要存进 NVS。
   审查界面会标注"自加"，而且它们永远不改变被签名的字节。EVM、Stellar、NFT 都可以声明；
@@ -33,10 +38,10 @@
 ## 矿池身份
 
 `tools/miningpoolstats_snapshot.json` 钉死来源和 SHA-256；`miningpoolstats_mapping.json` 是人工核对过的
-"来源 id → 钱包配置"映射。生成器遇到快照哈希变化会拒绝，遇到 GRAVEYARD 不一致也会拒绝，然后同时写出
+"来源 id → 钱包配置"映射。生成器遇到快照哈希变化会拒绝，遇到 已撤回资产 不一致也会拒绝，然后同时写出
 C++ 表和公开覆盖报告。
 
-当前数字：520 条活跃列表，115 条已映射，94 个不同钱包配置，其中 91 个有签名路径。其余是有意不映射的：
+当前数字：520 条活跃列表，121 条已映射，98 个不同钱包配置，其中 93 个有签名路径。其余是有意不映射的：
 矿池网站列出来，不等于钱包支持。
 
 ## 改哪里

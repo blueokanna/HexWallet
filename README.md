@@ -12,7 +12,7 @@ board with an SE051 secure element, or a headless CLI for bench work.
 
 Green host suite, unfinished product. Both statements are load-bearing.
 
-- **Tested here:** 67 labelled host checks (`tests/host/build.ps1`), the ESP32-S3/P4 compile
+- **Tested here:** 72 labelled host checks (`tests/host/build.ps1`), the ESP32-S3/P4 compile
   checks, the board-port compile matrix, and the policy gates. All of it runs in CI on every
   push.
 - **Not tested here:** hardware acceptance. No board in this repository has a recorded
@@ -75,9 +75,9 @@ There is no API to approve a request from code, and no path that signs an unrevi
   authenticated, keys non-exportable, wallet uses handles) must hold before secure custody is
   reported. One boolean set by an integration path is exactly how "hardware wallet" claims become
   marketing.
-- **Randomness.** Raw hardware entropy goes through continuous health tests (stuck, skewed,
-  repeated, alternating blocks) into an HMAC-SHA256 DRBG. A failing source latches the wallet
-  closed for the rest of the boot.
+- **Randomness.** The firmware samples the SAR ADC entropy source before starting the battery ADC or worker tasks.
+  It health-checks each block before seeding the HMAC-SHA256 DRBG. A failed sample prevents wallet startup.
+  The device requires a reboot after 2²⁰ random requests to sample physical entropy again.
 - **Boot trust.** `TrustAnchor` records the boot state; `HEXWALLET_REQUIRE_VERIFIED_BOOT=1` makes a
   build refuse to sign when secure boot or flash encryption is off.
 - **Fail closed on parse errors.** Signing failures clear the caller's output buffer
@@ -86,17 +86,17 @@ There is no API to approve a request from code, and no path that signs an unrevi
 
 ## Chain coverage
 
-The catalog exposes 211 wallet entries over 243 compiled network profiles. "Entry" means a
+The catalog exposes 215 wallet entries over 247 compiled network profiles. "Entry" means a
 derivation path plus a review/sign policy, not node acceptance.
 
 | Family | What it does | Deliberate scope |
 | --- | --- | --- |
 | Bitcoin | PSBT v0 and v2, legacy / BIP143 / Taproot key-path (BIP86), `SIGHASH_DEFAULT`/`ALL` | No script-path spends, no multisig, no Lightning |
 | UTXO forks | 105 generated profiles, policy family per chain: legacy, BIP143, `SIGHASH_FORKID`, Groestl-512, ZIP-243 | A fork is admitted only after its `chainparams` were checked; the Bitcoin signer is never used as a guess |
-| EVM | 63 networks, EIP-155/2930/1559, 78 pinned token records, raw-calldata review with keccak-256 | Unknown calldata is shown as code, never decoded as a transfer |
+| EVM | 62 networks, EIP-155/2930/1559, 80 pinned token records, raw-calldata review with keccak-256 | Unknown calldata is shown as code, never decoded as a transfer |
 | Monero | RCT type 6, CLSAG, Bulletproofs+, 16-member rings, subaddress spends | Decoys come from the phone; an offline device cannot prove they exist on chain |
-| Native adapters | ADA, ALGO, APT, CKB, DCR, ERG, FIL, HBAR, HIVE, ICX, ICP, KSM, DOT, NEAR, QRL v1/v2, SC, SOL, STARK, SUI, TFUEL, TON, VET, XCH, XEM, XLM, XRP, XTZ, ZEC, TRX, KAS, DASH | Each adapter has its own payload format, review rules and refusal list |
-| Address only | Aeternity, RyoCurrency, Zano | Encoders are tested; there is no signing path and the UI does not pretend otherwise |
+| Native adapters | ADA, ALGO, APT, CKB, DCR, ERG, FIL, HBAR, HIVE, ICX, ICP, KSM, DOT, NEAR, QRL v1/v2, SC, SOL, STARK, SUI, TFUEL, TON, VET, XCH, XEM, XLM, XRP, XTZ, ZEC, TRX, KAS, DASH, AE, QUAI (Cyprus-1), ALPH, QTC (Quantus), ZEPH | Each adapter has its own payload format, review rules and refusal list |
+| Address only | RyoCurrency, Zano | Encoders are tested; there is no signing path and the UI does not pretend otherwise |
 
 Hive is review-and-sign only: an STM public key is not a receive address, so the entry has no
 address capability. That asymmetry is in the catalog, not in a footnote.
@@ -116,16 +116,27 @@ Short list; the wiki has the complete one.
   decoded into a transfer.
 - TRON NFTs, batch calls, multi-contract transactions, non-owner permissions.
 - Cosmos IBC, authz, feegrant, amino/JSON signing.
-- Dash special transactions (`extraPayload`), Stacks, Lightning, Mimblewimble chains as wallets.
+- Dash special transactions (`extraPayload`). Plain type-0 payments are signed, and InstantSend
+  intent is shown on screen, but the lock itself is a quorum decision the device cannot verify.
+- Stacks, Lightning, and Grin wallet flows.
+- Beam has a native two-party transfer implementation for one standard input. Mainnet custody,
+  node synchronization, and recovery still require integration. See the [Beam implementation notes](wiki/Beam-zh.md).
+- AION, by decision. `policy_check.ps1` fails if the identity reappears in a profile, the catalog or
+  the mining table.
+- Qubitcoin, by decision. Its advertised site 404s and two unrelated projects publish under ticker
+  QTC, so the owner dropped it from scope; the reasoning stays in
+  [Admission-Policy](https://github.com/blueokanna/HexWallet/wiki/Admission-Policy#requested-chains-that-are-not-admitted).
 - Any chain without an upstream SLIP-0044 type. Reusing another chain's coin type would derive the
   same key for two domains.
+
+Native review and signing cover ordinary Zephyr, Alephium and Quantus transfers. Beam regular address encoding and two-party signing have independent reference tests. Xelis has native recovery, address and signature primitives. Physical key custody and Beam node messaging and synchronization are pending. See [chain payloads](wiki/Chain-Payloads.md).
 
 ## Interfaces
 
 **Serial CLI** (`help` lists everything, and is the contract):
 
 ```text
-public: help | status | coin list | coin search <text> | coin show <id>
+public: help | status | coin list | coin search <text> | coin show <id> | coin why <id>
         mining stats | mining list [ASIC|GPU|CPU|HDD|MERGED] [offset] | mining show <id>
         token list [network] | token show <id>
 auth:   auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock
@@ -200,7 +211,7 @@ notes before burning any eFuse; a wrong eFuse cannot be fixed by an OTA update. 
 ## Test
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tests/host/build.ps1            # host suite, 67 checks
+powershell -ExecutionPolicy Bypass -File tests/host/build.ps1            # host suite, 72 checks
 powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1     # firmware policy gates
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
 powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4

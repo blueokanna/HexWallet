@@ -90,7 +90,7 @@ namespace hexwallet
       dot(pixels, stride, 56, 14);
       break;
     case MascotMood::Angry:
-      for (int step = 0; step < 2 + (frame & 1U); ++step)
+      for (int step = 0; step < 2 + static_cast<int>(frame & 1U); ++step)
       {
         dot(pixels, stride, 55 - step, 8);
         dot(pixels, stride, 55, 8 - step);
@@ -101,8 +101,10 @@ namespace hexwallet
     case MascotMood::Eating:
       for (int y = 0; y < 5; ++y)
       {
-        dot(pixels, stride, 5 + ((y + frame) & 1U), 31 - frame * 2 + y);
-        dot(pixels, stride, 57 + ((y + frame + 1) & 1U), 28 - frame * 2 + y);
+        dot(pixels, stride, 5 + static_cast<int>((y + frame) & 1U),
+            31 - frame * 2 + y);
+        dot(pixels, stride, 57 + static_cast<int>((y + frame + 1) & 1U),
+            28 - frame * 2 + y);
       }
       break;
     case MascotMood::Sleep:

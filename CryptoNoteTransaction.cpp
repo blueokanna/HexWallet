@@ -18,6 +18,10 @@ namespace hexwallet
     constexpr uint8_t kTxoutToTaggedKey = 3;
     constexpr uint8_t kRctTypeBpPlus = 6;
     constexpr uint64_t kTxVersionRingCt = 2;
+    // Zephyr v3 serializes a length-prefixed native asset on each input
+    // and output. Only ordinary post-audit ZPH transfers enter this codec.
+    constexpr uint8_t kZphAsset[] = {3, 'Z', 'P', 'H'};
+    constexpr uint8_t kTransferPricing[] = {0, 0, 0}; // height, amount burnt, amount minted
     constexpr size_t kTruncatedAmountSize = 8;
     constexpr size_t kOutputsPerBpProof = 16;
 
@@ -390,7 +394,8 @@ namespace hexwallet
     CryptoNoteTxError write_transaction(const CryptoNoteTransaction &tx, Sink *writer,
                                         bool with_signatures)
     {
-      if (tx.version != kTxVersionRingCt)
+      const bool zephyr = tx.network == CryptoNoteReviewNetwork::ZephyrMainnet;
+      if (!cryptonote_transaction_version_valid(tx.network, tx.version))
         return CryptoNoteTxError::Unsupported;
       if (tx.input_count == 0 || tx.input_count > kCryptoNoteMaxTxInputs ||
           tx.output_count == 0 || tx.output_count > kCryptoNoteMaxTxOutputs)
@@ -414,6 +419,7 @@ namespace hexwallet
           return CryptoNoteTxError::NonCanonical;
         }
         if (!writer->varint(kTxinToKey) || !writer->varint(0) ||
+            (zephyr && !writer->bytes(kZphAsset, sizeof(kZphAsset))) ||
             !writer->varint(input.key_offset_count))
         {
           return CryptoNoteTxError::BufferTooSmall;
@@ -435,9 +441,11 @@ namespace hexwallet
       for (uint16_t index = 0; index < tx.output_count; ++index)
       {
         const CryptoNoteTxOutput &output = tx.outputs[index];
+        if (zephyr && !output.tagged) return CryptoNoteTxError::Unsupported;
         if (!writer->varint(0) ||
-            !writer->varint(output.tagged ? kTxoutToTaggedKey : kTxoutToKey) ||
-            !writer->bytes(output.public_key, sizeof(output.public_key)))
+            !writer->varint(!zephyr && output.tagged ? kTxoutToTaggedKey : kTxoutToKey) ||
+            !writer->bytes(output.public_key, sizeof(output.public_key)) ||
+            (zephyr && !writer->bytes(kZphAsset, sizeof(kZphAsset))))
         {
           return CryptoNoteTxError::BufferTooSmall;
         }
@@ -447,7 +455,8 @@ namespace hexwallet
         }
       }
       if (!writer->varint(tx.extra_size) ||
-          !writer->bytes(tx.extra, tx.extra_size))
+          !writer->bytes(tx.extra, tx.extra_size) ||
+          (zephyr && !writer->bytes(kTransferPricing, sizeof(kTransferPricing))))
       {
         return CryptoNoteTxError::BufferTooSmall;
       }
@@ -461,8 +470,14 @@ namespace hexwallet
 
   } // namespace
 
+  bool cryptonote_transaction_version_valid(CryptoNoteReviewNetwork network, uint64_t version)
+  {
+    return (network == CryptoNoteReviewNetwork::MoneroMainnet && version == kTxVersionRingCt) ||
+           (network == CryptoNoteReviewNetwork::ZephyrMainnet && version == 3);
+  }
+
   CryptoNoteTxError cryptonote_parse_transaction(const uint8_t *data, size_t size,
-                                                 CryptoNoteTransaction *out)
+                                                 CryptoNoteTransaction *out, CryptoNoteReviewNetwork network)
   {
     if (out == nullptr)
       return CryptoNoteTxError::InvalidArgument;
@@ -481,8 +496,16 @@ namespace hexwallet
     e = varint_or_error(&cursor, &version);
     if (e != CryptoNoteTxError::Ok)
       return e;
-    if (version != kTxVersionRingCt)
+    const bool zephyr = network == CryptoNoteReviewNetwork::ZephyrMainnet;
+    if (!cryptonote_transaction_version_valid(network, version))
       return CryptoNoteTxError::Unsupported;
+    out->network = network;
+    auto consume = [&](const uint8_t *expected, size_t length) {
+      if (!cursor.remaining(length)) return CryptoNoteTxError::Truncated;
+      if (memcmp(cursor.data + cursor.offset, expected, length)) return CryptoNoteTxError::Unsupported;
+      cursor.offset += length;
+      return CryptoNoteTxError::Ok;
+    };
     e = varint_or_error(&cursor, &unlock_time);
     if (e != CryptoNoteTxError::Ok)
       return e;
@@ -513,6 +536,7 @@ namespace hexwallet
         return e;
       if (amount != 0)
         return CryptoNoteTxError::InvalidAmount;
+      if (zephyr && (e = consume(kZphAsset, sizeof(kZphAsset))) != CryptoNoteTxError::Ok) return e;
       uint64_t offset_count = 0;
       e = varint_or_error(&cursor, &offset_count);
       if (e != CryptoNoteTxError::Ok)
@@ -556,15 +580,16 @@ namespace hexwallet
       e = varint_or_error(&cursor, &target);
       if (e != CryptoNoteTxError::Ok)
         return e;
-      if (target != kTxoutToKey && target != kTxoutToTaggedKey)
+      if (target != kTxoutToKey && (zephyr || target != kTxoutToTaggedKey))
       {
         return CryptoNoteTxError::Unsupported;
       }
-      output.tagged = target == kTxoutToTaggedKey;
+      output.tagged = zephyr || target == kTxoutToTaggedKey;
       if (!cursor.bytes(output.public_key, sizeof(output.public_key)))
       {
         return CryptoNoteTxError::Truncated;
       }
+      if (zephyr && (e = consume(kZphAsset, sizeof(kZphAsset))) != CryptoNoteTxError::Ok) return e;
       if (output.tagged && !cursor.byte(&output.view_tag))
       {
         return CryptoNoteTxError::Truncated;
@@ -583,6 +608,7 @@ namespace hexwallet
       return CryptoNoteTxError::Truncated;
     }
 
+    if (zephyr && (e = consume(kTransferPricing, sizeof(kTransferPricing))) != CryptoNoteTxError::Ok) return e;
     const CryptoNoteTxError signatures = parse_signatures(&cursor, out);
     if (signatures != CryptoNoteTxError::Ok)
     {

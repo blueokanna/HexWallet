@@ -5,6 +5,14 @@
 How a host hands a transaction to the device, and what comes back. Everything is hex on the CLI and
 length-prefixed binary on the phone link; the parser is the same code in both cases.
 
+## Zephyr, Alephium and Quantus
+
+Zephyr uses phone link kind 5 with network ID `zeph`. Native ZPH inputs and tagged ZPH outputs are mandatory. Pricing height, burnt and minted amounts must be zero. The device verifies the prefix, BP+, ownership, change and CLSAG. The node checks UTXO state and ring membership. [Mainnet fixture](https://explorer.zephyrprotocol.com/tx/7e2f3d9d1b5deaf3db873d5fe5d6c54272d127a84aa04ddc18bd46e66a9a7c12)
+
+Alephium accepts the SDK's mainnet P2PKH UnsignedTx bytes. Up to 16 inputs may use the same public key. One external recipient and optional wallet change are supported. The device rejects tokens, scripts, time locks, duplicate inputs and output messages, reviews the gas fee and returns a 64-byte low-S signature over the BLAKE2b-256 ID. [Official codec](https://github.com/alephium/alephium-web3/tree/c457e9f3959423b22ffa3e18dd0e14b1e26dcf20/packages/web3/src/codec)
+
+Quantus accepts `call || extra || implicit` for mainnet spec 153 and transaction version 6. Balances transfers and keep-alive transfers are supported. The device reviews the account, amount, tip, nonce, era and checkpoint. The runtime calculates the base fee. The result is a complete, hedged ML-DSA-87 v4 extrinsic. [Official implementation](https://github.com/Quantus-Network/quantus-wasm/blob/04174ffca2e385ca64d45ee0c9523cc1dd36707d/src/ext.rs)
+
 ## Rules that apply everywhere
 
 - The payload length must match exactly. Trailing bytes are an error, not padding.
@@ -15,6 +23,26 @@ length-prefixed binary on the phone link; the parser is the same code in both ca
   defined that way (HIVE returns a 65-byte graphene signature, XRP returns the signed binary).
 - Every value, fee and nonce is host-supplied. The device checks internal consistency and wallet
   ownership, not existence on chain.
+
+## Beam
+
+The authenticated serial CLI exchanges a 162-byte offer and a 902-byte receiver contribution. Both peers review their side on the trusted display. The sender returns a serialized Beam transaction after checking the payment confirmation, kernel signature and output balance. [Commands, scope and tests](Beam-zh)
+
+## Xelis native accounts
+
+English and Simplified Chinese recovery directly decodes the private scalar from 24 words and checks the optional 25th checksum word. The public key is `sk⁻¹·H`. The device command `xelis check-address <address>` validates the checksum and Ristretto point of an external mainnet address. The native Schnorr primitive has an independent signature vector. Production recovery, confidential balances and transfer proofs are pending. [Upstream recovery](https://github.com/xelis-project/xelis-blockchain/blob/db59b5c246ab0e40386d6c241dcd77f0aea84b10/xelis_wallet/src/mnemonics/mod.rs)
+
+## Ethereum token approvals
+
+The registered contract standard distinguishes ERC-20 allowance amounts from ERC-721 token IDs. Reviews identify the spender or operator and distinguish grants, unlimited allowances and revocations. The ENS Base Registrar and Name Wrapper were checked against the official deployment list and their ERC-165 interfaces at Ethereum block `0x1922794`. [ENS deployments](https://docs.ens.domains/learn/deployments/)
+
+## Quai account transfers
+
+`quai` accepts mainnet Cyprus-1 type 0 transfers. Supply the actual child index selected by quais.js for this zone. The device derives `m/44'/994'/0'/0/index` and checks that both addresses belong to the local Quai account ledger.
+
+Submit the bytes of go-quai's `ProtoEncodeTxSigningData` with type, to, nonce, value, gas, data, chain_id, gas_price and access_list in field-number order. Type is 0 and chain_id is 9. Encode data and access_list as present, empty fields. Value and gas_price are minimal positive big-endian integers. The device displays the amount, nonce, gas limit, price and maximum fee. Approval returns 65 bytes of `r || s || yParity` for assembly by the host.
+
+[go-quai](https://github.com/dominant-strategies/go-quai/blob/5917bf5e2ced1d3f1cafdde6bc6fa3345fb71c3e/core/types/transaction.go) · [Cyprus-1 type 0](https://quaiscan.io/tx/0x00060019fdf877647e4a9bab684b0c51732b590cb0ffebc058fb29702fe87f97)
 
 ## Bitcoin PSBT
 
@@ -97,7 +125,7 @@ if version >= 3:
   u8[32] additional_tx_secret[count]
 u8 input_count
 u8 output_count
-u8 flags                     bit0: per-output mask (MSR only); all other bits must be 0
+u8 flags                     reserved; must be zero
 input[input_count]
 output[output_count]
 ```
@@ -144,10 +172,55 @@ The envelope is defined per adapter, and the header next to the parser is the sp
 | DOT / KSM | `DOT2` payload with short-lived era and tip; returns a v4 signed extrinsic |
 | XRP | 50-byte Payment review struct; returns the signed binary |
 | THETA | 46-byte native `SendTx`; the same network id also serves EVM transfers |
+| DASH | `DAS2`/`DAS3` review payload; see below |
 | VET / ICX / TON / DCR / CKB / HIVE / SOL / TRX / XLM / XRP / ATOM… | family-specific compact struct, magic-prefixed where documented in `<Name>Transaction.h` |
 
 `chain_sign_transaction()` re-runs the review and compares it with the stored one field by field
 before signing. If the payload and the review disagree, nothing is signed.
+
+## Dash
+
+`DAS2` and `DAS3` differ by one trailing byte; both carry every input's funding transaction, which
+is what makes the reviewed input amounts real rather than host text.
+
+```text
+"DAS2" | "DAS3"
+u32 lock_time
+u8  input_count
+input_count * { u8[32] previous_txid, u32 previous_index, u32 sequence,
+                u64 value, u8 script_size + script,
+                u32 account, u8 change, u32 address_index }
+u8  output_count
+output_count * { u64 value, u8 script_size + script }
+input_count * { u16 funding_size, funding_transaction }
+u8  flags                     // DAS3 only; DAS2 implies 0
+```
+
+`flags` bit 0 declares InstantSend intent. Any other bit is refused with `unsupported`: a host
+asking for behaviour the firmware does not implement has to learn that before review, not after.
+
+Each funding transaction must be a type-0 Dash transaction whose double-SHA256 equals
+`previous_txid`, with the output at `previous_index` paying exactly `value` to exactly `script`.
+A mismatch is `WrongWallet`. The device then recomputes the fee from proven values, so a host
+cannot inflate an input to bury a fee.
+
+The legacy `DASH` payload has no funding proofs. It still parses, so an old host gets a precise
+`missing-field`, and it can never be signed.
+
+### InstantSend
+
+InstantSend adds no bytes to a transaction: an LLMQ quorum locks the inputs after the signed bytes
+exist. There is nothing for the device to sign and nothing it could check. So the claim is handled
+as exactly that — a claim:
+
+- with bit 0 set, the trusted screen says the host requested InstantSend, that the lock is a
+  quorum decision made after broadcast, and that an unlocked transaction is not confirmed;
+- the flag lives inside the hashed payload, so a phone cannot add or drop it after the device
+  rendered the review;
+- the signed bytes are identical with and without the flag, which is asserted by a test. A review
+  flag must never be able to change what is broadcast.
+
+The firmware never reports a Dash transaction as locked, confirmed or final.
 
 ## Status codes over the link
 

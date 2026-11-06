@@ -16,7 +16,7 @@
 | BTC / LTC / DOGE / DGB / BTG / NMC 等 UTXO | PSBT + legacy/BIP143/fork-id 摘要，官方向量 | `bitcoin-sighash`、`run_bitcoin_sighash_self_tests()` |
 | DASH | **两笔真实主网交易**的链上签名对本固件算出的摘要验签通过；合成向量逐字节复现 | `chain_probe dash-sign-selftest` |
 | ZEC (t1/t3) | 官方 ZIP-243 向量 + 真实 BIP32/ECDSA 签名 | `chain_probe zcash-sign-selftest` |
-| XMR / MSR | 官方/独立向量 + CLSAG、金额、view tag | `cryptonote-*` 系列 |
+| XMR | 官方/独立向量 + CLSAG、金额、view tag | `cryptonote-*` 系列 |
 | TRON / TRC-10 / TRC-20 | 主网交易样本 + `transferFrom` + memo | `tron` |
 | Cosmos (ATOM/OSMO/TIA) | 独立 protobuf+RFC6979 生成器复现全部旧向量后产出 v2/v3 | `chain_probe cosmos-sign-selftest` |
 | SOL / XLM / ALGO / NEAR / XTZ / XRP / KAS / EVM 系 | 各自的向量 + 签名自检 | 见 `docs/validation.md` |
@@ -104,8 +104,14 @@
 
 ### BEAM
 
-- 交互式 Mimblewimble：没有静态收款地址，花费需要 slate/BBS 多轮交换，签名是内核 Schnorr 签名加上
-  rangeproof 与内核承诺。缺的是整个 slate 状态机，不是"再写点序列化"。
+普通 BEAM 的单输入双端协商和完整范围证明已在固件中实现。通用收款目录仍受安全托管、未花费输出发现和真实节点验收约束。详见[协议与测试](Beam-zh)。
+
+### ZEPH（Zephyr）
+
+- **已核实**：`ZephyrProtocol/zephyr` 的 `src/cryptonote_config.h` 给出地址前缀 `0x6241d18c0`、12 位小数；
+  `tests/unit_tests/base58.cpp` 带一条"公钥 → 地址"向量。`run_cryptonote_address_self_tests()`
+  逐字节复现：73 字节编码成 101 字符 `ZEPHYR3baX…QuP1u4V`。
+- 已接入普通 ZPH 交易的审阅和签名，使用 Zephyr v3、原生资产字段和 16 成员 CLSAG 环。主网回归检查交易哈希、逐字节重编码和承诺平衡。[测试交易](https://explorer.zephyrprotocol.com/tx/7e2f3d9d1b5deaf3db873d5fe5d6c54272d127a84aa04ddc18bd46e66a9a7c12)
 
 ### PRL（Pearl）
 

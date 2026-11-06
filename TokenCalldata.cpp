@@ -15,6 +15,10 @@ namespace hexwallet
   const TokenCalldataSelector kTokenCalldataSelectors[] = {
       {EvmTokenStandard::Erc20, TokenFunction::Transfer,
        "transfer(address,uint256)", 0xa9059cbb, 2},
+      {EvmTokenStandard::Erc20, TokenFunction::Approve,
+       "approve(address,uint256)", 0x095ea7b3, 2},
+      {EvmTokenStandard::Erc721, TokenFunction::Approve,
+       "approve(address,uint256)", 0x095ea7b3, 2},
       {EvmTokenStandard::Erc20, TokenFunction::TransferFrom,
        "transferFrom(address,address,uint256)", 0x23b872dd, 3},
       {EvmTokenStandard::Erc721, TokenFunction::TransferFrom,
@@ -24,6 +28,8 @@ namespace hexwallet
       {EvmTokenStandard::Erc721, TokenFunction::SafeTransferFromWithData,
        "safeTransferFrom(address,address,uint256,bytes)", 0xb88d4fde, 4},
       {EvmTokenStandard::Erc721, TokenFunction::SetApprovalForAll,
+       "setApprovalForAll(address,bool)", 0xa22cb465, 2},
+      {EvmTokenStandard::Erc1155, TokenFunction::SetApprovalForAll,
        "setApprovalForAll(address,bool)", 0xa22cb465, 2},
       {EvmTokenStandard::Erc1155, TokenFunction::SafeTransferFrom,
        "safeTransferFrom(address,address,uint256,uint256,bytes)", 0xf242432a, 5},
@@ -358,6 +364,8 @@ namespace hexwallet
       return "safeBatchTransferFrom";
     case TokenFunction::SetApprovalForAll:
       return "setApprovalForAll";
+    case TokenFunction::Approve:
+      return "approve";
     case TokenFunction::Deposit:
       return "deposit";
     case TokenFunction::Mint:
@@ -532,6 +540,25 @@ namespace hexwallet
     out->standard = selector->standard;
     out->function = selector->function;
 
+    if (selector->function == TokenFunction::SetApprovalForAll) {
+      uint64_t flag;
+      if (arguments_size != head_size || !read_address_word(arguments, out->recipient) ||
+          !word_to_u64(arguments + kTokenWordSize, &flag) || flag > 1) return false;
+      out->approval_for_all = flag != 0;
+      return true;
+    }
+    if (selector->function == TokenFunction::Approve) {
+      if (arguments_size != head_size || !read_address_word(arguments, out->recipient)) return false;
+      if (selector->standard == EvmTokenStandard::Erc721) {
+        out->has_token_id = true;
+        memcpy(out->token_id, arguments + kTokenWordSize, kTokenWordSize);
+      } else {
+        memcpy(out->amount, arguments + kTokenWordSize, kTokenWordSize);
+        out->amount_fits_u64 = word_to_u64(out->amount, &out->amount_u64);
+      }
+      return true;
+    }
+
     switch (selector->standard)
     {
     case EvmTokenStandard::Erc20:
@@ -556,18 +583,6 @@ namespace hexwallet
     }
     case EvmTokenStandard::Erc721:
     {
-      if (selector->function == TokenFunction::SetApprovalForAll)
-      {
-        if (!read_address_word(arguments, out->recipient))
-          return false;
-        uint64_t approval = 0;
-        if (!word_to_u64(arguments + kTokenWordSize, &approval) || approval > 1)
-        {
-          return false;
-        }
-        out->approval_for_all = approval == 1;
-        return arguments_size == head_size;
-      }
       if (!read_address_word(arguments, out->secondary) ||
           !read_address_word(arguments + kTokenWordSize, out->recipient))
       {
@@ -1330,14 +1345,20 @@ namespace hexwallet
              decoded.amount_u64 == 500 && !decoded.has_token_id && passed;
     passed = !token_decode_calldata(data, onft_size, &decoded) && passed;
 
-    // ERC-721 setApprovalForAll boolean validation.
+    // Shared approval selectors require a registered contract standard.
     store_selector(data, 0xa22cb465);
     store_u64_word(data + 36, 1);
-    passed = token_decode_calldata(data, 68, &decoded) && decoded.approval_for_all && passed;
+    passed = !token_decode_calldata(data, 68, &decoded) &&
+             token_decode_calldata(data, 68, EvmTokenStandard::Erc721, &decoded) && decoded.approval_for_all && passed;
     store_u64_word(data + 36, 0);
-    passed = token_decode_calldata(data, 68, &decoded) && !decoded.approval_for_all && passed;
+    passed = token_decode_calldata(data, 68, EvmTokenStandard::Erc1155, &decoded) && !decoded.approval_for_all && passed;
     store_u64_word(data + 36, 2);
-    passed = !token_decode_calldata(data, 68, &decoded) && passed;
+    passed = !token_decode_calldata(data, 68, EvmTokenStandard::Erc1155, &decoded) && passed;
+    store_selector(data, 0x095ea7b3);
+    passed = !token_decode_calldata(data, 68, &decoded) &&
+             token_decode_calldata(data, 68, EvmTokenStandard::Erc721, &decoded) && decoded.has_token_id &&
+             token_decode_calldata(data, 68, EvmTokenStandard::Erc20, &decoded) && decoded.amount_u64 == 2 &&
+             !token_decode_calldata(data, 69, EvmTokenStandard::Erc20, &decoded) && passed;
 
     uint8_t unknown[36];
     memcpy(unknown, data, sizeof(unknown));

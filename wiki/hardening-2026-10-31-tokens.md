@@ -60,5 +60,5 @@ X Layer 上的封装 BTC/ETH）。不把"地址贴上去"当成支持。
 | `tests/host/evm_access_list_check.ps1` | 502 项通过（EVM 审阅路径未被自定义代币改动破坏） |
 | `tests/host/build_chain_native.ps1` | `chain_probe` + `production_policy` 通过 |
 | `tests/host/device_compile_check.ps1 -Target esp32p4` | 全部源 + `WalletCustomTokens.cpp` + 以真实 Arduino 头文件编译的 `WalletCustomTokensNvs.cpp` 通过 |
-| `tests/host/policy_check.ps1` | 143 个 graveyard 身份、五张注册表、无界字符串基线通过 |
+| `tests/host/policy_check.ps1` | 143 个 已撤回资产 身份、五张注册表、无界字符串基线通过 |
 | `tools/token_audit.ps1` | 62 条已验证、0 位数错误、2 标签漂移、8 不可达 |

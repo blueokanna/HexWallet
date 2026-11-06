@@ -420,8 +420,6 @@ namespace hexwallet
     {
       return false;
     }
-    // The descriptor and key are hashed as one buffer; keep it on the heap so a
-    // firmware task with a small stack can still derive an address.
     HeapBlock material(sizeof(kQrlV2Descriptor) + kQrlV2PublicKeySize);
     if (!material.ok())
       return false;
@@ -563,11 +561,6 @@ namespace hexwallet
 
   namespace
   {
-
-    // Signs with the account seed that was already derived for the reviewed path.
-    // Keeping this separate from qrl_v2_sign_payload lets the host self-test cover
-    // review, signing and self-verification even when the host build has no BIP32
-    // body of its own.
     ChainError sign_with_seed(const uint8_t seed[kMlDsa87SeedSize],
                               const uint8_t *payload, size_t size,
                               const char *sender, uint8_t *out,
@@ -617,10 +610,7 @@ namespace hexwallet
       uint8_t message[kQrlV2MessageSize];
       uint8_t rnd[32];
       build_message(digest, message);
-      random_fill(rnd, sizeof(rnd));
-      // random_fill zeroes on a health failure; deterministic ML-DSA would still
-      // verify, so refuse explicitly instead of masking a dead entropy source.
-      if (!random_healthy())
+      if (!random_fill_checked(rnd, sizeof(rnd)))
       {
         secure_zero(rnd, sizeof(rnd));
         secure_zero(message, sizeof(message));

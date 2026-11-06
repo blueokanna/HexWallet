@@ -539,11 +539,6 @@ host with real BIP32/ECDSA through `chain_probe zcash-sign-selftest`
 the scriptSig is exactly `push(sig) push(redeem)` and verifies the DER signature
 against the redeem `scriptCode`.
 
-Flux used to share this engine with the Flux branch id `0x76b809bb`. It was
-withdrawn on 2026-10-28: the MiningPoolStats snapshot of 2026-10-23 lists FLUX
-in its GRAVEYARD category, and the project rules forbid graveyard identities in
-production registries. ZEC keeps the engine, so no signing code was lost.
-
 | Chain | Encoding | Path |
 | --- | --- | --- |
 | VET | `0x` + keccak256(uncompressed pubkey)[12..31] | `m/44'/818'/0'/0/index` |
@@ -696,7 +691,7 @@ signing, and the catalog marks them `ADDRESS` only.
 | Chain | Path | Encoder | Pinned evidence |
 |---|---|---|---|
 | Aeternity (AE) | SLIP-0010 `m/44'/457'/0'/0'/i'` | `ak_` + base58(ed25519 pubkey \|\| SHA-256d(pubkey)[0..3]) | `aeserialization/src/aeser_api_encoder.erl` (`base58_check/1` hashes the payload twice with SHA-256); the 32-byte-key + 4-byte-checksum vector is in `run_alt_address_self_tests()` |
-| RyoCurrency (RYO) | BIP44 `m/44'/382'/0'/0/i` | CryptoNote two-key body with the 3-byte varint prefix `0x2ce192` | `ryo-currency/ryo-currency/src/cryptonote_config.h` (`RYO_LONG_ADDRESS_BASE58_PREFIX`); the encoder reproduces the official Monero/Masari vectors, and the Ryo vector is pinned in `run_cryptonote_self_tests()` |
+| RyoCurrency (RYO) | BIP44 `m/44'/382'/0'/0/i` | CryptoNote two-key body with the 3-byte varint prefix `0x2ce192` | `ryo-currency/ryo-currency/src/cryptonote_config.h` (`RYO_LONG_ADDRESS_BASE58_PREFIX`); the encoder reproduces the official Monero vectors, and the Ryo vector is pinned in `run_cryptonote_self_tests()` |
 | Zano (ZANO) | BIP44 `m/44'/1018'/0'/0/i` | CryptoNote two-key body with prefix `0xc5` | `hyle-team/zano/tests/unit_tests/base58.cpp` vector `ZxDqHy6WnyYY...` is reproduced byte-for-byte by `cryptonote_address_from_public_keys()` |
 
 Ryo and Zano use the same `CryptoNoteAddressProfile` structure as Monero, but
@@ -712,9 +707,6 @@ Why the other names from the mining-pool screenshot are not in the catalog:
   interactive multi-round exchange. Showing one as a normal wallet address
   would be a category error, and a hardware signer needs the whole slate state
   machine.
-- **Super Zero (SERO)** uses 64/96-byte superzk public-key bundles. There is no
-  single-key encoder in this tree, and a plausible-looking base58 string would
-  not be spendable by the derived key.
 - **Swap (XWP), Evolution (EVOX), VeriBlock (VBK)** have no SLIP-0044 coin type
   in the current registry. Reusing another chain's coin type would derive the
   same private key material in two domains. They stay out until an upstream
@@ -739,7 +731,7 @@ What a future signing port must add, in order, is not a new address encoder:
 3. **VeriBlock**: the PoP publication fields and the exact X.509/SHA-256 address
    derivation, plus a signed transaction vector. A Bitcoin PSBT path is not a
    substitute.
-4. **Swap / Evolution / SERO**: an upstream SLIP-0044 (or equivalent) coin type
+4. **Swap / Evolution**: an upstream SLIP-0044 (or equivalent) coin type
    and a reviewed address/transaction format. Without a coin type the same seed
    would derive keys shared with another chain.
 
@@ -1640,354 +1632,10 @@ N 取 1..4。设备重算 2+9N 与长度是否吻合、每笔 span 是否为 3�
 ERC-20 金额默认按 base unit 原文显示，只有设备上登记过该代币合约时才换算并标注未核验
 （见 `WalletCustomTokens`）。
 
-## 
+## CryptoNote transfers
 
-*Merged from docs/xmr-review.md.*
-
-> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](chain-protocols.md)。
-
-## Monero on HexWallet: what the device actually verifies
-
-This is the trust model for XMR/MSR signing. It describes what runs on the
-device, what comes from the phone, and what stops the phone from lying.
-
-### Roles
-
-The device never talks to a node. There is no network stack in this firmware and
-no plan to add one. The phone does all chain I/O and hands the device two things:
-
-1. a transaction to review, already serialized, plus the ring members and
-   offsets it wants to spend;
-2. the transaction secret key for that transaction.
-
-Everything else the device derives itself from the wallet secrets. The phone is
-treated as hostile.
-
-### What `cryptonote_review_transaction` proves
-
-Implemented in `CryptoNoteReview.cpp`; called before anything is displayed or
-signed.
-
-| # | Check | What it stops |
-| --- | --- | --- |
-| 1 | `version == 2 or 3`, `rct.type == 6`, counts match the payload | shape confusion, downgrade to a simpler RCT type |
-| 2 | One leading `tx_extra` public key equals `tx_secret·G` (or `tx_secret·D` for the one-output subaddress form); the optional additional-key vector is canonical, length-bound and checked against supplied secrets | inconsistent transaction keys that prevent the recipient from scanning outputs |
-| 3 | For each output: one-time key, 8-byte amount ciphertext, view tag recomputed from the selected primary/additional transaction secret, recipient keys and index | showing one recipient/index while paying another |
-| 4 | For each output: commitment recomputed from the **stated amount** and the derived mask, then compared to the wire commitment | displaying an amount the transaction does not commit to |
-| 5 | Change outputs must derive from this wallet's own spend and view keys | claiming somebody else's output as change to hide fee inflation |
-| 6 | Every Bulletproofs+ proof block verified over its own 16-output window | out-of-range outputs, which is how hidden inflation happens |
-| 7 | `Σ pseudoOut == Σ outPk + fee·H` | value creation outside the fee |
-| 8 | For each input: our output located at `real_index`, its one-time key and commitment rebuilt from the view secret, key image rebuilt from the **derived one-time secret** | spending an output we do not own, or a ring that does not contain our output |
-| 9 | `pseudoOut_i == commit(c_out_i, amount_i)` for the phone-supplied mask | a pseudo output committing to a different amount than the one shown |
-| 10 | `Σ inputs == Σ outputs + fee` | arithmetic that does not add up |
-| 11 | CLSAG auxiliary key image `D = z·Hp(P)/8` recomputed and compared to the wire | a host choosing the `D` field that is not covered by the signing hash |
-| 12 | Ring offsets in the host request must equal the serialized transaction and be strictly monotonic | reordering the ring or supplying a duplicate output |
-| 13 | No repeated ring member inside one input; no repeated key image across inputs | a malformed ring that would make the CLSAG equation degenerate, or spending the same output twice |
-| 14 | Standard outputs and owned change use the primary transaction key; subaddress destinations use the single-destination `rD` form or the output-index-bound additional key | signing a subaddress output without its matching transaction public key |
-
-Check 4 is the one that makes the display trustworthy: the amount shown is an
-input to a Pedersen commitment that must match a byte on the wire. The phone
-cannot show 1 XMR and commit to 100.
-
-Check 8 uses `cryptonote_derive_secret_key`, so the master spend key is only
-ever used as a derivation input; the scalar that signs is the per-output
-one-time secret, and it is zeroized before the next input is examined.
-
-### What the device then signs
-
-`cryptonote_sign_input` produces the CLSAG for one input. The scalar it signs
-with is `z = c_a − c_out` (real commitment mask minus pseudo output mask), which
-is Monero's `zero_commit_sk` in `proveRctCLSAGSimple`. `CryptoNoteReviewResult`
-carries that scalar per input, so the signer never recomputes it from untrusted
-data.
-
-### Signing is exposed
-
-`WalletCatalog` now exposes XMR (and MSR) with address, review and signing
-capabilities. `WalletSigning` has a `CryptoNote` request kind that keeps the
-reviewed transaction and ring data until the on-screen APPROVE button is
-pressed. The phone link uses `BEGIN_SIGN` kind 5; the serialized transaction
-plus the host's ring data is capped at 16 KiB.
-
-The review screen shows every output amount and destination, the change line,
-the fee and the total spent. It also prints the honest caveat that ring decoys
-were supplied by the phone and that their chain membership cannot be proven
-offline.
-
-The signing keys are the same BIP32 child that `derive_address()` used for the
-displayed address (`m/44'/128'/0'/0/<address_index>` for XMR). They are not
-derived from the BIP39 seed directly; the signer would otherwise sign with a
-different view/spend pair than the one shown on screen. The BIP32 account and
-change path components are fixed at zero. CryptoNote subaddress inputs derive
-their own spend scalar from that account, as described below.
-
-### Masari is a separate path
-
-`CryptoNoteMasari.cpp` implements Masari's own historical RCT enum:
-
-| type | name | range proof | signature | status |
-| --- | --- | --- | --- | --- |
-| 0 | RCTTypeNull | none | none | rejected (not a private spend) |
-| 1 | RCTTypeFull | Borromean | one MLSAG over all inputs | implemented |
-| 2 | RCTTypeSimple | Borromean | MLSAG per input | implemented; validated against the real `tests/data/fuzz/transaction/TX2` vector |
-| 3 | RCTTypeBulletproof | Bulletproofs | MLSAG per input | parsed but disabled by `HEXWALLET_MSR_ENABLE_RCT_TYPE3` until a mainnet BP vector exists |
-
-Masari uses the legacy 64-byte `ecdhInfo` tuple (`mask || amount` encrypted by
-scalar addition, not ChaCha8) and MLSAG, so it never shares the Monero type-6
-parser, CLSAG signer or compact-amount code.
-
-The real TX2 vector (2 inputs, 2 outputs, ring size 3, fee 6076330000) is parsed
-in the host self-test and must pass Borromean verification; flipping one proof
-byte must fail. A synthetic type-2 spend is then reviewed and signed, and the
-resulting MLSAG is verified against the ring.
-
-### Subaddress spending
-
-A subaddress output is spent with `b + Hs("SubAddr" || a || major || minor)`
-instead of `b`, and the same substitution is applied per input, so one
-transaction can mix standard and subaddress coins. `(0, 0)` means the standard
-address and keeps the original path.
-
-The payload carries `(major, minor)` per input. XMR output support follows
-Monero's construction rules:
-
-- a transaction with exactly one external subaddress destination may use the
-  primary secret as `R = rD` and payload version 2;
-- a mixed or multi-destination transaction uses payload version 3, with one
-  additional secret per output and a canonical `tx_extra` additional-public-key
-  vector of the same length;
-- for output `i`, a subaddress destination must select additional key `i+1`;
-  standard destinations and all change outputs select the primary key (`0`);
-- the device verifies `s_i*C_i` for subaddress destinations and `s_i*G` for
-  standard destinations, then recomputes the one-time key, amount ciphertext,
-  view tag and commitment with the selected derivation;
-- external subaddress records carry the spend/view public keys but no claimed
-  `(major, minor)` index. Only change may carry indices, and those indices are
-  re-derived from the wallet keys before the change label is shown.
-
-MSR remains standard-address-only because its legacy RCT path has no Monero
-additional-key construction. Payload version 1 omits subaddress fields and
-retains standard-address behavior. Checking ownership of `(D, C)` alone is
-not sufficient; the transaction-key binding and output-scanning derivation
-must agree as well.
-
-### Fee ceiling
-
-`cryptonote_review_fee_policy` rejects a fee above
-`HEXWALLET_XMR_MAX_FEE_ATOMIC` (XMR) or `HEXWALLET_MSR_MAX_FEE_ATOMIC` (MSR),
-both 0.1 coin by default, before any curve operation. This is a local firmware
-policy, not a live fee estimate. Host requests cannot raise it.
-
-### Ring data authenticity
-
-The device verifies that the ring is internally consistent, that the offsets
-match the serialized transaction byte for byte, that the offsets are monotonic,
-and that the owned output sits at the claimed `real_index`. It cannot prove
-that a decoy exists on chain without chain access. That is inherent to an
-offline signer: the phone is trusted only for the **liveness of decoys**, never
-for amounts, fees or destinations.
-
-### Verification cost
-
-Bulletproofs+ dominates review time. The padded scalar `mn` is
-`64 * next_pow2(outputs)` (minimum 64), exactly like Monero, so a 16-output
-proof needs 1024 multi-exponentiation terms while a 2-output proof needs 128.
-
-Measured on the host suite (x86-64, MSVC `/O2`, `bp_plus_probe.exe --bench`):
-
-| commitments | rounds | `mn` | per proof |
-| --- | --- | --- | --- |
-| 1 | 6 | 64 | 67 ms |
-| 2 | 7 | 128 | 127 ms |
-| 16 | 10 | 1024 | 932 ms |
-
-Two changes got it there, both verified against the eight reference proofs, the
-mainnet proof and the tamper tests:
-
-* `point_mul8` now does its three doublings in extended coordinates
-  (`ed25519_point_mul8_compressed`), one inversion instead of five. Every BP+
-  generator needs it.
-* The verifier accumulates in extended coordinates with a 3-bit window
-  (`ed25519_extended_add_scaled`), so there is no inversion per term and no
-  point re-encoding between terms. The window table is 2.5 KiB.
-* The whole review runs on the 24 KiB crypto worker
-  (`wallet_worker_begin` / `wallet_worker_wait`), because about 7 KiB of stack
-  comes close to the 8 KiB Arduino loop task. LVGL stays on the calling task,
-  which is not thread safe to share.
-
-P4 latency and watchdog behavior have not been measured on the intended board.
-Both review and signing now run on the crypto worker; the caller polls while
-servicing LVGL and yielding. It does not process new host requests during that
-wait. A deadline invalidates the result but does not cancel the task: borrowed
-buffers remain alive until the task finishes, and a late signature is erased.
-Worker startup failure rejects the operation instead of falling back to the
-smaller Arduino loop stack.
-
-### Test coverage
-
-`run_cryptonote_review_self_tests()` builds a complete type-6 spend and requires
-rejection for each tampering attempt: destination amount +1, change amount −1,
-foreign change view key, fee +1, replaced key image, replaced pseudo output,
-replaced `tx_extra` key, replaced phone-supplied `c_out`, swapped owned ring
-slot, swapped output commitments, replaced auxiliary key image `D`, a ring order
-that disagrees with the wire offsets, and a change output that claims a
-subaddress without carrying its keys.
-
-`run_cryptonote_signing_self_tests()` prepares the same transaction through the
-host payload, checks the summary, signs every CLSAG with a fresh per-input
-nonce and verifies the serialized result. `run_masari_self_tests()` covers
-MLSAG sign/verify, legacy ECDH decode, the real TX2 Borromean vector and an
-end-to-end type-2 review/sign.
-
-The Monero fixture uses a valid proof generated by the isolated pinned Monero
-reference build (`MoneroReviewProofTest.inc`). The Masari TX2 vector comes from
-the upstream `masari-project/masari` fuzz corpus. Neither is a mainnet
-acceptance run.
-
-### Remaining limits
-
-* Type-3 Masari (Bulletproofs) needs a mainnet proof vector before it can be
-  enabled; the parser currently returns `unsupported` by default. Run
-  `tools/fetch_masari_bulletproof_vector.py` against a Masari node to produce the
-  vector, and the host self-test will require it to parse and reject single-byte
-  edits before you build with `-DHEXWALLET_MSR_ENABLE_RCT_TYPE3=1`.
-* XMR/MSR subaddress inputs are supported, but subaddress destinations and
-  change are rejected pending independent transaction-key and scanning tests.
-* There is no distance bounding on NFC; a relay can forward frames, but the
-  on-device buttons and trusted display still gate every signature.
-
-## 
-
-*Merged from docs/xmr-signing.md.*
-
-> 2026-10-24：MSR 已移除，不再接受地址或签名请求。下文 MSR 段落仅保留为历史协议记录；不代表当前支持。SOL 使用 kind=6，详见 [solana-signing.md](chain-protocols.md)。
-
-## XMR / MSR 签名与离线边界
-
-### 设备不联网
-
-硬件只通过 NFC 或用户主动开启的 USB 数据通道接收候选交易，在本机审阅并签名。区块下载、节点查询、广播和节点验收由手机或电脑完成。固件没有 WiFi/HTTP/以太网客户端；PC 侧开发工具访问参考实现或节点，不属于固件联网能力。
-
-### 现在开放的路径
-
-`WalletCatalog` 已开放 XMR 与 MSR 的地址、审阅和签名。链路使用 `BEGIN_SIGN` 的 `kind=5`，请求体携带序列化交易、交易密钥、每个输入的本机输出位置、ring、key offsets 与主机提供的伪输出掩码。请求上限 16 KiB。
-
-审阅通过后：
-
-- 屏幕显示每个输出的金额与地址、找零、手续费和总支出；
-- 屏幕明确注明 ring 诱饵由手机提供、离线设备无法证明其链上存在；
-- 用户必须按设备上的 APPROVE，手机不能代替按键；
-- 签名只在这次批准后执行一次，随后会话清零。
-
-### 地址与签名密钥必须同源
-
-地址派生使用 BIP32 子密钥作为 CryptoNote 种子：
-
-```
-m/44'/128'/0'/0/<address_index>  -> child.private_key -> Hs() -> spend, Hs(spend) -> view
-```
-
-签名也必须使用同一个子密钥。早期实现直接从 BIP39 种子派生签名密钥，会导致屏幕地址与签名密钥不一致；现在 `derive_cryptonote_keys()` 复用 `derive_address()` 的同一条路径。
-
-#### 子地址消费
-
-XMR 子地址已开放消费：
-
-```
-m               = Hs("SubAddr" || a || major || minor)
-spend_secret    = b + m
-spend_public    = B + m·G
-view_public     = a·spend_public        (Monero 的 C = a·D)
-```
-
-- 每个输入携带自己的 `(major, minor)`，设备用该子地址的 spend secret 派生一次性私钥并签名；`(0,0)` 就是标准地址，路径不变。
-- XMR 单一子地址目的地使用已绑定的 `R = rD`；混合/多目的地使用 payload v3 的每输出 additional transaction public key。设备按输出索引验证秘密、公钥、one-time key、金额密文、view tag 和 commitment，避免签出收款方无法扫描的输出。
-- `cryptonote_subaddress_keys()` 的输出与地址编码器 `cryptonote_subaddress_public_keys()` 在同一自检里交叉验证，并对齐 Monero 固定的子地址地址向量 `8AGiXjGVUbB7…`(0,1) 与 `8AGDdrcnAd7R…`(1,0)。
-- 自检还证明：用标准 spend secret 无法对子地址输出签出有效 CLSAG（`cryptonote_clsag_sign` 内部要求 `p·G == dest`），只有 `b + m` 可以。
-- Masari 的子地址输入采用相同的密钥派生；子地址发送和子地址找零仍关闭，因为 legacy 路径没有 XMR additional-key 语义。
-
-### Monero（XMR）
-
-- RCT type 6、CLSAG、Bulletproofs+、16 成员 ring。
-- 每个输出：一次性公钥、8 字节金额密文、view tag、承诺全部重算；显示金额是承诺的输入。
-- 每个输入：本机输出在 ring 中的位置、一次性密钥、承诺、key image 全部重算。
-- `pseudoOut_i == commit(c_out_i, amount_i)`，`Σ pseudoOut == Σ outPk + fee·H`。
-- CLSAG 辅助 key image `D = z·Hp(P)/8` 与线上字节比对。
-- ring offsets 必须与序列化交易逐字节一致且严格递增。
-- 手续费上限 `HEXWALLET_XMR_MAX_FEE_ATOMIC`（默认 0.1 XMR）在任何曲线运算前拒绝超限。
-
-#### CLSAG 消息哈希
-
-`Keccak(prefix_hash || rct_base_hash || proof_fields_hash)`
-
-`proof_fields_hash` 按 Monero v0.18.4.0 `get_pre_mlsag_hash` 的顺序包含每个 BP+ 的 A、A1、B、r1、s1、d1、L、R；不加入向量长度、V 或 pseudoOut。这是共识消息构造，**不是 BP+ 证明验证**。
-
-#### 签名前不变量
-
-- 全部输入的 key image 与 key offsets 必须在任何一个输入签名前确定；签名函数核对既定 key image，不在签名途中修改 prefix。双输入回归用最终 prefix 校验两个签名，避免单输入自测掩盖问题。
-- 构造器要求传入已经确定的证明字节；不能先生成 CLSAG 再补证明。
-- `CryptoNoteSpendInput` 含设备内部秘密，不是手机请求格式，禁止直接把手机输入反序列化成该结构。手机格式由 `cryptonote_signing_prepare` 独立解析并核验所有权后才生成内部结构。
-
-### Masari（MSR）
-
-Masari 使用自己的历史 RCT 枚举与 legacy ECDH，不能复用 type-6：
-
-| 类型 | 范围证明 | 签名 | 状态 |
-| --- | --- | --- | --- |
-| 1 RCTTypeFull | Borromean | 全输入一个 MLSAG | 已实现 |
-| 2 RCTTypeSimple | Borromean | 每输入一个 MLSAG | 已实现；用上游真实 TX2 向量验证 Borromean |
-| 3 RCTTypeBulletproof | Bulletproofs | 每输入一个 MLSAG | 验证器已实现；默认 `HEXWALLET_MSR_ENABLE_RCT_TYPE3=0`，缺主网向量时返回 `unsupported` |
-
-类型 3 的验证器不是“写完就算”：它必须有链上向量才能启用。流程是
-
-```
-python tools/fetch_masari_bulletproof_vector.py --hash <txid> --url <masari-daemon>
-```
-
-该工具把节点返回的原始交易写成 `tests/fixtures/masari/tx3.bin` 与 `tx3.json`（记录 txid、来源与 SHA-256）。主机自检一旦看到这个文件就会解析它、校验其中的标准 Bulletproof，并要求单字节篡改被拒绝；没有文件时自检反而要求 type 3 继续 fail-closed。通过后才用 `-DHEXWALLET_MSR_ENABLE_RCT_TYPE3=1` 构建发行固件。
-
-legacy ECDH 为标量加法：`mask + Hs(shared)`、`amount + Hs(Hs(shared))`，不是 ChaCha8，也不是 compact amount。MLSAG 消息为 `Keccak(prefix_hash || rct_base_hash || proofs_hash)`。手续费上限 `HEXWALLET_MSR_MAX_FEE_ATOMIC` 默认 0.1 MSR。
-
-### 性能（可信数字，不夸大）
-
-Bulletproofs+ 验证是审阅阶段的主要成本。`mn`（填充后的标量数量）为 `64 * next_pow2(输出数)`，与 Monero 一致：16 个输出对应 1024 项多指数运算，2 个输出对应 128 项。
-
-主机实测（x86-64，MSVC `/O2`，`bp_plus_probe.exe --bench`）：
-
-| 输出数 | rounds | `mn` | 单证明耗时 |
-| --- | --- | --- | --- |
-| 1 | 6 | 64 | 67 ms |
-| 2 | 7 | 128 | 127 ms |
-| 16 | 10 | 1024 | 932 ms |
-
-两项优化把耗时降到原来的约 1/2.2，且结论都通过了 8 份参考证明、真实主网证明与全部篡改测试：
-
-- `point_mul8` 改为扩展坐标下三次倍增（`ed25519_point_mul8_compressed`），一次求逆代替五次；每个 BP+ 生成元都要用它。
-- 验证器用扩展坐标累加 + 3 位窗口（`ed25519_extended_add_scaled`），每项不再求逆、不再反复重编码点；窗口表只有 2.5 KiB，验证器整体仍能装进调用方栈。
-
-Bulletproofs+ 验证需要约 7 KiB 栈，接近 Arduino 主循环任务的 8 KiB 上限，因此 CryptoNote 审阅在 24 KiB 的加密 worker 任务上执行（`wallet_worker_begin` / `wallet_worker_wait`），LVGL 更新仍留在调用任务上（LVGL 不是线程安全的）。
-
-尚无这块 ESP32-P4 实机的延迟、栈水位和看门狗数据，不能从主机成绩推算设备性能。审阅与签名均在加密 worker 上执行；调用任务轮询完成状态、刷新 LVGL 并让出 CPU，不处理新的主机请求。启动 worker 失败会拒绝请求，不回退到较小的主循环栈。
-
-任务超过截止时间后，结果失效；调用方仍等到任务实际结束才清除它借用的请求、密钥和缓冲区，避免超时导致悬空指针。超时签名的输出会清零并拒绝返回。此处不是强制取消：如果 worker 不结束，仍需硬件看门狗/复位策略，不能宣称已完成异常实机验收。
-
-### 仍然存在的边界
-
-- **诱饵真实性**：设备能证明 ring 内部一致、包含本机输出、offsets 与交易一致，但无法证明诱饵真的在链上。离线签名器没有链访问；手机只被信任“提供活跃诱饵”，永远不被信任金额、手续费或目的地址。设备额外强制：同一 ring 内成员不得重复、不同输入的 key image 不得重复。
-- **Masari type 3**：验证器已实现且默认关闭；用 `tools/fetch_masari_bulletproof_vector.py` 取到主网向量并通过自检后才可启用。
-- **子地址目的地址/找零**：XMR 的 `R=rD` 单目的地和 payload v3 additional-key 目的地会验证；MSR 仍拒绝。XMR 找零仍必须是设备重新派生并核对的本钱包地址；子地址输入消费与目的地址构造是不同路径。
-- **主网接收验收**：本地审查/签名回归不等于全节点会接收；广播后仍需手机侧节点验收。
-
-### 自测
-
-- `run_cryptonote_review_self_tests()`：额外公钥字段、交易公钥和输出绑定的篡改拒绝。
-- `run_cryptonote_signing_self_tests()`：完整请求 -> 审阅 -> 逐输入 CLSAG -> 序列化 -> 验证，另含子地址消费路径（与固定的 Monero 子地址向量交叉验证）。
-- `run_masari_self_tests()`：MLSAG 签名/验证、legacy ECDH 解码、真实 TX2 Borromean、type-2 端到端审阅/签名，以及 type 3 的 fail-closed 门禁（有向量时必须通过并拒绝篡改）。
-- 主机 `tests/host/build.ps1` 与设备 `device_compile_check.ps1` / `p4_runtime_compile_check.ps1` 都必须通过。
-
-不要把 `cryptonote-signing=pass` 或 `masari=pass` 解释为主网收发已验收。
-
-来源：[Monero v0.18.4.0 rctSigs.cpp](https://github.com/monero-project/monero/blob/v0.18.4.0/src/ringct/rctSigs.cpp)、[masari-project/masari](https://github.com/masari-project/masari)。
+The signing request, review fields and network limits are maintained in [Chain payloads](Chain-Payloads.md).
+The mainnet proof regressions below cover the cryptographic primitives shared by the transaction adapters.
 
 ## Monero Bulletproofs+ 独立回归
 
@@ -2027,7 +1675,6 @@ C++ 主机回归逐项比对证明及中间值；Python 回归核对校验和、
 
 ### 仍不是完整生产钱包
 
-这些结果证明所测 BP+ 样本与固定 Monero 参考算法兼容。它们不等于完成手机协议、可信屏幕授权、SE050C1 解封策略、节点验收、实机故障注入或安全审计。CryptoNote 对外签名仍受目录门禁保护。MSR 不能套用 XMR type-6 路径。
 
 ## Monero 主网交易回归
 

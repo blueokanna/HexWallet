@@ -40,7 +40,7 @@ namespace hexwallet
         {"ltc49", "LTC", "Litecoin Nested SegWit", 2, WalletCapabilityAddress, "ltc49", "P2SH-P2WPKH address and BIP143 signing"},
         {"ltc84", "LTC", "Litecoin Native SegWit", 2, WalletCapabilityAddress, "ltc84", "P2WPKH address and BIP143 signing"},
         {"doge", "DOGE", "Dogecoin", 3, WalletCapabilityAddress, "doge", "address only"},
-        {"dash", "DASH", "Dash", 5, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "dash", "P2PKH plain payments (type 0) through the Dash adapter; special transaction types refused; InstantSend lock state is node-side"},
+        {"dash", "DASH", "Dash", 5, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "dash", "Type-0 P2PKH payments with a funding proof per input, so the reviewed fee is computed rather than supplied; special transaction types refused; InstantSend is a host declaration shown on screen, and the lock itself is a quorum decision made after broadcast"},
         {"xlayer", "OKB", "X Layer", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "xlayer", "EIP-155/type-2 transfers; registered tokens only; additional L1 fees are not in the execution fee cap"},
         {"zksync", "ETH", "zkSync Era", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "zksync", "EIP-155/type-2 EOA transfers only; no type-113, paymasters or account abstraction"},
         {"eth", "ETH", "Ethereum", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "eth", "EVM address and token account support; EIP-155 signing"},
@@ -116,7 +116,6 @@ namespace hexwallet
         {"robinhood", "ETH", "Robinhood Chain", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "robinhood", "Arbitrum Orbit L2 chain 4663, native ETH, EIP-155 legacy transfers and registered token calls; no token contract is registered"},
         {"flare", "FLR", "Flare", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "flare", "EVM chain 14, native FLR, EIP-155 transfers and registered token calls"},
         {"xdc", "XDC", "XinFin Network", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "xdc", "EVM chain 50, native XDC, EIP-155 transfers and registered token calls"},
-        {"zen", "ZEN", "Horizen EON", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "zen", "EON EVM chain 7332, native ZEN; the Horizen mainchain is not this profile"},
         {"rose", "ROSE", "Oasis Sapphire", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "rose", "Sapphire EVM chain 23294, native ROSE; the Oasis consensus layer is not this profile"},
         {"merlin", "BTC", "Merlin Chain", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "merlin", "Bitcoin L2 EVM chain 4200 with BTC as the native gas asset; not Bitcoin mainnet"},
         {"bitlayer", "BTC", "Bitlayer", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "bitlayer", "Bitcoin L2 EVM chain 200901 with BTC as the native gas asset; not Bitcoin mainnet"},
@@ -131,6 +130,9 @@ namespace hexwallet
         {"icp", "ICP", "Internet Computer", 223, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "icp", "Ed25519 default ledger account; pinned ICP ledger Candid transfer and signed CBOR request; no arbitrary canisters or staking; not Ledger seed/path compatible"},
         {"dot", "DOT", "Polkadot", 354, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "dot", "Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005002/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update"},
         {"ksm", "KSM", "Kusama", 434, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ksm", "Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005001/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update"},
+        {"alph", "ALPH", "Alephium", 1234, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "alph", "Mainnet native ALPH P2PKH transfer with one recipient and optional change"},
+        {"quai", "QUAI", "Quai Cyprus-1", 994, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "quai", "Mainnet type 0 transfers within Cyprus-1. Supply the actual BIP44 child index selected by quais.js."},
+        {"quantus", "QTC", "Quantus ML-DSA-87", 189189, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "quantus", "Mainnet runtime 153/6, native balances transfers, ML-DSA-87 signed v4 extrinsics"},
         {"kas", "KAS", "Kaspa", 111111, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "kas", "Kaspa bech32 address; BIP340 Schnorr v0 transaction review and signing"},
         {"vtc", "VTC", "Vertcoin Legacy", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc", "P2PKH address and Bitcoin-sighash signing"},
         {"vtc49", "VTC", "Vertcoin Nested SegWit", 28, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "vtc49", "P2SH-P2WPKH address and BIP143 signing"},
@@ -139,10 +141,11 @@ namespace hexwallet
         {"grs", "GRS", "Groestlcoin", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs", "P2PKH spends signed over Bitcoin's legacy preimage with a single SHA-256 digest, which is what Groestlcoin Core finalises; the base58 checksum is double Groestl-512. Use grs49/grs84 for the segwit accounts"},
         {"grs49", "GRS", "Groestlcoin Nested SegWit", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs49", "P2SH-P2WPKH spends; BIP143 preimage with Groestlcoin's single-finalise writer on all four hashes"},
         {"grs84", "GRS", "Groestlcoin Native SegWit", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs84", "P2WPKH spends with grs1 bech32 addresses; BIP143 preimage with Groestlcoin's single-finalise writer on all four hashes"},
+        {"zeph", "ZEPH", "Zephyr", 128, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zeph", "Native ZPH-to-ZPH version 3, RingCT type 6, CLSAG; shared XMR spend/view derivation"},
         {"xmr", "XMR", "Monero", 128, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xmr", "RingCT type-6 review and CLSAG signing; fully offline, host supplies decoys"},
         {"ryo", "RYO", "RyoCurrency", 382, WalletCapabilityAddress, "ryo", "CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled"},
         {"zano", "ZANO", "Zano", 1018, WalletCapabilityAddress, "zano", "CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled"},
-        {"ae", "AE", "Aeternity", 457, WalletCapabilityAddress, "ae", "Ed25519 ak_ address at m/44'/457'/0'/0'/i'; receive/address verification only - native spend signing is not enabled"},
+        {"ae", "AE", "Aeternity", 457, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ae", "Ed25519 ak_ address at m/44'/457'/0'/0'/i'; SpendTx review and signing (canonical RLP, ae_mainnet domain prefix, blake2b-256 tx hash); name, oracle and contract recipients are refused"},
         {"trx", "TRX", "TRON", 195, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "trx", "native TRX and registered TRC-20 transfer signing; owner permission only, strict protobuf review"},
         {"xlm", "XLM", "Stellar", 148, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xlm", "SEP-0005; public-network XDR Payment/CreateAccount; G addresses and explicit memo review"},
         {"atom", "ATOM", "Cosmos Hub", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "atom", "Cosmos SDK native MsgSend; direct sign mode, strict protobuf review"},
@@ -168,9 +171,6 @@ namespace hexwallet
     WalletCatalogEntry resolved_entry(size_t index)
     {
       const CatalogSeed &seed = kCatalog[index];
-      // Deliberately uncached: the UI task and the signing worker can resolve
-      // entries on different cores, and a mutable table here was a data race
-      // for a lookup that costs one strcmp scan over a compile-time table.
       const NetworkProfile *network =
           seed.network_id == nullptr ? nullptr : find_network_profile(seed.network_id);
       uint8_t capabilities = seed.capabilities;
@@ -282,9 +282,6 @@ namespace hexwallet
       return (*a == *b) ? 0 : (*a == '\0' ? -1 : 1);
     }
 
-    // Sorted view of the catalog, built once. The UI task renders the list
-    // while the worker task signs, so the one-time build is published with an
-    // atomic state instead of a plain `static bool` flag.
     const uint16_t *sorted_order()
     {
       enum : uint8_t
@@ -320,8 +317,6 @@ namespace hexwallet
       }
       else
       {
-        // Another core is building the same immutable table; the sort is
-        // bounded by the catalog size and runs once per boot.
         while (state.load(std::memory_order_acquire) != kOrderReady)
         {
         }
@@ -351,8 +346,6 @@ namespace hexwallet
   {
     if (out == nullptr || id_or_symbol == nullptr)
       return false;
-    // Stable IDs take precedence over shared native tickers: "eth" must never
-    // select zkSync merely because its ETH row occurs earlier in the table.
     for (size_t index = 0; index < wallet_catalog_count(); ++index)
     {
       const WalletCatalogEntry entry = resolved_entry(index);
@@ -394,7 +387,6 @@ namespace hexwallet
     WalletCatalogEntry ethereum = {};
     if (!wallet_catalog_find("ETH", &ethereum) || strcmp(ethereum.id, "eth") != 0)
       return false;
-    // BNB is native on more than one registered chain. No first-row guessing.
     if (wallet_catalog_find("BNB", &ethereum))
       return false;
     for (size_t index = 0; index < wallet_catalog_count(); ++index)
@@ -429,11 +421,6 @@ namespace hexwallet
         const bool cosmos =
             entry.network->encoding == AddressEncoding::Bech32Cosmos &&
             cosmos_chain_params(entry.network->id) != nullptr;
-        // A CryptoNote signing claim is valid only when the firmware has a
-        // review policy for that network. Masari has no enabled policy, so a
-        // catalog entry that claimed its signing would fail here.
-        // Dash signs only through its own adapter, never through PSBT, so this
-        // claim is backed by the adapter rather than by a UTXO sighash policy.
         const bool dash =
             entry.network->encoding == AddressEncoding::P2pkh &&
             strcmp(entry.network->id, "dash") == 0;
@@ -478,26 +465,15 @@ namespace hexwallet
       if (signable)
         return false;
     }
-    // XMR stays supported; MSR must not return through a generated catalog.
-    bool xmr_signable = false;
-    bool msr_signable = false;
-    for (size_t index = 0; index < wallet_catalog_count(); ++index)
+    constexpr const char *private_networks[] = {"xmr", "zeph"};
+    for (const char *id : private_networks)
     {
-      const WalletCatalogEntry entry = resolved_entry(index);
-      if (entry.network == nullptr ||
-          entry.network->encoding != AddressEncoding::CryptoNote)
-      {
-        continue;
-      }
-      const bool signable =
-          wallet_catalog_has(entry, WalletCapabilitySigning) &&
-          cryptonote_review_policy(entry.network->id) != nullptr;
-      if (strcmp(entry.network->id, "xmr") == 0)
-        xmr_signable = signable;
-      if (strcmp(entry.network->id, "msr") == 0)
-        msr_signable = true;
+      WalletCatalogEntry entry{};
+      if (!wallet_catalog_find(id, &entry) || !wallet_catalog_has(entry, WalletCapabilitySigning) ||
+          cryptonote_review_policy(id) == nullptr)
+        return false;
     }
-    return xmr_signable && !msr_signable && cryptonote_review_policy("msr") == nullptr;
+    return true;
   }
 
 }

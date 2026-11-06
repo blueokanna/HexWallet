@@ -5,6 +5,14 @@
 主机怎么把交易交给设备，设备又还回什么。CLI 上一律是十六进制，手机链路上是带长度前缀的二进制；
 两边跑的是同一份解析代码。
 
+## Zephyr、Alephium 和 Quantus
+
+**Zephyr** 使用手机链路 `kind=5` 和 `coin_id=zeph`。设备要求普通 ZPH 输入和带 view tag 的 ZPH 输出，换币相关的报价高度、销毁量和铸造量必须为零。设备重建前缀并验证 BP+、输入归属、找零及 CLSAG。诱饵和未花费状态仍需节点确认。[主网测试交易](https://explorer.zephyrprotocol.com/tx/7e2f3d9d1b5deaf3db873d5fe5d6c54272d127a84aa04ddc18bd46e66a9a7c12)
+
+**Alephium** 的 `chain begin alph <index> <payload-hex>` 接收官方 SDK 的主网 UnsignedTx 字节。支持 1 至 16 个同一 P2PKH 密钥的输入、一个外部收款方及可选找零。拒绝脚本调用、代币、锁定输出、附加数据和重复输入。设备显示 ALPH 金额和 gas 费，签署 BLAKE2b-256 交易 ID，返回 64 字节低 S 签名。节点负责确认每个输出引用有效且未花费。[上游编码](https://github.com/alephium/alephium-web3/tree/c457e9f3959423b22ffa3e18dd0e14b1e26dcf20/packages/web3/src/codec)
+
+**Quantus** 的 `chain begin quantus <index> <payload-hex>` 接收官方顺序的 `call || extra || implicit`，固定主网创世哈希、spec 153 和 transaction 6。支持 balances 普通转账与保活转账，审阅小费与有效期。基础费用由 runtime 计算。签名携带 `QUANTUS_EXTRINSIC` 上下文，返回完整 v4 extrinsic。升级后的 runtime 需要重新核验。[官方签名实现](https://github.com/Quantus-Network/quantus-wasm/blob/04174ffca2e385ca64d45ee0c9523cc1dd36707d/src/ext.rs)
+
 ## 通用规则
 
 - 长度必须精确匹配。多余字节算错误，不当填充。
@@ -14,6 +22,26 @@
 - 设备返回的是已签名交易，不是裸签名；只有明确这样定义的适配器例外（HIVE 返回 65 字节 graphene 签名，
   XRP 返回签名后的二进制）。
 - 金额、手续费、nonce 全部由主机提供。设备只校验内部一致性和钱包归属，不校验链上是否存在。
+
+## Beam
+
+Beam 的设备端证明格式、双端命令及最终交易序列化见[原生交互转账](Beam-zh)。
+
+## Xelis 原生账户
+
+Xelis 的 24 个词直接编码 32 字节私钥，可附第 25 个校验词。当前恢复器支持英文和简体中文词表，检查校验词与标量范围。账户公钥为 `sk⁻¹·H`，普通主网地址前缀为 `xel:`。设备命令 `xelis check-address <address>` 检查校验和及压缩点，返回该外部地址的公钥。原生 Schnorr 签名通过独立向量验证。生产恢复入口、密文余额同步和机密转账证明仍待接入。[上游恢复格式](https://github.com/xelis-project/xelis-blockchain/blob/db59b5c246ab0e40386d6c241dcd77f0aea84b10/xelis_wallet/src/mnemonics/mod.rs)
+
+## Ethereum 代币授权
+
+授权审阅按链和合约区分同名 ABI。ERC-20 显示 spender 与额度，并区分无限额度和撤销。ERC-721 显示被授权的 token ID，ERC-721 和 ERC-1155 的整组授权明确区分授予与撤销。ENS Base Registrar 和 Name Wrapper 已按官方部署地址注册，并在同一以太坊主网区块 `0x1922794` 用 ERC-165 核对接口。[ENS 部署记录](https://docs.ens.domains/learn/deployments/)
+
+## Quai 账户转账
+
+`quai` 接受主网 Cyprus-1 的 type 0 转账。地址索引使用 quais.js 为该分片选中的实际子索引。设备按 `m/44'/994'/0'/0/index` 派生，并检查发送方和接收方均属于本区的 Quai 账户账本。
+
+主机提交 go-quai 的 `ProtoEncodeTxSigningData` 字节。按字段号顺序编码 type、to、nonce、value、gas、data、chain_id、gas_price、access_list。type 为 0，chain_id 为 9，data 和 access_list 显式编码为空。value 和 gas_price 为最短大端正整数。审阅显示转账额、nonce、gas 上限、单价和最高费用。确认后返回 65 字节 `r || s || yParity`，由主机组装交易。
+
+[go-quai](https://github.com/dominant-strategies/go-quai/blob/5917bf5e2ced1d3f1cafdde6bc6fa3345fb71c3e/core/types/transaction.go) · [Cyprus-1 type 0](https://quaiscan.io/tx/0x00060019fdf877647e4a9bab684b0c51732b590cb0ffebc058fb29702fe87f97)
 
 ## Bitcoin PSBT
 
@@ -90,7 +118,7 @@ if version >= 3:
   u8[32] additional_tx_secret[count]
 u8 input_count
 u8 output_count
-u8 flags                     bit0：每个输出带 mask（仅 MSR）；其余位必须为 0
+u8 flags                     保留字段，必须为 0
 input[input_count]
 output[output_count]
 ```
@@ -135,9 +163,48 @@ chain reject
 | DOT / KSM | `DOT2` 载荷，带短命期 era 和 tip；返回 v4 已签名 extrinsic |
 | XRP | 50 字节 Payment 审查结构；返回已签名二进制 |
 | THETA | 46 字节原生 `SendTx`；同一网络 id 也承载 EVM 转账 |
+| DASH | `DAS2`/`DAS3` 审查载荷，见下文 |
 | VET / ICX / TON / DCR / CKB / HIVE / SOL / TRX / XLM / ATOM 等 | 各家族自己的紧凑结构，带 magic 的写在 `<Name>Transaction.h` |
 
 签名前 `chain_sign_transaction()` 会重新跑一遍审查并逐字段比对。载荷和审查结果对不上，就不签。
+
+## Dash
+
+`DAS2` 和 `DAS3` 只差最后一个字节；两者都带每个输入的资助交易，这是"屏上的输入金额是真的"而不是主机文本的唯一依据。
+
+```text
+"DAS2" | "DAS3"
+u32 lock_time
+u8  input_count
+input_count * { u8[32] previous_txid, u32 previous_index, u32 sequence,
+                u64 value, u8 script_size + script,
+                u32 account, u8 change, u32 address_index }
+u8  output_count
+output_count * { u64 value, u8 script_size + script }
+input_count * { u16 funding_size, funding_transaction }
+u8  flags                     // 仅 DAS3；DAS2 视为 0
+```
+
+`flags` bit0 表示 InstantSend 意图。其它任何位都返回 `unsupported`：主机要求固件没实现的行为，
+必须在审查之前知道，而不是签完之后。
+
+每个资助交易必须是 type-0 Dash 交易，其 double-SHA256 等于 `previous_txid`，且 `previous_index`
+指向的输出金额等于 `value`、脚本等于 `script`。任何不匹配都是 `WrongWallet`。随后设备用被证明的值
+重算手续费，主机无法靠抬高输入金额把手续费藏起来。
+
+旧 `DASH` 载荷没有资助证明。它仍然可以解析，让旧主机收到明确的 `missing-field`，但永远不能签名。
+
+### InstantSend
+
+InstantSend 不给交易加任何字节：LLMQ 是在已签名字节存在之后锁输入的。设备没有可签的字段，也没有
+可校验的东西。所以这个声明就按"声明"处理：
+
+- bit0 置位时，可信屏幕显示"主机会求 InstantSend"，并说明锁是广播后由 quorum 决定的，未上锁的交易
+  不算确认；
+- 标志在被哈希的载荷里，手机无法在设备渲染审查之后加上或去掉它；
+- 带标志和不带标志签出的字节完全相同，这一点有测试断言。审查标志绝不能改变实际广播的内容。
+
+固件永远不会把 Dash 交易报告为已锁、已确认或已终局。
 
 ## 链路状态码
 

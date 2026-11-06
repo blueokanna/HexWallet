@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #ifndef HEXWALLET_LOOP_TASK_STACK_SIZE
 #define HEXWALLET_LOOP_TASK_STACK_SIZE (32 * 1024)
@@ -17,16 +19,18 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 #include "CryptoExtended.h"
 #include "src/EcdsaCurve.h"
 #include "Se051Apdu.h"
+#include "WalletAdmission.h"
 #include "WalletCatalog.h"
 #include "WalletCli.h"
 #include "WalletConfig.h"
 #include "CryptoPrimitives.h"
+#include "RandomSource.h"
+#include "Blake3.h"
 #include "CryptoNoteAddress.h"
 #include "CryptoNoteRingCt.h"
 #include "CryptoNoteSpend.h"
 #include "CryptoNoteTransaction.h"
 #include "CryptoNoteSigning.h"
-#include "CryptoNoteMasari.h"
 #include "EvmTransaction.h"
 #include "ZcashTransaction.h"
 #include "QrlXmss.h"
@@ -55,6 +59,7 @@ namespace
   {
     kCrypto = 0,
     kExtended,
+    kBlake3,
     kCryptonote,
     kCryptonoteRingCt,
     kCryptonoteTransaction,
@@ -63,6 +68,7 @@ namespace
     kQrl,
     kCustody,
     kCatalog,
+    kAdmission,
     kEvm,
     kBip39,
     kBip32,
@@ -100,6 +106,7 @@ namespace
   const char *const kSelfTestNames[kSelfTestCount] = {
       "crypto",
       "extended",
+      "blake3",
       "cryptonote",
       "cryptonote-ringct",
       "cryptonote-tx",
@@ -108,6 +115,7 @@ namespace
       "qrl",
       "custody",
       "catalog",
+      "admission",
       "evm",
       "bip39",
       "bip32",
@@ -161,6 +169,7 @@ namespace
     SelfTestReport *report = static_cast<SelfTestReport *>(context);
     report->passed[kCrypto] = hexwallet::run_crypto_self_tests();
     report->passed[kExtended] = hexwallet::run_crypto_extended_self_tests();
+    report->passed[kBlake3] = hexwallet::run_blake3_self_tests();
     report->passed[kCryptonote] = hexwallet::run_cryptonote_self_tests();
     report->passed[kCryptonoteRingCt] = hexwallet::run_cryptonote_ringct_self_tests();
     report->passed[kCryptonoteTransaction] = hexwallet::run_cryptonote_transaction_self_tests();
@@ -169,6 +178,7 @@ namespace
     report->passed[kQrl] = hexwallet::run_qrl_xmss_self_tests();
     report->passed[kCustody] = hexwallet::run_custody_self_tests();
     report->passed[kCatalog] = hexwallet::run_catalog_self_tests();
+    report->passed[kAdmission] = hexwallet::run_admission_self_tests();
     report->passed[kEvm] = hexwallet::run_evm_transaction_self_test();
     report->passed[kBip39] = hexwallet::run_bip39_self_test();
     report->passed[kBip32] = hexwallet::run_bip32_self_test();
@@ -218,7 +228,30 @@ namespace
 
   SelfTestReport self_test_report;
 
+#if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
+  struct SelfTestTask
+  {
+    SelfTestReport *report;
+    volatile bool finished;
+  };
+
+  void run_self_tests_task(void *context)
+  {
+    SelfTestTask *task = static_cast<SelfTestTask *>(context);
+    run_self_tests(task->report);
+    task->finished = true;
+    vTaskDelete(nullptr);
+  }
+#endif
+
 }
+
+// The loop task carries the serial CLI, the phone-link request path and the UI.
+// Measured with -fstack-usage on the xtensa toolchain, the deepest frames are
+// wallet_signing_begin_evm (4992 B) under the link's request handler (752 B) and
+// the CLI handlers at ~2.3 KB, against the 32 KB set by
+// SET_LOOP_TASK_STACK_SIZE above. device_compile_check.ps1 -StackBudget keeps
+// the loop-task half of that budget honest.
 
 void setup()
 {
@@ -226,13 +259,23 @@ void setup()
   Serial.enableReboot(false);
 #endif
   Serial.begin(115200);
+  if (!hexwallet::random_init_at_boot())
+  {
+    Serial.println("FATAL: hardware entropy unavailable; wallet services disabled");
+    return;
+  }
 
-  bool self_tests_queued = false;
 #if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
+  bool self_tests_queued = false;
   self_test_report = SelfTestReport{};
-  self_tests_queued = hexwallet::wallet_worker_start() &&
-                      hexwallet::wallet_worker_begin(run_self_tests,
-                                                     &self_test_report);
+  // The suite needs more stack than the worker task has, so it gets its own task
+  // sized by HEXWALLET_SELFTEST_STACK_BYTES instead of running inline in setup().
+  // The context is static so a timeout return cannot leave the task writing to a
+  // dead stack frame.
+  static SelfTestTask self_test_task = {&self_test_report, false};
+  self_tests_queued =
+      xTaskCreate(run_self_tests_task, "hexwallet-selftest", HEXWALLET_SELFTEST_STACK_BYTES,
+                  &self_test_task, 1, nullptr) == pdPASS;
 #endif
 
   display_available = hexwallet::board_display_init();
@@ -268,26 +311,24 @@ void setup()
   }
 
 #if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
-  if (self_tests_queued)
+  if (!self_tests_queued)
+  {
+    Serial.println("FATAL: self-test task could not start; wallet services disabled");
+    return;
+  }
+  if (display_available)
+    hexwallet::wallet_ui_show_busy("Running self-tests...");
+  const uint32_t self_test_started = millis();
+  while (!self_test_task.finished)
   {
     if (display_available)
-      hexwallet::wallet_ui_show_busy("Running self-tests...");
-    const uint32_t self_test_started = millis();
-    while (!hexwallet::wallet_worker_wait(0))
+      hexwallet::wallet_ui_service();
+    if (static_cast<uint32_t>(millis() - self_test_started) >= HEXWALLET_SELFTEST_TIMEOUT_MS)
     {
-      if (display_available)
-        hexwallet::wallet_ui_service();
-      if (static_cast<uint32_t>(millis() - self_test_started) >= HEXWALLET_SELFTEST_TIMEOUT_MS)
-      {
-        Serial.println("FATAL: self-test did not finish; wallet services disabled");
-        return;
-      }
-      delay(1);
+      Serial.println("FATAL: self-test did not finish; wallet services disabled");
+      return;
     }
-  }
-  else
-  {
-    run_self_tests(&self_test_report);
+    delay(1);
   }
   print_self_test_report(self_test_report);
   if (!self_test_report.all_passed())

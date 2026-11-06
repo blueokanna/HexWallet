@@ -25,6 +25,11 @@ struct WalletTransportState {
   bool authenticated;
   bool paired;
   bool trusted_display;
+  // Set when the battery monitor reports a critical pack. A signing burst pulls
+  // more current than idle, and a brown-out in the middle of a signature is worse
+  // than refusing the request, so the policy closes the signing surface instead
+  // of leaving it to each adapter to remember.
+  bool battery_critical;
 };
 
 bool wallet_transport_allows(WalletTransport transport,

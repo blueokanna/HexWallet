@@ -118,6 +118,11 @@ Response.payload = request_id(4) | status(1) | data…
 CKB, ADA, HIVE, SUI, FIL, DOT, KSM), 15 Dash. `BEGIN_SIGN` accepts up to 16384 bytes; anything
 larger is `invalid`, never truncated. The review expires after 120 seconds.
 
+Kind 15 takes a `DAS2` or `DAS3` payload. Both must carry every input's funding transaction; `DAS3`
+adds one flags byte whose bit 0 declares InstantSend intent. The device shows that declaration, says
+the lock is a quorum decision it cannot verify, and produces the same signed bytes either way. See
+[Chain-Payloads](Chain-Payloads#dash).
+
 Address derivation and signing need an unlocked wallet session. Unlock happens over the USB CLI
 (`auth begin`, `auth unlock`); the link itself never carries a PIN. `ADDRESS` never returns a private
 key, and adapters whose key generation is too expensive for the link are refused there.

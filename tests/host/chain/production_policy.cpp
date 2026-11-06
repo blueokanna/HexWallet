@@ -10,6 +10,8 @@
 #include "QrlXmss.h"
 #include "StarknetTransaction.h"
 #include "SecureElementPort.h"
+#include "RandomSource.h"
+#include <bootloader_random.h>
 
 using namespace hexwallet;
 static bool zero(const void *v, size_t n) {
@@ -19,7 +21,32 @@ static bool zero(const void *v, size_t n) {
 }
 #define CHECK(condition) do { if (!(condition)) { \
   printf("FAIL line=%d: %s\n", __LINE__, #condition); return 1; } } while (0)
-int main() {
+int main(int argc, char **argv) {
+  uint8_t sample[32];
+  memset(sample, 0xa5, sizeof(sample));
+  CHECK(!random_healthy() && !random_fill_checked(sample, sizeof(sample)) && zero(sample, sizeof(sample)));
+  if (argc == 2) {
+    CHECK(strlen(argv[1]) == 1 && argv[1][0] >= '1' && argv[1][0] <= '3');
+    boot_entropy_test::fail_on = argv[1][0] - '0';
+    CHECK(!random_init_at_boot() && !random_healthy());
+    CHECK(!boot_entropy_test::adc_enabled && boot_entropy_test::reads == boot_entropy_test::fail_on);
+    CHECK(!random_init_at_boot() && boot_entropy_test::starts == 1);
+    char mnemonic[256];
+    memset(mnemonic, 0xa5, sizeof(mnemonic));
+    CHECK(bip39_generate_english_24(mnemonic, sizeof(mnemonic)) == WalletError::RandomFailure);
+    CHECK(zero(mnemonic, sizeof(mnemonic)) && random_stats().health_failures == 1);
+    puts("boot-entropy-failure=pass");
+    return 0;
+  }
+  CHECK(argc == 1 && random_init_at_boot() && random_init_at_boot() && random_healthy());
+  CHECK(!boot_entropy_test::adc_enabled && boot_entropy_test::reads == 3 && boot_entropy_test::starts == 1);
+  // Entropy 00..1f, nonce 20..3f, reseed 40..5f. First Generate, no additional input.
+  static const uint8_t expected[] = {
+    0xe7,0x97,0xaa,0xae,0xbe,0x4b,0x99,0xaf,0xef,0x65,0xdb,0xd2,0x4e,0x9c,0xec,0x96,
+    0xe6,0x04,0xec,0xf2,0x1e,0x19,0x44,0x36,0x06,0x4f,0xb3,0x71,0xd7,0x13,0x4d,0x2b
+  };
+  CHECK(!random_reseed() && random_fill_checked(sample, sizeof(sample)) && !memcmp(sample, expected, sizeof(sample)));
+  puts("boot-entropy-drbg=pass");
   HdPrivateNode master{};
   uint8_t seed[kSeedSize]{};
   CHECK(!secure_custody_backend_ready());

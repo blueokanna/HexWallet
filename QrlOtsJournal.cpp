@@ -92,7 +92,6 @@ namespace hexwallet
       }
       return state;
     }
-
     QrlOtsError write_journal(QrlOtsStorage &storage,
                               const QrlOtsRecord &record)
     {

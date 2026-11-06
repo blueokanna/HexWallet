@@ -256,12 +256,8 @@ namespace hexwallet
     WipeOnExit wipe_entropy(entropy, sizeof(entropy));
     WipeOnExit wipe_digest(digest, sizeof(digest));
     WipeOnExit wipe_bits(bits, sizeof(bits));
-    // A seed must never be derived from a source that failed its own health
-    // tests; random_fill() zeroes the buffer in that case, so refuse here instead
-    // of turning 32 zero bytes into a deterministic mnemonic.
-    if (!random_healthy())
-      return WalletError::CryptoFailure;
-    random_fill(entropy, sizeof(entropy));
+    if (!random_fill_checked(entropy, sizeof(entropy)))
+      return WalletError::RandomFailure;
     if (!crypto_sha256(entropy, sizeof(entropy), digest))
     {
       secure_zero(entropy, sizeof(entropy));

@@ -3,7 +3,12 @@
 #include <esp_random.h>
 #include <string.h>
 
-#include <atomic>
+#include <mutex>
+
+#if (defined(ARDUINO_ARCH_ESP32) && !defined(HEXWALLET_HOST_TEST)) || defined(HEXWALLET_TEST_BOOT_ENTROPY)
+#include <bootloader_random.h>
+#define HEXWALLET_BOOT_ENTROPY 1
+#endif
 
 #include "CryptoPrimitives.h"
 #include "WalletSecurity.h"
@@ -39,30 +44,13 @@ namespace hexwallet
 
     HealthState g_health;
 
-#if !defined(HEXWALLET_HOST_TEST)
-    std::atomic_flag g_lock = ATOMIC_FLAG_INIT;
-    struct Lock
-    {
-      Lock()
-      {
-        while (g_lock.test_and_set(std::memory_order_acquire))
-        {
-        }
-      }
-      ~Lock() { g_lock.clear(std::memory_order_release); }
-    };
-#else
-    struct Lock
-    {
-      Lock() {}
-      ~Lock() {}
-    };
-#endif
+    std::mutex g_lock;
 
-    void drbg_update(const uint8_t *data, size_t size)
+    bool drbg_update(const uint8_t *data, size_t size)
     {
       uint8_t buffer[kKeySize + 1 + 3 * kBlockSize];
       uint8_t digest[kSha256Size];
+      bool ok = true;
       for (uint8_t separator = 0; separator < 2; ++separator)
       {
         if (separator == 1 && size == 0)
@@ -75,13 +63,17 @@ namespace hexwallet
           memcpy(buffer + length, data, size);
           length += size;
         }
-        crypto_hmac_sha256(g_drbg.key, kKeySize, buffer, length, digest);
+        ok = crypto_hmac_sha256(g_drbg.key, kKeySize, buffer, length, digest);
+        if (!ok) break;
         memcpy(g_drbg.key, digest, kKeySize);
-        crypto_hmac_sha256(g_drbg.key, kKeySize, g_drbg.value, kKeySize, digest);
+        ok = crypto_hmac_sha256(g_drbg.key, kKeySize, g_drbg.value, kKeySize, digest);
+        if (!ok) break;
         memcpy(g_drbg.value, digest, kKeySize);
       }
       secure_zero(buffer, sizeof(buffer));
       secure_zero(digest, sizeof(digest));
+      if (!ok) g_stats.healthy = false;
+      return ok;
     }
 
     bool block_looks_random(const uint8_t block[kBlockSize])
@@ -133,6 +125,7 @@ namespace hexwallet
       if (!health_test(g_health, out))
       {
         g_stats.healthy = false;
+        ++g_stats.health_failures;
         secure_zero(out, kBlockSize);
         return false;
       }
@@ -145,25 +138,24 @@ namespace hexwallet
       uint8_t nonce[kBlockSize];
       if (!read_entropy(entropy))
         return false;
-      esp_fill_random(nonce, sizeof(nonce));
-      if (!health_test(g_health, nonce))
+      if (!read_entropy(nonce))
       {
-        g_stats.healthy = false;
         secure_zero(entropy, sizeof(entropy));
+        secure_zero(nonce, sizeof(nonce));
         return false;
       }
       memset(&g_drbg, 0, sizeof(g_drbg));
+      memset(g_drbg.value, 0x01, sizeof(g_drbg.value));
       uint8_t seed[kBlockSize * 2];
       memcpy(seed, entropy, kBlockSize);
       memcpy(seed + kBlockSize, nonce, kBlockSize);
-      drbg_update(seed, sizeof(seed));
-      g_drbg.instantiated = true;
+      g_drbg.instantiated = drbg_update(seed, sizeof(seed));
       g_drbg.since_reseed = 0;
-      ++g_stats.reseeds;
+      if (g_drbg.instantiated) ++g_stats.reseeds;
       secure_zero(entropy, sizeof(entropy));
       secure_zero(nonce, sizeof(nonce));
       secure_zero(seed, sizeof(seed));
-      return true;
+      return g_drbg.instantiated;
     }
 
     bool reseed()
@@ -171,11 +163,11 @@ namespace hexwallet
       uint8_t entropy[kBlockSize];
       if (!read_entropy(entropy))
         return false;
-      drbg_update(entropy, sizeof(entropy));
+      const bool ok = drbg_update(entropy, sizeof(entropy));
       g_drbg.since_reseed = 0;
-      ++g_stats.reseeds;
+      if (ok) ++g_stats.reseeds;
       secure_zero(entropy, sizeof(entropy));
-      return true;
+      return ok;
     }
 
     bool generate(uint8_t *out, size_t size)
@@ -183,82 +175,125 @@ namespace hexwallet
       uint8_t block[kBlockSize];
       while (size != 0)
       {
-        crypto_hmac_sha256(g_drbg.key, kKeySize, g_drbg.value, kKeySize, block);
+        if (!crypto_hmac_sha256(g_drbg.key, kKeySize, g_drbg.value, kKeySize, block)) {
+          secure_zero(block, sizeof(block));
+          g_stats.healthy = false;
+          return false;
+        }
         memcpy(g_drbg.value, block, kBlockSize);
         const size_t take = size < kBlockSize ? size : kBlockSize;
         memcpy(out, block, take);
         out += take;
         size -= take;
       }
-      drbg_update(nullptr, 0);
       secure_zero(block, sizeof(block));
-      return true;
+      return drbg_update(nullptr, 0);
     }
 
   } // namespace
 
-  bool random_healthy()
+  bool random_init_at_boot()
   {
-    return g_stats.healthy;
+    std::lock_guard<std::mutex> lock(g_lock);
+    if (!g_stats.healthy || g_drbg.instantiated)
+      return g_stats.healthy && g_drbg.instantiated;
+#if HEXWALLET_BOOT_ENTROPY
+    // setup() owns the SAR ADC here, before the battery ADC, radios or
+    // worker tasks start. Never reconfigure it from a signing operation.
+    bootloader_random_enable();
+#endif
+    const bool ok = instantiate() && reseed();
+#if HEXWALLET_BOOT_ENTROPY
+    bootloader_random_disable();
+#endif
+    if (!ok) ++g_stats.entropy_failures;
+    return ok;
   }
 
-  const RandomStats &random_stats()
+  bool random_healthy()
   {
+    std::lock_guard<std::mutex> lock(g_lock);
+#if HEXWALLET_BOOT_ENTROPY
+    return g_stats.healthy && g_drbg.instantiated;
+#else
+    return g_stats.healthy;
+#endif
+  }
+
+  RandomStats random_stats()
+  {
+    std::lock_guard<std::mutex> lock(g_lock);
     return g_stats;
   }
 
   bool random_reseed()
   {
-    Lock lock;
+    std::lock_guard<std::mutex> lock(g_lock);
+#if HEXWALLET_BOOT_ENTROPY
+    // A running board cannot guarantee exclusive access to the entropy ADC.
+    // A reboot provides the next physical seed.
+    return false;
+#else
     if (!g_stats.healthy)
       return false;
     if (!g_drbg.instantiated)
       return instantiate();
     return reseed();
+#endif
   }
 
   void random_fill(void *out, size_t size)
   {
+    (void)random_fill_checked(out, size);
+  }
+
+  bool random_fill_checked(void *out, size_t size)
+  {
     if (out == nullptr || size == 0)
-      return;
+      return false;
+    std::lock_guard<std::mutex> lock(g_lock);
     if (size > kMaxRequestSize)
     {
       // No wallet operation needs this much. Refuse the request, but do not
       // latch the source unhealthy: a caller bug is not an entropy failure.
       secure_zero(out, size);
       ++g_stats.oversized_requests;
-      return;
+      return false;
     }
-    Lock lock;
+    if (!g_stats.healthy) {
+      secure_zero(out, size);
+      return false;
+    }
+#if HEXWALLET_BOOT_ENTROPY
+    if (!g_drbg.instantiated || g_drbg.since_reseed >= kReseedInterval)
+    {
+      secure_zero(out, size);
+      if (g_drbg.instantiated) g_stats.healthy = false;
+      return false;
+    }
+#else
     if (g_drbg.instantiated && g_drbg.since_reseed >= kReseedInterval)
     {
       if (!reseed())
       {
         secure_zero(out, size);
-        return;
+        return false;
       }
     }
-    if (!g_drbg.instantiated)
-    {
-      if (g_stats.healthy && !instantiate())
-      {
-        secure_zero(out, size);
-        ++g_stats.entropy_failures;
-        return;
-      }
-      if (!g_drbg.instantiated)
-      {
-        secure_zero(out, size);
-        return;
-      }
+    if (!g_drbg.instantiated && !instantiate()) {
+      secure_zero(out, size);
+      ++g_stats.entropy_failures;
+      return false;
     }
+#endif
     if (!generate(static_cast<uint8_t *>(out), size))
     {
       secure_zero(out, size);
-      return;
+      return false;
     }
     ++g_drbg.since_reseed;
     ++g_stats.requests;
+    return true;
   }
 
   uint32_t random_u32()
@@ -283,17 +318,18 @@ namespace hexwallet
     passed = random_healthy() && passed;
     passed = random_stats().requests >= 2 && passed;
 
-    // Reseeding must change the following output.
-    // Reseeding must change the following output.
     uint8_t before[32];
     uint8_t after[32];
     random_fill(before, sizeof(before));
+#if HEXWALLET_BOOT_ENTROPY
+    passed = !random_reseed() && passed;
+#else
     passed = random_reseed() && passed;
+#endif
     random_fill(after, sizeof(after));
     passed = memcmp(before, after, sizeof(before)) != 0 && passed;
     passed = random_stats().reseeds >= 2 && passed;
 
-    // Zero-length and oversized requests must not corrupt the stream or the gate.
     // Zero-length and oversized requests must not corrupt the stream or the gate.
     random_fill(nullptr, 16);
     random_fill(first, 0);

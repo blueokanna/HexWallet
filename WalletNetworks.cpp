@@ -137,11 +137,9 @@ namespace hexwallet
       // support; the type-2 allowlist below is the narrower gate.
       {"robinhood", "ETH", "Robinhood Chain", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 4663, 0, 0, nullptr},
       // Chain IDs verified by eth_chainId against each network's official RPC:
-      // Flare 0xe (14), XinFin 0x32 (50), Horizen EON 0x1ca4 (7332),
-      // Oasis Sapphire 0x5afe (23294). Native coins are FLR, XDC, ZEN, ROSE.
+      // Flare 0xe (14), XinFin 0x32 (50), Oasis Sapphire 0x5afe (23294).
       {"flare", "FLR", "Flare", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 14, 0, 0, nullptr},
       {"xdc", "XDC", "XinFin Network", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 50, 0, 0, nullptr},
-      {"zen", "ZEN", "Horizen EON", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 7332, 0, 0, nullptr},
       {"rose", "ROSE", "Oasis Sapphire", 60, 60, 44, DerivationStyle::Bip44, AddressEncoding::Evm, {0, 0, nullptr, false}, 0, 23294, 0, 0, nullptr},
       // Merlin and Bitlayer are Bitcoin L2s whose EVM gas asset is BTC:
       // docs.merlinchain.io mainnet table and docs.bitlayer.org PoS networks
@@ -153,6 +151,14 @@ namespace hexwallet
       {"trx", "TRX", "TRON", 195, 195, 44, DerivationStyle::Bip44, AddressEncoding::Tron, {0, 0, nullptr, false}, 0x41, 0, 0, 0, nullptr},
       {"xlm", "XLM", "Stellar", 148, 148, 44, DerivationStyle::StellarSep5, AddressEncoding::StellarStrKey, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"xmr", "XMR", "Monero", 128, 128, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 18, 0, 0, 0, nullptr, 19, 42, false},
+      // Zephyr is a Monero fork: same CryptoNote address body, same 12 decimals,
+      // five-byte prefixes from ZephyrProtocol/zephyr src/cryptonote_config.h.
+      // SLIP-0044 has no ZEPH entry, so the derivation deliberately reuses
+      // Monero's 128 (owner decision): for a given account/index the spend and
+      // view keys are identical to XMR's, and only the prefix makes the address
+      // different. The transaction policy binds Zephyr's v3 wire format and
+      // native asset fields independently of the shared key derivation.
+      {"zeph", "ZEPH", "Zephyr", 128, 128, 44, DerivationStyle::Bip44, AddressEncoding::CryptoNote, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, false, 0, &kZephyrMainnet},
       // RyoCurrency (SLIP-0044 382) and Zano (SLIP-0044 1018) use the same
       // two-key CryptoNote address body as Monero, but their prefixes are
       // multi-byte varints and therefore live in the 64-bit profile below.
@@ -163,6 +169,9 @@ namespace hexwallet
       // checksum; see aeserialization/src/aeser_api_encoder.erl.
       {"ae", "AE", "Aeternity", 457, 457, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::Aeternity, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       // --- New multi-coin support (SLIP-0044) --------------------------------
+      {"alph", "ALPH", "Alephium", 1234, 1234, 44, DerivationStyle::Bip44, AddressEncoding::AlephiumP2pkh, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
+      {"quai", "QUAI", "Quai Cyprus-1", 994, 994, 44, DerivationStyle::Bip44, AddressEncoding::QuaiCyprus1, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, true},
+      {"quantus", "QTC", "Quantus ML-DSA-87", 189189, 189189, 44, DerivationStyle::AllHardenedBip44, AddressEncoding::QuantusMlDsa87, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr, 0, 0, true},
       {"kas", "KAS", "Kaspa", 111111, 111111, 44, DerivationStyle::Bip44, AddressEncoding::KaspaBech32, {0, 0, nullptr, false}, 0, 0, 0, 0, nullptr},
       {"zec", "ZEC", "Zcash (transparent)", 133, 133, 44, DerivationStyle::Bip44, AddressEncoding::ZcashTransparent, {0, 0, nullptr, false}, 0, 0, 0x1cb8, 0x1cbd, nullptr},
       // ZERO (ZER) is a Zcash fork (zerocurrency.io, github.com/zerocurrencycoin/Zero).
@@ -439,7 +448,6 @@ namespace hexwallet
     const NetworkProfile *bsc = find_network_profile("bsc");
     const NetworkProfile *conflux = find_network_profile("cfx");
     const NetworkProfile *monero = find_network_profile("xmr");
-    const NetworkProfile *masari = find_network_profile("msr");
     const NetworkProfile *kaspa = find_network_profile("kas");
     const NetworkProfile *algorand = find_network_profile("algo");
     const NetworkProfile *solana = find_network_profile("sol");
@@ -747,12 +755,6 @@ namespace hexwallet
         {
           return false;
         }
-        // Groestlcoin's spine is its address encoding, not its spend type: all
-        // three accounts (legacy, nested, native) share 0x24/0x05/"grs" and
-        // differ only in derivation and address form. A policy row must not be
-        // able to point another chain at that encoding, and a Groestlcoin
-        // profile must not be signable under Bitcoin rules - that combination
-        // would render a GRS address and sign a Bitcoin digest.
         const bool groestl_profile =
             network->utxo.p2pkh_version == kGroestlcoinMainnet.p2pkh_version &&
             network->utxo.p2sh_version == kGroestlcoinMainnet.p2sh_version &&
@@ -771,7 +773,6 @@ namespace hexwallet
         }
       }
     }
-    // Peercoin v<3 transactions serialize nTime; the Bitcoin legacy path cannot sign them.
     if (find_network_signing_policy("ppc") != nullptr)
       return false;
 #if defined(HEXWALLET_HOST_TEST)
@@ -799,13 +800,10 @@ namespace hexwallet
         rootstock == nullptr || rootstock->evm_chain_id != 30 ||
         monero == nullptr || monero->account_version != 18 ||
         monero->cryptonote_integrated_prefix != 19 ||
-        monero->cryptonote_subaddress_prefix != 42 || masari != nullptr ||
+        monero->cryptonote_subaddress_prefix != 42 ||
         zcash == nullptr || zcash->encoding != AddressEncoding::ZcashTransparent ||
         zcash->alt_p2pkh_version != 0x1cb8 || zcash->alt_p2sh_version != 0x1cbd ||
         zcash_policy == nullptr || zcash_policy->branch_id != 0x5437f330 ||
-        // ZERO is the second transparent Zcash lineage: same version bytes, its
-        // own branch id. Pairing one chain's address bytes with the other's
-        // branch id would produce a signature no node accepts.
         zero == nullptr || zero->encoding != AddressEncoding::ZcashTransparent ||
         zero->alt_p2pkh_version != 0x1cb8 || zero->alt_p2sh_version != 0x1cbd ||
         zero->derivation_coin_type != 323 || zero_policy == nullptr ||

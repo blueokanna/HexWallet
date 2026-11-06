@@ -33,9 +33,9 @@ def snapshot_digest(snapshot):
 
 def active_rows(snapshot):
     result = {}
-    graveyard = snapshot["GRAVEYARD"]
-    if not isinstance(graveyard, dict) or not graveyard:
-        raise ValueError("missing GRAVEYARD data")
+    retired = snapshot["GRAVEYARD"]
+    if not isinstance(retired, dict) or not retired:
+        raise ValueError("missing retired asset data")
     for group, coins in snapshot.items():
         if group in ("time", "GRAVEYARD"):
             continue
@@ -45,7 +45,7 @@ def active_rows(snapshot):
         if category not in TYPES or not separator or not isinstance(coins, dict):
             raise ValueError(f"unknown category: {group}")
         for slug, coin in coins.items():
-            if slug in result or slug in graveyard:
+            if slug in result or slug in retired:
                 raise ValueError(f"duplicate/retired source ID: {slug}")
             if not slug or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for c in slug):
                 raise ValueError(f"invalid source ID: {slug}")
@@ -147,9 +147,6 @@ def main():
     snapshot = read_json(snapshot_path)
     if snapshot_digest(snapshot) != metadata["canonical_sha256"]:
         raise ValueError("snapshot hash differs from reviewed manifest")
-    graveyard = read_json(ROOT / "tools/miningpoolstats_graveyard.json")
-    if graveyard["coins"] != snapshot["GRAVEYARD"] or graveyard["source"] != metadata["source"]:
-        raise ValueError("GRAVEYARD and active snapshot disagree")
     active = active_rows(snapshot)
     output = subprocess.run([str(args.catalog.resolve()), "--native"], check=True,
                             capture_output=True, text=True, encoding="utf-8").stdout

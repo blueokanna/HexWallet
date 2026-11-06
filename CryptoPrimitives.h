@@ -42,6 +42,7 @@ bool crypto_hash160(const uint8_t *data, size_t size, uint8_t out[kRipemd160Size
 bool crypto_keccak256(const uint8_t *data, size_t size, uint8_t out[kKeccak256Size]);
 // Legacy Keccak-512 (0x01 padding), required by CryptoNote subaddresses.
 bool crypto_keccak512(const uint8_t *data, size_t size, uint8_t out[kKeccak512Size]);
+bool crypto_sha3_512(const uint8_t *data, size_t size, uint8_t out[64]);
 // FIPS 202 SHAKE-256 (0x1F padding), arbitrary output length.
 bool crypto_shake256(const uint8_t *data, size_t size, uint8_t *out, size_t out_size);
 // FIPS 202 SHAKE-128 (rate 168), used by ML-DSA's ExpandA.

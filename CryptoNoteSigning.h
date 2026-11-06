@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "CryptoNoteMasari.h"
 #include "CryptoNoteReview.h"
 #include "CryptoNoteTransaction.h"
 #include "WalletSecurity.h"
@@ -52,9 +51,6 @@ namespace hexwallet
     uint8_t spend_public[kCryptoNoteKeySize];
     uint8_t view_public[kCryptoNoteKeySize];
     uint64_t amount;
-    // Masari RCT type 1 (full) needs every output blinding factor for its
-    // single MLSAG. Unused by the Monero type-6 path.
-    uint8_t mask[kCryptoNoteKeySize];
     // Reserved output indices: both must be zero until subaddress sends have
     // independent transaction and receiver-scanning evidence.
     uint32_t subaddress_major;
@@ -67,10 +63,7 @@ namespace hexwallet
   struct CryptoNoteSigningState
   {
     CryptoNoteReviewNetwork network;
-    union {
-      CryptoNoteTransaction monero;
-      MasariTransaction masari;
-    } chain;
+    CryptoNoteTransaction transaction;
     uint8_t tx_secret[kCryptoNoteKeySize];
     uint8_t additional_tx_key_count;
     uint8_t additional_tx_secrets[kCryptoNoteMaxSignOutputs][kCryptoNoteKeySize];

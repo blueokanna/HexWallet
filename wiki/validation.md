@@ -138,11 +138,9 @@ Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512
 - 这套自检抓出两个真 bug：`add_mod()` 在 `a+b ≥ 2^256` 时用“减模数”处理进位，正确做法是
   加 `2^256 − modulus`（可观测后果是 `3α` 少 2，公钥直接错）；签名 `s` 曾写成
   `k·(e+rd)^{-1}`，应为 `(e+rd)·k^{-1}`。两者都由 KAT 钉死，不靠人工审查发现。
-- `tests/host/build.ps1` 改为在仓库根目录执行测试二进制：Masari 向量按
-  `tests/fixtures/...` 相对路径打开，从 `tests/host` 启动会误报 `masari-stage=55`。
 - 认证部分的实现边界（TOTP 账户表、USB/NFC 传输、CTAPHID 只到传输层、没有 CTAP2 命令）
   单独记在 [authentication-status.md](authentication-status.md)，不在这里重复宣称能力。
-- 回归：`build.ps1` 全项通过（含 `eink-panel=pass`、`p256-ecdsa=pass`、`masari=pass`）；
+- 回归：`build.ps1` 全项通过（含 `eink-panel=pass`、`p256-ecdsa=pass`）；
   `build_chain_native.ps1`、`build_clang_ubsan.ps1`、`policy_check.ps1` 通过；
   `device_compile_check.ps1 -Target esp32p4` 全源编译通过。`epd_driver_compile_check.ps1`
   需要外部 GxEPD2 检出（`build/epd-deps/GxEPD2`），本机没有该目录，因此这一项未运行。
@@ -282,7 +280,7 @@ Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512
   该套测试使用 host crypto shim；原生 Mbed TLS 的 chain-selftest 和 EVM 独立向量另行通过。
 - P4 核心编译、真实 P4 Arduino 签名编排编译，以及六种板型的真实 LVGL 9.5
   头文件编译通过。编译成功不代表已经完成固件整包链接、真实显示或烧录测试。
-- `policy_check.ps1`：143 个 graveyard 身份、五张注册表检查通过，名单日期仍为
+- `policy_check.ps1`：143 个 已撤回资产 身份、五张注册表检查通过，名单日期仍为
   2026-10-23。递归扫描漏检和缺少生产策略二进制时错误放行的回归检查通过。
 - NXP 固定版本的 Arduino Wire 端口已通过故障注入单测和 P4 编译；这不包括
   实际 SCP03 配钥、applet 会话或非导出钱包密钥托管。详见 [SE051 状态](se051-integration.md)。
@@ -315,7 +313,7 @@ Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512
 - **RyoCurrency**：CryptoNote long address 的 3 字节 varint 前缀 `0x2ce192` 已用官方 `cryptonote_config.h` 和 dev-fund 地址逐字节复核；`RYoL...` 向量在 `run_cryptonote_self_tests()`。
 - **Zano**：直接复现 `hyle-team/zano/tests/unit_tests/base58.cpp` 的 `ZxDqHy6...` 向量；`0xc5` 前缀和双密钥 body 一致。
 - 这三条链**没有**交易审阅/签名路径，目录能力只有 `ADDRESS`。不要把地址可用当成收付可用。
-- Beam / Grin / MimbleWimbleCoin / Epic Cash 没有静态链上地址；SERO 是 superzk 公钥包；Swap / Evolution / VeriBlock 没有 SLIP-0044 coin type。原因与拒绝策略见 [chain-protocols.md](chain-protocols.md#aeternity-ryocurrency-和-zano--address-profiles-only)。
+- Beam / Grin / MimbleWimbleCoin / Epic Cash 没有静态链上地址；Swap / Evolution / VeriBlock 没有 SLIP-0044 coin type。原因与拒绝策略见 [chain-protocols.md](chain-protocols.md#aeternity-ryocurrency-和-zano--address-profiles-only)。
 
 ## 2026-10-23 验证记录
 
@@ -338,23 +336,20 @@ Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512
 ### 修复与拒绝边界
 
 - worker 超时不会释放仍被任务借用的栈对象、密钥或交易缓冲区。结果过期后等待任务结束，再清除数据；超时签名不会返回给手机。等待期间服务 UI，不接收新的签名请求。
-- XMR/MSR 签名也在 worker 执行。worker 不可用时拒绝请求，不在主循环的小栈上重试。
+- XMR 签名也在 worker 执行。worker 不可用时拒绝请求，不在主循环的小栈上重试。
 - 新的签名请求先使旧批准失效；拒绝时清除请求内容。无效参数会清除 CryptoNote 签名状态。
 - 无法生成完整目的地址时不显示批准按钮；签名输出数量不能超过显示容量。
 - 审阅检查完整 `extra`，拒绝重复交易公钥、重复附加公钥向量、未知字段、重复 nonce、截断字段和非法填充；XMR payload v3 会继续逐项验证 additional public key 与秘密、公钥和输出索引的绑定。
-- XMR 标准输出和找零使用 `R = rG`；单一子地址目的地使用已绑定的 `R = rD`，混合/多目的地使用 payload v3 的逐输出 additional transaction-key 绑定。设备核对 `tx_extra` 公钥、输出索引、金额密文、view tag 和 commitment；MSR 子地址输出仍拒绝。子地址输入消费保留。
 
 ### 尚未完成
 
-币种范围以 `coin-coverage.md` 为准。SIGN 只表示目录声明签名入口，并不表示全部交易类型可用。SOL、ADA、DOT、FIL、XCH、DCR、FIRO、FLUX 等仍缺已接入的交易适配器；不能用地址原语代替发送支持。
+币种范围以 `coin-coverage.md` 为准。SIGN 只表示目录声明签名入口，并不表示全部交易类型可用。SOL、ADA、DOT、FIL、XCH、DCR、FIRO 等仍缺已接入的交易适配器；不能用地址原语代替发送支持。
 
-MSR RCT type 3 默认关闭。Monero 的独立 BP+ 基线和历史主网交易向量已进入回归，但新签交易仍需手机/电脑侧节点验收。SE050 安全会话、秘密解封策略、PN7161 实际连线、可信显示、看门狗、断电恢复与整机性能尚无这块硬件的完整验收证据。当前工程不能称为已完成生产验证的百链硬件钱包。
 
 ## 2026-10-24 变更与验收范围
 
 *Merged from docs/validation-2026-10-24.md.*
 
-MSR 不再作为 GRAVEYARD 例外：网络配置、设备目录、主机签名选择及设备启动自检均已移除。底层遗留 Masari 回归材料仍保留供历史算法检查，不表示产品支持。XMR 保留。
 
 SOL 转账新增真实消息解析、费用计算、可信显示数据、单次批准签名和完整交易输出。范围扩展为单付款账户的 legacy/v0 System Transfer、经典 SPL 与 Token-2022 TransferChecked；不含 ATA 创建、质押和地址查找表。Token-2022 会显示“扩展不可离线核验”警告，要求额外 hook 账户的指令在解析阶段即被拒绝。未登记 mint 可通过精确 mint/代币账户/数量审阅转账，但不信任手机提供的代币名称或账户 owner。协议与离线限制见 [solana-signing.md](chain-protocols.md)。
 
@@ -368,7 +363,7 @@ Clang UBSan 主机自检及 11 项 SOL/SPL Python 测试通过；真实 LVGL 9.5
 
 SE050 目前仍只有探测与能力规划，`WalletSession.cpp` 的助记词保存在 MCU RAM；不能称为已由安全芯片托管。接入前需要完整芯片料号、Applet 版本、设备独立 SCP03 配置方式以及板级连线。不要把生产密钥写进代码或提交到仓库，也不要用 NXP 默认演示凭据宣称完成保护。
 
-ADA、DOT、FIL、CHIA、DCR、FIRO、FLUX 等交易适配器尚未补齐。当前完成度以 [coin-coverage.md](chain-support.md) 为准，不将目录或地址生成能力视作完整链支持。
+ADA、DOT、FIL、CHIA、DCR、FIRO 等交易适配器尚未补齐。当前完成度以 [coin-coverage.md](chain-support.md) 为准，不将目录或地址生成能力视作完整链支持。
 
 ### 同日追加：TRON、Token-2022 与 EVM 网络扩展
 

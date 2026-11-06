@@ -12,15 +12,23 @@
 #include "CryptoNoteAddress.h"
 #include "CryptoNoteRingCt.h"
 #include "CryptoPrimitives.h"
+#include "DashTransaction.h"
 #include "RandomSource.h"
 #include "EvmTransaction.h"
 #include "KaspaTransaction.h"
 #include "ZcashTransaction.h"
 #include "Totp.h"
+#include "BatteryMonitor.h"
+#include "AeternityTransaction.h"
+#include "BeamCli.h"
+#include "XelisAccount.h"
+#include <memory>
+#include "WalletCliPolicy.h"
 #include "WalletTotp.h"
 #include "WalletAltAddresses.h"
 #include "WalletBoardPort.h"
 #include "ChainCommon.h"
+#include "WalletAdmission.h"
 #include "WalletCatalog.h"
 #include "WalletConfig.h"
 #include "WalletCustomTokens.h"
@@ -70,6 +78,27 @@ namespace hexwallet
     uint8_t verifier[kVerifierSize];
     uint8_t challenge[kChallengeSize];
     SensitiveLineBuffer<kLineSize> command_line;
+    // The CLI and the USB APDU bridge run on the Arduino loop task, which the
+    // sketch sizes at 32 KB (HEXWALLET_LOOP_TASK_STACK_SIZE). Measured with
+    // -fstack-usage, `evm inspect` used 6688 bytes of frame and the APDU response
+    // another 5004, a quarter of that stack for one command, so the large
+    // request/response buffers live in BSS and are wiped at the end of each
+    // request. Only one command runs at a time, so one pair suffices; a handler
+    // must not hand either buffer to anything that outlives its own call.
+    uint8_t cli_byte_scratch[UsbApduFrame::kCapacity + 4];
+    char cli_text_scratch[kEvmReviewTextSize];
+    // A constant bump in any adapter must fail the build, not overflow the one
+    // buffer the CLI reuses across handlers.
+    static_assert(UsbApduFrame::kCapacity + 4 <= sizeof(cli_byte_scratch),
+                  "APDU response must fit the CLI scratch buffer");
+    static_assert(HEXWALLET_MAX_PSBT_BYTES <= sizeof(cli_byte_scratch),
+                  "PSBT output must fit the CLI scratch buffer");
+    static_assert(kEvmMaxUnsignedTransactionSize <= sizeof(cli_byte_scratch),
+                  "unsigned EVM transaction must fit the CLI scratch buffer");
+    static_assert(kEvmMaxSignedTransactionSize <= sizeof(cli_byte_scratch),
+                  "signed EVM transaction must fit the CLI scratch buffer");
+    static_assert(kZcashMaxTransactionSize <= sizeof(cli_byte_scratch),
+                  "Zcash transaction must fit the CLI scratch buffer");
     uint32_t command_last_byte_ms = 0;
     BitcoinSigningRequest pending_transaction;
     EvmSigningRequest pending_evm_transaction;
@@ -83,7 +112,8 @@ namespace hexwallet
       Evm,
       Kaspa,
       Zcash,
-      Chain
+      Chain,
+      Beam
     };
     PendingTransactionKind pending_transaction_kind = PendingTransactionKind::None;
     bool transaction_pending = false;
@@ -209,10 +239,25 @@ namespace hexwallet
       clear_kaspa_transaction(&pending_kaspa_transaction);
       clear_zcash_request(&pending_zcash_transaction);
       secure_zero(&pending_chain_transaction, sizeof(pending_chain_transaction));
+      beam_cli_reset();
       pending_transaction_kind = PendingTransactionKind::None;
       transaction_pending = false;
       transaction_approval = 0;
       transaction_expires_at = 0;
+    }
+
+    bool begin_transaction_review()
+    {
+      uint32_t random_value;
+      if (!random_fill_checked(&random_value, sizeof(random_value))) {
+        clear_pending_transaction();
+        Serial.println("ERR entropy-unavailable");
+        return false;
+      }
+      transaction_approval = random_value % 1000000U;
+      transaction_expires_at = millis() + kTransactionApprovalMs;
+      transaction_pending = true;
+      return true;
     }
 
     void clear_wallet()
@@ -249,12 +294,37 @@ namespace hexwallet
       return true;
     }
 
+    // Every signing path, CLI or phone, asks the same question, so the state that
+    // answers it is assembled once: an authenticated session, whether this board
+    // has a display, and whether the pack can survive a signing burst. Spelling
+    // the aggregate out at each call site is how a flag gets forgotten.
+    WalletTransportState current_transport_state()
+    {
+      WalletTransportState state;
+      state.authenticated = true;
+      state.paired = false;
+      state.trusted_display = display_is_available;
+      state.battery_critical = battery_monitor_blocks_signing();
+      return state;
+    }
+
+    // The policy knows why it closed the surface; the printed line has to say the
+    // same thing, or the operator chases a display problem that is not there.
+    const char *signing_denial_text(bool approval)
+    {
+      if (battery_monitor_blocks_signing())
+        return approval ? "ERR battery-critical; review-cleared"
+                        : "ERR battery-critical; charge before signing";
+      return approval ? "ERR trusted-display-required-for-approval; review-cleared"
+                      : "ERR trusted-display-required-for-signing";
+    }
+
     // A review is only useful when the transport policy will accept the approval
     // it produces. Printing a confirm code that the matching sign command must
     // refuse is worse than refusing the review now.
     bool prepare_approval(char approval[7])
     {
-      const WalletTransportState state = {true, false, display_is_available};
+      const WalletTransportState state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::ApprovalResponse, state))
         return false;
@@ -307,14 +377,18 @@ namespace hexwallet
 
     void show_help()
     {
-      Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | mining stats | mining list [ASIC|GPU|CPU|HDD|MERGED] [offset] | mining show <source-id-or-symbol> | token list [network] | token show <id>");
+      Serial.println("OK beam: beam prove <regular|change> <index> <subkey> <groth> | beam verify <output-hex> | beam recover <output-hex>");
+      Serial.println("OK beam peer: beam check-peer <offer-hex> <receiver-reply-hex>");
+      Serial.println("OK beam transfer: beam address <id> | beam endpoint <id> | beam offer <id> <regular-address-or-endpoint> <groth> <fee> <min-height> <max-height> <owned-output-hex> | beam receive <id> <offer-hex> | beam finalize <reply-hex> | beam approve <display-code> | beam reject");
+      Serial.println("OK xelis check-address <mainnet-address>");
+      Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | coin why <id> | mining stats | mining list [ASIC|GPU|CPU|HDD|MERGED] [offset] | mining show <source-id-or-symbol> | token list [network] | token show <id>");
       Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
       Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
       Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
       Serial.println("OK NFT: token custom-add-nft <network> <contract-hex> <erc721|erc1155> <symbol> <name>");
       Serial.println("OK totp: totp time [unix] | totp add <otpauth-uri> | totp list | totp show <slot> | totp remove <slot>");
       Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
-      Serial.println("OK chain: chain begin <network> <index> <payload-hex> | chain sign <code> | chain reject  (native Theta SendTx payload is 46 bytes)");
+      Serial.println("OK chain: chain begin <network> <index> <payload-hex> | chain sign <code> | chain reject  (payload is the adapter's unsigned transaction: Theta SendTx is 46 bytes, Aeternity SpendTx is its canonical RLP)");
       Serial.println("OK link: link status | link pair confirm | link pair reject");
       Serial.println("OK security: secret export and host mnemonic import unavailable | selftest");
     }
@@ -330,7 +404,15 @@ namespace hexwallet
       Serial.print(" wallet=");
       Serial.print(wallet_session_is_loaded() ? "loaded" : "empty");
       Serial.print(" pending-tx=");
-      Serial.println(transaction_pending ? "yes" : "no");
+      Serial.print(transaction_pending ? "yes" : "no");
+      // The pack decides whether the next sign command will be accepted, so it
+      // belongs in the one line an operator reads first. 0 mV means this board has
+      // no divider, which is reported as unknown, not as empty.
+      const BatteryStatus battery = battery_monitor_status();
+      Serial.print(" battery=");
+      Serial.print(static_cast<unsigned long>(battery.millivolts));
+      Serial.print("mV ");
+      Serial.println(battery_level_text(battery.level));
     }
 
     void provision_pin(char *arguments)
@@ -355,9 +437,9 @@ namespace hexwallet
         secure_zero(separator, strlen(separator));
         return;
       }
-      random_fill(salt, sizeof(salt));
       uint8_t new_verifier[kVerifierSize];
-      const bool derived = crypto_pbkdf2_sha256(reinterpret_cast<const uint8_t *>(arguments), pin_size,
+      const bool derived = random_fill_checked(salt, sizeof(salt)) &&
+                           crypto_pbkdf2_sha256(reinterpret_cast<const uint8_t *>(arguments), pin_size,
                                                 salt, sizeof(salt), HEXWALLET_CLI_PBKDF2_ITERATIONS,
                                                 new_verifier, sizeof(new_verifier));
       secure_zero(arguments, pin_size);
@@ -389,8 +471,11 @@ namespace hexwallet
         Serial.println(retry_after - now);
         return;
       }
-      random_fill(challenge, sizeof(challenge));
-      challenge_active = true;
+      challenge_active = random_fill_checked(challenge, sizeof(challenge));
+      if (!challenge_active) {
+        Serial.println("ERR entropy-unavailable");
+        return;
+      }
       Serial.print("OK challenge salt=");
       print_hex(salt, sizeof(salt));
       Serial.print(" iterations=");
@@ -492,6 +577,42 @@ namespace hexwallet
       Serial.print(entry.status);
       Serial.println("\"");
     }
+    void explain_coin(const char *id)
+    {
+      char lowered[24] = {};
+      const size_t length = id == nullptr ? 0 : strlen(id);
+      if (length == 0 || length >= sizeof(lowered))
+      {
+        Serial.println("ERR unknown-coin");
+        return;
+      }
+      for (size_t index = 0; index < length; ++index)
+      {
+        const char c = id[index];
+        lowered[index] = (c >= 'A' && c <= 'Z')
+                             ? static_cast<char>(c - 'A' + 'a')
+                             : c;
+      }
+      char line[512] = {};
+      if (refused_chain_describe(lowered, line, sizeof(line)))
+      {
+        Serial.print("OK refused ");
+        Serial.println(line);
+        secure_zero(line, sizeof(line));
+        return;
+      }
+      WalletCatalogEntry entry;
+      if (wallet_catalog_find(lowered, &entry))
+      {
+        Serial.print("OK supported id=");
+        Serial.print(entry.id);
+        Serial.print(" name=\"");
+        Serial.print(entry.name);
+        Serial.println("\"; run coin show for capabilities");
+        return;
+      }
+      Serial.println("ERR unknown-coin");
+    }
 
     void handle_coin(char *command)
     {
@@ -501,6 +622,8 @@ namespace hexwallet
         show_catalog(command + 12);
       else if (strncmp(command, "coin show ", 10) == 0 && command[10] != '\0')
         show_coin(command + 10);
+      else if (strncmp(command, "coin why ", 9) == 0 && command[9] != '\0')
+        explain_coin(command + 9);
       else
         Serial.println("ERR invalid-coin-command");
     }
@@ -1391,11 +1514,11 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::SigningRequest, transport_state))
       {
-        Serial.println("ERR trusted-display-required-for-signing");
+        Serial.println(signing_denial_text(false));
         return;
       }
       const NetworkProfile *network = find_network_profile("btc");
@@ -1452,11 +1575,7 @@ namespace hexwallet
         Serial.println(transaction_error_text(result));
         return;
       }
-      uint32_t random_value;
-      random_fill(&random_value, sizeof(random_value));
-      transaction_approval = random_value % 1000000U;
-      transaction_expires_at = millis() + kTransactionApprovalMs;
-      transaction_pending = true;
+      if (!begin_transaction_review()) return;
       pending_transaction_kind = PendingTransactionKind::Bitcoin;
       print_transaction_review();
       char approval[7];
@@ -1494,12 +1613,12 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::ApprovalResponse, transport_state))
       {
         clear_pending_transaction();
-        Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+        Serial.println(signing_denial_text(true));
         return;
       }
       if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Bitcoin)
@@ -1544,15 +1663,16 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
-      uint8_t signed_transaction[HEXWALLET_MAX_PSBT_BYTES];
-      size_t signed_size = sizeof(signed_transaction);
+      uint8_t *signed_transaction = cli_byte_scratch;
+      constexpr size_t kSignedCapacity = HEXWALLET_MAX_PSBT_BYTES;
+      size_t signed_size = kSignedCapacity;
       const TransactionError result = bitcoin_sign_request(pending_transaction, master,
                                                            signed_transaction, &signed_size);
       secure_zero(&master, sizeof(master));
       clear_pending_transaction();
       if (result != TransactionError::Ok)
       {
-        secure_zero(signed_transaction, sizeof(signed_transaction));
+        secure_zero(signed_transaction, kSignedCapacity);
         Serial.print("ERR tx-sign ");
         Serial.println(transaction_error_text(result));
         return;
@@ -1569,7 +1689,7 @@ namespace hexwallet
         Serial.println();
       }
       secure_zero(wtxid, sizeof(wtxid));
-      secure_zero(signed_transaction, sizeof(signed_transaction));
+      secure_zero(signed_transaction, kSignedCapacity);
       wallet_ui_show_catalog();
     }
 
@@ -1577,11 +1697,11 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::SigningRequest, transport_state))
       {
-        Serial.println("ERR trusted-display-required-for-signing");
+        Serial.println(signing_denial_text(false));
         return;
       }
       char *network_end = strchr(arguments, ' ');
@@ -1611,11 +1731,12 @@ namespace hexwallet
         Serial.println("ERR invalid-index");
         return;
       }
-      uint8_t transaction[kEvmMaxUnsignedTransactionSize];
+      uint8_t *transaction = cli_byte_scratch;
+      constexpr size_t kTransactionCapacity = kEvmMaxUnsignedTransactionSize;
       size_t transaction_size = 0;
-      if (!decode_hex(index_end, transaction, sizeof(transaction), &transaction_size))
+      if (!decode_hex(index_end, transaction, kTransactionCapacity, &transaction_size))
       {
-        secure_zero(transaction, sizeof(transaction));
+        secure_zero(transaction, kTransactionCapacity);
         Serial.println("ERR invalid-evm-transaction-hex");
         return;
       }
@@ -1623,14 +1744,14 @@ namespace hexwallet
       auto &master = master_storage.get();
       if (!load_master(&master))
       {
-        secure_zero(transaction, sizeof(transaction));
+        secure_zero(transaction, kTransactionCapacity);
         return;
       }
       clear_pending_transaction();
       const EvmTransactionError error = evm_parse_for_review(
           transaction, transaction_size, *network, master, address_index, &pending_evm_transaction);
       secure_zero(&master, sizeof(master));
-      secure_zero(transaction, sizeof(transaction));
+      secure_zero(transaction, kTransactionCapacity);
       if (error != EvmTransactionError::Ok)
       {
         clear_pending_transaction();
@@ -1638,11 +1759,7 @@ namespace hexwallet
         Serial.println(evm_transaction_error_text(error));
         return;
       }
-      uint32_t random_value;
-      random_fill(&random_value, sizeof(random_value));
-      transaction_approval = random_value % 1000000U;
-      transaction_expires_at = millis() + kTransactionApprovalMs;
-      transaction_pending = true;
+      if (!begin_transaction_review()) return;
       pending_transaction_kind = PendingTransactionKind::Evm;
       const bool contract_call = pending_evm_transaction.has_call;
       const char *asset = network->symbol;
@@ -1776,8 +1893,9 @@ namespace hexwallet
       char display_amount[256];
       char display_fee[112];
       char output_label[96];
-      char access_details[kEvmReviewTextSize];
-      if (!evm_review_details(pending_evm_transaction, access_details, sizeof(access_details)))
+      char *access_details = cli_text_scratch;
+      constexpr size_t kAccessDetailsCapacity = kEvmReviewTextSize;
+      if (!evm_review_details(pending_evm_transaction, access_details, kAccessDetailsCapacity))
       {
         clear_pending_transaction();
         Serial.println("ERR incomplete-evm-review");
@@ -1785,16 +1903,10 @@ namespace hexwallet
       }
       if (access_details[0] != '\0')
         Serial.println(access_details);
-      if (pending_evm_transaction.call.has_token_id)
-      {
-        snprintf(display_amount, sizeof(display_amount), "%s %s #%s",
-                 pending_evm_transaction.amount_text, asset,
-                 pending_evm_transaction.token_id_text);
-      }
-      else
-      {
-        snprintf(display_amount, sizeof(display_amount), "%s %s",
-                 pending_evm_transaction.amount_text, asset);
+      if (!evm_review_amount(pending_evm_transaction, asset, display_amount, sizeof(display_amount))) {
+        clear_pending_transaction();
+        Serial.println("ERR incomplete-evm-review");
+        return;
       }
       if (pending_evm_transaction.opaque)
       {
@@ -1825,18 +1937,19 @@ namespace hexwallet
       secure_zero(display_fee, sizeof(display_fee));
       secure_zero(output_label, sizeof(output_label));
       secure_zero(approval, sizeof(approval));
+      secure_zero(cli_text_scratch, sizeof(cli_text_scratch));
     }
 
     void sign_evm_transaction(const char *approval_text)
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::ApprovalResponse, transport_state))
       {
         clear_pending_transaction();
-        Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+        Serial.println(signing_denial_text(true));
         return;
       }
       if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Evm)
@@ -1874,15 +1987,16 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
-      uint8_t signed_transaction[kEvmMaxSignedTransactionSize];
-      size_t signed_size = sizeof(signed_transaction);
+      uint8_t *signed_transaction = cli_byte_scratch;
+      constexpr size_t kSignedCapacity = kEvmMaxSignedTransactionSize;
+      size_t signed_size = kSignedCapacity;
       const EvmTransactionError error = evm_sign_transaction(
           pending_evm_transaction, master, signed_transaction, &signed_size);
       secure_zero(&master, sizeof(master));
       clear_pending_transaction();
       if (error != EvmTransactionError::Ok)
       {
-        secure_zero(signed_transaction, sizeof(signed_transaction));
+        secure_zero(signed_transaction, kSignedCapacity);
         Serial.print("ERR evm-sign ");
         Serial.println(evm_transaction_error_text(error));
         return;
@@ -1899,7 +2013,7 @@ namespace hexwallet
         Serial.println();
       }
       secure_zero(transaction_hash, sizeof(transaction_hash));
-      secure_zero(signed_transaction, sizeof(signed_transaction));
+      secure_zero(signed_transaction, kSignedCapacity);
       wallet_ui_show_catalog();
     }
 
@@ -1915,25 +2029,26 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::SigningRequest, transport_state))
       {
-        Serial.println("ERR trusted-display-required-for-signing");
+        Serial.println(signing_denial_text(false));
         return;
       }
-      uint8_t payload[4096];
+      uint8_t *payload = cli_byte_scratch;
+      constexpr size_t kPayloadCapacity = 4096;
       size_t payload_size = 0;
-      if (!decode_hex(arguments, payload, sizeof(payload), &payload_size))
+      if (!decode_hex(arguments, payload, kPayloadCapacity, &payload_size))
       {
-        secure_zero(payload, sizeof(payload));
+        secure_zero(payload, kPayloadCapacity);
         Serial.println("ERR invalid-kaspa-payload-hex");
         return;
       }
       clear_pending_transaction();
       const KaspaError error = kaspa_parse_review_payload(
           payload, payload_size, &pending_kaspa_transaction);
-      secure_zero(payload, sizeof(payload));
+      secure_zero(payload, kPayloadCapacity);
       if (error != KaspaError::Ok)
       {
         clear_pending_transaction();
@@ -1941,11 +2056,7 @@ namespace hexwallet
         Serial.println(kaspa_error_text(error));
         return;
       }
-      uint32_t random_value;
-      random_fill(&random_value, sizeof(random_value));
-      transaction_approval = random_value % 1000000U;
-      transaction_expires_at = millis() + kTransactionApprovalMs;
-      transaction_pending = true;
+      if (!begin_transaction_review()) return;
       pending_transaction_kind = PendingTransactionKind::Kaspa;
       Serial.println("BEGIN TRANSACTION REVIEW");
       Serial.println("network=kas type=KASPA-V0");
@@ -2027,12 +2138,12 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::ApprovalResponse, transport_state))
       {
         clear_pending_transaction();
-        Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+        Serial.println(signing_denial_text(true));
         return;
       }
       if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Kaspa)
@@ -2071,15 +2182,16 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
-      uint8_t signed_transaction[4096];
-      size_t signed_size = sizeof(signed_transaction);
+      uint8_t *signed_transaction = cli_byte_scratch;
+      constexpr size_t kSignedCapacity = 4096;
+      size_t signed_size = kSignedCapacity;
       const KaspaError error = kaspa_sign_transaction(
           pending_kaspa_transaction, master, signed_transaction, &signed_size);
       secure_zero(&master, sizeof(master));
       if (error != KaspaError::Ok)
       {
         clear_pending_transaction();
-        secure_zero(signed_transaction, sizeof(signed_transaction));
+        secure_zero(signed_transaction, kSignedCapacity);
         Serial.print("ERR kaspa-sign ");
         Serial.println(kaspa_error_text(error));
         return;
@@ -2101,7 +2213,7 @@ namespace hexwallet
         Serial.println();
       }
       secure_zero(transaction_id, sizeof(transaction_id));
-      secure_zero(signed_transaction, sizeof(signed_transaction));
+      secure_zero(signed_transaction, kSignedCapacity);
       wallet_ui_show_catalog();
     }
 
@@ -2117,11 +2229,11 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::SigningRequest, transport_state))
       {
-        Serial.println("ERR trusted-display-required-for-signing");
+        Serial.println(signing_denial_text(false));
         return;
       }
       const NetworkProfile *network = find_network_profile("zec");
@@ -2159,11 +2271,7 @@ namespace hexwallet
         Serial.println(zcash_error_text(error));
         return;
       }
-      uint32_t random_value;
-      random_fill(&random_value, sizeof(random_value));
-      transaction_approval = random_value % 1000000U;
-      transaction_expires_at = millis() + kTransactionApprovalMs;
-      transaction_pending = true;
+      if (!begin_transaction_review()) return;
       pending_transaction_kind = PendingTransactionKind::Zcash;
       Serial.println("BEGIN TRANSACTION REVIEW");
       Serial.println("network=zec type=ZCASH-V4-TRANSPARENT");
@@ -2325,12 +2433,12 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::ApprovalResponse, transport_state))
       {
         clear_pending_transaction();
-        Serial.println("ERR trusted-display-required-for-approval; review-cleared");
+        Serial.println(signing_denial_text(true));
         return;
       }
       if (!transaction_pending || pending_transaction_kind != PendingTransactionKind::Zcash)
@@ -2370,15 +2478,16 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
-      uint8_t signed_transaction[kZcashMaxTransactionSize];
-      size_t signed_size = sizeof(signed_transaction);
+      uint8_t *signed_transaction = cli_byte_scratch;
+      constexpr size_t kSignedCapacity = kZcashMaxTransactionSize;
+      size_t signed_size = kSignedCapacity;
       const ZcashError error = zcash_sign_request(
           pending_zcash_transaction, master, signed_transaction, &signed_size);
       secure_zero(&master, sizeof(master));
       clear_pending_transaction();
       if (error != ZcashError::Ok)
       {
-        secure_zero(signed_transaction, sizeof(signed_transaction));
+        secure_zero(signed_transaction, kSignedCapacity);
         Serial.print("ERR zcash-sign ");
         Serial.println(zcash_error_text(error));
         return;
@@ -2396,7 +2505,7 @@ namespace hexwallet
         Serial.println();
       }
       secure_zero(transaction_id, sizeof(transaction_id));
-      secure_zero(signed_transaction, sizeof(signed_transaction));
+      secure_zero(signed_transaction, kSignedCapacity);
       wallet_ui_show_catalog();
     }
 
@@ -2542,17 +2651,14 @@ namespace hexwallet
     {
       if (!require_authentication())
         return;
-      const WalletTransportState transport_state = {true, false, display_is_available};
+      const WalletTransportState transport_state = current_transport_state();
       if (!wallet_transport_allows(WalletTransport::SerialUsb,
                                    WalletTransportOperation::SigningRequest, transport_state))
       {
-        Serial.println("ERR trusted-display-required-for-signing");
+        Serial.println(signing_denial_text(false));
         return;
       }
-      // Any earlier review is dropped before this one is parsed: a failed parse
-      // must not leave a stale, still-approvable request behind.
       clear_pending_transaction();
-      // chain begin <network> <address-index> <payload-hex>
       char *network_id = arguments;
       char *index_text = strchr(network_id, ' ');
       if (index_text == nullptr)
@@ -2598,8 +2704,6 @@ namespace hexwallet
           return;
         }
       }
-      // The payload is small by design (46 bytes for Theta); the adapter buffers
-      // are far larger, but nothing here should accept a multi-kilobyte blob.
       uint8_t payload[kChainMaxPayload];
       size_t payload_size = 0;
       if (!decode_hex(payload_hex, payload, sizeof(payload), &payload_size))
@@ -2637,11 +2741,7 @@ namespace hexwallet
         Serial.println(chain_error_text(error));
         return;
       }
-      uint32_t random_value;
-      random_fill(&random_value, sizeof(random_value));
-      transaction_approval = random_value % 1000000U;
-      transaction_expires_at = millis() + kTransactionApprovalMs;
-      transaction_pending = true;
+      if (!begin_transaction_review()) return;
       pending_transaction_kind = PendingTransactionKind::Chain;
       print_chain_review(pending_chain_transaction);
       char approval[7];
@@ -2715,26 +2815,27 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
-      // kChainMaxPayload is the largest adapter payload, but the signed result can
-      // be a full transaction; 512 bytes covers every adapter in this family.
-      uint8_t signed_transaction[512];
-      size_t signed_size = sizeof(signed_transaction);
-      const ChainError error = chain_sign_transaction(
-          pending_chain_transaction, master, seed, signed_transaction, &signed_size);
+      const bool large = pending_chain_transaction.family == ChainFamily::Quantus ||
+                         pending_chain_transaction.family == ChainFamily::QrlV2;
+      const size_t capacity = large ? kChainMaxSignedSize : kAeternityMaxSignedSize;
+      std::unique_ptr<uint8_t[]> signed_transaction(new(std::nothrow) uint8_t[capacity]);
+      size_t signed_size = capacity;
+      const ChainError error = signed_transaction ? chain_sign_transaction(
+          pending_chain_transaction, master, seed, signed_transaction.get(), &signed_size) : ChainError::BufferTooSmall;
       secure_zero(&master, sizeof(master));
       secure_zero(seed, sizeof(seed));
       clear_pending_transaction();
       if (error != ChainError::Ok)
       {
-        secure_zero(signed_transaction, sizeof(signed_transaction));
+        if (signed_transaction) secure_zero(signed_transaction.get(), capacity);
         Serial.print("ERR chain-sign ");
         Serial.println(chain_error_text(error));
         return;
       }
       Serial.print("OK signed-transaction=");
-      print_hex(signed_transaction, signed_size);
+      print_hex(signed_transaction.get(), signed_size);
       Serial.println();
-      secure_zero(signed_transaction, sizeof(signed_transaction));
+      secure_zero(signed_transaction.get(), capacity);
       wallet_ui_show_catalog();
     }
 
@@ -2786,8 +2887,18 @@ namespace hexwallet
       }
     }
 
+    // Self-tests are a bench feature. Referencing them from the serial CLI put
+    // every vector table and every test scratch buffer back into the firmware,
+    // because the linker can only drop a function nobody calls: CryptoNote
+    // signing alone was 205 KB of .bss. Gating the whole command on
+    // HEXWALLET_DEVICE_SELF_TESTS (0 for production builds) is what actually
+    // reclaims that flash and RAM.
     void run_self_tests()
     {
+#if !HEXWALLET_DEVICE_SELF_TESTS
+      Serial.println("ERR self-tests-compiled-out; rebuild with -DHEXWALLET_DEVICE_SELF_TESTS=1");
+      return;
+#else
       if (!require_authentication())
         return;
       const bool crypto = run_crypto_self_tests();
@@ -2804,6 +2915,9 @@ namespace hexwallet
       const bool evm = run_evm_transaction_self_test();
       const bool zcash_sighash = run_zcash_sighash_self_tests();
       const bool zcash = run_zcash_transaction_self_test();
+      const bool dash = run_dash_self_tests();
+      const bool dash_sign = run_dash_signature_self_test();
+      const bool admission = run_admission_self_tests();
       const bool transport = run_transport_policy_self_test();
       Serial.print("OK crypto=");
       Serial.print(crypto ? "pass" : "FAIL");
@@ -2833,8 +2947,15 @@ namespace hexwallet
       Serial.print(zcash_sighash ? "pass" : "FAIL");
       Serial.print(" zcash=");
       Serial.print(zcash ? "pass" : "FAIL");
+      Serial.print(" dash=");
+      Serial.print(dash ? "pass" : "FAIL");
+      Serial.print(" dash-sign=");
+      Serial.print(dash_sign ? "pass" : "FAIL");
+      Serial.print(" admission=");
+      Serial.print(admission ? "pass" : "FAIL");
       Serial.print(" transport-policy=");
       Serial.println(transport ? "pass" : "FAIL");
+#endif
     }
 
     void handle_totp(char *command)
@@ -2916,6 +3037,36 @@ namespace hexwallet
       }
       Serial.println("ERR use-totp-time-add-list-show-remove; codes-are-device-only");
     }
+    void check_xelis_address(const char *address)
+    {
+      if (!require_authentication()) return;
+      uint8_t key[32];
+      if (!xelis_public_key_from_address(address, key)) {
+        Serial.println("ERR invalid-xelis-mainnet-address");
+        return;
+      }
+      Serial.print("OK external-xelis-public-key=");
+      print_hex(key, sizeof(key));
+      Serial.println();
+    }
+
+    void handle_beam(char *args)
+    {
+      if (!require_authentication()) return;
+      if (transaction_pending && pending_transaction_kind != PendingTransactionKind::Beam) {
+        Serial.println("ERR transaction-review-active");
+        return;
+      }
+      const auto state = beam_cli_command(args, display_is_available);
+      if (state.active) {
+        pending_transaction_kind = PendingTransactionKind::Beam;
+        transaction_pending = true;
+        transaction_expires_at = state.expires_at;
+      } else if (pending_transaction_kind == PendingTransactionKind::Beam) {
+        clear_pending_transaction();
+      }
+    }
+
     void handle_line(char *command)
     {
       while (*command == ' ')
@@ -2924,20 +3075,27 @@ namespace hexwallet
         return;
       // One trusted screen has one owner. A second transport/CLI command must not
       // replace an approval screen while the original request remains signable.
-      const bool passive = strcmp(command, "help") == 0 || strcmp(command, "status") == 0 ||
-                           strcmp(command, "lock") == 0 || strcmp(command, "link status") == 0;
-      if (!passive && (wallet_signing_active() || wallet_link_service_pairing_pending() || wallet_totp_pending()))
+      // Which commands may finish a pending review lives in WalletCliPolicy so
+      // that adding a `<family> sign` command cannot silently lock it out.
+      const bool passive = wallet_cli_command_is_passive(command);
+      if (!passive)
       {
-        Serial.println("ERR device-review-active");
-        return;
-      }
-      const bool finish_cli = strcmp(command, "tx reject") == 0 ||
-                              strncmp(command, "tx sign ", 8) == 0 || strncmp(command, "evm sign ", 9) == 0 ||
-                              strncmp(command, "kaspa sign ", 11) == 0 || strncmp(command, "zec sign ", 9) == 0;
-      if (transaction_pending && !passive && !finish_cli)
-      {
-        Serial.println("ERR transaction-review-active");
-        return;
+        if (wallet_signing_active() || wallet_totp_pending())
+        {
+          Serial.println(wallet_cli_review_error(PendingReview::Signing));
+          return;
+        }
+        if (wallet_link_service_pairing_pending() &&
+            !wallet_cli_command_resolves(PendingReview::Pairing, command))
+        {
+          Serial.println(wallet_cli_review_error(PendingReview::Pairing));
+          return;
+        }
+        if (transaction_pending && !wallet_cli_command_resolves(PendingReview::Transaction, command))
+        {
+          Serial.println(wallet_cli_review_error(PendingReview::Transaction));
+          return;
+        }
       }
       if (strcmp(command, "help") == 0)
         show_help();
@@ -2976,7 +3134,11 @@ namespace hexwallet
         handle_transaction(command);
       else if (strncmp(command, "chain ", 6) == 0)
         handle_chain(command);
-      else if (strncmp(command, "totp", 4) == 0)
+      else if (strncmp(command, "xelis check-address ", 20) == 0)
+        check_xelis_address(command + 20);
+      else if (strncmp(command, "beam ", 5) == 0)
+        handle_beam(command + 5);
+      else if (strcmp(command, "totp") == 0 || strncmp(command, "totp ", 5) == 0)
         handle_totp(command);
       else
         Serial.println("ERR unknown-command; use help");
@@ -2987,6 +3149,7 @@ namespace hexwallet
 
   bool wallet_cli_init(bool display_available)
   {
+    battery_monitor_init();
 #if !HEXWALLET_ENABLE_CLI
     (void)display_available;
     return false;
@@ -3057,8 +3220,6 @@ namespace hexwallet
     command_line.clear();
     if (enabled)
     {
-      // Drop bytes that arrived while the transport was closed so they can
-      // never be replayed into an authenticated session later.
       discard_serial_input();
       Serial.print("INFO usb-data-enabled window-ms=");
       Serial.println(HEXWALLET_USB_ENABLE_WINDOW_MS);
@@ -3076,7 +3237,6 @@ namespace hexwallet
   {
 #if HEXWALLET_ENABLE_CLI
     const uint32_t now = millis();
-    // Enforce expiry even on boards without a button and when enabled at t=0.
     if (usb_data_enabled &&
         now - usb_data_enabled_at >= HEXWALLET_USB_ENABLE_WINDOW_MS)
     {
@@ -3129,10 +3289,11 @@ namespace hexwallet
       }
       if (result != UsbApduFrame::Result::Ready)
         continue;
-      uint8_t response[UsbApduFrame::kCapacity + 4];
+      uint8_t *response = cli_byte_scratch;
+      constexpr size_t kResponseCapacity = UsbApduFrame::kCapacity + 4;
       const size_t response_size = wallet_link_service_apdu(
           WalletLinkTransport::Usb, usb_apdu_frame.data(), usb_apdu_frame.size(),
-          millis(), response + 4, sizeof(response) - 4);
+          millis(), response + 4, kResponseCapacity - 4);
       const size_t total = 4 + response_size;
       response[0] = UsbApduFrame::kMagic0;
       response[1] = UsbApduFrame::kMagic1;
@@ -3142,7 +3303,7 @@ namespace hexwallet
       {
         Serial.write(response[index]);
       }
-      secure_zero(response, sizeof(response));
+      secure_zero(response, kResponseCapacity);
       usb_apdu_frame.clear();
       return true;
     }
@@ -3153,6 +3314,9 @@ namespace hexwallet
   void wallet_cli_service()
   {
 #if HEXWALLET_ENABLE_CLI
+    // One ADC read per kBatterySampleIntervalMs covers every consumer: the
+    // transport policy, the review screen and the low-battery warning.
+    battery_monitor_poll(millis());
     wallet_usb_data_service();
     wallet_totp_tick();
     if (authenticated && millis() - authenticated_at >= HEXWALLET_CLI_SESSION_TIMEOUT_MS)

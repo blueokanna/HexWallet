@@ -46,7 +46,6 @@ namespace hexwallet
     constexpr uint8_t kRfIntfActivatedOid = 0x05;
     constexpr uint8_t kRfDeactivateOid = 0x06;
 
-    // NCI RF technology/mode and RF interface identifiers are separate fields.
     constexpr uint8_t kRfNfcAPassiveListen = 0x80;
     constexpr uint8_t kRfInterfaceIsoDep = 0x02;
     constexpr uint8_t kRfProtocolIsoDep = 0x04;
@@ -181,8 +180,6 @@ namespace hexwallet
         if (size != 3 + length || (packet[0] & 0x10) != 0)
           continue;
 
-        // CORE_RESET_NTF follows CORE_RESET_RSP. It must be observed but it is
-        // not the response we are waiting for.
         if (type == kNotificationPacket && packet_group == kGidCore &&
             packet_oid == kCoreResetOid)
         {
@@ -229,7 +226,7 @@ namespace hexwallet
       uint8_t response[kNciMaxPayload];
       size_t response_size = 0;
 
-      const uint8_t reset_payload[1] = {0x00}; // keep the current configuration
+      const uint8_t reset_payload[1] = {0x00};
       if (!send_command(kGidCore, kCoreResetOid, reset_payload,
                         sizeof(reset_payload)))
       {
@@ -243,10 +240,7 @@ namespace hexwallet
         return false;
       }
       if (response_size < 1 || response[0] != 0x00)
-        return false; // status != OK
-
-      // Wait for CORE_RESET_NTF before the next command, otherwise the controller
-      // answers STATUS_REJECTED while it is still restarting.
+        return false;
       const uint32_t notification_started = millis();
       uint8_t packet[kNciMaxPacket];
       while (!saw_reset_notification && millis() - notification_started < kNciResetTimeoutMs)
@@ -341,7 +335,7 @@ namespace hexwallet
 
     void relay_apdu(uint8_t connection)
     {
-      (void)connection; // Static RF connection ID is always zero.
+      (void)connection;
       if (apdu_handler == nullptr || apdu_size < 4 || tx_size != 0)
       {
         fail_session();
@@ -430,8 +424,6 @@ namespace hexwallet
       if (group == kGidRf && oid == kRfIntfActivatedOid)
       {
         nfc_port_end_session();
-        // Discovery ID is not a status byte or a connection ID.
-        // Fields after RF technology parameters have variable offsets.
         if (length < 11 || payload[1] != kRfInterfaceIsoDep ||
             payload[2] != kRfProtocolIsoDep || payload[3] != kRfNfcAPassiveListen ||
             payload[4] == 0)
@@ -455,7 +447,6 @@ namespace hexwallet
       if (group == kGidRf && oid == kRfDeactivateOid)
       {
         nfc_port_end_session();
-        // Discovery and sleep can await another activation. Idle needs re-init.
         state = length == 2 && payload[0] >= 1 && payload[0] <= 3
                     ? NfcPortState::Ready
                     : NfcPortState::Error;
@@ -465,9 +456,9 @@ namespace hexwallet
         fail_session();
     }
 
-#endif // HEXWALLET_NFC_PORT_AVAILABLE
+#endif
 
-  } // namespace
+  }
 
   bool nfc_port_configured()
   {
@@ -519,7 +510,6 @@ namespace hexwallet
                     HEXWALLET_NFC_PIN_MOSI, HEXWALLET_NFC_PIN_CS);
       bus_ready = true;
     }
-    // Re-running the sequence is safe: it is exactly what a field reset does.
     const bool ok = nci_initialize();
     state = ok ? NfcPortState::Ready : NfcPortState::InitFailed;
     if (!ok)
@@ -592,4 +582,4 @@ namespace hexwallet
 #endif
   }
 
-} // namespace hexwallet
+}

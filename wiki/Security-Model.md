@@ -32,6 +32,7 @@ seal proves the frame was committed and the approval is unused.
 | Review integrity | `TrustAnchor.cpp` | `ReviewSeal` hashes the exact rendered text, is armed only when the panel reports the frame committed, is single-use, and expires with the review |
 | Approval lifetime | `WalletSigning.cpp`, `WalletCli.cpp` | 120 s; expiry clears the session; a rejected review cannot be flipped back to approved |
 | Approval consumption | `WalletSigning.cpp` | the approval is consumed before the key is unsealed; a failure after that point does not restore it |
+| Computed fees on Dash | `DashTransaction.cpp` | every input must carry its funding transaction; the txid, output index, amount and script are re-proved, so the fee is computed from proven values instead of accepted from the host. Legacy payloads without proofs are refused with `missing-field` |
 | Output clearing | `SensitiveValue.h` | `SigningOutputGuard` zeroes the caller buffer unless the producer commits a valid, non-zero length |
 | Custody gate | `WalletCustody.cpp` | five facts must all hold; a missing one yields a specific `CustodyBlocker`, never a silent fallback |
 | Boot trust | `TrustAnchor.cpp` | `HEXWALLET_REQUIRE_VERIFIED_BOOT=1` refuses to sign when secure boot or flash encryption is off; "cannot tell" is reported separately from "off" |
@@ -63,6 +64,45 @@ The approval is not a boolean set by the caller. It is produced by the panel cal
 A build without a display therefore has no approval source. Signing over serial is possible only
 with `HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION=1`, and only for the serial transport; the phone link
 still refuses, because a phone that approves its own request is not a trusted display.
+
+## The review is the contract
+
+An adapter fills a `ChainReview`; the screen renders it; the approval seals it. Between those three
+steps sit two failure modes that cost funds, and both are closed in `ChainTransaction.cpp` rather
+than being left to each of the 25 families:
+
+- `chain_review_transaction()` refuses a review whose `symbol`, `recipient`, `amount` or `fee` is
+  empty. An empty recipient prints as a blank line the user can approve over, and the sign path
+  re-reviews and compares two empty strings — which are equal, so the approval would succeed.
+- A field that fills its buffer to the last byte is treated as a truncation and refused. `snprintf`
+  cuts silently, and a truncated recipient is the one mistake this device cannot undo. 136 bytes
+  holds every admitted address form with room to spare (Cardano Shelley base is the longest at 103),
+  so a field at the limit is a bug, not a long address.
+
+The gate is pinned by `run_chain_self_tests()`: it accepts a complete review, rejects each field
+being emptied in turn, and rejects a 135-byte recipient while accepting 134.
+
+## Power and the signing surface
+
+A signature is the most expensive thing this device does: the radio, the panel and the MCU all draw
+at once, and the IR drop of that burst is what actually ends a session on a nearly empty cell.
+`BatteryMonitor.cpp` therefore owns the decision, not each adapter:
+
+- The ADC is read at most every 5 s into a five-sample ring, and the level comes from the **median**,
+  so one conversion skewed by a USB plug-in or a panel refresh cannot move it.
+- `Critical` (≤ 3350 mV) closes `SigningRequest` and `ApprovalResponse` in
+  `wallet_transport_allows()`, on every transport. Read-only operations stay open, so the catalog
+  and `status` still answer.
+- Recovery needs 60 mV above a threshold before the level improves; without that band a pack sitting
+  on the boundary flaps between states on ADC noise.
+- A board with no divider reports `Unknown`, and `Unknown` never blocks signing — a USB-powered unit
+  must not refuse work because it cannot see a battery.
+- `status` prints `battery=<mV> <level>` so the reason a review was refused is visible without a
+  debugger.
+
+Display idle-off is **not** implemented. Turning the panel rail off and back on is board-specific
+(AMOLED vs e-paper vs TFT), and it has to be validated on hardware; a policy that assumes it works is
+worse than none.
 
 ## Secure element status
 

@@ -16,11 +16,10 @@
 - `tools/miningpoolstats_snapshot.json`：来源、核对日期和规范化 JSON 的 SHA-256。规范化使用 ASCII JSON、键排序及无空白分隔符，避免 Git 换行转换影响检查。
 - `tools/miningpoolstats_mapping.json`：网站 source ID 到钱包 network ID 的显式绑定，同时固定币名和简称。生成器不按简称猜测网络，也不自动把新增项目变成可签名项目。
 
-`tools/generate_mining_catalog.py` 读取新编译的 `catalog_dump.exe --native`。来源身份变化、GRAVEYARD 回流、目标缺失和原生资产不一致都会失败。`--check` 还会检查固件表和覆盖文档是否与输入一致。CI 离线验证固定快照；网站随后发生的变化需要重新抓取、复核和测试。
+`tools/generate_mining_catalog.py` 读取新编译的 `catalog_dump.exe --native`。来源身份变化、已撤回资产 回流、目标缺失和原生资产不一致都会失败。`--check` 还会检查固件表和覆盖文档是否与输入一致。CI 离线验证固定快照；网站随后发生的变化需要重新抓取、复核和测试。
 
 2026-11-02 修正了三种错误绑定：BIT / BitNet 到 BTN / Bitnet Money、ETI 到 EGAZ、Conflux Core Space 到 eSpace。Conflux 官方明确说明两个空间需要跨空间调用，不能直接互转：[CrossSpaceCall](https://doc.confluxnetwork.org/docs/espace/build/cross-space-bridge/)。这些条目不再借用另一个网络的能力。
 
-Callisto、Dogecoinev、Actinium、AIPowerGrid、CPUchain 已进入本次 GRAVEYARD 快照，相应生产 profile 和签名策略已撤下，包括 Actinium 的 SegWit 地址变体。保留底层通用算法不代表恢复这些网络。
 
 CLI 的 `mining show <source-id-or-symbol>` 优先匹配精确、区分大小写的 source ID；简称和名称可以忽略大小写，但指向多个网络时必须拒绝。歧义表涵盖所有活跃项目，包括尚无适配器的项目。`BIT` 不会误选 source ID 为 `bit`、简称为 `B1T` 的另一个项目；`BTG` 也不会忽略 BitGem 而直接选择 Bitcoin Gold。`mining stats` 分别报告网站条目数和去重的钱包 profile 数。
 

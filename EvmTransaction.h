@@ -103,6 +103,7 @@ namespace hexwallet
                                            const NetworkProfile &network, const HdPrivateNode &master,
                                            uint32_t address_index, EvmSigningRequest *out);
   const char *evm_operation_text(const EvmSigningRequest &request);
+  bool evm_review_amount(const EvmSigningRequest &request, const char *asset, char *out, size_t capacity);
   EvmTransactionError evm_sign_transaction(const EvmSigningRequest &request,
                                            const HdPrivateNode &master,
                                            uint8_t *out_transaction,

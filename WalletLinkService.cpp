@@ -22,6 +22,7 @@
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
 #include "WalletTotp.h"
+#include "BatteryMonitor.h"
 
 namespace hexwallet
 {
@@ -318,14 +319,13 @@ namespace hexwallet
       }
     }
 
-    // The phone link is a signing transport with the same fail-closed policy as
-    // the serial CLI: it needs an unlocked wallet and a working trusted display.
     bool link_signing_allowed()
     {
       if (wallet_cli_review_active() || link.pairing_pending() || wallet_totp_pending())
         return false;
       const WalletTransportState transport_state = {
-          wallet_session_is_loaded(), true, board_has_display()};
+          wallet_session_is_loaded(), true, board_has_display(),
+          battery_monitor_blocks_signing()};
       return wallet_transport_allows(WalletTransport::Nfc,
                                      WalletTransportOperation::SigningRequest,
                                      transport_state);
@@ -344,9 +344,6 @@ namespace hexwallet
       {
         return writer.u8(kStatusInvalid);
       }
-      // Optional trailing CryptoNote subaddress indices (major, minor). Older
-      // phone builds stop after `index`, which keeps deriving the standard
-      // address.
       uint32_t subaddress[2] = {0, 0};
       bool has_subaddress = false;
       if (reader.offset != reader.size)
@@ -367,8 +364,6 @@ namespace hexwallet
       char path[kDerivationPathTextSize];
       if (!wallet_session_is_loaded())
         return writer.u8(kStatusLocked);
-      // Do not replace a transaction's trusted review with an address supplied in
-      // a second host request. The caller must finish or cancel that review first.
       if (wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending() || link.pairing_pending())
         return writer.u8(kStatusNotApproved);
       if (!board_has_display() || !wallet_ui_ready())
@@ -694,7 +689,7 @@ namespace hexwallet
                                       response_capacity);
     }
 
-  } // namespace
+  }
 
   bool wallet_link_service_init()
   {
@@ -705,12 +700,13 @@ namespace hexwallet
       return false;
     if (preferences.getBytesLength(kIdentitySeedKey) == sizeof(identity_seed))
     {
-      preferences.getBytes(kIdentitySeedKey, identity_seed, sizeof(identity_seed));
+      if (preferences.getBytes(kIdentitySeedKey, identity_seed, sizeof(identity_seed)) != sizeof(identity_seed))
+        return false;
     }
     else
     {
-      random_fill(identity_seed, sizeof(identity_seed));
-      identity_seed[0] |= 1;
+      if (preferences.isKey(kIdentitySeedKey) || !random_fill_checked(identity_seed, sizeof(identity_seed)))
+        return false;
       if (preferences.putBytes(kIdentitySeedKey, identity_seed,
                                sizeof(identity_seed)) != sizeof(identity_seed))
       {

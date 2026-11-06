@@ -25,8 +25,7 @@ namespace hexwallet
   bool wallet_catalog_at_sorted(size_t, WalletCatalogEntry *) { return false; }
   bool wallet_catalog_matches(const WalletCatalogEntry &, const char *) { return false; }
   bool wallet_catalog_has(const WalletCatalogEntry &, WalletCapability) { return false; }
-  void random_fill(void *out, size_t size) { memset(out, 0x37, size); }
-  bool random_healthy() { return test_entropy; }
+  bool random_fill_checked(void *out, size_t size) { memset(out, test_entropy ? 0x37 : 0, size); return test_entropy; }
   bool review_seal_build(ReviewSeal *seal, const uint8_t *, const char *const *lines,
                          size_t count, uint32_t now, uint32_t window)
   {

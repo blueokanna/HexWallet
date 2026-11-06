@@ -1,6 +1,7 @@
 ﻿#include "Clvm.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ChainCommon.h"
@@ -14,6 +15,18 @@ namespace
 constexpr uint8_t kClvmCons = 0xff;
 constexpr uint8_t kClvmNil = 0x80;
 constexpr size_t kClvmMaxDepth = 256;
+
+// Scratch that only exists for the length of one call. Hash walks and parsers
+// used to keep these buffers as function-local statics, which put tens of KB
+// into .bss for a wallet that spends most of its life idle.
+struct HeapBuffer
+{
+  uint8_t *data;
+  explicit HeapBuffer(size_t size) : data(static_cast<uint8_t *>(malloc(size))) {}
+  ~HeapBuffer() { free(data); }
+  HeapBuffer(const HeapBuffer &) = delete;
+  HeapBuffer &operator=(const HeapBuffer &) = delete;
+};
 
 struct ParseFrame
 {
@@ -284,7 +297,10 @@ bool clvm_tree_hash(const ClvmArena *arena, uint16_t node, uint8_t out[32])
   if (arena == nullptr || out == nullptr) return false;
   if (!valid_arena_node(arena, node)) return false;
 
-  // Post-order walk; `result` holds the hash of every finished node.
+  // Post-order walk; `result` holds the hash of every finished node, indexed by
+  // node id. Allocating it per call keeps 32 KB out of .bss and sizes the buffer
+  // to the tree that is actually hashed: a Chia spend is tens of nodes, not the
+  // arena's 1024-node worst case. The walk is single-threaded, so no lock.
   struct Frame
   {
     uint16_t node;
@@ -292,10 +308,14 @@ bool clvm_tree_hash(const ClvmArena *arena, uint16_t node, uint8_t out[32])
   };
   Frame stack[kClvmMaxDepth];
   size_t depth = 0;
-  static uint8_t result[kClvmMaxNodes + 1][32];  // single-threaded signing path
-  // Atoms are not bounded to 64 bytes. Standard puzzle modules and opaque
-  // serialized values can contain atoms up to the arena's full byte capacity.
-  uint8_t buffer[1 + kClvmMaxAtoms];
+  const size_t node_slots = static_cast<size_t>(arena->node_count) + 1;
+  HeapBuffer result_storage(node_slots * kSha256Size);
+  if (result_storage.data == nullptr) return false;
+  uint8_t *const result = result_storage.data;
+  // 0x01 || atom and 0x02 || left || right are hashed straight out of the arena
+  // and the result table, so no atom copy is needed at all.
+  constexpr uint8_t kAtomTag = 0x01;
+  constexpr uint8_t kPairTag = 0x02;
 
   stack[depth].node = node;
   stack[depth].visited = false;
@@ -308,9 +328,8 @@ bool clvm_tree_hash(const ClvmArena *arena, uint16_t node, uint8_t out[32])
     if (entry->left == 0)
     {
       const uint8_t *atom = arena->atoms + entry->atom_offset;
-      buffer[0] = 0x01;
-      if (entry->atom_size) memcpy(buffer + 1, atom, entry->atom_size);
-      if (!crypto_sha256(buffer, 1u + entry->atom_size, result[frame.node]))
+      if (!crypto_sha256_segments(&kAtomTag, 1, atom, entry->atom_size, nullptr, 0,
+                                  result + frame.node * kSha256Size))
       {
         return false;
       }
@@ -329,13 +348,15 @@ bool clvm_tree_hash(const ClvmArena *arena, uint16_t node, uint8_t out[32])
       ++depth;
       continue;
     }
-    buffer[0] = 0x02;
-    memcpy(buffer + 1, result[entry->left], 32);
-    memcpy(buffer + 33, result[entry->right], 32);
-    if (!crypto_sha256(buffer, 65, result[frame.node])) return false;
+    if (!crypto_sha256_segments(&kPairTag, 1, result + entry->left * kSha256Size,
+                                kSha256Size, result + entry->right * kSha256Size,
+                                kSha256Size, result + frame.node * kSha256Size))
+    {
+      return false;
+    }
     --depth;
   }
-  memcpy(out, result[node], 32);
+  memcpy(out, result + node * kSha256Size, kSha256Size);
   return true;
 }
 

@@ -48,7 +48,7 @@
 | QRL | 生产签名，两代账户分别准入。**v1**：XMSS/SHAKE-256（h=10, w=16）完整签名，签名前把一次性叶持久预留到 NVS 双槽记录并回读证明，与 qrllib `xmss_alt` 在 h=4/6/10、索引 0/1/末叶逐字节比对通过。**v2（Zond）**：`qrl2` 用 BIP44 `m/44'/238'/account'/change/index` 子私钥作 ML-DSA-87 种子，地址 `SHAKE256(01 00 00‖pk)` 显示为 `Q`+128 hex；只签 `0x02` 动态费信封，keygen/sign 与 NIST ACVP tc51/tc61 逐字节一致 | v1 只准入原生转账；v2 只准入主网 chain id 1 的动态费信封（`descriptor=010000`、`extra_params` 为空、`to` 为 64 字节账户或空）。两代都不含代币、质押、多签或跨链消息 |
 | APT | 生产签名。Ed25519 账户地址 `sha3-256(pk‖0x00)`；设备自建 `RawTransaction` BCS（`0x1::aptos_account::transfer`），签名 `sha3-256("APTOS::RawTransaction"‖BCS)`，输出 `0x00‖sig‖pk` authenticator | 仅原生 APT 转账；无 EntryFunction 任意调用、多签、赞助交易、fa 代币。向量由 Python `sha3_256` + libsodium 独立生成 |
 | AE | SLIP-0010 `m/44'/457'/0'/0'/i'`，`ak_` + base58(pubkey‖SHA-256d 校验)；固定向量在 `run_alt_address_self_tests()` | 仅地址；没有经过审计的原生 spend 交易、费用策略和签名路径 |
-| RYO | BIP44 `m/44'/382'/0'/0/i`，CryptoNote 双密钥 long address，varint 前缀 `0x2ce192`；编码器复用 Monero/Masari 向量并通过 Ryo 向量 | 仅地址；Ryo 的 RingCT/交易格式未接入，不能声明收付可用 |
+| RYO | BIP44 `m/44'/382'/0'/0/i`，CryptoNote 双密钥 long address，varint 前缀 `0x2ce192`；编码器复用 Monero 向量并通过 Ryo 向量 | 仅地址；Ryo 的 RingCT/交易格式未接入，不能声明收付可用 |
 | ZANO | BIP44 `m/44'/1018'/0'/0/i`，CryptoNote 双密钥 `Zx` 地址，前缀 `0xc5`；与 zano `tests/unit_tests/base58.cpp` 向量逐字节一致 | 仅地址；没有标准子地址前缀，子地址 API 返回 `InvalidArgument`；签名关闭 |
 
 ### 未接入的截图币种（明确原因）
@@ -56,7 +56,6 @@
 | 币种 | 原因 |
 | --- | --- |
 | Beam / Grin / MimbleWimbleCoin / Epic Cash | 交互式 Mimblewimble，没有静态链上收款地址；收款/花费需要 slate/BBS 多轮状态机，不能把 slatepack 端点伪装成地址 |
-| Super Zero (SERO) | 64/96 字节 superzk 公钥包，不是单密钥地址；本仓库没有经过审计的编码与签名路径 |
 | Swap (XWP) / Evolution (EVOX) / VeriBlock (VBK) | 当前 SLIP-0044 没有对应 coin type；复用其它链的 coin type 会造成跨域密钥复用，必须等上游注册与独立向量 |
 | Veil (VEIL) | 已作为 Bitcoin-family fork 接入透明 P2PKH 签名；Zerocoin/环签名隐私交易不支持 |
 
@@ -75,12 +74,8 @@ Ethereum、BSC、Polygon、Arbitrum 和 KAIA 的 ERC-721/1155 唯一 selector �
 | 名称 | 原因 | 当前状态 |
 | --- | --- | --- |
 | QUBIC | Qubic 身份是 FourQ 曲线 + KangarooTwelve，不是 Ed25519/SHA3。旧实现用 Ed25519 公钥的 SHA3/base26 结果冒充地址，会产出不可花费的身份 | 网络 profile、`AddressEncoding::QubicBase26`、base26 编码器和自检向量已整体删除；`find_network_profile("qubic")` 必须返回 `nullptr`（生产策略测试断言）。没有 FourQ/K12 实现与独立向量前不得重新登记 |
-| FLUX | 2026-10-23 的 MiningPoolStats 快照把 FLUX 归入 GRAVEYARD；项目规则禁止 GRAVEYARD 身份进入生产注册表（与 MSR 同样处理） | 目录条目、网络 profile、ZIP-243 签名策略与分支 ID 已移除。ZIP-243 引擎仍由 ZEC 使用（含 t3 P2SH-P2PK 花费）并有独立向量；FLUX 在 `tools/coin_coverage_report.py` 中保留为 REQUESTED，报告显示 `ABSENT` |
-| MSR | Masari 已不在活跃列表 | 仅保留底层算法回归材料；无 profile、无目录条目、无签名入口 |
 
-`tests/test_graveyard.py` 现在同时检查 `WalletNetworks.cpp`、`WalletCatalog.cpp`、
-三个生成文件与 `tools/fork_registry.json`，并断言 FLUX/MSR/QUBIC 不会回流；矿池表
-的每一行还必须指向目录里真实存在的条目，否则测试失败。
+`tests/host/policy_check.ps1` 核对生产注册表和矿池映射。
 
 ### THETA、BEAM 与 Pearl：实际范围和剩余接入
 
@@ -111,7 +106,7 @@ BEAM 的链上承诺隐藏金额，不代表设备无法核对自己派生的金
 `TOKEN` 是已登记的 EVM/TRC-20 代币合约，前提是所属网络本身可签名。
 `ADDRESS` 只能派生地址；`ABSENT` 表示这棵树里没有对应适配器。
 原链清单来自本脚本的 `REQUESTED`；资产与网络组合来自 `tools/requested_asset_networks.json`。
-MSR 已按用户要求移除；SOL 支持原生转账、SPL Token 与 Token-2022 TransferChecked（Token-2022 显示扩展风险警告，拒绝 ATA 创建）；TRX 支持原生 TRX、TRC-10（已登记 id 带精度，未登记 id 只显示精确 base unit）、已登记 TRC-20 `transfer`/自转 `transferFrom`、≤64 字节可打印 memo（仅 owner 权限）；ATOM/OSMO/TIA 支持 Cosmos SDK 单笔 1..4 条 MsgSend（可选 memo、任意 denom；无固定精度的 denom 显示精确 base unit；无 IBC 报文/authz）；ZEC 仅透明地址 v4（t1 P2PKH 与 t3 P2SH-P2PK 输入，多签与其它 redeem 形式拒绝）。SIGN 不代表该链全部交易类型。
+SOL 支持原生转账、SPL Token 与 Token-2022 TransferChecked（Token-2022 显示扩展风险警告，拒绝 ATA 创建）；TRX 支持原生 TRX、TRC-10（已登记 id 带精度，未登记 id 只显示精确 base unit）、已登记 TRC-20 `transfer`/自转 `transferFrom`、≤64 字节可打印 memo（仅 owner 权限）；ATOM/OSMO/TIA 支持 Cosmos SDK 单笔 1..4 条 MsgSend（可选 memo、任意 denom；无固定精度的 denom 显示精确 base unit；无 IBC 报文/authz）；ZEC 仅透明地址 v4（t1 P2PKH 与 t3 P2SH-P2PK 输入，多签与其它 redeem 形式拒绝）。SIGN 不代表该链全部交易类型。
 Starknet 使用 Cairo 而非 EVM，Aptos/Sui/TON/NEAR 也不是 EVM；它们需要各自独立的交易适配器，不应以 EVM profile 冒充。Starknet 已接入自研 Stark 曲线、Pedersen/Poseidon、Stark ECDSA 与 Cairo v3 交易哈希（`StarknetCrypto.cpp`），并由 `StarknetTransaction.cpp` 只准入 `deploy_account` 与「单笔 ERC-20 `transfer`」两种 v3 交易：账户地址由设备用 class hash、salt 与单公钥构造参数重算 SNIP-5 地址，链 ID 钉死 `SN_MAIN`，多调用账户、`declare`、paymaster、多签与非主网一律拒绝。
 XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行者审阅；范围见 stellar-signing.md。NFT ABI 解析器不等于已准入 NFT 合约，实际缺口见 adapter-status.md。
 
@@ -146,7 +141,6 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 | DOGE | SIGN | doge, dogechain |
 | LTC | SIGN | ltc, ltc49, ltc84 |
 | FIRO | SIGN | firo |
-| FLUX | ABSENT | no profile in this tree |
 | BTG | SIGN | btg, btg49, btg84 |
 | AION | ABSENT | no Aion adapter |
 | USDT | TOKEN | eth:eth-usdt, bsc:bsc-usdt, arb1:arb-usdt, avaxc:avaxc-usdt, opt:opt-usdt, kaia:kaia-usdt, celo:celo-usdt, trx:trx-usdt |
@@ -203,7 +197,6 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 | LUNA | SIGN | `terra`（Cosmos，`phoenix-N`、`uluna`）；CW20 与 wasm execute 一律拒绝 |
 | LUNC | SIGN | `terraclassic`（Cosmos，`columbus-N`、`uluna`）；同上 |
 | ROSE | SIGN | rose（Oasis Sapphire EVM chain 23294，原生 ROSE） |
-| ZEN | SIGN | zen（Horizen EON EVM chain 7332，原生 ZEN） |
 | SCRT | ABSENT | no Secret Network adapter |
 | DERO | ABSENT | no Dero adapter |
 | TAO | ABSENT | no Bittensor adapter |
@@ -222,7 +215,7 @@ XLM 已接入主网 XDR Payment/CreateAccount、SEP-0005 地址和 memo/发行�
 
 合计：SIGN 60 / REVIEW 0 / ADDRESS 3 / TOKEN 11 / ABSENT 16（共 90 个）
 
-目录声明签名入口：XMR, ZEC, RVN, BTC, BCH, ADA, AVAX, ATOM, CKB, XEC, CRO, DCR, ALGO, ETH, SOL, DOGE, LTC, FIRO, BTG, USDC, BNB, ETC, FIL, FTM, KAS, MNT, NEAR, POL, SUI, TON, TRX, VET, XLM, XPL, XRP, ONE, BSV, ERG, DGB, XTZ, CFX, KAIA, FLOW, BERA, TIA, OSMO, GLMR, HBAR, SEI, ICP, SC, ICX, QTUM, HIVE, XEM, FLR, XDC, ZEN, ROSE
+目录声明签名入口：XMR, ZEC, RVN, BTC, BCH, ADA, AVAX, ATOM, CKB, XEC, CRO, DCR, ALGO, ETH, SOL, DOGE, LTC, FIRO, BTG, USDC, BNB, ETC, FIL, FTM, KAS, MNT, NEAR, POL, SUI, TON, TRX, VET, XLM, XPL, XRP, ONE, BSV, ERG, DGB, XTZ, CFX, KAIA, FLOW, BERA, TIA, OSMO, GLMR, HBAR, SEI, ICP, SC, ICX, QTUM, HIVE, XEM, FLR, XDC, ROSE
 
 
 ### 本次要求的资产与网络组合

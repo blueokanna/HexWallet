@@ -77,8 +77,12 @@ namespace hexwallet
     uint16_t ring_size;
   };
 
+  enum class CryptoNoteReviewNetwork : uint8_t { MoneroMainnet = 0, ZephyrMainnet = 2 };
+  bool cryptonote_transaction_version_valid(CryptoNoteReviewNetwork network, uint64_t version);
+
   struct CryptoNoteTransaction
   {
+    CryptoNoteReviewNetwork network;
     uint64_t version;
     uint64_t unlock_time;
     uint16_t input_count;
@@ -91,7 +95,8 @@ namespace hexwallet
   };
 
   CryptoNoteTxError cryptonote_parse_transaction(const uint8_t *data, size_t size,
-                                                 CryptoNoteTransaction *out);
+                                                 CryptoNoteTransaction *out,
+                                                 CryptoNoteReviewNetwork network = CryptoNoteReviewNetwork::MoneroMainnet);
 
   CryptoNoteTxError cryptonote_serialize_transaction(const CryptoNoteTransaction &tx,
                                                      uint8_t *out,

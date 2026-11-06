@@ -31,6 +31,7 @@
 | 审查完整性 | `TrustAnchor.cpp` | `ReviewSeal` 对实际渲染的文本做哈希，只有面板报告帧已提交才武装，一次即废，随审查一起过期 |
 | 批准有效期 | `WalletSigning.cpp`、`WalletCli.cpp` | 120 秒；过期即清会话；被拒绝的审查不能翻回"已批准" |
 | 批准消耗 | `WalletSigning.cpp` | 先消耗批准，再解封密钥；之后失败也不会恢复批准 |
+| Dash 手续费可计算 | `DashTransaction.cpp` | 每个输入必须带资助交易；txid、输出序号、金额、脚本全部重新证明，手续费从被证明的值算出来，而不是采信主机。没有证明的旧载荷返回 `missing-field` |
 | 输出清零 | `SensitiveValue.h` | `SigningOutputGuard` 在生产者没有提交合法非零长度时清零调用方缓冲区 |
 | 托管门禁 | `WalletCustody.cpp` | 五个事实全部成立才算数；缺哪个就返回哪个 `CustodyBlocker`，没有静默降级 |
 | 启动信任 | `TrustAnchor.cpp` | `HEXWALLET_REQUIRE_VERIFIED_BOOT=1` 时，安全启动或 Flash 加密关闭就拒绝签名；"读不到"和"关着"分开报告 |
@@ -58,6 +59,38 @@
 
 所以没有屏幕的构建没有批准来源。串口签名只有在编入 `HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION=1`
 时才可能，而且只限串口；手机链路仍然拒绝，因为"自己批准自己请求"的手机不是可信显示。
+
+## 审查行就是契约
+
+适配器填一个 `ChainReview`，屏幕渲染它，批准动作把它封死。这三步之间有两种会亏钱的失效模式，
+它们都在 `ChainTransaction.cpp` 里统一关掉，而不是交给 25 个家族各自记得：
+
+- `chain_review_transaction()` 会拒绝 `symbol`、`recipient`、`amount`、`fee` 任一为空的审查。
+  空的 recipient 在屏上就是一行空白，用户完全可以在上面按批准；而签名路径会重新审查并比较两个
+  空字符串——它们相等，于是批准就通过了。
+- 某个字段把缓冲区填到最后一个字节，一律当作被截断并拒绝。`snprintf` 是静默截断的，而"地址被
+  截断"是这台设备唯一无法挽回的错误。136 字节足够放下所有已准入的地址形式（最长的是 Cardano
+  Shelley base，103 字节），所以顶到上限就是 bug，不是长地址。
+
+这条闸门由 `run_chain_self_tests()` 钉住：它接受完整审查，逐个清空字段必须被拒，135 字节的
+recipient 被拒而 134 字节被接受。
+
+## 供电与签名面
+
+一笔签名是这台设备最费电的动作：射频、屏幕和 MCU 同时拉电流，真正结束会话的是一个快没电的电芯在
+这一瞬间的压降。所以这个决定由 `BatteryMonitor.cpp` 统一持有，而不是散落在各个适配器里：
+
+- ADC 最多每 5 秒采一次，进五格环形缓冲，等级取**中位数**——USB 插入或屏幕刷新带偏的一次转换
+  不会改变结论。
+- `Critical`（≤ 3350 mV）在 `wallet_transport_allows()` 里同时关掉 `SigningRequest` 和
+  `ApprovalResponse`，对所有传输都一样；只读操作保持开放，`status` 和目录照常回答。
+- 回升要高出阈值 60 mV 才升级，没有这个回差，压在阈值上的电芯会在 ADC 噪声里来回跳。
+- 没有分压电阻的板子报 `Unknown`，而 `Unknown` 从不阻止签名——USB 供电的设备不能因为看不见电池
+  就拒绝干活。
+- `status` 会打出 `battery=<mV> <level>`，被拒绝的原因不用接调试器就能看到。
+
+屏幕空闲熄屏**没有**实现。AMOLED、墨水屏和 TFT 的电源轨行为各不相同，必须在硬件上验证；假定它
+能用，比不做更糟。
 
 ## 安全芯片现状
 

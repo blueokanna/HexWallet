@@ -249,6 +249,10 @@ bool crypto_keccak512(const uint8_t *data, size_t size, uint8_t out[kKeccak512Si
   return keccak_sponge(data, size, 72, 0x01, out, kKeccak512Size);
 }
 
+bool crypto_sha3_512(const uint8_t *data, size_t size, uint8_t out[64]) {
+  return keccak_sponge(data, size, 72, 0x06, out, 64);
+}
+
 bool crypto_shake256(const uint8_t *data, size_t size, uint8_t *out, size_t out_size) {
   return keccak_sponge(data, size, 136, 0x1F, out, out_size);
 }

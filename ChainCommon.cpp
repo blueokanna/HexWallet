@@ -232,8 +232,7 @@ bool chain_constant_time_equal(const uint8_t *left, const uint8_t *right,
 namespace {
 
 int chain_random_callback(void *, unsigned char *output, size_t length) {
-  random_fill(output, length);
-  return 0;
+  return random_fill_checked(output, length) ? 0 : -1;
 }
 
 size_t chain_der_integer(const mbedtls_mpi &value, uint8_t *out) {

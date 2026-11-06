@@ -101,6 +101,43 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Check out Beam reference sources
+        uses: actions/checkout@v4
+        with:
+          repository: BeamMW/beam
+          ref: 90a8be3ba2bed3e3adac748867658e9381b3f462
+          path: BeamReference
+          persist-credentials: false
+          sparse-checkout: |
+            core
+            utility
+            3rdparty/yas
+            wallet/core
+
+      - name: Check out Beam's pinned secp256k1
+        uses: actions/checkout@v4
+        with:
+          repository: BeamMW/secp256k1
+          ref: 3ac4050e7bf914c59677c22aa4b9dba95cc40944
+          path: BeamReference/3rdparty/secp256k1
+          persist-credentials: false
+
+      - name: Verify signed Beam transaction with upstream cryptography
+        shell: pwsh
+        run: |
+          cmake -S tests/host/beam -B build/beam-reference-test -A x64 "-DBEAM_REFERENCE=$env:GITHUB_WORKSPACE/BeamReference"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/beam-reference-test --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $token = & build/beam-reference-test/Release/beam_reference.exe --regular-token
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $deviceToken = & build/chain-native/Release/chain_probe.exe beam-regular-address
+          if ($LASTEXITCODE -ne 0 -or $token -cne $deviceToken) { throw "Beam address mismatch" }
+          & build/chain-native/Release/chain_probe.exe beam-output-selftest build/beam-reference-test/output.bin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & build/beam-reference-test/Release/beam_reference.exe build/beam-reference-test/output.bin build/beam-reference-test/output.bin.tx
+          exit $LASTEXITCODE
+
       - name: Verify pinned mining identities and compiled capabilities
         shell: pwsh
         run: |
@@ -109,6 +146,8 @@ jobs:
           python tests/host/mining_catalog_test.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/generate_mining_catalog.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/generate_blake3_vectors.py --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: TOTP local approval and transport protocol regressions
@@ -124,7 +163,7 @@ jobs:
       - name: Firmware policy gates
         shell: pwsh
         run: |
-          # Graveyard exclusion, withdrawn-chain pins, mining-table resolution,
+          # Retired asset exclusion, withdrawn-chain pins, mining-table resolution,
           # no network stack, and the production custody refusal.
           powershell -ExecutionPolicy Bypass -File tests/host/policy_check.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -142,9 +181,12 @@ jobs:
         run: |
           # Compiles every pure-C++ firmware source with the ESP32 Xtensa
           # toolchain to prove the crypto core builds for the 32-bit device.
-          powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1
+          # -StackBudget also fails the build when a frame that runs on the
+          # 32 KB Arduino loop task grows past one sixth of it.
+          powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -StackBudget 5120
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4
+          powershell -ExecutionPolicy Bypass -File tests/host/device_compile_check.ps1 -Target esp32p4 -StackBudget 5120
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
       - name: Checkout pinned NXP transport headers

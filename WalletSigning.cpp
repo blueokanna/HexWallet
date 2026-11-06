@@ -627,7 +627,8 @@ namespace hexwallet
     {
       BitcoinReviewText text = {};
       WalletUiTransactionReview review = {};
-      if (!bitcoin_prepare_review(request, &text, &review)) return false;
+      if (!bitcoin_prepare_review(request, &text, &review))
+        return false;
       review.show_decision_buttons = true;
       wallet_ui_set_decision_callback(decision_callback);
       wallet_ui_show_transaction(review);
@@ -645,15 +646,7 @@ namespace hexwallet
                     ? request.token->symbol
                     : evm_token_standard_name(request.call.standard);
       }
-      if (request.call.has_token_id)
-      {
-        snprintf(amount, sizeof(amount), "%s %s #%s", request.amount_text, asset,
-                 request.token_id_text);
-      }
-      else
-      {
-        snprintf(amount, sizeof(amount), "%s %s", request.amount_text, asset);
-      }
+      if (!evm_review_amount(request, asset, amount, sizeof(amount))) return false;
       bool recipient_zero = true;
       for (size_t index = 0; index < kEvmAddressSize; ++index)
       {
@@ -839,8 +832,6 @@ namespace hexwallet
       {
         return false;
       }
-      // One display row per MsgSend: every recipient and its own amount. The
-      // chain/account/memo detail block hangs off the first row.
       WalletUiTransactionOutput outputs[kCosmosMaxMessages] = {};
       static_assert(kCosmosMaxMessages <= kWalletUiMaxTransactionOutputs,
                     "Every Cosmos message must fit the trusted review");
@@ -1103,10 +1094,6 @@ namespace hexwallet
 
     bool show_chain_review(const ChainTransaction &request)
     {
-      // One row per reviewed call for the adapters that can carry several (a
-      // Starknet `execute` batch); every other family keeps the single row. Lives in
-      // static storage because four full addresses plus the note would cost most of
-      // the UI task's stack.
       static char details[kChainMaxCalls][kChainCallAddressSize + 12];
       static char note[512];
       WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
@@ -1198,8 +1185,6 @@ namespace hexwallet
         outputs[index] = {request.outputs[index].value, amounts[index],
                           request.outputs[index].address, "EXTERNAL"};
       }
-      // t3 spends must name the P2SH address whose redeem script is being spent.
-      // Silently hiding one would let a review show only destinations.
       size_t shown = count;
       bool has_p2sh_input = false;
       for (size_t index = 0; index < request.input_count; ++index)
@@ -1230,10 +1215,6 @@ namespace hexwallet
                       : nullptr);
       return true;
     }
-
-    // Dash review. Every row comes from bytes the device will actually sign: the
-    // destination scripts are decoded back into addresses, and the input rows show
-    // the prevout scripts whose key hashes the signer re-derives and compares.
     bool show_dash_review(const DashTransaction &request)
     {
       static_assert(kDashMaxInputs + kDashMaxOutputs <= kWalletUiMaxTransactionOutputs,
@@ -1273,11 +1254,18 @@ namespace hexwallet
       snprintf(fee, sizeof(fee), "%llu.%08lu DASH",
                static_cast<unsigned long long>(request.fee / kDashDuffsPerDash),
                static_cast<unsigned long>(request.fee % kDashDuffsPerDash));
-      char note[256];
+      const bool instant = dash_instant_send_requested(request);
+      char note[384];
       snprintf(note, sizeof(note),
-               "Version %lu / type 0. Lock time: %lu. Input amounts verified against funding transactions. Confirmations, unspent status and InstantSend locks require a node.",
+               "Version %lu / type 0. Lock time: %lu. %s"
+               "Input amounts verified against funding transactions. Confirmations and unspent status require a node.",
                static_cast<unsigned long>(request.version),
-               static_cast<unsigned long>(request.lock_time));
+               static_cast<unsigned long>(request.lock_time),
+               instant
+                   ? "INSTANTSEND REQUESTED by the host. The lock is an LLMQ "
+                     "decision made after broadcast; this device cannot see or "
+                     "verify it, and an unlocked transaction is not confirmed. "
+                   : "");
       show_review("DASH", request.fee, 0, fee, outputs, shown, nullptr, note, "FEE");
       return true;
     }
@@ -1286,8 +1274,9 @@ namespace hexwallet
     {
       static_assert(kCryptoNoteMaxSignOutputs <= kWalletUiMaxTransactionOutputs,
                     "Every signed output must fit the trusted review");
-      const char *network_id =
-          request.network == CryptoNoteReviewNetwork::MasariMainnet ? "msr" : "xmr";
+      const auto *policy = cryptonote_review_policy(request.network);
+      if (!policy) return false;
+      const char *network_id = policy->id;
       const NetworkProfile *profile = find_network_profile(network_id);
       if (profile == nullptr || request.output_count == 0 ||
           request.output_count > kWalletUiMaxTransactionOutputs)
@@ -1307,13 +1296,8 @@ namespace hexwallet
                  static_cast<unsigned long long>(output.amount / 1000000000000ULL),
                  static_cast<unsigned long long>(output.amount % 1000000000000ULL),
                  symbol);
-        uint64_t prefix = 0;
-        if (profile != nullptr)
-        {
-          prefix = output.address_type == 1 && profile->cryptonote_subaddress_prefix != 0
-                       ? profile->cryptonote_subaddress_prefix
-                       : profile->account_version;
-        }
+        const auto address_profile = cryptonote_profile_for(*profile);
+        const uint64_t prefix = output.address_type == 1 ? address_profile.subaddress_prefix : address_profile.standard_address_prefix;
         if (prefix == 0 ||
             cryptonote_address_from_public_keys(prefix, output.spend_public,
                                                 output.view_public, addresses[index],
@@ -1351,9 +1335,6 @@ namespace hexwallet
                     "Every SOL transfer must be displayed");
       if (request.transfer_count == 0 || request.transfer_count > kSolanaMaxTransfers)
         return false;
-      // Main-loop-only scratch: LVGL copies the strings synchronously. Keeping the
-      // bounded public review data out of the 8 KiB loop stack leaves headroom for
-      // LVGL rendering. Clear it on every return, including formatting failures.
       struct Scratch
       {
         WalletUiTransactionOutput outputs[kSolanaMaxTransfers];
@@ -1441,7 +1422,10 @@ namespace hexwallet
       active.approved = false;
       active.rejected = false;
       active.consumed = false;
-      random_fill(active.review_id, sizeof(active.review_id));
+      if (!random_fill_checked(active.review_id, sizeof(active.review_id))) {
+        wallet_signing_clear();
+        return WalletSigningError::CryptoFailure;
+      }
       bool nonzero = false;
       for (size_t index = 0; index < sizeof(active.review_id); ++index)
       {
@@ -1733,15 +1717,11 @@ namespace hexwallet
     {
       return WalletSigningError::InvalidArgument;
     }
-    // The old DASH payload trusts host-supplied input amounts. Never approve it.
-    if (memcmp(payload, "DAS2", 4) != 0)
+    if (!dash_payload_is_signable(payload, payload_size))
       return WalletSigningError::Unsupported;
     if (network_id == nullptr || network_id[0] == '\0')
       network_id = "dash";
     const NetworkProfile *network = find_network_profile(network_id);
-    // Dash is only offered through this payload shape: a PSBT would carry
-    // witness fields Dash has no meaning for, and the Bitcoin adapter would then
-    // be reviewing a transaction it cannot describe.
     if (network == nullptr || strcmp(network->id, "dash") != 0 ||
         network->encoding != AddressEncoding::P2pkh ||
         network->derivation_coin_type != kDashCoinType ||
@@ -1808,9 +1788,7 @@ namespace hexwallet
     }
     secure_zero(&master, sizeof(master));
     wallet_signing_clear();
-    wallet_ui_show_busy(strcmp(network_id, "msr") == 0
-                            ? "Verifying MSR transaction..."
-                            : "Verifying XMR transaction...");
+    wallet_ui_show_busy("Verifying private transfer...");
     CryptoNotePrepareJob job;
     job.network_id = network_id;
     job.payload = payload;
@@ -1835,8 +1813,6 @@ namespace hexwallet
     }
     active.request.cryptonote.address_index = address_index;
     active.kind = WalletSigningKind::CryptoNote;
-    // The review lifetime starts when verification finishes, not when the
-    // potentially expensive verification began.
     (void)now_ms;
     return finish_review(millis());
   }
@@ -2446,10 +2422,9 @@ namespace hexwallet
     }
     if (active.kind == WalletSigningKind::CryptoNote)
     {
-      const char *network_id =
-          active.request.cryptonote.network == CryptoNoteReviewNetwork::MasariMainnet
-              ? "msr"
-              : "xmr";
+      const auto *policy = cryptonote_review_policy(active.request.cryptonote.network);
+      if (!policy) { wallet_signing_clear(); return WalletSigningError::Unsupported; }
+      const char *network_id = policy->id;
       const NetworkProfile *network = find_network_profile(network_id);
       HdPrivateNode master;
       if (network == nullptr || !load_master(&master))
@@ -2471,10 +2446,13 @@ namespace hexwallet
         return WalletSigningError::NoWallet;
       }
       uint8_t nonce_seed[kCryptoNoteKeySize];
-      random_fill(nonce_seed, sizeof(nonce_seed));
-      wallet_ui_show_busy(strcmp(network_id, "msr") == 0
-                              ? "Signing MSR transaction..."
-                              : "Signing XMR transaction...");
+      if (!random_fill_checked(nonce_seed, sizeof(nonce_seed))) {
+        secure_zero(spend_secret, sizeof(spend_secret));
+        secure_zero(view_secret, sizeof(view_secret));
+        wallet_signing_clear();
+        return WalletSigningError::CryptoFailure;
+      }
+      wallet_ui_show_busy("Signing private transfer...");
       const size_t output_capacity = *in_out_size;
       CryptoNoteSignJob job = {&active.request.cryptonote, view_secret,
                                spend_secret, nonce_seed, out, in_out_size, CryptoNoteTxError::CryptoFailure};

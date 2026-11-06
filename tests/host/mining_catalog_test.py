@@ -34,7 +34,7 @@ class MiningIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no longer active"):
             mining.resolve(active, {"retired": {}}, self.catalog)
 
-    def test_duplicate_and_graveyard_source_ids(self):
+    def test_duplicate_and_retired_source_ids(self):
         duplicate = copy.deepcopy(self.snapshot)
         duplicate["CPU - Various Algo"]["bitnetmoney"] = {"s": "OTHER", "n": "Other"}
         with self.assertRaises(ValueError):

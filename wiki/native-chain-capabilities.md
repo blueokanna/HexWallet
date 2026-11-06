@@ -2,7 +2,7 @@
 
 Generated from the compiled, resolved catalog by `tools/native_coverage.ps1`. Do not edit by hand.
 
-Catalog entries: 211. Distinct execution/address domains: 182. Domains with a signing-code claim: 179.
+Catalog entries: 214. Distinct execution/address domains: 185. Domains with a signing-code claim: 183.
 
 EVM domains use chain ID; Bitcoin-family address variants merge when coin type and both Base58 versions agree (legacy rows may omit the SegWit HRP). Other adapters keep their explicit network IDs. These are conservative catalog groups, not independently attested chain identities. A domain is not necessarily an independent L1 or a distinct native coin: for example, several rollups use ETH.
 
@@ -61,7 +61,6 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | evm:61 | etc | ETC | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:61803 | egaz | EGAZ | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:66 | okt | OKT | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
-| evm:7332 | zen | ZEN | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:747 | flow-evm | FLOW | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:7700 | canto | CANTO | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | evm:787 | acalaevm | ACA | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
@@ -74,8 +73,9 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | evm:9745 | plasma | XPL | SIGN | EIP-155/EIP-1559 signing: native transfers, registered token calls, arbitrary calldata and contract creation; undecoded code is reviewed as raw bytes with its keccak-256 |
 | evm:9898 | lrs | LRS | SIGN | EIP-155 legacy signing: native transfers, registered token calls, arbitrary calldata and contract creation; type-2 envelopes are rejected by chain policy |
 | native:ada | ada | ADA | SIGN | CIP-0003 Ledger/BitBox02 root, CIP-1852 BIP32-Ed25519; mainnet ADA-only transfer; UTxO ownership/value must be checked by the node; no tokens, scripts, staking or governance |
-| native:ae | ae | AE | ADDRESS | Ed25519 ak_ address at m/44'/457'/0'/0'/i'; receive/address verification only - native spend signing is not enabled |
+| native:ae | ae | AE | SIGN | Ed25519 ak_ address at m/44'/457'/0'/0'/i'; SpendTx review and signing (canonical RLP, ae_mainnet domain prefix, blake2b-256 tx hash); name, oracle and contract recipients are refused |
 | native:algo | algo | ALGO | SIGN | Mainnet canonical MessagePack payments, ASA transfers and opt-in; no groups, rekey or account closing |
+| native:alph | alph | ALPH | SIGN | Mainnet native ALPH P2PKH transfer with one recipient and optional change |
 | native:apt | apt | APT | SIGN | Ed25519 account address (sha3-256 of key \|\| 0x00); 0x1::aptos_account::transfer only, signed over sha3-256("APTOS::RawTransaction" \|\| BCS RawTransaction); no EntryFunction calls, sponsored transactions, multisig or tokens |
 | native:atom | atom | ATOM | SIGN | Cosmos SDK native MsgSend; direct sign mode, strict protobuf review |
 | native:bch | bch | BCH | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
@@ -98,6 +98,8 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:prl | prl | PRL | SIGN | Mainnet BIP86 P2TR key-path PSBT v0/v2, DEFAULT/ALL; no P2MR, XMSS or script-path signing |
 | native:qrl | qrl | QRL | SIGN | QRL v1 XMSS/SHAKE-256 tree height 10: native transfers only, the one-time leaf is reserved in durable storage before the WOTS+ signature exists and the device verifies its own signature before releasing it. Use the qrl2 entry for v2 accounts |
 | native:qrl2 | qrl2 | QRL | SIGN | QRL v2 (Zond) ML-DSA-87 accounts and dynamic-fee transactions: BIP44 m/44'/238'/account'/change/index, SHAKE-256 checksummed Q address, ML-DSA-87 over keccak-256 of the reviewed envelope. Mainnet chain id 1 only; unknown descriptors or non-empty extra_params are refused |
+| native:quai | quai | QUAI | SIGN | Mainnet type 0 transfers within Cyprus-1. Supply the actual BIP44 child index selected by quais.js. |
+| native:quantus | quantus | QTC | SIGN | Mainnet runtime 153/6, native balances transfers, ML-DSA-87 signed v4 extrinsics |
 | native:ryo | ryo | RYO | ADDRESS | CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled |
 | native:sc | sc | SC | SIGN | v2 PolicyPublicKey single-input transfer; node must validate parent/proof/maturity; no contracts; wallet-specific SLIP10 seed derivation |
 | native:sol | sol | SOL | SIGN | SOL, SPL Token and Token-2022 TransferChecked: legacy/v0, single payer; exact mint/token accounts reviewed; Token-2022 extension warning; no ALTs or ATA creation |
@@ -118,6 +120,7 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:xtz | xtz | XTZ | SIGN | Modern Ed25519 reveal and native implicit-account transfers; no KT1, FA tokens or NFT calls; branch origin unverified offline |
 | native:zano | zano | ZANO | ADDRESS | CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled |
 | native:zec | zec | ZEC | SIGN | Zcash v4 transparent ZIP-243 review and signing (NU6.2) |
+| native:zeph | zeph | ZEPH | SIGN | Native ZPH-to-ZPH version 3, RingCT type 6, CLSAG; shared XMR spend/view derivation |
 | native:zer | zer | ZER | SIGN | Zcash v4 transparent ZIP-243 review and signing (NU6.2) |
 | utxo:0:0:5 | btc, btc44, btc49 | BTC | SIGN | BIP49 nested SegWit PSBT signing (BIP143); BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:10226:60:16 | fork_utxo_raptoreum | RTM | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
@@ -164,7 +167,7 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | utxo:4242:140:19 | axe | AXE | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:4474:63:22 | fork_utxo_shibacoin | SHIC | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:481:3:22 | fork_utxo_mooncoin, fork_utxo_mooncoin84 | MOON | SIGN | BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
-| utxo:5:76:16 | dash | DASH | SIGN | P2PKH plain payments (type 0) through the Dash adapter; special transaction types refused; InstantSend lock state is node-side |
+| utxo:5:76:16 | dash | DASH | SIGN | Type-0 P2PKH payments with a funding proof per input, so the reviewed fee is computed rather than supplied; special transaction types refused; InstantSend is a host declaration shown on screen, and the lock itself is a quorum decision made after broadcast |
 | utxo:522:125:117 | fork_utxo_stakecubecoin | SCC | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:608:65:16 | fork_utxo_cointaft | TAFT | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:658:73:10 | fork_utxo_whive, fork_utxo_whive84 | WHIVE | SIGN | BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |

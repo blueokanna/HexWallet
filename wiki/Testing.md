@@ -12,7 +12,7 @@ powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 ```
 
 Compiles the firmware sources with MSVC against the mbedTLS headers from the exact ESP32 core, then
-runs `host_test.exe`. 67 labelled checks print one line each, for example:
+runs `host_test.exe`. 72 labelled checks print one line each, for example:
 
 ```text
 crypto-primitives=pass      bip39=pass              bip32=pass
@@ -20,6 +20,8 @@ bip84=pass                  evm-derive=pass         address=pass
 sighash=pass                kaspa=pass              zcash=pass
 dash=pass                   cryptonote-clsag=pass   bulletproof-plus=pass
 cryptonote-review=pass      cryptonote-signing=pass cryptonote-mainnet=pass
+blake3=pass                 blake2b=pass            groestl512=pass
+cli-policy=pass             battery=pass            kangarootwelve=pass
 qrl-xmss=pass               qrl-ots=pass            ml-dsa-87=pass
 starknet-crypto=pass        solana=pass             xrp=pass
 cosmos=pass                 stellar=pass            algorand=pass
@@ -37,7 +39,7 @@ and names the check.
 | --- | --- |
 | `build_clang_ubsan.ps1` | the same sources build under clang with UBSan; undefined behaviour in the exercised paths is reported |
 | `build_chain_native.ps1` | the chain code links against a real mbedTLS 3.6.5, not the host shim |
-| `device_compile_check.ps1` | every pure-C++ firmware file compiles for Xtensa (S3) and, with `-Target esp32p4`, for RISC-V |
+| `device_compile_check.ps1` | every pure-C++ firmware file compiles for Xtensa (S3) and, with `-Target esp32p4`, for RISC-V; `-StackBudget 5120` also fails when a frame that runs on the 32 KB Arduino loop task grows past one sixth of that stack, and the production CLI object is checked for any reference to the self-test suites (that reference is what used to keep 546 KB of test scratch in `.bss`) |
 | `p4_runtime_compile_check.ps1` | the worker and signing orchestration compile for the P4 |
 | `board_port_compile_check.ps1` | `WalletBoardPort.cpp` + `WalletUi.cpp` compile for every board profile against real LVGL 9.5 headers |
 | `epd_driver_compile_check.ps1` | the GxEPD2 path compiles against the pinned commit |
@@ -45,7 +47,8 @@ and names the check.
 | `ui_check.ps1` | LVGL object lifetime, review rendering and mascot regressions |
 | `qr_cross_check.ps1` | all version/level/mask matrices match nayuki/QR-Code-generator |
 | `evm_access_list_check.ps1` | EIP-2930 vectors produced independently |
-| `policy_check.ps1` | graveyard exclusion, withdrawn-chain pins, mining resolution, no network stack, custody refusal, unbounded-copy baseline |
+| `policy_check.ps1` | 已撤回资产 exclusion, withdrawn-chain pins, mining resolution, no network stack, custody refusal, unbounded-copy baseline |
+| `admission=` in the host suite | no refused identity (`WalletAdmission.cpp`) resolves to a network profile or a catalog entry; runs on the device boot self-test too |
 | `policy_check_test.ps1` | the policy checker itself fails when it should |
 | `tests/host/auth` (CMake) | TOTP, transport matrix and local approval |
 | `mining_catalog_test.py` | pinned MiningPoolStats identities |
