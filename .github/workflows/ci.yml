@@ -19,9 +19,6 @@ concurrency:
 
 env:
   ESP32_CORE_VERSION: 3.3.10
-  # arduino-cli release assets are versioned (arduino-cli_<ver>_<os>_<arch>.zip).
-  # The bare "latest" alias (arduino-cli_latest_*.zip) no longer exists in the
-  # release assets, so downloading it 404s. Pin a concrete tag instead.
   ARDUINO_CLI_VERSION: 1.5.1
   ARDUINO_CLI_BASE: https://github.com/arduino/arduino-cli/releases/download/v1.5.1
 
@@ -175,6 +172,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -ExecutionPolicy Bypass -File tests/host/policy_check_test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -ExecutionPolicy Bypass -File tests/host/token_audit_test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Device-target compile check (xtensa g++)
         shell: pwsh
@@ -211,6 +210,13 @@ jobs:
           # driver code can never drift from the actual 9.5 API (the removed
           # lv_disp_drv_t/lv_indev_drv_t API once broke the build silently).
           git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git tests/host/lvgl_real
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $lvglCommit = git -C tests/host/lvgl_real rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $lvglCommit -cne '85aa60d18b3d5e5588d7b247abf90198f07c8a63') {
+            throw 'LVGL tag does not match the reviewed commit'
+          }
+          powershell -ExecutionPolicy Bypass -File tools/prepare_lvgl.ps1 -Directory tests/host/lvgl_real
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: P4 worker and signing orchestration compile check
         shell: pwsh
@@ -256,7 +262,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/epd_driver_compile_check.ps1
 
   firmware-build:
-    name: Device build (${{ matrix.target }})
+    name: Device build (${{ matrix.profile }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -265,7 +271,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [esp32s3, esp32p4]
+        include:
+          - { profile: s3-display, target: esp32s3, board: 1, psram: opi }
+          - { profile: s3-headless, target: esp32s3, board: 6, psram: disabled }
+          - { profile: p4-display, target: esp32p4, board: 7, psram: enabled }
+          - { profile: p4-headless, target: esp32p4, board: 6, psram: disabled }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -296,15 +306,19 @@ jobs:
           cd "$HOME/Arduino/libraries"
           # The sketch uses the LVGL 9 API (lv_screen_active, LV_OS_NONE, ...).
           git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git
+          test "$(git -C lvgl rev-parse HEAD)" = "85aa60d18b3d5e5588d7b247abf90198f07c8a63"
 
-      - name: Compile firmware (S3 display / P4 headless)
+      - name: Apply reviewed LVGL callback ABI fix
+        run: pwsh -File tools/prepare_lvgl.ps1 -Directory "$HOME/Arduino/libraries/lvgl"
+
+      - name: Compile and link selected board profile
         run: |
           export PATH="$HOME/bin:$PATH"
           # LV_CONF_INCLUDE_SIMPLE makes lvgl pick up lv_conf.h from the
           # sketch root (which arduino-cli puts on the include path); without
           # it LVGL falls back to its built-in defaults and the UI widgets
           # (list, textarea, keyboard, ...) are not compiled in.
-          arduino-cli compile --fqbn esp32:esp32:${{ matrix.target }} --library "$HOME/Arduino/libraries/lvgl" \
-            --build-property compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE \
-            --build-property compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE \
+          arduino-cli compile --fqbn esp32:esp32:${{ matrix.target }}:PartitionScheme=min_spiffs,PSRAM=${{ matrix.psram }} --library "$HOME/Arduino/libraries/lvgl" \
+            --build-property "compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=${{ matrix.board }}" \
+            --build-property "compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=${{ matrix.board }}" \
             .

@@ -203,4 +203,4 @@ namespace hexwallet
     secure_zero(seed, sizeof(seed));
     return ok;
   }
-} // namespace hexwallet
+}

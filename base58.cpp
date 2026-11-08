@@ -35,6 +35,8 @@ bool encode_base58(const char *alphabet, char *out, size_t *in_out_size,
   if (alphabet == nullptr || out == nullptr || in_out_size == nullptr || (input == nullptr && input_size != 0)) {
     return false;
   }
+  // Bound the workspace calculation before reading the caller's input.
+  if (input_size > (SIZE_MAX - 1) / 138) return false;
   const uint8_t *bytes = static_cast<const uint8_t *>(input);
   size_t zeroes = 0;
   while (zeroes < input_size && bytes[zeroes] == 0) {
@@ -81,6 +83,7 @@ bool encode_base58(const char *alphabet, char *out, size_t *in_out_size,
 }
 
 int bitcoin_digit(unsigned char value) {
+  if (value == 0) return -1; // strchr would otherwise match the terminator.
   const char *position = strchr(kBitcoinAlphabet, value);
   return position == nullptr ? -1 : static_cast<int>(position - kBitcoinAlphabet);
 }
@@ -95,13 +98,14 @@ bool b58dec(uint8_t *bin, size_t *binsz, const char *b58, size_t b58sz) {
   if (bin == nullptr || binsz == nullptr || b58 == nullptr) return false;
   size_t zeroes = 0;
   while (zeroes < b58sz && b58[zeroes] == '1') ++zeroes;
+  if (zeroes > *binsz) return false;
   uint8_t work[kDecodeBufferSize];
   memset(work, 0, sizeof(work));
+  ScopedZero work_guard(work, sizeof(work));
   size_t length = 0;
   for (size_t index = zeroes; index < b58sz; ++index) {
-    const char *position = strchr(kBitcoinAlphabet, b58[index]);
-    if (position == nullptr) return false;
-    int carry = static_cast<int>(position - kBitcoinAlphabet);
+    int carry = bitcoin_digit(static_cast<unsigned char>(b58[index]));
+    if (carry < 0) return false;
     size_t cursor = 0;
     for (; cursor < length; ++cursor) {
       carry += 58 * work[cursor];
@@ -115,14 +119,13 @@ bool b58dec(uint8_t *bin, size_t *binsz, const char *b58, size_t b58sz) {
     }
     length = cursor;
   }
+  if (length > *binsz - zeroes) return false;
   const size_t required = zeroes + length;
-  if (*binsz < required) return false;
   memset(bin, 0, zeroes);
   for (size_t index = 0; index < length; ++index) {
     bin[zeroes + index] = work[length - 1 - index];
   }
   *binsz = required;
-  mbedtls_platform_zeroize(work, sizeof(work));
   return true;
 }
 

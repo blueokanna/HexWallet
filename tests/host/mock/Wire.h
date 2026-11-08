@@ -15,7 +15,14 @@ class TwoWire {
   size_t write(uint8_t data) { (void)data; return 1; }
   int requestFrom(uint8_t addr, uint8_t len) { (void)addr; return len; }
   int available(void) { return 0; }
-  int read(void) { return -1; }
+  int read(void) {
+#ifdef HEXWALLET_BOARD_RUNTIME_TEST
+    extern int board_test_wire_read();
+    return board_test_wire_read();
+#else
+    return -1;
+#endif
+  }
 };
 
 extern TwoWire Wire;

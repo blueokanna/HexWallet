@@ -135,8 +135,6 @@ namespace hexwallet
   {
     if (!state.reported)
       return TrustLevel::Unknown;
-    // Without a readable flash-encryption state the device cannot be classified,
-    // so it is never promoted to Verified.
     if (!state.flash_encryption_known)
       return TrustLevel::Unknown;
     if (state.secure_boot_enabled && !state.secure_boot_from_config &&
@@ -163,49 +161,57 @@ namespace hexwallet
                          const char *const *lines, size_t line_count,
                          uint32_t now_ms, uint32_t window_ms)
   {
-    if (seal == nullptr) return false;
+    if (seal == nullptr)
+      return false;
     // Copy first: nonce may refer to seal->nonce when a review is rebuilt.
     uint8_t nonce_copy[kReviewSealNonceSize] = {};
-    if (nonce != nullptr) memcpy(nonce_copy, nonce, sizeof(nonce_copy));
+    if (nonce != nullptr)
+      memcpy(nonce_copy, nonce, sizeof(nonce_copy));
     memset(seal, 0, sizeof(*seal));
     seal->consumed = true; // Every failure revokes any previous authorization.
     if (nonce == nullptr || lines == nullptr || line_count == 0 ||
-        line_count > kReviewSealMaxLines || window_ms > INT32_MAX) return false;
+        line_count > kReviewSealMaxLines || window_ms > INT32_MAX)
+      return false;
 
-    // Preserve the canonical encoding without a large stack buffer: nonce,
-    // big-endian u32 count, then u32 length + exact bytes for each label.
     mbedtls_md_context_t context;
     mbedtls_md_init(&context);
-    struct Cleanup {
+    struct Cleanup
+    {
       mbedtls_md_context_t *context;
       ~Cleanup() { mbedtls_md_free(context); }
     } cleanup{&context};
     const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (info == nullptr || mbedtls_md_setup(&context, info, 0) != 0 ||
         mbedtls_md_starts(&context) != 0 ||
-        mbedtls_md_update(&context, nonce_copy, sizeof(nonce_copy)) != 0) return false;
-    auto length_prefix = [&context](size_t length) {
+        mbedtls_md_update(&context, nonce_copy, sizeof(nonce_copy)) != 0)
+      return false;
+    auto length_prefix = [&context](size_t length)
+    {
       const uint8_t bytes[4] = {static_cast<uint8_t>(length >> 24),
-          static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 8),
-          static_cast<uint8_t>(length)};
+                                static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 8),
+                                static_cast<uint8_t>(length)};
       return mbedtls_md_update(&context, bytes, sizeof(bytes)) == 0;
     };
-    if (!length_prefix(line_count)) return false;
+    if (!length_prefix(line_count))
+      return false;
     size_t text_bytes = 0;
     for (size_t index = 0; index < line_count; ++index)
     {
       if (lines[index] == nullptr)
         return false;
       size_t length = 0;
-      while (length <= kReviewSealMaxLineBytes && lines[index][length] != '\0') ++length;
+      while (length <= kReviewSealMaxLineBytes && lines[index][length] != '\0')
+        ++length;
       if (length > kReviewSealMaxLineBytes ||
-          length > kReviewSealMaxTextBytes - text_bytes) return false;
+          length > kReviewSealMaxTextBytes - text_bytes)
+        return false;
       text_bytes += length;
       if (!length_prefix(length) ||
           mbedtls_md_update(&context, reinterpret_cast<const uint8_t *>(lines[index]), length) != 0)
         return false;
     }
-    if (mbedtls_md_finish(&context, seal->digest) != 0) {
+    if (mbedtls_md_finish(&context, seal->digest) != 0)
+    {
       secure_zero(seal->digest, sizeof(seal->digest));
       return false;
     }
@@ -220,7 +226,8 @@ namespace hexwallet
   bool review_seal_matches(const ReviewSeal &seal, const char *const *lines,
                            size_t line_count)
   {
-    if (!seal.built) return false;
+    if (!seal.built)
+      return false;
     ReviewSeal rebuilt = {};
     if (!review_seal_build(&rebuilt, seal.nonce, lines, line_count, 0, 0))
     {
@@ -241,8 +248,6 @@ namespace hexwallet
   {
     if (seal == nullptr || !seal->built || !seal->displayed || seal->consumed)
       return false;
-    // Signed compare, not `now_ms < expires_ms`: the two are unsigned and a wrap
-    // must not turn into an eternal authorization.
     if (static_cast<int32_t>(now_ms - seal->expires_ms) >= 0)
     {
       seal->consumed = true;
@@ -250,8 +255,6 @@ namespace hexwallet
     }
     if (!review_seal_matches(*seal, lines, line_count))
     {
-      // The text changed after it was displayed. Burn the seal: this is exactly
-      // the case the whole mechanism exists for.
       seal->consumed = true;
       return false;
     }
@@ -259,17 +262,20 @@ namespace hexwallet
     return true;
   }
 
-  bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now_ms) {
-  if (seal == nullptr || !seal->built || !seal->displayed || seal->consumed) return false;
-  if (static_cast<int32_t>(now_ms - seal->expires_ms) >= 0) {
+  bool review_seal_authorize_rendered(ReviewSeal *seal, uint32_t now_ms)
+  {
+    if (seal == nullptr || !seal->built || !seal->displayed || seal->consumed)
+      return false;
+    if (static_cast<int32_t>(now_ms - seal->expires_ms) >= 0)
+    {
+      seal->consumed = true;
+      return false;
+    }
     seal->consumed = true;
-    return false;
+    return true;
   }
-  seal->consumed = true;
-  return true;
-}
 
-void review_seal_code(const ReviewSeal &seal, char out[9])
+  void review_seal_code(const ReviewSeal &seal, char out[9])
   {
     static const char kHex[] = "0123456789ABCDEF";
     for (size_t index = 0; index < 4; ++index)
@@ -343,19 +349,19 @@ void review_seal_code(const ReviewSeal &seal, char out[9])
     passed = !review_seal_authorize(&swapped, same, 3, 1200) && passed;
 
     // The rendered-text variant enforces the same clock and single-use rules.
-  ReviewSeal rendered = {};
-  passed = review_seal_build(&rendered, kNonce, lines_a, 3, 1000, 200) && passed;
-  passed = !review_seal_authorize_rendered(&rendered, 1100) && passed;  // not armed
-  review_seal_mark_displayed(&rendered);
-  passed = review_seal_authorize_rendered(&rendered, 1100) && passed;
-  passed = !review_seal_authorize_rendered(&rendered, 1100) && passed;  // used once
-  ReviewSeal stale = {};
-  passed = review_seal_build(&stale, kNonce, lines_a, 3, 1000, 100) && passed;
-  review_seal_mark_displayed(&stale);
-  passed = !review_seal_authorize_rendered(&stale, 1200) && passed;
-  passed = !review_seal_authorize_rendered(&stale, 1050) && passed;  // burned
+    ReviewSeal rendered = {};
+    passed = review_seal_build(&rendered, kNonce, lines_a, 3, 1000, 200) && passed;
+    passed = !review_seal_authorize_rendered(&rendered, 1100) && passed; // not armed
+    review_seal_mark_displayed(&rendered);
+    passed = review_seal_authorize_rendered(&rendered, 1100) && passed;
+    passed = !review_seal_authorize_rendered(&rendered, 1100) && passed; // used once
+    ReviewSeal stale = {};
+    passed = review_seal_build(&stale, kNonce, lines_a, 3, 1000, 100) && passed;
+    review_seal_mark_displayed(&stale);
+    passed = !review_seal_authorize_rendered(&stale, 1200) && passed;
+    passed = !review_seal_authorize_rendered(&stale, 1050) && passed; // burned
 
-  // The short code is the first four digest bytes, so it changes with the seal.
+    // The short code is the first four digest bytes, so it changes with the seal.
     char code_a[9] = {};
     char code_b[9] = {};
     review_seal_code(seal, code_a);
@@ -392,15 +398,15 @@ void review_seal_code(const ReviewSeal &seal, char out[9])
     passed = !review_seal_build(&seal, kNonce, long_lines, 2, 0, 100) && passed;
     large[kReviewSealMaxLineBytes] = '\0';
     const char *many[kReviewSealMaxLines + 1];
-    for (const char *&line : many) line = "";
+    for (const char *&line : many)
+      line = "";
     passed = review_seal_build(&seal, kNonce, many, kReviewSealMaxLines, 0, 100) && passed;
     passed = !review_seal_build(&seal, kNonce, many, kReviewSealMaxLines + 1, 0, 100) && passed;
-    for (size_t i = 0; i < 9; ++i) many[i] = large;
+    for (size_t i = 0; i < 9; ++i)
+      many[i] = large;
     passed = review_seal_build(&seal, kNonce, many, 8, 0, 100) && passed;
     passed = !review_seal_build(&seal, kNonce, many, 9, 0, 100) && passed;
     passed = !review_seal_build(&seal, kNonce, lines_a, 3, 0, 0x80000000U) && passed;
-    // A failed rebuild must revoke a previously displayed seal, even when
-    // validation fails before hashing begins.
     passed = review_seal_build(&seal, kNonce, lines_a, 3, 0, 100) && passed;
     review_seal_mark_displayed(&seal);
     passed = !review_seal_build(&seal, nullptr, lines_a, 3, 0, 100) && passed;
@@ -408,4 +414,4 @@ void review_seal_code(const ReviewSeal &seal, char out[9])
     return passed;
   }
 
-} // namespace hexwallet
+}

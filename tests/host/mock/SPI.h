@@ -33,9 +33,23 @@ class SPIClass {
   void setFrequency(uint32_t freq) { (void)freq; }
   void beginTransaction(SPISettings settings) { (void)settings; }
   void endTransaction(void) {}
-  void write(uint8_t data) { (void)data; }
+  void write(uint8_t data) {
+#ifdef HEXWALLET_BOARD_RUNTIME_TEST
+    extern void board_test_spi_write(uint8_t);
+    board_test_spi_write(data);
+#else
+    (void)data;
+#endif
+  }
   void write16(uint16_t data) { (void)data; }
-  void writeBytes(const uint8_t *data, size_t size) { (void)data; (void)size; }
+  void writeBytes(const uint8_t *data, size_t size) {
+#ifdef HEXWALLET_BOARD_RUNTIME_TEST
+    extern void board_test_spi_write_bytes(const uint8_t *, size_t);
+    board_test_spi_write_bytes(data, size);
+#else
+    (void)data; (void)size;
+#endif
+  }
   uint8_t transfer(uint8_t data) {
 #ifdef HEXWALLET_NFC_RUNTIME_TEST
     extern uint8_t nfc_test_transfer(uint8_t);

@@ -29,6 +29,8 @@ try {
 
   & 'build/chain-native/Release/chain_probe.exe' alph-zeph-selftest
   if ($LASTEXITCODE -ne 0) { throw 'Alephium / Zephyr derivation failed' }
+  & 'build/chain-native/Release/chain_probe.exe' security-regressions
+  if ($LASTEXITCODE -ne 0) { throw 'Codec bounds or EVM review binding regression failed' }
   $alph = Get-Content -Raw tests/fixtures/alephium/p2pkh-transfer.json | ConvertFrom-Json
   $result = & 'build/chain-native/Release/chain_probe.exe' alph $alph.seed $alph.unsignedTx $alph.index
   if ($LASTEXITCODE -ne 0 -or $result -notcontains "signed=$($alph.signature)" -or

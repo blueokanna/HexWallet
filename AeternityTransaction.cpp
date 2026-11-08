@@ -78,15 +78,18 @@ namespace hexwallet
     bool rlp_append_string(uint8_t *out, size_t capacity, size_t *offset,
                            const uint8_t *data, size_t size)
     {
+      if (out == nullptr || offset == nullptr || *offset > capacity ||
+          (size != 0 && data == nullptr))
+        return false;
       if (size == 1 && data[0] < kRlpShortString)
       {
-        if (*offset + 1 > capacity)
+        if (*offset == capacity)
           return false;
         out[(*offset)++] = data[0];
         return true;
       }
       const size_t header = rlp_header_size(size, false);
-      if (*offset + header + size > capacity)
+      if (header > capacity - *offset || size > capacity - *offset - header)
         return false;
       *offset += rlp_write_header(out + *offset, size, false);
       if (size != 0)
@@ -100,9 +103,11 @@ namespace hexwallet
     bool rlp_append_raw(uint8_t *out, size_t capacity, size_t *offset,
                         const uint8_t *data, size_t size)
     {
-      if (*offset + size > capacity)
+      if (out == nullptr || offset == nullptr || *offset > capacity ||
+          size > capacity - *offset || (size != 0 && data == nullptr))
         return false;
-      memcpy(out + *offset, data, size);
+      if (size != 0)
+        memcpy(out + *offset, data, size);
       *offset += size;
       return true;
     }
@@ -1404,10 +1409,11 @@ namespace hexwallet
                                                 tampered_digest) ==
                            ChainError::WrongWallet;
 
-    uint8_t non_canonical[2 + 34 + 34 + 4 + 1];
+    constexpr size_t kNonCanonicalBodySize = 2 + 34 + 34 + 4 + 1;
+    uint8_t non_canonical[2 + kNonCanonicalBodySize];
     size_t non_canonical_size = 0;
     {
-      uint8_t body[sizeof(non_canonical)];
+      uint8_t body[kNonCanonicalBodySize];
       size_t offset = 0;
       const uint8_t tag = kSpendTxTag;
       const uint8_t version = kObjectVersion;
@@ -1429,10 +1435,10 @@ namespace hexwallet
       ok = ok && rlp_append_string(body, sizeof(body), &offset, &empty, 0);
       if (ok)
       {
-        non_canonical_size = rlp_write_header(non_canonical, offset, true);
-        memcpy(non_canonical + non_canonical_size, body, offset);
-        non_canonical_size += offset;
+        ok = rlp_wrap_list(body, offset, non_canonical, sizeof(non_canonical),
+                           &non_canonical_size);
       }
+      passed = passed && ok;
       secure_zero(body, sizeof(body));
     }
     passed = passed &&

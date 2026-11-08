@@ -461,7 +461,6 @@ namespace hexwallet
                                   &secret_size) == TotpError::InvalidBase32;
     secure_zero(secret, sizeof(secret));
 
-    // RFC 6238 Appendix B, SHA-1.
     static const uint8_t kRfcSecret[] = "12345678901234567890";
     struct Vector
     {
@@ -506,4 +505,4 @@ namespace hexwallet
     return ok;
   }
 
-} // namespace hexwallet
+}

@@ -5,6 +5,9 @@
 
 namespace hexwallet {
 
+// Decimal digits only, with an inclusive limit; failure clears the output.
+bool wallet_cli_parse_u32(const char *text, uint32_t maximum, uint32_t *out);
+
 enum class PendingReview : uint8_t {
   None = 0,
   Transaction,  // inspected and waiting for <family> sign / reject

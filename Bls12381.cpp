@@ -480,7 +480,6 @@ namespace hexwallet
       return sign0 | (zero0 & fp_parity(x.c1));
     }
 
-    // Square root in Fp2 with p == 3 (mod 4), RFC 9380 appendix F.2.1.2.
     bool fp2_sqrt(Fp2 &out, const Fp2 &a)
     {
       if (fp_is_zero(a.c1))
@@ -1627,7 +1626,7 @@ namespace hexwallet
         break;
       }
       if (point.infinity)
-        continue; // the canonical identity
+        continue;
       G2Jac jacobian;
       g2_from_affine(jacobian, point);
       G2Jac subgroup;
@@ -1650,4 +1649,4 @@ namespace hexwallet
     return true;
   }
 
-} // namespace hexwallet
+}

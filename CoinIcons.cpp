@@ -85,7 +85,6 @@ namespace hexwallet
     const CoinIcon *dash = coin_icon_find("DASH");
     if (dash == nullptr || dash->size != kCoinIconBytes)
       return false;
-    // Case sensitivity, and chains we ship no artwork for, must stay honest.
     return coin_icon_find("dash") == nullptr && coin_icon_find("EVM") == nullptr &&
            coin_icon_find("NEAR") == nullptr && coin_icon_find("") == nullptr &&
            coin_icon_find(nullptr) == nullptr;

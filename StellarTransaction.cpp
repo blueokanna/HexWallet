@@ -354,23 +354,27 @@ namespace hexwallet
     // only adds a local label and marks it unverified.
     uint8_t request[kStellarMaxRequest];
     size_t request_size = 0;
-    auto put32 = [&](uint32_t value) {
+    auto put32 = [&](uint32_t value)
+    {
       request[request_size++] = static_cast<uint8_t>(value >> 24);
       request[request_size++] = static_cast<uint8_t>(value >> 16);
       request[request_size++] = static_cast<uint8_t>(value >> 8);
       request[request_size++] = static_cast<uint8_t>(value);
     };
-    auto put64 = [&](uint64_t value) {
+    auto put64 = [&](uint64_t value)
+    {
       for (int shift = 56; shift >= 0; shift -= 8)
         request[request_size++] = static_cast<uint8_t>(value >> shift);
     };
-    auto put_account = [&](const uint8_t key[32]) {
+    auto put_account = [&](const uint8_t key[32])
+    {
       put32(0);
       memcpy(request + request_size, key, 32);
       request_size += 32;
     };
     uint8_t issuer[32], destination[32], network[32];
-    for (size_t i = 0; i < 32; ++i) {
+    for (size_t i = 0; i < 32; ++i)
+    {
       issuer[i] = static_cast<uint8_t>(0x90 + i);
       destination[i] = static_cast<uint8_t>(0xB0 + i);
     }
@@ -410,13 +414,11 @@ namespace hexwallet
                                         "Stellar test asset", 7) ==
                    CustomTokenError::Ok;
     StellarTransaction declared = {};
-    ok = ok && stellar_review_request(request, request_size, public_key,
-                                      &declared) == StellarError::Ok &&
+    ok = ok && stellar_review_request(request, request_size, public_key, &declared) == StellarError::Ok &&
          declared.review.operations[0].asset_user_declared &&
          strcmp(declared.review.operations[0].asset_symbol, "USDCx") == 0;
     envelope_size = sizeof(envelope);
-    ok = ok && stellar_sign_transaction(declared, seed, envelope,
-                                        &envelope_size) == StellarError::Ok &&
+    ok = ok && stellar_sign_transaction(declared, seed, envelope, &envelope_size) == StellarError::Ok &&
          envelope_size > 0;
     ok = ok && custom_token_remove_stellar("xlm", issuer, "USDC") ==
                    CustomTokenError::Ok;

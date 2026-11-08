@@ -131,14 +131,11 @@ namespace hexwallet
       return false;
     }
 
-    // sk = 1 must reproduce the bare hash-to-curve output, proving the augmented
-    // public-key prefix is part of the signed message.
     uint8_t identified[96] = {};
     ok = bls12_381_g2_sign_augmented(kOneKey, (const uint8_t *)"hexwallet", 9,
                                      identified) &&
          memcmp(identified, kOneExpected, sizeof(identified)) == 0;
 
-    // Aggregating one signature is the identity; two signatures must differ.
     const uint8_t *single[1] = {kExpectedSignature};
     uint8_t aggregate[96] = {};
     ok = ok && bls12_381_g2_aggregate(single, 1, aggregate) &&
@@ -149,11 +146,10 @@ namespace hexwallet
          memcmp(combined, kExpectedSignature, sizeof(combined)) != 0 &&
          memcmp(combined, kOneExpected, sizeof(combined)) != 0;
 
-    // An empty transcript must not collide with the real message.
     uint8_t empty_signature[96] = {};
     ok = ok && bls12_381_g2_sign_augmented(kPrivateKey, (const uint8_t *)"", 0, empty_signature) &&
          memcmp(empty_signature, kExpectedSignature, sizeof(empty_signature)) != 0;
     return ok;
   }
 
-} // namespace hexwallet
+}

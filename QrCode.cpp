@@ -182,8 +182,6 @@ namespace hexwallet
 
     void rs_generator(uint8_t degree, uint8_t *polynomial)
     {
-      // polynomial[0] is the highest-order coefficient (1); the array holds degree+1
-      // entries.
       memset(polynomial, 0, static_cast<size_t>(degree) + 1);
       polynomial[0] = 1;
       uint8_t root = 1;
@@ -255,9 +253,6 @@ namespace hexwallet
       return row == 6 || column == 6;
     }
 
-    // Version information only exists from version 7: two 3x6 blocks next to the
-    // finder patterns. They are function modules, so data must never be placed
-    // there.
     bool in_version_info(uint8_t row, uint8_t column, uint8_t version,
                          uint8_t size)
     {

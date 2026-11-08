@@ -10,7 +10,9 @@ board with an SE051 secure element, or a headless CLI for bench work.
 
 ## Status
 
-Green host suite, unfinished product. Both statements are load-bearing.
+Host regressions pass; custody integration and hardware acceptance remain incomplete. Build configurations and validation scope are documented in the [build guide](wiki/Build-and-Flash.md).
+
+The [2026-11-09 device integration review](wiki/Device-Integration-2026-11-09-zh.md) records display/input fixes, runtime regressions and device build evidence (Chinese).
 
 - **Tested here:** 72 labelled host checks (`tests/host/build.ps1`), the ESP32-S3/P4 compile
   checks, the board-port compile matrix, and the policy gates. All of it runs in CI on every
@@ -23,7 +25,7 @@ Green host suite, unfinished product. Both statements are load-bearing.
   `HEXWALLET_REQUIRE_SECURE_CUSTODY=1` (the device default) compiles the session to refusals. In
   plain terms: **no device build can create, import or use a wallet today**. Only the host test
   build exercises the key path.
-- Treat the whole tree as experimental. Do not put funds you cannot lose on it.
+- The validation below does not establish readiness for custody of real assets.
 
 ## Hardware
 
@@ -34,7 +36,7 @@ Green host suite, unfinished product. Both statements are load-bearing.
 | 3 | T-Display S3 | 170x320 ST7789, 8-bit parallel | ESP32-S3 |
 | 4 | T-Deck Max | 240x320 UC8253 e-paper, partial refresh | ESP32-S3, no verified user button beyond BOOT |
 | 5 | T-Echo Lite Kit | 176x192 e-paper | nRF52840; pin map only, this tree does not ship an nRF52 build target |
-| 6 | Headless | none | any ESP32; Serial CLI only |
+| 6 | Headless | none | ESP32-S3/P4; Serial CLI only |
 | 7 | HexWallet P4 rev A | 128x296 SSD1680 e-paper | ESP32-P4, SE051C2HQ1 on I2C, PN7161 on shared SPI |
 
 Pin assignments live in `WalletBoardPins.h`, one block per board, each traceable to a schematic or
@@ -180,7 +182,8 @@ ESP32 core 3.3.10 and LVGL 9.5.0:
 ```powershell
 arduino-cli core install esp32:esp32@3.3.10
 git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git "$HOME/Arduino/libraries/lvgl"
-arduino-cli compile --fqbn esp32:esp32:esp32s3 `
+powershell -ExecutionPolicy Bypass -File tools/prepare_lvgl.ps1 -Directory "$HOME/Arduino/libraries/lvgl"
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs,PSRAM=opi `
   --library "$HOME/Arduino/libraries/lvgl" `
   --build-property compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE `
   --build-property compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE .
@@ -190,7 +193,7 @@ Board and feature selection are compile-time `-D` flags; all of them live in `Wa
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `HEXWALLET_BOARD` | 1 | board profile (see the table above) |
+| `HEXWALLET_BOARD` | 1 on S3, 6 on P4 | board profile (see the table above) |
 | `HEXWALLET_ENABLE_LVGL` | 1 | 0 builds the CLI-only image |
 | `HEXWALLET_EPD_PROFILE` | 0 | 0 SSD1680 mono, 1 four-colour, 2 mono V2 (P4) |
 | `HEXWALLET_REQUIRE_SECURE_CUSTODY` | 1 on device | refuse to open a wallet without SE custody |
@@ -201,10 +204,21 @@ Board and feature selection are compile-time `-D` flags; all of them live in `Wa
 The P4 profile is board 7 and must be selected explicitly when compiling for `esp32p4`:
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32p4 -DHEXWALLET_BOARD=7 ...
+arduino-cli compile --fqbn esp32:esp32:esp32p4:PartitionScheme=min_spiffs,PSRAM=enabled `
+  --library "$HOME/Arduino/libraries/lvgl" `
+  --build-property "compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" `
+  --build-property "compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" .
 ```
 
-Flash layout is `partitions/hexwallet-16mb-ota.csv`. Read the secure-boot and flash-encryption
+S3 headless:
+
+```powershell
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs `
+  --build-property compiler.cpp.extra_flags=-DHEXWALLET_BOARD=6 `
+  --build-property compiler.c.extra_flags=-DHEXWALLET_BOARD=6 .
+```
+
+These commands use the 4 MB `min_spiffs` layout. `partitions/hexwallet-16mb-ota.csv` is a separate layout for 16 MB devices. Run the LVGL preparation script before building: it verifies and fixes the reproduced callback ABI defect. Read the secure-boot and flash-encryption
 notes before burning any eFuse; a wrong eFuse cannot be fixed by an OTA update. See
 [Build-and-Flash](https://github.com/blueokanna/HexWallet/wiki/Build-and-Flash).
 

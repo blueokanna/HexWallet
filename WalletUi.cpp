@@ -130,6 +130,34 @@ namespace hexwallet
     bool companion_has_frame = false;
     static LV_ATTRIBUTE_MEM_ALIGN uint8_t companion_pixels[8 + 64 * 16];
 
+    lv_key_t review_key_remap(lv_indev_t *indev, lv_key_t key)
+    {
+      lv_group_t *group = lv_indev_get_group(indev);
+      if (review_seal_valid && group != nullptr &&
+          lv_group_get_focused(group) == screen_content)
+      {
+        if (key == LV_KEY_NEXT) return LV_KEY_DOWN;
+        if (key == LV_KEY_PREV) return LV_KEY_UP;
+      }
+      return key;
+    }
+
+    void review_body_event(lv_event_t *event)
+    {
+      if (!review_seal_valid) return;
+      if (lv_event_get_code(event) == LV_EVENT_CANCEL)
+      {
+        reject_event(event);
+      }
+      else if (lv_event_get_code(event) == LV_EVENT_CLICKED)
+      {
+        // ENTER leaves the scrollable text and selects REJECT first. A separate
+        // press is required for either decision; NEXT/PREV then select actions.
+        lv_group_t *group = lv_obj_get_group(screen_content);
+        if (group != nullptr) lv_group_focus_next(group);
+      }
+    }
+
     void forget_companion()
     {
       companion_stage = nullptr;
@@ -154,7 +182,10 @@ namespace hexwallet
       coin_list = nullptr;
       keyboard = nullptr;
       if (screen_content != nullptr)
+      {
+        lv_group_remove_obj(screen_content);
         lv_obj_clean(screen_content);
+      }
     }
 
     struct RenderedReviewLines
@@ -697,6 +728,14 @@ namespace hexwallet
     lv_obj_set_width(screen_content, LV_PCT(100));
     lv_obj_set_flex_grow(screen_content, 1);
     set_clean_container(screen_content);
+    lv_obj_add_event_cb(screen_content, review_body_event, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(screen_content, review_body_event, LV_EVENT_CANCEL, nullptr);
+    for (lv_indev_t *indev = lv_indev_get_next(nullptr); indev != nullptr;
+         indev = lv_indev_get_next(indev))
+    {
+      if (lv_indev_get_type(indev) == LV_INDEV_TYPE_KEYPAD)
+        lv_indev_set_key_remap_cb(indev, review_key_remap);
+    }
 
     status_label = lv_label_create(screen);
     lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
@@ -1071,6 +1110,14 @@ namespace hexwallet
     }
     if (review.show_decision_buttons)
     {
+      // A keypad must be able to scroll every line, including labels taller
+      // than the viewport, before moving to the decision buttons.
+      if (lv_group_t *group = lv_group_get_default())
+      {
+        lv_group_add_obj(group, screen_content);
+        lv_group_focus_obj(screen_content);
+        lv_obj_add_flag(screen_content, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
+      }
       lv_obj_t *actions = lv_obj_create(screen_content);
       lv_obj_set_width(actions, LV_PCT(100));
       lv_obj_set_height(actions, sc(52));
@@ -1085,6 +1132,7 @@ namespace hexwallet
       lv_obj_set_flex_grow(reject, 1);
       lv_obj_set_style_bg_color(reject, theme_warn(), 0);
       lv_obj_add_event_cb(reject, reject_event, LV_EVENT_CLICKED, nullptr);
+      lv_obj_add_event_cb(reject, reject_event, LV_EVENT_CANCEL, nullptr);
       lv_obj_t *reject_label = lv_label_create(reject);
       lv_label_set_text(reject_label, "REJECT");
       lines.add(reject_label);
@@ -1095,6 +1143,7 @@ namespace hexwallet
       lv_obj_set_flex_grow(approve, 1);
       lv_obj_set_style_bg_color(approve, theme_accent(), 0);
       lv_obj_add_event_cb(approve, approve_event, LV_EVENT_CLICKED, nullptr);
+      lv_obj_add_event_cb(approve, reject_event, LV_EVENT_CANCEL, nullptr);
       lv_obj_t *approve_label = lv_label_create(approve);
       lv_label_set_text(approve_label, "APPROVE");
       lines.add(approve_label);
@@ -1187,12 +1236,9 @@ namespace hexwallet
       if (callback != nullptr && (!value || board_display_review_ready()))
         callback(value);
     }
-    // Arm the review seal only after the panel reports the frame committed.
     if (review_seal_valid && !review_seal.displayed && board_display_review_ready())
       review_seal_mark_displayed(&review_seal);
 
-    // On a full-refresh e-paper panel keep the event pose still. Animate only
-    // an existing home canvas; review/address/pairing pages own no pet handles.
     if (companion_canvas != nullptr && !review_seal_valid &&
         (!eink_panel || board_partial_refresh_supported()) &&
         board_display_review_ready() && mascot_take_animation_tick(millis()))
@@ -1221,12 +1267,10 @@ namespace hexwallet
 
   bool wallet_ui_review_authorize()
   {
-    if (!review_seal_valid)
+    if (!review_seal_valid || !board_display_review_ready())
       return false;
     if (!review_seal.displayed)
     {
-      if (!board_display_review_ready())
-        return false;
       review_seal_mark_displayed(&review_seal);
     }
     return review_seal_authorize_rendered(&review_seal, millis());

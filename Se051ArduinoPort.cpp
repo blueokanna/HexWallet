@@ -100,8 +100,6 @@ extern "C" i2c_error_t axI2CWrite(void *context, unsigned char bus,
   Wire1.beginTransmission(kAddress);
   if (Wire1.write(data, length) != length)
   {
-    // ESP32 Wire::flush clears txLength. Release its transaction lock with an
-    // empty probe; never send the truncated frame or retry a stateful command.
     Wire1.flush();
     Wire1.endTransmission(true);
     port.poisoned = true;

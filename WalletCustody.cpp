@@ -172,6 +172,7 @@ namespace hexwallet
       plan.se_can_sign = false;
       plan.mcu_must_hold_key = true;
       plan.reason = "Starknet signs on the Stark curve (2^251 + 17*2^192 + 1); the SE050/SE051 only hold NIST P-256 and secp256k1 keys";
+      break;
     case KeyScheme::Unsupported:
       plan.reason = "unknown key scheme; hardware custody cannot be inferred from an address encoding";
       break;

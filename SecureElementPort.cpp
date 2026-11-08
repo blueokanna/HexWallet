@@ -76,9 +76,6 @@ namespace hexwallet
     }
 
     constexpr AesTables kAesTables = make_aes_tables();
-
-    // Inverse S-box, derived from the forward table at compile time so the two can
-    // never drift apart.
     struct AesInverseTables
     {
       uint8_t inv_sbox[256];
@@ -260,8 +257,6 @@ namespace hexwallet
       return false;
     if (atr[0] != 0x3B && atr[0] != 0x3F)
       return false;
-    // T0: Y1 (TA1/TB1/TC1/TD1 present) in the high nibble, K historical bytes in
-    // the low nibble.
     uint8_t interface_bits = static_cast<uint8_t>(atr[1] >> 4);
     size_t offset = 2;
     bool requires_tck = false;
@@ -278,11 +273,9 @@ namespace hexwallet
         ++count; // TD
       if (offset + count > size)
         return false;
-      // TCK is mandatory if any TD announces a protocol other than T=0.
       if ((interface_bits & 0x08U) != 0 &&
           (atr[offset + count - 1] & 0x0fU) != 0)
         requires_tck = true;
-      // TD is the last of the interface bytes and carries the next Y.
       interface_bits = (interface_bits & 0x08U) != 0
                            ? static_cast<uint8_t>(atr[offset + count - 1] >> 4)
                            : 0;
@@ -296,7 +289,6 @@ namespace hexwallet
       return trailing == 0;
     if (trailing != 1)
       return false;
-    // TCK is chosen so that the XOR of every byte after TS is zero.
     uint8_t checksum = 0;
     for (size_t index = 1; index < size; ++index)
     {
@@ -731,13 +723,11 @@ namespace hexwallet
 #if defined(HEXWALLET_HOST_TEST)
     if (g_backend != nullptr)
       return false;
-    // Gate behaviour: nothing registered means nothing ready.
     secure_element_register_backend(nullptr);
     char reason[96];
     passed = !secure_element_ready() && strcmp(secure_element_name(), "") == 0 && passed;
     passed = !secure_element_open(reason, sizeof(reason)) && !secure_element_ready() && passed;
 
-    // An incomplete contract must be refused.
     passed = !secure_element_register_backend(&kFakeIncomplete) &&
              !secure_element_ready() && passed;
 
@@ -779,4 +769,4 @@ namespace hexwallet
     return passed;
   }
 
-} // namespace hexwallet
+}

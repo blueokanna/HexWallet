@@ -558,4 +558,4 @@ namespace hexwallet
     return passed;
   }
 
-} // namespace hexwallet
+}

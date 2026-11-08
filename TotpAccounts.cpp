@@ -167,7 +167,6 @@ namespace hexwallet
         {
         case 1:
         {
-          // Whitespace is useful for manual Base32 entry, not URI secrets.
           if (strchr(value.text, ' ') != nullptr)
             return TotpError::InvalidBase32;
           const TotpError result = totp_base32_decode(

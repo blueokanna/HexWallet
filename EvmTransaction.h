@@ -54,6 +54,7 @@ namespace hexwallet
     bool contract_creation;
     const NetworkProfile *network;
     const TokenProfile *token;
+    uint8_t token_metadata_hash[kSha256Size];
     uint32_t address_index;
     uint64_t nonce;
     uint64_t gas_limit;
@@ -65,8 +66,6 @@ namespace hexwallet
     uint8_t amount[kEvmUint256Size];
     uint8_t data[kEvmMaxDataSize];
     uint16_t data_size;
-    // Canonical RLP list payload, without its outer prefix. Preserve order and
-    // duplicates: EIP-2930 charges each occurrence and signs the exact list.
     uint8_t access_list[kEvmMaxAccessListBytes];
     uint16_t access_list_size;
     uint8_t access_list_addresses;
@@ -97,8 +96,6 @@ namespace hexwallet
                                             uint32_t address_index,
                                             EvmSigningRequest *out,
                                             bool opaque_review = false);
-  // Try the registered decoder first; unsupported semantics use a raw-byte
-  // review. Malformed envelopes, wrong networks and fee violations never fall back.
   EvmTransactionError evm_parse_for_review(const uint8_t *transaction, size_t size,
                                            const NetworkProfile &network, const HdPrivateNode &master,
                                            uint32_t address_index, EvmSigningRequest *out);

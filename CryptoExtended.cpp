@@ -2288,9 +2288,6 @@ namespace hexwallet
       secure_zero(next, sizeof(next));
     }
 
-    // Ed25519 identity -> Curve25519 public key. The seed is RFC 8032 test 1;
-    // the expected u-coordinate is the X25519 public key derived from
-    // SHA-512(seed)[0..31], which is the identity libsodium relies on.
     static const uint8_t kRfc8032Seed[32] = {
         0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a,
         0xf4, 0x92, 0xec, 0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32,
@@ -2319,7 +2316,6 @@ namespace hexwallet
                      crypto_constant_time_equal(other, kX25519Public, 32)) &&
              passed;
 
-    // Low-order points must be rejected rather than producing a zero secret.
     static const uint8_t kZeroPoint[32] = {};
     static const uint8_t kOrderOne[32] = {1};
     passed = selftest_report(
@@ -2327,7 +2323,6 @@ namespace hexwallet
                  !x25519_ecdh(kAliceScalar, kZeroPoint, result) &&
                      !x25519_ecdh(kAliceScalar, kOrderOne, result)) &&
              passed;
-    // A null argument is a programming error, not a zero secret.
     memset(result, 0xa5, sizeof(result));
     passed = selftest_report("x25519 rejects null input",
                              !x25519_scalar_mult(nullptr, kV1Point, result)) &&

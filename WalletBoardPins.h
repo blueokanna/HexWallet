@@ -272,8 +272,8 @@
 #define HEXWALLET_BOARD_NAME "HexWallet P4 E-Paper 2.9"
 
 // ---------------------------------------------------------------------------
-// Headless - no display, no touch, no LVGL. Works on ANY supported MCU
-// (ESP32, ESP32-S3, nRF52, ...): the authenticated Serial CLI is the only
+// Headless - no display, no touch, no LVGL. ESP32-S3/P4 builds use the
+// authenticated Serial CLI as the only
 // interface. Select with HEXWALLET_BOARD_HEADLESS (6), e.g. pass
 // `-DHEXWALLET_BOARD=6` as a build flag, or drop a `build_opt.h` containing
 // `-DHEXWALLET_BOARD=6` next to HexWallet.ino in the Arduino IDE.
@@ -285,7 +285,13 @@
 
 // Deliberately no HEXWALLET_HAS_DISPLAY / display pins / touch / battery.
 // The BOOT strap button is the physical USB-enable control.
+#ifndef HEXWALLET_PIN_USER_BUTTON
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+#define HEXWALLET_PIN_USER_BUTTON 35
+#else
 #define HEXWALLET_PIN_USER_BUTTON 0
+#endif
+#endif
 #define HEXWALLET_BOARD_NAME "Headless CLI"
 
 // ---------------------------------------------------------------------------

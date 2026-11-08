@@ -1,0 +1,161 @@
+#include <stdio.h>
+#include <string.h>
+#include "../../../WalletBoardPort.cpp"
+
+HardwareSerial Serial;
+SPIClass SPI;
+TwoWire Wire, Wire1;
+static uint32_t test_now = 0;
+static bool pin_low[64] = {};
+static unsigned clicks = 0;
+static uint8_t spi_command = 0, panel_orientation = 0xff;
+static int touch_data[6] = {};
+static size_t touch_index = 0;
+
+void board_test_spi_write(uint8_t value) { spi_command = value; }
+void board_test_spi_write_bytes(const uint8_t *data, size_t size) {
+  if (spi_command == 0x36 && size == 1) panel_orientation = data[0];
+}
+int board_test_wire_read() { return touch_data[touch_index++ % 6]; }
+
+uint32_t millis() { return test_now; }
+void delay(uint32_t ms) { test_now += ms; }
+void pinMode(uint8_t, uint8_t) {}
+void digitalWrite(uint8_t, uint8_t) {}
+int digitalRead(uint8_t pin) { return pin < 64 && pin_low[pin] ? LOW : HIGH; }
+int analogReadMilliVolts(uint8_t) { return 1900; }
+void *ps_malloc(size_t size) { return malloc(size); }
+namespace hexwallet {
+bool se051_transport_in_use() { return false; }
+void secure_zero(void *out, size_t size) { memset(out, 0, size); }
+}
+
+#define CHECK(condition) do { if (!(condition)) { \
+  fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #condition); return 1; \
+} } while (0)
+
+static void pump(uint32_t ms = 40) {
+  test_now += ms;
+  hexwallet::board_display_service();
+}
+static void clicked(lv_event_t *) { ++clicks; }
+
+int main() {
+  using namespace hexwallet;
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_ESP32P4_EINK
+  pin_low[HEXWALLET_EPD_PIN_BUSY] = true;
+#endif
+  CHECK(!lv_is_initialized());
+  CHECK(board_display_init());
+  CHECK(lv_is_initialized() && lv_tick_get_cb() != nullptr);
+  const uint32_t before = lv_tick_get();
+  test_now += 17;
+  CHECK(lv_tick_get() - before == 17);
+  lv_display_t *display = lv_display_get_default();
+  CHECK(display != nullptr);
+  CHECK(board_display_init() && lv_display_get_next(display) == nullptr);
+  lv_obj_t *screen = lv_screen_active();
+  lv_obj_set_style_bg_color(screen, lv_color_hex(0xff0000), 0);
+  lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+  pump();
+  pump(160);
+  CHECK(board_display_review_ready());
+
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_ESP32P4_EINK
+  CHECK(lv_display_get_color_format(display) == LV_COLOR_FORMAT_RGB565);
+  CHECK(g_draw_buf[0] == 0x00 && g_draw_buf[1] == 0xf8);
+  lv_obj_t *patch = lv_obj_create(screen);
+  lv_obj_set_pos(patch, 40, 100);
+  lv_obj_set_size(patch, 10, 10);
+  lv_obj_set_style_radius(patch, 0, 0);
+  lv_obj_set_style_border_width(patch, 0, 0);
+  lv_obj_set_style_bg_color(patch, lv_color_hex(0x0000ff), 0);
+  pump();
+  CHECK(!board_display_review_ready());
+  pump(160);
+  CHECK(board_display_review_ready());
+  // DIRECT-mode redraw must not change retained pixels outside its rectangle.
+  CHECK(g_draw_buf[0] == 0x00 && g_draw_buf[1] == 0xf8);
+  const size_t pixel = (105 * 128 + 45) * 2;
+  CHECK(g_draw_buf[pixel] == 0x1f && g_draw_buf[pixel + 1] == 0x00);
+
+  CHECK(g_keypad != nullptr && lv_indev_get_type(g_keypad) == LV_INDEV_TYPE_KEYPAD);
+  CHECK(lv_indev_get_group(g_keypad) == lv_group_get_default());
+  lv_obj_clean(screen);
+  lv_obj_t *first = lv_button_create(screen);
+  lv_obj_t *second = lv_button_create(screen);
+  lv_obj_add_event_cb(second, clicked, LV_EVENT_CLICKED, nullptr);
+  CHECK(lv_group_get_obj_count(lv_group_get_default()) == 2);
+  lv_group_focus_obj(first);
+  pin_low[HEXWALLET_PIN_BUTTON_2] = true; pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_2] = false; pump(); pump();
+  CHECK(lv_group_get_focused(lv_group_get_default()) == second);
+  pin_low[HEXWALLET_PIN_BUTTON_3] = true; pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_3] = false; pump(); pump();
+  CHECK(clicks == 1);
+  pin_low[HEXWALLET_PIN_BUTTON_3] = true; pump(); pump();
+  board_display_prepare_review();
+  pin_low[HEXWALLET_PIN_BUTTON_3] = false; pump(); pump();
+  CHECK(clicks == 1); // Holding ENTER across a review change cannot approve it.
+  lv_group_focus_obj(first);
+  pin_low[HEXWALLET_PIN_BUTTON_2] = true; pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_3] = true; pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_2] = false; pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_3] = false; pump(); pump();
+  CHECK(clicks == 1); // NEXT+ENTER followed by releasing NEXT is not a click.
+  lv_group_focus_obj(second);
+  pin_low[HEXWALLET_PIN_BUTTON_3] = true; pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_3] = false; pump(); pump();
+  CHECK(clicks == 2);
+
+  release_display();
+  pin_low[HEXWALLET_EPD_PIN_BUSY] = false;
+  CHECK(!board_display_init() && !board_display_review_ready());
+  CHECK(s_eink_bw == nullptr && g_draw_buf == nullptr && g_display == nullptr);
+  pin_low[HEXWALLET_EPD_PIN_BUSY] = true;
+  pin_low[HEXWALLET_PIN_BUTTON_3] = true;
+  CHECK(board_display_init());
+  CHECK(g_keypad != nullptr && lv_group_get_default() != nullptr);
+  lv_obj_t *after_retry = lv_button_create(lv_screen_active());
+  lv_obj_add_event_cb(after_retry, clicked, LV_EVENT_CLICKED, nullptr);
+  pump(); pump();
+  pin_low[HEXWALLET_PIN_BUTTON_3] = false; pump(); pump();
+  CHECK(clicks == 2); // A held key during recovery must also be released first.
+  puts("P4 display lifecycle, tick, partial frame, buttons, stale press and retry: PASS");
+#else
+  CHECK(panel_orientation == 0x00); // No axis exchange for 240 x 536 portrait.
+  CHECK(lv_display_get_color_format(display) == LV_COLOR_FORMAT_RGB565_SWAPPED);
+  CHECK(g_draw_buf[0] == 0xf8 && g_draw_buf[1] == 0x00);
+  touch_data[1] = 1;
+  touch_data[3] = 239;
+  touch_data[4] = 2;
+  touch_data[5] = 23; // Last valid point: (239, 535).
+  touch_index = 0;
+  cst816s_read();
+  CHECK(s_touch_pressed && s_touch_x == 239 && s_touch_y == 535);
+  touch_data[5] = 24;
+  touch_index = 0;
+  cst816s_read();
+  CHECK(!s_touch_pressed);
+  touch_data[5] = 23;
+  touch_data[3] = 240;
+  touch_index = 0;
+  cst816s_read();
+  CHECK(!s_touch_pressed);
+  touch_data[3] = 239;
+  touch_data[1] = 2;
+  touch_index = 0;
+  cst816s_read();
+  CHECK(!s_touch_pressed);
+  touch_data[1] = 1;
+  touch_data[0] = -1;
+  touch_index = 0;
+  cst816s_read();
+  CHECK(!s_touch_pressed);
+  puts("S3 display lifecycle, tick, RGB565 wire order, orientation and touch bounds: PASS");
+#endif
+  release_display();
+  CHECK(lv_display_get_default() == nullptr && lv_group_get_default() == nullptr);
+  lv_deinit();
+  return 0;
+}

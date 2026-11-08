@@ -6,7 +6,6 @@
 
 namespace hexwallet
 {
-
   namespace
   {
     constexpr const char *kNamespace = "hexpet";

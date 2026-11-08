@@ -6,10 +6,10 @@
  *====================*/
 #define LV_COLOR_DEPTH 16
 
-/* All panels (SPI RM67162, 8-bit parallel ST7789, e-paper conversion) expect
- * the high byte of RGB565 first, so store the two bytes swapped in memory and
- * stream the buffer straight to the panel without a per-pixel copy. */
-#define LV_COLOR_16_SWAP 1
+/* The board port selects RGB565_SWAPPED for color-panel wire buffers and
+ * native RGB565 for persistent e-paper frames. Global flush-time swapping
+ * corrupts DIRECT-mode frames when only a subrectangle is redrawn. */
+#define LV_COLOR_16_SWAP 0
 #define LV_COLOR_SCREEN_TRANSP 0
 #define LV_COLOR_MIX_ROUND_OFS 0
 #define LV_COLOR_CHROMA_KEY lv_color_hex(0x00ff00)
@@ -42,12 +42,7 @@
 #define LV_DISP_DEF_REFR_PERIOD 16
 #define LV_INDEV_DEF_READ_PERIOD 30
 
-/* Tick from millis(); the board port drives lv_timer_handler() from loop(). */
-#define LV_TICK_CUSTOM 1
-#if LV_TICK_CUSTOM
-#define LV_TICK_CUSTOM_INCLUDE "Arduino.h"
-#define LV_TICK_CUSTOM_SYS_TIME_EXPR (millis())
-#endif
+/* LVGL 9: WalletBoardPort installs millis() with lv_tick_set_cb(). */
 
 #define LV_DPI_DEF 130
 

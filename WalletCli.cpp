@@ -249,7 +249,8 @@ namespace hexwallet
     bool begin_transaction_review()
     {
       uint32_t random_value;
-      if (!random_fill_checked(&random_value, sizeof(random_value))) {
+      if (!random_fill_checked(&random_value, sizeof(random_value)))
+      {
         clear_pending_transaction();
         Serial.println("ERR entropy-unavailable");
         return false;
@@ -357,21 +358,7 @@ namespace hexwallet
         return 0;
       }
       uint32_t value = 0;
-      for (; *text != '\0'; ++text)
-      {
-        if (*text < '0' || *text > '9' || value > 214748364UL)
-        {
-          *ok = false;
-          return 0;
-        }
-        value = value * 10U + static_cast<uint32_t>(*text - '0');
-        if (value >= kHardenedOffset)
-        {
-          *ok = false;
-          return 0;
-        }
-      }
-      *ok = true;
+      *ok = wallet_cli_parse_u32(text, kHardenedOffset - 1, &value);
       return value;
     }
 
@@ -472,7 +459,8 @@ namespace hexwallet
         return;
       }
       challenge_active = random_fill_checked(challenge, sizeof(challenge));
-      if (!challenge_active) {
+      if (!challenge_active)
+      {
         Serial.println("ERR entropy-unavailable");
         return;
       }
@@ -1026,8 +1014,8 @@ namespace hexwallet
         Serial.println("ERR usage-token-custom-add");
         return;
       }
-      const unsigned long decimals = strtoul(parts[4], nullptr, 10);
-      if (decimals > kCustomTokenMaxDecimals)
+      uint32_t decimals = 0;
+      if (!wallet_cli_parse_u32(parts[4], kCustomTokenMaxDecimals, &decimals))
       {
         Serial.println("ERR invalid-decimals");
         return;
@@ -1049,8 +1037,8 @@ namespace hexwallet
         Serial.println("ERR usage-token-custom-add-stellar");
         return;
       }
-      const unsigned long decimals = strtoul(parts[4], nullptr, 10);
-      if (decimals > kCustomTokenMaxDecimals)
+      uint32_t decimals = 0;
+      if (!wallet_cli_parse_u32(parts[4], kCustomTokenMaxDecimals, &decimals))
       {
         Serial.println("ERR invalid-decimals");
         return;
@@ -1575,7 +1563,8 @@ namespace hexwallet
         Serial.println(transaction_error_text(result));
         return;
       }
-      if (!begin_transaction_review()) return;
+      if (!begin_transaction_review())
+        return;
       pending_transaction_kind = PendingTransactionKind::Bitcoin;
       print_transaction_review();
       char approval[7];
@@ -1759,7 +1748,8 @@ namespace hexwallet
         Serial.println(evm_transaction_error_text(error));
         return;
       }
-      if (!begin_transaction_review()) return;
+      if (!begin_transaction_review())
+        return;
       pending_transaction_kind = PendingTransactionKind::Evm;
       const bool contract_call = pending_evm_transaction.has_call;
       const char *asset = network->symbol;
@@ -1903,7 +1893,8 @@ namespace hexwallet
       }
       if (access_details[0] != '\0')
         Serial.println(access_details);
-      if (!evm_review_amount(pending_evm_transaction, asset, display_amount, sizeof(display_amount))) {
+      if (!evm_review_amount(pending_evm_transaction, asset, display_amount, sizeof(display_amount)))
+      {
         clear_pending_transaction();
         Serial.println("ERR incomplete-evm-review");
         return;
@@ -2056,7 +2047,8 @@ namespace hexwallet
         Serial.println(kaspa_error_text(error));
         return;
       }
-      if (!begin_transaction_review()) return;
+      if (!begin_transaction_review())
+        return;
       pending_transaction_kind = PendingTransactionKind::Kaspa;
       Serial.println("BEGIN TRANSACTION REVIEW");
       Serial.println("network=kas type=KASPA-V0");
@@ -2271,7 +2263,8 @@ namespace hexwallet
         Serial.println(zcash_error_text(error));
         return;
       }
-      if (!begin_transaction_review()) return;
+      if (!begin_transaction_review())
+        return;
       pending_transaction_kind = PendingTransactionKind::Zcash;
       Serial.println("BEGIN TRANSACTION REVIEW");
       Serial.println("network=zec type=ZCASH-V4-TRANSPARENT");
@@ -2741,7 +2734,8 @@ namespace hexwallet
         Serial.println(chain_error_text(error));
         return;
       }
-      if (!begin_transaction_review()) return;
+      if (!begin_transaction_review())
+        return;
       pending_transaction_kind = PendingTransactionKind::Chain;
       print_chain_review(pending_chain_transaction);
       char approval[7];
@@ -2818,16 +2812,18 @@ namespace hexwallet
       const bool large = pending_chain_transaction.family == ChainFamily::Quantus ||
                          pending_chain_transaction.family == ChainFamily::QrlV2;
       const size_t capacity = large ? kChainMaxSignedSize : kAeternityMaxSignedSize;
-      std::unique_ptr<uint8_t[]> signed_transaction(new(std::nothrow) uint8_t[capacity]);
+      std::unique_ptr<uint8_t[]> signed_transaction(new (std::nothrow) uint8_t[capacity]);
       size_t signed_size = capacity;
       const ChainError error = signed_transaction ? chain_sign_transaction(
-          pending_chain_transaction, master, seed, signed_transaction.get(), &signed_size) : ChainError::BufferTooSmall;
+                                                        pending_chain_transaction, master, seed, signed_transaction.get(), &signed_size)
+                                                  : ChainError::BufferTooSmall;
       secure_zero(&master, sizeof(master));
       secure_zero(seed, sizeof(seed));
       clear_pending_transaction();
       if (error != ChainError::Ok)
       {
-        if (signed_transaction) secure_zero(signed_transaction.get(), capacity);
+        if (signed_transaction)
+          secure_zero(signed_transaction.get(), capacity);
         Serial.print("ERR chain-sign ");
         Serial.println(chain_error_text(error));
         return;
@@ -3039,9 +3035,11 @@ namespace hexwallet
     }
     void check_xelis_address(const char *address)
     {
-      if (!require_authentication()) return;
+      if (!require_authentication())
+        return;
       uint8_t key[32];
-      if (!xelis_public_key_from_address(address, key)) {
+      if (!xelis_public_key_from_address(address, key))
+      {
         Serial.println("ERR invalid-xelis-mainnet-address");
         return;
       }
@@ -3052,17 +3050,22 @@ namespace hexwallet
 
     void handle_beam(char *args)
     {
-      if (!require_authentication()) return;
-      if (transaction_pending && pending_transaction_kind != PendingTransactionKind::Beam) {
+      if (!require_authentication())
+        return;
+      if (transaction_pending && pending_transaction_kind != PendingTransactionKind::Beam)
+      {
         Serial.println("ERR transaction-review-active");
         return;
       }
       const auto state = beam_cli_command(args, display_is_available);
-      if (state.active) {
+      if (state.active)
+      {
         pending_transaction_kind = PendingTransactionKind::Beam;
         transaction_pending = true;
         transaction_expires_at = state.expires_at;
-      } else if (pending_transaction_kind == PendingTransactionKind::Beam) {
+      }
+      else if (pending_transaction_kind == PendingTransactionKind::Beam)
+      {
         clear_pending_transaction();
       }
     }

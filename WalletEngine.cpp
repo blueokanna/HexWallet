@@ -44,8 +44,6 @@ namespace hexwallet
   namespace
   {
 
-
-
     // Build the display derivation path for a network style.
     bool build_path_text(const NetworkProfile &network, uint32_t account,
                          uint32_t change, uint32_t address_index, char *path,
@@ -341,10 +339,12 @@ namespace hexwallet
       return WalletError::BufferTooSmall;
     }
 
-    if (network.encoding == AddressEncoding::QuantusMlDsa87) {
+    if (network.encoding == AddressEncoding::QuantusMlDsa87)
+    {
       const WalletError result = quantus_derive_account(seed, account, change, address_index,
-          out->address, sizeof(out->address), out->private_key);
-      if (result != WalletError::Ok) clear_derived_address(out);
+                                                        out->address, sizeof(out->address), out->private_key);
+      if (result != WalletError::Ok)
+        clear_derived_address(out);
       return result;
     }
 
@@ -580,9 +580,6 @@ namespace hexwallet
         }
         case AddressEncoding::StarknetKey:
         {
-          // Starknet keys live on the Stark curve, so the secp256k1 key just
-          // derived is only a seed: grindKey() hashes it into a scalar in
-          // [1, n) and the Stark key is the x coordinate of that scalar * G.
           uint8_t stark_private[kStarkFeltSize];
           uint8_t stark_public[kStarkFeltSize];
           if (!stark_grind_key(child.private_key, stark_private) ||

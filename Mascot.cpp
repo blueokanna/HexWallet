@@ -436,7 +436,7 @@ namespace hexwallet
       return true;
     }
 
-  } // namespace
+  }
 
   bool run_mascot_self_tests()
   {

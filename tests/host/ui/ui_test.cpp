@@ -6,8 +6,30 @@
 static uint32_t test_now = 0;
 static bool test_partial = true, test_entropy = true, test_committed = true;
 static std::vector<std::string> sealed_lines;
+static lv_key_t input_key = LV_KEY_ENTER;
+static lv_indev_state_t input_state = LV_INDEV_STATE_RELEASED;
+static unsigned decisions = 0;
+static bool last_approval = false;
+static uint8_t display_pixels[128 * 296 * 2];
 uint32_t millis() { return test_now; }
 void delay(uint32_t ms) { test_now += ms; }
+static void read_key(lv_indev_t *, lv_indev_data_t *data) {
+  data->key = input_key;
+  data->state = input_state;
+}
+static void press_key(lv_indev_t *indev, lv_key_t key) {
+  input_key = key;
+  input_state = LV_INDEV_STATE_PRESSED;
+  test_now += 40;
+  lv_indev_read(indev);
+  input_state = LV_INDEV_STATE_RELEASED;
+  test_now += 40;
+  lv_indev_read(indev);
+}
+static void decided(bool approved) { ++decisions; last_approval = approved; }
+static void flush(lv_display_t *display, const lv_area_t *, uint8_t *) {
+  lv_display_flush_ready(display);
+}
 
 namespace hexwallet
 {
@@ -20,7 +42,7 @@ namespace hexwallet
   bool board_partial_refresh_supported() { return test_partial; }
   bool board_display_review_ready() { return test_committed; }
   void board_display_prepare_review() {}
-  void board_display_service() {}
+  void board_display_service() { lv_timer_handler(); }
   size_t wallet_catalog_count() { return 0; }
   bool wallet_catalog_at_sorted(size_t, WalletCatalogEntry *) { return false; }
   bool wallet_catalog_matches(const WalletCatalogEntry &, const char *) { return false; }
@@ -65,8 +87,19 @@ int main()
   CHECK(run_mascot_self_tests());
   CHECK(run_maid_sprite_self_tests());
   lv_init();
+  lv_tick_set_cb(millis);
   lv_display_t *display = lv_display_create(128, 296);
   CHECK(display != nullptr);
+  lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+  lv_display_set_buffers(display, display_pixels, nullptr, sizeof(display_pixels), LV_DISPLAY_RENDER_MODE_DIRECT);
+  lv_display_set_flush_cb(display, flush);
+  lv_group_t *group = lv_group_create();
+  lv_indev_t *keypad = lv_indev_create();
+  CHECK(group != nullptr && keypad != nullptr);
+  lv_group_set_default(group);
+  lv_indev_set_type(keypad, LV_INDEV_TYPE_KEYPAD);
+  lv_indev_set_read_cb(keypad, read_key);
+  lv_indev_set_group(keypad, group);
   CHECK(wallet_ui_init());
   CHECK(companion_canvas != nullptr);
   lv_obj_t *original_canvas = companion_canvas;
@@ -110,6 +143,32 @@ int main()
   CHECK(sealed_lines[65] == "MAXIMUM NETWORK FEE  0.002 ETH");
   CHECK(sealed_lines[67] == review.note);
   CHECK(sealed_lines[68] == "CONFIRM  654321");
+  CHECK(lv_group_get_focused(group) == screen_content);
+  CHECK(review_key_remap(keypad, LV_KEY_NEXT) == LV_KEY_DOWN);
+  lv_obj_update_layout(lv_screen_active());
+  CHECK(lv_obj_get_scroll_y(screen_content) == 0);
+  CHECK(lv_group_send_data(group, LV_KEY_DOWN) == LV_RESULT_OK);
+  CHECK(lv_obj_get_scroll_y(screen_content) > 0);
+  CHECK(lv_group_send_data(group, LV_KEY_UP) == LV_RESULT_OK);
+  CHECK(lv_obj_get_scroll_y(screen_content) == 0);
+  lv_obj_send_event(screen_content, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *action = lv_group_get_focused(group);
+  CHECK(action != screen_content && lv_obj_check_type(action, &lv_button_class));
+  CHECK(strcmp(lv_label_get_text(lv_obj_get_child(action, 0)), "REJECT") == 0);
+  lv_group_focus_next(group);
+  CHECK(strcmp(lv_label_get_text(lv_obj_get_child(lv_group_get_focused(group), 0)), "APPROVE") == 0);
+  CHECK(review_key_remap(keypad, LV_KEY_NEXT) == LV_KEY_NEXT);
+  lv_group_focus_obj(screen_content);
+  wallet_ui_set_decision_callback(decided);
+  press_key(keypad, LV_KEY_ENTER);
+  wallet_ui_service();
+  CHECK(decisions == 0);
+  CHECK(strcmp(lv_label_get_text(lv_obj_get_child(lv_group_get_focused(group), 0)), "REJECT") == 0);
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  wallet_ui_service();
+  CHECK(decisions == 1 && last_approval);
+  wallet_ui_set_decision_callback(nullptr);
   const size_t review_children = lv_obj_get_child_count(screen_content);
   test_now += kMascotAnimationMs;
   wallet_ui_service();
@@ -148,6 +207,13 @@ int main()
   CHECK(!wallet_ui_review_authorize());
   test_committed = true;
   CHECK(wallet_ui_review_authorize());
+  wallet_ui_show_transaction(review);
+  wallet_ui_service();
+  CHECK(review_seal.displayed);
+  test_committed = false;
+  CHECK(!wallet_ui_review_authorize()); // A previously displayed frame can fail later.
+  test_committed = true;
+  CHECK(wallet_ui_review_authorize());
   CHECK(wallet_ui_show_otp("Example", "alice@example.com", "012345", 2000000030));
   CHECK(otp_visible && strcmp(otp_text, "012345") == 0 && !wallet_ui_review_authorize());
   wallet_ui_hide_otp();
@@ -162,6 +228,9 @@ int main()
   wallet_ui_show_port_error();
   CHECK(!wallet_ui_ready() && !wallet_ui_review_authorize());
   wallet_ui_service();
+  lv_indev_delete(keypad);
+  lv_group_set_default(nullptr);
+  lv_group_delete(group);
   lv_display_delete(display);
   lv_deinit();
   puts("mascot, sprite bounds, real LVGL lifetime and complete review labels: PASS");

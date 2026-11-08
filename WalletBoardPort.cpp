@@ -177,7 +177,7 @@ namespace hexwallet
                            kRm67162SpiInit[i].len);
         }
       }
-      rm67162_set_rotation(1); // landscape: 536 x 240 logical
+      rm67162_set_rotation(0); // portrait: matches the 240 x 536 LVGL/touch coordinates
       return true;
     }
 
@@ -511,12 +511,19 @@ namespace hexwallet
       if (Wire.requestFrom(static_cast<uint8_t>(0x15), static_cast<uint8_t>(6)) != 6)
         return;
       for (int i = 0; i < 6; ++i)
-        buf[i] = Wire.read();
+      {
+        const int value = Wire.read();
+        if (value < 0) return;
+        buf[i] = static_cast<uint8_t>(value);
+      }
       const uint8_t fingers = buf[1];
-      if (fingers == 0)
+      if (fingers != 1)
         return;
-      s_touch_x = static_cast<int16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
-      s_touch_y = static_cast<int16_t>(((buf[4] & 0x0F) << 8) | buf[5]);
+      const int16_t x = static_cast<int16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
+      const int16_t y = static_cast<int16_t>(((buf[4] & 0x0F) << 8) | buf[5]);
+      if (x >= HEXWALLET_LCD_WIDTH || y >= HEXWALLET_LCD_HEIGHT) return;
+      s_touch_x = x;
+      s_touch_y = y;
       s_touch_pressed = true;
     }
 
@@ -525,6 +532,12 @@ namespace hexwallet
 //  LVGL glue (LVGL 9.5 API: lv_display_t / lv_indev_t)
 #if HEXWALLET_ENABLE_LVGL
     static uint8_t *g_draw_buf = nullptr;
+    static lv_display_t *g_display = nullptr;
+    static lv_indev_t *g_keypad = nullptr;
+    static lv_indev_t *g_touch = nullptr;
+    static lv_group_t *g_key_group = nullptr;
+
+    static uint32_t display_tick() { return static_cast<uint32_t>(millis()); }
 
 #if defined(HEXWALLET_DISPLAY_KIND_COLOR)
     static void color_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
@@ -556,11 +569,7 @@ namespace hexwallet
     static void eink_convert_frame(const uint8_t *frame16, uint16_t w, uint16_t h)
     {
       eink_convert_rgb565(frame16, w, h, kEpdConvertDepth,
-#if LV_COLOR_16_SWAP
-                          true,
-#else
                           false,
-#endif
                           s_eink_bw, eink_frame_size(w, h, kEpdConvertDepth));
     }
 
@@ -624,6 +633,7 @@ namespace hexwallet
 
     static void eink_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     {
+      g_review_frame_pending = true;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
       if (area != nullptr && area->x2 >= area->x1 && area->y2 >= area->y1)
       {
@@ -668,6 +678,16 @@ namespace hexwallet
 #if defined(HEXWALLET_PIN_BUTTON_1) && (HEXWALLET_PIN_BUTTON_1 >= 0)
 
     static constexpr uint32_t kButtonDebounceMs = 25;
+    struct ButtonInputState
+    {
+      uint8_t stable = 0;
+      uint8_t candidate = 0;
+      uint32_t candidate_since = 0;
+      uint32_t held_key = LV_KEY_ENTER;
+      uint8_t held_mask = 0;
+      bool require_release = true;
+    };
+    static ButtonInputState button_input;
 
     static uint8_t button_mask()
     {
@@ -704,37 +724,56 @@ namespace hexwallet
 
     static void buttons_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     {
-      (void)indev;
-      static uint8_t stable = 0;
-      static uint8_t candidate = 0;
-      static uint32_t candidate_since = 0;
-      static uint32_t held_key = LV_KEY_ENTER;
+      ButtonInputState &input = button_input;
 
       const uint8_t sample = button_mask();
       const uint32_t now = millis();
-      if (sample != candidate)
+      if (sample != input.candidate)
       {
-        candidate = sample;
-        candidate_since = now;
+        input.candidate = sample;
+        input.candidate_since = now;
       }
-      if (now - candidate_since >= kButtonDebounceMs)
-        stable = candidate;
+      if (now - input.candidate_since >= kButtonDebounceMs)
+        input.stable = input.candidate;
 
-      if (stable != 0)
+      // A chord or a key change without a full release must not turn a
+      // navigation press into an ENTER release on the newly focused button.
+      if (input.stable != 0 && ((input.stable & (input.stable - 1)) != 0 ||
+                                (input.held_mask != 0 && input.stable != input.held_mask)))
       {
-        held_key = button_key(stable);
-        data->key = held_key;
+        lv_indev_wait_release(indev);
+        input.require_release = true;
+      }
+      if (input.require_release)
+      {
+        data->key = input.held_key;
+        data->state = LV_INDEV_STATE_RELEASED;
+        if (input.stable == 0 && sample == 0)
+        {
+          input.require_release = false;
+          input.held_mask = 0;
+        }
+        return;
+      }
+
+      if (input.stable != 0)
+      {
+        input.held_mask = input.stable;
+        input.held_key = button_key(input.stable);
+        data->key = input.held_key;
         data->state = LV_INDEV_STATE_PRESSED;
       }
       else
       {
-        data->key = held_key;
+        input.held_mask = 0;
+        data->key = input.held_key;
         data->state = LV_INDEV_STATE_RELEASED;
       }
     }
 
     static void buttons_init_pins()
     {
+      button_input = ButtonInputState{};
       pinMode(HEXWALLET_PIN_BUTTON_1, INPUT_PULLUP);
 #if defined(HEXWALLET_PIN_BUTTON_2)
       pinMode(HEXWALLET_PIN_BUTTON_2, INPUT_PULLUP);
@@ -759,16 +798,70 @@ namespace hexwallet
       uint8_t *buf = static_cast<uint8_t *>(board_alloc(buf_px * 2));
       if (buf == nullptr)
         return false;
-      g_draw_buf = buf;
       lv_display_t *disp = lv_display_create(width, height);
       if (disp == nullptr)
+      {
+        free(buf);
         return false;
+      }
+#if defined(HEXWALLET_DISPLAY_KIND_COLOR)
+      lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
+#else
+      lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
+#endif
       lv_display_set_buffers(disp, buf, nullptr, buf_px * 2,
                              full_frame ? LV_DISPLAY_RENDER_MODE_DIRECT
                                         : LV_DISPLAY_RENDER_MODE_PARTIAL);
       lv_display_set_flush_cb(disp, flush_cb);
       lv_display_set_antialiasing(disp, false);
+#if defined(HEXWALLET_PIN_BUTTON_1) && (HEXWALLET_PIN_BUTTON_1 >= 0)
+      lv_group_t *group = lv_group_create();
+      lv_indev_t *keypad = lv_indev_create();
+      if (group == nullptr || keypad == nullptr)
+      {
+        if (keypad != nullptr) lv_indev_delete(keypad);
+        if (group != nullptr) lv_group_delete(group);
+        lv_display_delete(disp);
+        free(buf);
+        return false;
+      }
+      buttons_init_pins();
+      lv_group_set_default(group);
+      lv_indev_set_display(keypad, disp);
+      lv_indev_set_type(keypad, LV_INDEV_TYPE_KEYPAD);
+      lv_indev_set_read_cb(keypad, buttons_read_cb);
+      lv_indev_set_group(keypad, group);
+      g_keypad = keypad;
+      g_key_group = group;
+#endif
+      g_draw_buf = buf;
+      g_display = disp;
       return true;
+    }
+
+    static void release_display()
+    {
+      g_display_ready = false;
+      g_touch_ready = false;
+      g_review_frame_pending = true;
+      if (g_touch != nullptr) lv_indev_delete(g_touch);
+      if (g_keypad != nullptr) lv_indev_delete(g_keypad);
+      g_touch = g_keypad = nullptr;
+      if (g_key_group != nullptr)
+      {
+        if (lv_group_get_default() == g_key_group) lv_group_set_default(nullptr);
+        lv_group_delete(g_key_group);
+        g_key_group = nullptr;
+      }
+      if (g_display != nullptr) lv_display_delete(g_display);
+      g_display = nullptr;
+      free(g_draw_buf);
+      g_draw_buf = nullptr;
+#if defined(HEXWALLET_DISPLAY_KIND_EINK)
+      free(s_eink_bw);
+      s_eink_bw = nullptr;
+      s_eink_dirty = false;
+#endif
     }
 
 #endif
@@ -1030,7 +1123,12 @@ namespace hexwallet
   {
 #if !HEXWALLET_ENABLE_LVGL
     return false;
-#elif defined(HEXWALLET_DISPLAY_KIND_COLOR)
+#else
+    if (g_display_ready) return true;
+    lv_init();
+    lv_tick_set_cb(display_tick);
+    release_display();
+#if defined(HEXWALLET_DISPLAY_KIND_COLOR)
 #if HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED || HEXWALLET_BOARD == HEXWALLET_BOARD_T_DISPLAY_S3_AMOLED_PLUS
     if (!rm67162_init())
       return false;
@@ -1066,12 +1164,13 @@ namespace hexwallet
     if (!epd_native_init())
     {
       Serial.println("ERR: e-paper panel did not initialise");
-      g_display_ready = false;
+      release_display();
       return false;
     }
     if (!lvgl_register_display(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
                                true, eink_flush_cb))
     {
+      release_display();
       return false;
     }
     g_display_ready = true;
@@ -1087,6 +1186,7 @@ namespace hexwallet
     if (!lvgl_register_display(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
                                true, eink_flush_cb))
     {
+      release_display();
       return false;
     }
     g_display_ready = true;
@@ -1110,6 +1210,7 @@ namespace hexwallet
       {
         lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
         lv_indev_set_read_cb(indev, touch_read_cb);
+        g_touch = indev;
         g_touch_ready = true;
       }
 #endif
@@ -1117,6 +1218,7 @@ namespace hexwallet
 #endif
 
     return g_display_ready;
+#endif // HEXWALLET_ENABLE_LVGL
   }
 
   void board_display_service()
@@ -1134,6 +1236,11 @@ namespace hexwallet
   void board_display_prepare_review()
   {
     g_review_frame_pending = true;
+#if HEXWALLET_ENABLE_LVGL
+    // A held key or touch belongs to the previous screen, never the new review.
+    if (g_keypad != nullptr) lv_indev_wait_release(g_keypad);
+    if (g_touch != nullptr) lv_indev_wait_release(g_touch);
+#endif
 #if HEXWALLET_ENABLE_LVGL && defined(HEXWALLET_DISPLAY_KIND_EINK)
     s_eink_dirty = false;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)

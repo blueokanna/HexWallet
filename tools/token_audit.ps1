@@ -14,8 +14,8 @@
 #   powershell -ExecutionPolicy Bypass -File tools/token_audit.ps1 -Network eth
 param(
   [string]$Network,
-  [int]$TimeoutSeconds = 20,
-  [int]$DelayMs = 400
+  [ValidateRange(1, 120)][int]$TimeoutSeconds = 20,
+  [ValidateRange(0, 10000)][int]$DelayMs = 400
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -37,12 +37,16 @@ $rpc = @{
   avaxc    = 'https://avalanche-c-chain-rpc.publicnode.com'
   celo     = 'https://celo-rpc.publicnode.com'
   cro      = 'https://cronos-evm-rpc.publicnode.com'
-  kava     = 'https://kava-evm-rpc.publicnode.com'
+  kavaevm  = 'https://kava-evm-rpc.publicnode.com'
   unichain = 'https://unichain-rpc.publicnode.com'
   kaia     = 'https://public-en.node.kaia.io'
-  bera     = 'https://bera-rpc.publicnode.com'
-  monad    = 'https://monad-rpc.publicnode.com'
-  plasma   = 'https://plasma-rpc.publicnode.com'
+  # Project endpoints; the former PublicNode hostnames returned HTTP 404.
+  # https://docs.berachain.com/build/getting-started/common-resources
+  # https://docs.monad.xyz/developer-essentials/network-information
+  # https://chainid.network/chain/9745/
+  bera     = 'https://rpc.berachain.com'
+  monad    = 'https://rpc.monad.xyz'
+  plasma   = 'https://rpc.plasma.to'
   opbnb    = 'https://opbnb-rpc.publicnode.com'
   mantle   = 'https://mantle-rpc.publicnode.com'
   blast    = 'https://blast-rpc.publicnode.com'
@@ -50,9 +54,9 @@ $rpc = @{
   aurora   = 'https://aurora-rpc.publicnode.com'
 }
 
-function Invoke-Call([string]$url, [string]$to, [string]$data, [int]$timeout) {
-  $body = @{ jsonrpc = '2.0'; id = 1; method = 'eth_call';
-             params = @(@{ to = $to; data = $data }, 'latest') } | ConvertTo-Json -Compress -Depth 5
+function Invoke-Rpc([string]$url, [string]$method, [object[]]$parameters, [int]$timeout) {
+  $body = @{ jsonrpc = '2.0'; id = 1; method = $method;
+             params = @($parameters) } | ConvertTo-Json -Compress -Depth 5
   # Public endpoints throttle aggressively. One retry after a pause separates
   # "rate limited" from "this contract does not answer", which are very
   # different findings for a registry audit.
@@ -60,7 +64,11 @@ function Invoke-Call([string]$url, [string]$to, [string]$data, [int]$timeout) {
     try {
       $response = Invoke-RestMethod -Method Post -Uri $url -ContentType 'application/json' `
         -Body $body -TimeoutSec $timeout
-      if ($null -eq $response.result) { return $null }
+      if ($response.jsonrpc -ne '2.0' -or $response.id -ne 1 -or $null -ne $response.error -or
+          $response.result -isnot [string] -or $response.result.Length -gt 131072 -or
+          $response.result -cnotmatch '^0x[0-9a-fA-F]*$') {
+        throw "Invalid JSON-RPC response for $method"
+      }
       return $response.result
     } catch {
       if ($attempt -eq 1) { throw }
@@ -69,25 +77,32 @@ function Invoke-Call([string]$url, [string]$to, [string]$data, [int]$timeout) {
   }
 }
 
+function Invoke-Call([string]$url, [string]$to, [string]$data, [int]$timeout) {
+  return Invoke-Rpc $url 'eth_call' @(@{ to = $to; data = $data }, 'latest') $timeout
+}
+
 # ABI responses here are either a dynamic string or, in older tokens, a
 # right-padded bytes32. Both appear in this registry, so both are decoded.
 function ConvertFrom-Text([string]$hex) {
   if ([string]::IsNullOrWhiteSpace($hex) -or $hex -eq '0x') { return $null }
   $raw = $hex.Substring(2)
   if ($raw.Length -ge 128) {
+    if ($raw.Substring(0, 64) -ne (('0' * 62) + '20')) { throw 'Invalid ABI string offset' }
     $length = [Convert]::ToInt32($raw.Substring(64, 64), 16)
-    if ($length -gt 0 -and $raw.Length -ge 128 + $length * 2) {
+    if ($length -gt 0 -and $length -le 4096 -and
+        $raw.Length -eq 128 + [int][Math]::Ceiling($length / 32.0) * 64) {
+      if ($raw.Substring(128 + $length * 2) -match '[^0]') { throw 'Nonzero ABI string padding' }
       $bytes = [byte[]]::new($length)
       for ($i = 0; $i -lt $length; ++$i) {
         $bytes[$i] = [Convert]::ToByte($raw.Substring(128 + $i * 2, 2), 16)
       }
-      return [Text.Encoding]::UTF8.GetString($bytes).Trim()
+      return (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes).Trim()
     }
   }
   if ($raw.Length -eq 64) {
     $bytes = [byte[]]::new(32)
     for ($i = 0; $i -lt 32; ++$i) { $bytes[$i] = [Convert]::ToByte($raw.Substring($i * 2, 2), 16) }
-    return [Text.Encoding]::UTF8.GetString($bytes).Trim([char]0).Trim()
+    return (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes).TrimEnd([char]0).Trim()
   }
   return $null
 }
@@ -119,10 +134,23 @@ foreach ($line in Get-Content $registry) {
   }
 }
 
+# Read chain IDs from the firmware registry instead of maintaining a second
+# identity table. Refuse incomplete extraction when a selected row needs it.
+$chainIds = @{}
+$profiles = Get-Content -Raw -Encoding UTF8 (Join-Path $root 'WalletNetworks.cpp')
+$profilePattern = '\{\s*"([^"]+)",\s*"[^"]*",\s*"[^"]*",\s*\d+,\s*\d+,\s*\d+,\s*DerivationStyle::\w+,\s*AddressEncoding::Evm,\s*\{[^}]*\},\s*0,\s*(\d+),'
+foreach ($match in [regex]::Matches($profiles, $profilePattern)) {
+  $chainIds[$match.Groups[1].Value] = [uint64]$match.Groups[2].Value
+}
+$networkChecks = @{}
+$selected = @($rows | Where-Object {
+  $_.standard -in @('Erc20', 'Bep20', 'Erc721', 'Erc1155') -and
+  (-not $Network -or $_.network -eq $Network)
+})
+if ($selected.Count -eq 0) { throw 'No EVM token records selected; nothing was verified.' }
+
 $checked = 0; $failed = 0; $skipped = 0; $warned = 0; $unreachable = 0
-foreach ($row in $rows) {
-  if ($row.standard -notin @('Erc20', 'Bep20', 'Erc721', 'Erc1155')) { continue }
-  if ($Network -and $row.network -ne $Network) { continue }
+foreach ($row in $selected) {
   if (-not $rpc.ContainsKey($row.network)) {
     Write-Output ("  SKIP    {0,-18} {1,-8} no RPC configured for network '{2}'" -f $row.id, $row.symbol, $row.network)
     ++$skipped
@@ -131,12 +159,35 @@ foreach ($row in $rows) {
   $url = $rpc[$row.network]
   Start-Sleep -Milliseconds $DelayMs
   try {
+    if (-not $row.contract -or $null -eq $row.decimals -or -not $chainIds.ContainsKey($row.network)) {
+      throw 'Incomplete token or network registry extraction'
+    }
+    if (-not $networkChecks.ContainsKey($row.network)) {
+      try {
+        $chain = Invoke-Rpc $url 'eth_chainId' @() $TimeoutSeconds
+        if ($chain -cnotmatch '^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$' -or
+            [Convert]::ToUInt64($chain.Substring(2), 16) -ne $chainIds[$row.network]) {
+          throw 'RPC chain ID does not match the firmware network'
+        }
+        $networkChecks[$row.network] = ''
+      } catch { $networkChecks[$row.network] = $_.Exception.Message }
+    }
+    if ($networkChecks[$row.network]) { throw $networkChecks[$row.network] }
+    $code = Invoke-Rpc $url 'eth_getCode' @($row.contract, 'latest') $TimeoutSeconds
+    if ($code -cnotmatch '^0x(?:[0-9a-fA-F]{2})+$' -or $code -match '^0x0*$') {
+      throw 'No contract bytecode at the registered address'
+    }
     if ($row.standard -in @('Erc721', 'Erc1155')) {
       $id = if ($row.standard -eq 'Erc721') { '80ac58cd' } else { 'd9b67a26' }
+      # ERC-165 requires both its own interface and rejection of 0xffffffff.
+      # A fallback that returns true for everything is not interface evidence.
+      $erc165 = Invoke-Call $url $row.contract ('0x01ffc9a701ffc9a7' + ('0' * 56)) $TimeoutSeconds
+      $invalid = Invoke-Call $url $row.contract ('0x01ffc9a7ffffffff' + ('0' * 56)) $TimeoutSeconds
       $answer = Invoke-Call $url $row.contract ('0x01ffc9a7' + $id + ('0' * 56)) $TimeoutSeconds
       if ($null -eq $answer) { throw 'Missing ERC-165 response' }
       ++$checked
-      if ($answer -eq ('0x' + ('0' * 63) + '1')) {
+      if ($erc165 -eq ('0x' + ('0' * 63) + '1') -and
+          $invalid -eq ('0x' + ('0' * 64)) -and $answer -eq ('0x' + ('0' * 63) + '1')) {
         Write-Output "  OK      $($row.id) $($row.standard) interface=$id"
       } else {
         ++$failed
@@ -149,7 +200,10 @@ foreach ($row in $rows) {
     $nameHex = Invoke-Call $url $row.contract '0x06fdde03' $TimeoutSeconds
     $onSymbol = ConvertFrom-Text $symbolHex
     $onName = ConvertFrom-Text $nameHex
-    $onDecimals = if ($decimalsHex) { [Convert]::ToInt32($decimalsHex.Substring(2), 16) } else { $null }
+    if ([string]::IsNullOrWhiteSpace($onSymbol) -or [string]::IsNullOrWhiteSpace($onName) -or
+        $onSymbol -match '[\x00-\x1f\x7f]' -or $onName -match '[\x00-\x1f\x7f]' -or
+        $decimalsHex -cnotmatch '^0x[0-9a-fA-F]{64}$') { throw 'Malformed or missing token metadata' }
+    $onDecimals = [Convert]::ToInt32($decimalsHex.Substring(2), 16)
     # Decimals are the value that moves money: a mismatch is fatal. The symbol is
     # a display label - issuers rebrand contracts in place (USDT -> USD-T0) and
     # bridged tokens carry a suffix the chain does not know - so a label drift is
@@ -179,3 +233,5 @@ if ($unreachable -ne 0) {
   Write-Output "note: unreachable rows were not proven either way; rerun with -Network to retry a single chain"
 }
 if ($failed -ne 0) { exit 1 }
+if ($checked -eq 0 -or $unreachable -ne 0 -or $skipped -ne 0) { exit 2 }
+exit 0

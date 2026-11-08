@@ -25,7 +25,7 @@ set(WALLET_SOURCES
   CryptoNoteAddress.cpp CryptoNoteRingCt.cpp CryptoNoteAmounts.cpp CryptoNoteSpend.cpp
   CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp)
 list(TRANSFORM WALLET_SOURCES PREPEND "${WALLET_ROOT}/")
-add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp)
+add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp security_regression.cpp)
 target_sources(chain_probe PRIVATE
   "${WALLET_ROOT}/XelisAccount.cpp" "${WALLET_ROOT}/src/xelis/Port.c"
   "${WALLET_ROOT}/src/xelis/ref10/ed25519_ref10.c"

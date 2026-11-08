@@ -8,7 +8,9 @@ HexWallet 是一台跑在单片机上的签名钱包：密钥派生、交易解�
 
 ## 项目状态
 
-Host 测试全绿，产品没做完。两句话都是重点。
+主机回归已通过，密钥托管集成和实机验收尚未完成。构建配置与验证范围见[编译文档](wiki/Build-and-Flash-zh.md)。
+
+2026-11-09 的显示与输入修复、运行时回归和设备构建证据见[设备复核记录](wiki/Device-Integration-2026-11-09-zh.md)。
 
 - **这里验证过的**：72 项带名字的 host 检查（`tests/host/build.ps1`）、ESP32-S3/P4 编译检查、
   全板型驱动编译矩阵、固件策略门禁。CI 每次 push 都会跑。
@@ -18,7 +20,7 @@ Host 测试全绿，产品没做完。两句话都是重点。
   host 测试，但钱包层仍然在 MCU RAM 里派生和签名。设备默认的 `HEXWALLET_REQUIRE_SECURE_CUSTODY=1`
   会把会话编译成一律拒绝。说直白点：**现在的设备固件无法创建、导入或使用钱包**，只有 host 测试构建
   会跑通密钥路径。
-- 整个代码树按实验品对待。不要放你赔不起的钱。
+- 当前固件只完成了下述软件验证，尚无真实资产使用的验收结论。
 
 ## 硬件
 
@@ -29,7 +31,7 @@ Host 测试全绿，产品没做完。两句话都是重点。
 | 3 | T-Display S3 | 170x320 ST7789，8 位并口 | ESP32-S3 |
 | 4 | T-Deck Max | 240x320 UC8253 墨水屏，支持局部刷新 | ESP32-S3，除 BOOT 外没有已验证的按键 |
 | 5 | T-Echo Lite Kit | 176x192 墨水屏 | nRF52840；这里只有引脚表，没有 nRF52 编译目标 |
-| 6 | 无屏 | 无 | 任意 ESP32，只能用串口 CLI |
+| 6 | 无屏 | 无 | ESP32-S3/P4，只能用串口 CLI |
 | 7 | HexWallet P4 rev A | 128x296 SSD1680 墨水屏 | ESP32-P4，SE051C2HQ1 走 I2C，PN7161 走共享 SPI |
 
 引脚定义在 `WalletBoardPins.h`，一块板一段，全部对齐原理图或厂家引脚图。7 号板取自 EasyEDA 工程
@@ -154,7 +156,8 @@ X25519 临时密钥交换，HKDF-SHA256 会话密钥，ChaCha20 加密后逐帧 
 ```powershell
 arduino-cli core install esp32:esp32@3.3.10
 git clone --depth 1 --branch v9.5.0 https://github.com/lvgl/lvgl.git "$HOME/Arduino/libraries/lvgl"
-arduino-cli compile --fqbn esp32:esp32:esp32s3 `
+powershell -ExecutionPolicy Bypass -File tools/prepare_lvgl.ps1 -Directory "$HOME/Arduino/libraries/lvgl"
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs,PSRAM=opi `
   --library "$HOME/Arduino/libraries/lvgl" `
   --build-property compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE `
   --build-property compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE .
@@ -164,7 +167,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3 `
 
 | 宏 | 默认值 | 含义 |
 | --- | --- | --- |
-| `HEXWALLET_BOARD` | 1 | 板型编号，见上表 |
+| `HEXWALLET_BOARD` | S3 为 1，P4 为 6 | 板型编号，见上表 |
 | `HEXWALLET_ENABLE_LVGL` | 1 | 0 表示只编 CLI 镜像 |
 | `HEXWALLET_EPD_PROFILE` | 0 | 0 SSD1680 单色、1 四色、2 单色 V2（P4） |
 | `HEXWALLET_REQUIRE_SECURE_CUSTODY` | 设备上为 1 | 没有安全芯片托管就拒绝打开钱包 |
@@ -175,10 +178,21 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3 `
 `esp32p4` 必须显式指定 7 号板：
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32p4 -DHEXWALLET_BOARD=7 ...
+arduino-cli compile --fqbn esp32:esp32:esp32p4:PartitionScheme=min_spiffs,PSRAM=enabled `
+  --library "$HOME/Arduino/libraries/lvgl" `
+  --build-property "compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" `
+  --build-property "compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" .
 ```
 
-Flash 分区表是 `partitions/hexwallet-16mb-ota.csv`。烧 eFuse 之前先读安全启动和 Flash 加密的说明：
+S3 无屏版：
+
+```powershell
+arduino-cli compile --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs `
+  --build-property compiler.cpp.extra_flags=-DHEXWALLET_BOARD=6 `
+  --build-property compiler.c.extra_flags=-DHEXWALLET_BOARD=6 .
+```
+
+上述构建使用 4 MB `min_spiffs` 分区；16 MB 设备另有 `partitions/hexwallet-16mb-ota.csv`，不能混用容量。LVGL 准备脚本校验源码后修复已复现的回调类型问题，构建前必须执行。烧 eFuse 之前先读安全启动和 Flash 加密的说明：
 eFuse 烧错，OTA 救不回来。详见
 [Build-and-Flash](https://github.com/blueokanna/HexWallet/wiki/Build-and-Flash-zh)。
 

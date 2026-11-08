@@ -18,14 +18,15 @@ size_t encoded_length(size_t payload_size) {
   if (payload_size <= 55) return 1 + payload_size;
   size_t length_bytes = 0;
   for (size_t value = payload_size; value != 0; value >>= 8) ++length_bytes;
-  return 1 + length_bytes + payload_size;
+  const size_t prefix_size = 1 + length_bytes;
+  return payload_size > SIZE_MAX - prefix_size ? 0 : prefix_size + payload_size;
 }
 
 bool append_prefix(uint8_t *out, size_t capacity, size_t *offset,
                    uint8_t short_base, uint8_t long_base,
                    size_t payload_size) {
   if (payload_size <= 55) {
-    if (*offset + 1 > capacity) return false;
+    if (*offset >= capacity) return false;
     out[(*offset)++] = static_cast<uint8_t>(short_base + payload_size);
     return true;
   }
@@ -34,7 +35,7 @@ bool append_prefix(uint8_t *out, size_t capacity, size_t *offset,
   for (size_t value = payload_size; value != 0; value >>= 8) {
     encoded[length_bytes++] = static_cast<uint8_t>(value);
   }
-  if (*offset + 1 + length_bytes > capacity) return false;
+  if (*offset > capacity || 1 + length_bytes > capacity - *offset) return false;
   out[(*offset)++] = static_cast<uint8_t>(long_base + length_bytes);
   for (size_t index = length_bytes; index != 0; --index) {
     out[(*offset)++] = encoded[index - 1];
@@ -118,18 +119,20 @@ bool RlpWriter::bytes(const uint8_t *data, size_t size) {
     return false;
   }
   if (size == 1 && data[0] < 0x80) {
-    if (size_ + 1 > capacity_) {
+    if (size_ >= capacity_) {
       ok_ = false;
       return false;
     }
     out_[size_++] = data[0];
     return true;
   }
-  if (!append_prefix(out_, capacity_, &size_, 0x80, 0xb7, size)) {
+  const size_t total = encoded_length(size);
+  if (total == 0 || size_ > capacity_ || total > capacity_ - size_ ||
+      !append_prefix(out_, capacity_, &size_, 0x80, 0xb7, size)) {
     ok_ = false;
     return false;
   }
-  if (size_ + size > capacity_) {
+  if (size_ > capacity_ || size > capacity_ - size_) {
     ok_ = false;
     return false;
   }
@@ -145,7 +148,7 @@ bool RlpWriter::integer(const uint8_t *big_endian, size_t size) {
   }
   size_t offset = 0;
   while (offset < size && big_endian[offset] == 0) ++offset;
-  return bytes(big_endian + offset, size - offset);
+  return bytes(size == 0 ? nullptr : big_endian + offset, size - offset);
 }
 
 bool RlpWriter::raw(const uint8_t *data, size_t size) {
@@ -153,7 +156,7 @@ bool RlpWriter::raw(const uint8_t *data, size_t size) {
     ok_ = false;
     return false;
   }
-  if (size_ + size > capacity_) {
+  if (size_ > capacity_ || size > capacity_ - size_) {
     ok_ = false;
     return false;
   }
@@ -164,12 +167,13 @@ bool RlpWriter::raw(const uint8_t *data, size_t size) {
 
 bool rlp_wrap_list(const uint8_t *payload, size_t payload_size, uint8_t *out,
                    size_t capacity, size_t *out_size) {
+  if (out_size != nullptr) *out_size = 0;
   if (out_size == nullptr || out == nullptr ||
       (payload_size != 0 && payload == nullptr)) {
     return false;
   }
   const size_t total = encoded_length(payload_size);
-  if (total > capacity) return false;
+  if (total == 0 || total > capacity) return false;
   size_t offset = 0;
   if (!append_prefix(out, capacity, &offset, 0xc0, 0xf7, payload_size)) return false;
   if (payload_size != 0) memcpy(out + offset, payload, payload_size);
@@ -178,14 +182,14 @@ bool rlp_wrap_list(const uint8_t *payload, size_t payload_size, uint8_t *out,
 }
 
 size_t chain_hex_length(size_t bytes) {
-  return bytes * 2 + 1;
+  return bytes > (SIZE_MAX - 1) / 2 ? 0 : bytes * 2 + 1;
 }
 
 void chain_hex(const uint8_t *data, size_t size, char *out, size_t out_size) {
   static const char kAlphabet[] = "0123456789abcdef";
   if (out == nullptr || out_size == 0) return;
   const size_t needed = chain_hex_length(size);
-  if (data == nullptr || out_size < needed) {
+  if (data == nullptr || needed == 0 || out_size < needed) {
     out[0] = '\0';
     return;
   }

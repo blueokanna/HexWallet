@@ -14,7 +14,7 @@ pinout. Nothing is inferred from a board name.
 | 3 | T-Display S3 | 170×320 ST7789, 8-bit parallel | CST816S | `HEXWALLET_PIN_POWER_ON` must be high before the panel works |
 | 4 | T-Deck Max | 240×320 GDEQ031T10 / UC8253, SPI | none verified | BOOT is the only usable key; touch sits behind an XL9555 and is not wired |
 | 5 | T-Echo Lite Kit | 176×192, SPI | TCA8418 keyboard | nRF52840 pin map only; no nRF52 build target in this tree |
-| 6 | Headless | none | none | Serial CLI; signing needs the host-only compile flag |
+| 6 | Headless | none | BOOT: S3 GPIO0, P4 GPIO35 | Serial CLI; approval without a trusted local display is refused by default |
 | 7 | HexWallet P4 rev A | 128×296 SSD1680, SPI | 4 keys (SW1–SW4) | SE051C2HQ1 on I²C, PN7161 on the shared SPI bus |
 
 Board 7 comes from the EasyEDA project `c26102103`; each pin comment names the package pad, so the
@@ -48,6 +48,10 @@ Rules the driver enforces:
 
 The approval barrier is released only after the refresh succeeds. A BUSY timeout or SPI failure
 never counts as "the transaction was displayed".
+
+On P4, SW1/SW2 scroll the review body, including fields taller than the viewport. SW3 moves to the decision buttons with REJECT selected first; SW1/SW2 select an action, a separate SW3 press activates it, and SW4 rejects. Held keys across screen changes, chords and changing keys without a full release cannot generate a new approval.
+
+Board initialization owns `lv_init()`, the LVGL 9 millisecond callback, the display and the keypad group. E-paper retains a native RGB565 framebuffer; color panels use `RGB565_SWAPPED` wire buffers. Global byte swapping is disabled so partial redraws cannot mutate retained pixels. Initialization failures release allocated display resources before a retry.
 
 ## Camera
 

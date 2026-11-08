@@ -13,7 +13,8 @@ namespace hexwallet
   class RlpWriter
   {
   public:
-    RlpWriter(uint8_t *out, size_t capacity) : out_(out), capacity_(capacity) {}
+    RlpWriter(uint8_t *out, size_t capacity)
+        : out_(out), capacity_(capacity), ok_(out != nullptr) {}
     bool bytes(const uint8_t *data, size_t size);
     // Minimal big-endian integer; zero is encoded as the empty string.
     bool integer(const uint8_t *big_endian, size_t size);
@@ -42,6 +43,7 @@ namespace hexwallet
       out[index] = text[index];
     return true;
   }
+  // Includes the terminator; returns zero if the size cannot be represented.
   size_t chain_hex_length(size_t bytes);
   void chain_hex(const uint8_t *data, size_t size, char *out, size_t out_size);
   bool chain_parse_hex(const char *text, uint8_t *out, size_t capacity, size_t *out_size);

@@ -204,7 +204,8 @@ namespace hexwallet
               custom_token_find("sol", mint, 32);
           if (custom != nullptr &&
               custom->standard == CustomTokenStandard::SolanaSpl &&
-              custom->symbol[0] != '\0') {
+              custom->symbol[0] != '\0')
+          {
             transfer.token_user_declared = true;
             snprintf(transfer.token_symbol, sizeof(transfer.token_symbol), "%s",
                      custom->symbol);
@@ -411,16 +412,22 @@ namespace hexwallet
       size_t size = 0;
       if (capacity < 3 + 1 + 5 * 32 + 32 + 1 + 1 + 1 + 4 + 1 + 10)
         return false;
-      out[size++] = 1;  // required signatures
-      out[size++] = 0;  // readonly signed
-      out[size++] = 2;  // readonly unsigned (mint, program)
-      out[size++] = 5;  // compact-u16 account count
-      memcpy(out + size, payer, 32); size += 32;
-      memcpy(out + size, source, 32); size += 32;
-      memcpy(out + size, destination, 32); size += 32;
-      memcpy(out + size, mint, 32); size += 32;
-      memcpy(out + size, kTokenProgram, 32); size += 32;
-      memcpy(out + size, blockhash, 32); size += 32;
+      out[size++] = 1; // required signatures
+      out[size++] = 0; // readonly signed
+      out[size++] = 2; // readonly unsigned (mint, program)
+      out[size++] = 5; // compact-u16 account count
+      memcpy(out + size, payer, 32);
+      size += 32;
+      memcpy(out + size, source, 32);
+      size += 32;
+      memcpy(out + size, destination, 32);
+      size += 32;
+      memcpy(out + size, mint, 32);
+      size += 32;
+      memcpy(out + size, kTokenProgram, 32);
+      size += 32;
+      memcpy(out + size, blockhash, 32);
+      size += 32;
       out[size++] = 1;  // one instruction
       out[size++] = 4;  // program id index
       out[size++] = 4;  // account index count
@@ -436,17 +443,19 @@ namespace hexwallet
       *out_size = size;
       return true;
     }
-  }  // namespace
+  } // namespace
 
   bool run_solana_self_tests()
   {
     uint8_t seed[kSeedSize];
-    for (size_t i = 0; i < sizeof(seed); ++i) seed[i] = static_cast<uint8_t>(i + 1);
+    for (size_t i = 0; i < sizeof(seed); ++i)
+      seed[i] = static_cast<uint8_t>(i + 1);
     uint8_t child[32], payer[32];
     bool passed = solana_derive_key(seed, 0, child) && ed25519_public_key(child, payer);
 
     uint8_t mint[32];
-    for (size_t i = 0; i < sizeof(mint); ++i) mint[i] = static_cast<uint8_t>(0x80 + i);
+    for (size_t i = 0; i < sizeof(mint); ++i)
+      mint[i] = static_cast<uint8_t>(0x80 + i);
     uint8_t message[kSolanaMaxMessage];
     size_t message_size = 0;
     passed = passed && build_spl_message(payer, mint, 123456789ULL, 6, message,
@@ -464,9 +473,6 @@ namespace hexwallet
              equal(reviewed.transfers[0].mint, mint) &&
              reviewed.transfers[0].token_symbol[0] == '\0' &&
              !reviewed.transfers[0].token_user_declared;
-
-    // A user-declared SPL token supplies a local label only; the mint bytes in
-    // the signed message remain the authority.
     passed = passed &&
              custom_token_add("sol", mint, sizeof(mint), "CUST", "Custom SPL",
                               6) == CustomTokenError::Ok;
