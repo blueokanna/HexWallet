@@ -10,16 +10,8 @@
 
 namespace hexwallet
 {
-
-  // A host may propose at most this many inputs for one CryptoNote spend. The
-  // limit keeps the reviewed request inside the link payload and the device
-  // RAM budget; larger transactions must be split by the host wallet.
   constexpr size_t kCryptoNoteMaxSignInputs = 8;
   constexpr size_t kCryptoNoteMaxSignOutputs = kCryptoNoteMaxTxOutputs;
-  // Version 1 carries only standard-address inputs/outputs. Version 2 appends
-  // the owning subaddress (major, minor) to every input and output record.
-  // Version 3 additionally carries transaction secrets for Monero's
-  // additional tx-public-key vector and a per-output key selector.
   constexpr uint8_t kCryptoNoteSigningPayloadVersion = 2;
   constexpr uint8_t kCryptoNoteSigningPayloadVersionAdditionalKeys = 3;
   constexpr uint8_t kCryptoNoteSigningPayloadVersionStandardOnly = 1;
@@ -43,16 +35,11 @@ namespace hexwallet
   struct CryptoNoteSigningOutput
   {
     bool change;
-    // Wire value 0 = standard, 1 = subaddress.
     uint8_t address_type;
-    // Version 3 only: zero selects tx_secret; nonzero is a one-based index
-    // into additional_tx_secrets.
     uint8_t tx_key_index;
     uint8_t spend_public[kCryptoNoteKeySize];
     uint8_t view_public[kCryptoNoteKeySize];
     uint64_t amount;
-    // Reserved output indices: both must be zero until subaddress sends have
-    // independent transaction and receiver-scanning evidence.
     uint32_t subaddress_major;
     uint32_t subaddress_minor;
   };
@@ -77,28 +64,18 @@ namespace hexwallet
     CryptoNoteReviewSummary summary;
   };
 
-  // Static session budget: this struct lives in .bss for the whole session, so
-  // it must never grow silently past what the target MCUs can spare.
   static_assert(sizeof(CryptoNoteSigningState) <= 32 * 1024,
                 "CryptoNoteSigningState exceeds the static RAM budget");
 
-  // Parses and fully verifies a host-proposed CryptoNote transaction. This is
-  // the only path that fills CryptoNoteSigningState: the summary it returns is
-  // therefore the reviewed truth and safe to render.
   CryptoNoteTxError cryptonote_signing_prepare(
       const char *network_id, const uint8_t *payload, size_t payload_size,
       const uint8_t seed[kSeedSize], CryptoNoteSigningState *state);
 
-  // Signs every input with a fresh, per-input nonce derived from `nonce_seed`
-  // and returns the serialized transaction. The state is zeroized on both
-  // success and failure.
   CryptoNoteTxError cryptonote_signing_sign(
       CryptoNoteSigningState *state, const uint8_t seed[kSeedSize],
       const uint8_t nonce_seed[kCryptoNoteKeySize], uint8_t *out,
       size_t *in_out_size);
 
-  // Core entry points used by the firmware (which derives the keys from the
-  // seed) and by the host tests (which use the public reference fixture).
   CryptoNoteTxError cryptonote_signing_prepare_with_keys(
       const char *network_id, const uint8_t *payload, size_t payload_size,
       const uint8_t view_secret[kCryptoNoteKeySize],
@@ -116,10 +93,9 @@ namespace hexwallet
 
   bool run_cryptonote_signing_self_tests();
 
-  // Diagnostics for the boot self-test.
   int cryptonote_signing_last_stage();
   int cryptonote_signing_last_error();
 
-} // namespace hexwallet
+}
 
 #endif

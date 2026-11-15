@@ -6,14 +6,15 @@
 #include "CryptoExtended.h"
 #include "WalletConfig.h"
 #include "WalletSecurity.h"
+#include "SensitiveValue.h"
 
 namespace hexwallet
 {
   namespace
   {
 
-    // Domain-separation keys from kaspa-hashes (blake2b_hasher! macro). The key is
-    // the literal ASCII string, padded with zeros to the 32-byte digest length.
+    // Domain-separation keys from kaspa-hashes (blake2b_hasher! macro).
+    // BLAKE2b receives each literal ASCII string with its own key length.
     constexpr char kTransactionIdKey[] = "TransactionID";
     constexpr char kTransactionSigningKey[] = "TransactionSigningHash";
 
@@ -38,6 +39,23 @@ namespace hexwallet
     constexpr uint8_t kOpEqual = 0x87;
     constexpr uint16_t kAddressVersionP2pk = 0;
     constexpr uint16_t kAddressVersionP2sh = 8;
+
+    // Shared by every public primitive before it iterates fixed-size arrays.
+    // This is a memory-boundary check; transaction policy is in kaspa_review.
+    bool bounded_fields(const KaspaTransaction &tx)
+    {
+      if (tx.version != 0 || !tx.input_count || tx.input_count > kKaspaMaxInputs ||
+          !tx.output_count || tx.output_count > kKaspaMaxOutputs ||
+          tx.payload_size > kKaspaMaxPayloadSize)
+        return false;
+      for (size_t i = 0; i < tx.input_count; ++i)
+        if (tx.inputs[i].script_size > sizeof(tx.inputs[i].script))
+          return false;
+      for (size_t i = 0; i < tx.output_count; ++i)
+        if (tx.outputs[i].script_size > sizeof(tx.outputs[i].script))
+          return false;
+      return true;
+    }
 
     struct Writer
     {
@@ -125,6 +143,71 @@ namespace hexwallet
       return state;
     }
 
+    void hash_integer(Blake2bState *state, uint64_t value, size_t size)
+    {
+      uint8_t bytes[8];
+      for (size_t i = 0; i < size; ++i)
+        bytes[i] = static_cast<uint8_t>(value >> (8 * i));
+      blake2b_update(state, bytes, size);
+    }
+
+    bool review_digest(const KaspaTransaction &tx, uint8_t digest[32])
+    {
+      if (!bounded_fields(tx))
+        return false;
+      constexpr char domain[] = "HexWalletKaspaReviewV1";
+      Blake2bState state = start_hash(domain, sizeof(domain) - 1);
+      hash_integer(&state, tx.version, 2);
+      hash_integer(&state, tx.lock_time, 8);
+      hash_integer(&state, tx.payload_size, 1);
+      blake2b_update(&state, tx.payload, tx.payload_size);
+      hash_integer(&state, tx.input_count, 1);
+      for (size_t i = 0; i < tx.input_count; ++i)
+      {
+        const auto &input = tx.inputs[i];
+        hash_outpoint(&state, input.previous_outpoint);
+        hash_integer(&state, input.sequence, 8);
+        hash_integer(&state, input.sigop_count, 1);
+        hash_integer(&state, input.account_index, 4);
+        hash_integer(&state, input.change, 1);
+        hash_integer(&state, input.address_index, 4);
+        hash_integer(&state, input.value, 8);
+        hash_script_public_key(&state, input.script_version, input.script, input.script_size);
+      }
+      hash_integer(&state, tx.output_count, 1);
+      for (size_t i = 0; i < tx.output_count; ++i)
+      {
+        const auto &output = tx.outputs[i];
+        hash_integer(&state, output.value, 8);
+        hash_script_public_key(&state, output.script_version, output.script, output.script_size);
+        blake2b_update(&state, reinterpret_cast<const uint8_t *>(output.address), sizeof(output.address));
+        hash_integer(&state, output.wallet_owned, 1);
+        hash_integer(&state, output.change, 1);
+      }
+      hash_integer(&state, tx.input_total, 8);
+      hash_integer(&state, tx.output_total, 8);
+      hash_integer(&state, tx.fee, 8);
+      hash_integer(&state, tx.compute_mass, 8);
+      hash_integer(&state, tx.transient_mass, 8);
+      hash_integer(&state, tx.storage_mass, 8);
+      return blake2b_final(&state, digest);
+    }
+
+    KaspaError validate_review(const KaspaTransaction &transaction)
+    {
+      KaspaTransaction verified = transaction;
+      uint8_t original_digest[32];
+      const KaspaError reviewed = kaspa_review(&verified);
+      if (reviewed != KaspaError::Ok)
+        return reviewed;
+      if (!review_digest(transaction, original_digest) ||
+          !crypto_constant_time_equal(original_digest, verified.review_hash, 32) ||
+          !crypto_constant_time_equal(transaction.review_hash, verified.review_hash, 32) ||
+          transaction.request_hash != verified.request_hash)
+        return KaspaError::NonCanonical;
+      return KaspaError::Ok;
+    }
+
     uint8_t kaspa_sighash_byte(KaspaSighash sighash)
     {
       return static_cast<uint8_t>(sighash);
@@ -147,8 +230,6 @@ namespace hexwallet
              value == 0x82 || value == 0x84;
     }
 
-    // KIP-0009 plurality: how many 100-byte storage units a UTXO occupies. Every
-    // standard 35-byte P2PK/P2SH script public key has a plurality of 1.
     uint64_t utxo_plurality(uint8_t script_size)
     {
       return (kUtxoConstStorage + script_size + kUtxoUnitSize - 1) / kUtxoUnitSize;
@@ -159,11 +240,7 @@ namespace hexwallet
                                const NetworkProfile &network, uint8_t *out_key,
                                uint8_t *out_xonly)
     {
-      // Kaspa spends P2PK outputs at m/44'/111111'/account'/change/index. The
-      // account is hardened; change and address are not. Refuse anything outside
-      // the two standard branches so a malformed review payload cannot select an
-      // unexpected derivation path.
-      if (change > 1 || account >= kHardenedOffset)
+      if (change > 1 || account >= kHardenedOffset || index >= kHardenedOffset)
         return false;
       const uint32_t path[5] = {44U | kHardenedOffset,
                                 static_cast<uint32_t>(network.derivation_coin_type) | kHardenedOffset,
@@ -175,8 +252,12 @@ namespace hexwallet
         const WalletError result = hd_private_derive(&current, path[depth], &next);
         secure_zero(&current, sizeof(current));
         if (result != WalletError::Ok)
+        {
+          secure_zero(&next, sizeof(next));
           return false;
+        }
         current = next;
+        secure_zero(&next, sizeof(next));
       }
       uint8_t parity;
       const WalletError keyed =
@@ -193,16 +274,14 @@ namespace hexwallet
   KaspaError kaspa_sighash(const KaspaTransaction &transaction, size_t input_index,
                            KaspaSighash sighash, uint8_t out_digest[32])
   {
-    if (out_digest == nullptr || input_index >= transaction.input_count ||
-        transaction.input_count == 0 || transaction.output_count == 0 ||
-        transaction.version != 0 || !valid_kaspa_sighash(sighash))
+    if (out_digest == nullptr || !bounded_fields(transaction) ||
+        input_index >= transaction.input_count || !valid_kaspa_sighash(sighash))
     {
       return KaspaError::InvalidArgument;
     }
     const bool anyone_can_pay = sighash_is_anyone_can_pay(sighash);
     const uint8_t base = sighash_base(sighash);
 
-    // previous_outputs_hash: zero when ANYONECANPAY.
     uint8_t previous_outputs_hash[32] = {};
     if (!anyone_can_pay)
     {
@@ -215,7 +294,6 @@ namespace hexwallet
                    &state, previous_outputs_hash);
     }
 
-    // sequences_hash: zero for SINGLE, NONE and ANYONECANPAY.
     uint8_t sequences_hash[32] = {};
     if (base != 0x04 && base != 0x02 && !anyone_can_pay)
     {
@@ -234,7 +312,6 @@ namespace hexwallet
                    &state, sequences_hash);
     }
 
-    // sig_op_counts_hash: zero when ANYONECANPAY; only v0 commits to it.
     uint8_t sigop_counts_hash[32] = {};
     if (!anyone_can_pay)
     {
@@ -291,7 +368,6 @@ namespace hexwallet
                    &state, outputs_hash);
     }
 
-    // payload_hash: zero for a native transaction with an empty payload.
     uint8_t payload_hash[32] = {};
     if (transaction.payload_size != 0)
     {
@@ -339,7 +415,6 @@ namespace hexwallet
       lock_time[byte] = static_cast<uint8_t>(transaction.lock_time >> (8 * byte));
     }
     blake2b_update(&state, lock_time, sizeof(lock_time));
-    // Native subnetwork id: 20 zero bytes.
     const uint8_t subnetwork[20] = {};
     blake2b_update(&state, subnetwork, sizeof(subnetwork));
     const uint8_t gas[8] = {};
@@ -359,15 +434,10 @@ namespace hexwallet
   KaspaError kaspa_transaction_id(const KaspaTransaction &transaction,
                                   uint8_t out_id[32])
   {
-    if (out_id == nullptr || transaction.version != 0 ||
-        transaction.input_count == 0 ||
-        transaction.input_count > kKaspaMaxInputs ||
-        transaction.output_count > kKaspaMaxOutputs)
+    if (out_id == nullptr || !bounded_fields(transaction))
     {
       return KaspaError::InvalidArgument;
     }
-    // The ID excludes the signature script and the mass commitment, so a v0
-    // transaction signs to a stable ID regardless of the signature bytes.
     Blake2bState state = start_hash(kTransactionIdKey, sizeof(kTransactionIdKey) - 1);
     uint8_t u16[2] = {static_cast<uint8_t>(transaction.version),
                       static_cast<uint8_t>(transaction.version >> 8)};
@@ -419,20 +489,10 @@ namespace hexwallet
     blake2b_update(&state, subnetwork, sizeof(subnetwork));
     const uint8_t gas[8] = {};
     blake2b_update(&state, gas, sizeof(gas));
-    const uint8_t payload_length[8] = {};
+    uint8_t payload_length[8] = {};
+    payload_length[0] = transaction.payload_size;
     blake2b_update(&state, payload_length, sizeof(payload_length));
-    if (transaction.payload_size != 0)
-    {
-      // A non-native payload would also change the subnetwork id; the wallet
-      // refuses those in kaspa_review, so this stays unreachable in practice.
-      uint8_t size_bytes[8];
-      for (uint8_t byte = 0; byte < 8; ++byte)
-      {
-        size_bytes[byte] = static_cast<uint8_t>(transaction.payload_size >> (8 * byte));
-      }
-      blake2b_update(&state, size_bytes, sizeof(size_bytes));
-      blake2b_update(&state, transaction.payload, transaction.payload_size);
-    }
+    blake2b_update(&state, transaction.payload, transaction.payload_size);
     return blake2b_final(&state, out_id) ? KaspaError::Ok : KaspaError::CryptoFailure;
   }
 
@@ -441,21 +501,17 @@ namespace hexwallet
                           uint64_t *storage_mass)
   {
     if (compute_mass == nullptr || transient_mass == nullptr ||
-        storage_mass == nullptr || transaction.version != 0 ||
-        transaction.input_count == 0)
+        storage_mass == nullptr || !bounded_fields(transaction))
     {
       return KaspaError::InvalidArgument;
     }
     // transaction_estimated_serialized_size for a v0 native transaction.
-    uint64_t size = 2 + 8 + 8 + 8 + 20 + 8 + 8;
+    uint64_t size = 2 + 8 + 8 + 8 + 20 + 8 + 32 + 8;
     uint64_t total_script_public_key_size = 0;
     uint64_t total_sigops = 0;
     for (size_t index = 0; index < transaction.input_count; ++index)
     {
-      size += kKaspaOutpointSize + 8 + transaction.inputs[index].script_size + 8;
-      // The wire serialization carries the *signature* script; the estimate uses
-      // its actual length, which at review time is the fixed 65-byte P2PK form.
-      size += kKaspaSignatureSize;
+      size += kKaspaOutpointSize + 8 + kKaspaP2pkSignatureScriptSize + 8;
       total_sigops += transaction.inputs[index].sigop_count;
     }
     for (size_t index = 0; index < transaction.output_count; ++index)
@@ -472,7 +528,6 @@ namespace hexwallet
     *compute_mass = size_mass + script_mass + sigop_mass;
     *transient_mass = size * kTransientByteToMassFactor;
 
-    // KIP-0009 storage mass. harmonic_outs = sum(C * plurality^2 / amount).
     uint64_t outs_plurality = 0;
     uint64_t harmonic_outs = 0;
     for (size_t index = 0; index < transaction.output_count; ++index)
@@ -667,6 +722,8 @@ namespace hexwallet
   KaspaError kaspa_parse_review_payload(const uint8_t *data, size_t size,
                                         KaspaTransaction *transaction)
   {
+    if (transaction != nullptr)
+      clear_kaspa_transaction(transaction);
     if (data == nullptr || transaction == nullptr || size < 2)
     {
       return KaspaError::InvalidArgument;
@@ -742,15 +799,14 @@ namespace hexwallet
 
   KaspaError kaspa_review(KaspaTransaction *transaction)
   {
-    if (transaction == nullptr || transaction->version != 0 ||
-        transaction->input_count == 0 ||
-        transaction->input_count > kKaspaMaxInputs ||
-        transaction->output_count == 0 ||
-        transaction->output_count > kKaspaMaxOutputs ||
-        transaction->payload_size > kKaspaMaxPayloadSize)
+    if (transaction == nullptr || !bounded_fields(*transaction))
     {
       return KaspaError::InvalidArgument;
     }
+    // The trusted review currently supports native payments only. Payload
+    // semantics are not displayed; do not silently sign such requests.
+    if (transaction->payload_size != 0)
+      return KaspaError::Unsupported;
     uint64_t input_total = 0;
     for (size_t index = 0; index < transaction->input_count; ++index)
     {
@@ -762,7 +818,8 @@ namespace hexwallet
       {
         return KaspaError::InvalidAmount;
       }
-      if (input.change > 1 || input.account_index >= kHardenedOffset)
+      if (input.change > 1 || input.account_index >= kHardenedOffset ||
+          input.address_index >= kHardenedOffset || input.sigop_count != 1)
       {
         return KaspaError::Unsupported;
       }
@@ -773,7 +830,7 @@ namespace hexwallet
       {
         return KaspaError::Unsupported;
       }
-      if (!add_u64(input_total, input.value, &input_total))
+      if (!add_u64(input_total, input.value, &input_total) || input_total > kKaspaMaxSompi)
       {
         return KaspaError::InvalidAmount;
       }
@@ -799,10 +856,13 @@ namespace hexwallet
       {
         return KaspaError::InvalidAmount;
       }
-      if (!add_u64(output_total, output.value, &output_total))
+      if (!add_u64(output_total, output.value, &output_total) || output_total > kKaspaMaxSompi)
       {
         return KaspaError::InvalidAmount;
       }
+      memset(output.address, 0, sizeof(output.address));
+      output.wallet_owned = false;
+      output.change = false;
       const KaspaError rendered =
           kaspa_address_from_script("kaspa", output.script_version, output.script,
                                     output.script_size, output.address,
@@ -830,35 +890,11 @@ namespace hexwallet
     {
       return KaspaError::FeePolicy;
     }
-    // Review fingerprint: FNV-1a over the fields an approval covers. The device
-    // shows this value and the signer recomputes it, so a changed amount, fee or
-    // recipient invalidates the one-time confirmation code.
-    uint32_t hash = 2166136261UL;
-    const auto mix = [&hash](const uint8_t *data, size_t size)
-    {
-      for (size_t index = 0; index < size; ++index)
-      {
-        hash ^= data[index];
-        hash *= 16777619UL;
-      }
-    };
-    const uint8_t version_bytes[2] = {static_cast<uint8_t>(transaction->version),
-                                      static_cast<uint8_t>(transaction->version >> 8)};
-    mix(version_bytes, sizeof(version_bytes));
-    for (size_t index = 0; index < transaction->input_count; ++index)
-    {
-      const KaspaInput &input = transaction->inputs[index];
-      mix(input.previous_outpoint.transaction_id, 32);
-      mix(reinterpret_cast<const uint8_t *>(&input.previous_outpoint.index), 4);
-      mix(input.script + 1, 32);
-    }
-    for (size_t index = 0; index < transaction->output_count; ++index)
-    {
-      const KaspaOutput &output = transaction->outputs[index];
-      mix(reinterpret_cast<const uint8_t *>(&output.value), 8);
-      mix(output.script, output.script_size);
-    }
-    transaction->request_hash = hash;
+    if (!review_digest(*transaction, transaction->review_hash))
+      return KaspaError::CryptoFailure;
+    transaction->request_hash = 0;
+    for (size_t i = 0; i < 4; ++i)
+      transaction->request_hash |= static_cast<uint32_t>(transaction->review_hash[i]) << (8 * i);
     return KaspaError::Ok;
   }
 
@@ -867,12 +903,14 @@ namespace hexwallet
                                     uint8_t *out_transaction,
                                     size_t *in_out_size)
   {
-    if (out_transaction == nullptr || in_out_size == nullptr ||
-        transaction.version != 0 || transaction.input_count == 0 ||
-        transaction.output_count == 0)
+    SigningOutputGuard output(out_transaction, in_out_size);
+    if (!output.valid() || !bounded_fields(transaction))
     {
       return KaspaError::InvalidArgument;
     }
+    const KaspaError reviewed = validate_review(transaction);
+    if (reviewed != KaspaError::Ok)
+      return reviewed;
     const NetworkProfile *network = find_network_profile("kas");
     if (network == nullptr)
       return KaspaError::Unsupported;
@@ -899,9 +937,8 @@ namespace hexwallet
       KaspaError result = kaspa_sighash(transaction, index, KaspaSighash::All, digest);
       if (result == KaspaError::Ok)
       {
-        // aux_rand of zeros is the BIP340 known-answer form; determinism is
-        // acceptable because RFC6979-style nonce derivation is already used for
-        // the ECDSA paths and the digest is unique per input.
+        // BIP340's deterministic form binds the nonce to the secret key,
+        // public key and message. This is not an RFC6979 nonce.
         const uint8_t aux[kPrivateKeySize] = {};
         if (secp256k1_schnorr_sign(secret, digest, aux, signatures[index]) !=
             WalletError::Ok)
@@ -926,7 +963,9 @@ namespace hexwallet
     const KaspaError serialized =
         kaspa_serialize_transaction(transaction, signatures, out_transaction, in_out_size);
     secure_zero(signatures, sizeof(signatures));
-    return serialized;
+    if (serialized != KaspaError::Ok)
+      return serialized;
+    return output.commit() ? KaspaError::Ok : KaspaError::CryptoFailure;
   }
 
   // proto3 wire encoding of the TransactionMessage hierarchy from
@@ -938,11 +977,8 @@ namespace hexwallet
       const uint8_t signature_scripts[kKaspaMaxInputs][kKaspaSignatureSize],
       uint8_t *out_transaction, size_t *in_out_size)
   {
-    if (signature_scripts == nullptr || out_transaction == nullptr ||
-        in_out_size == nullptr || transaction.version != 0 ||
-        transaction.input_count == 0 || transaction.input_count > kKaspaMaxInputs ||
-        transaction.output_count == 0 ||
-        transaction.output_count > kKaspaMaxOutputs)
+    SigningOutputGuard output_guard(out_transaction, in_out_size);
+    if (!output_guard.valid() || signature_scripts == nullptr || !bounded_fields(transaction))
     {
       return KaspaError::InvalidArgument;
     }
@@ -977,9 +1013,11 @@ namespace hexwallet
       //                    uint64 sequence = 3; uint32 compute_commit = 4; }
       uint8_t message[192];
       Writer body = {message, sizeof(message), 0};
+      const uint8_t push_signature = static_cast<uint8_t>(kKaspaSignatureSize);
       if (!write_tag(&body, 1, 2) || !write_varint(&body, point.position) ||
           !write_bytes(&body, outpoint, point.position) ||
-          !write_tag(&body, 2, 2) || !write_varint(&body, kKaspaSignatureSize) ||
+          !write_tag(&body, 2, 2) || !write_varint(&body, kKaspaP2pkSignatureScriptSize) ||
+          !write_bytes(&body, &push_signature, 1) ||
           !write_bytes(&body, signature_scripts[index], kKaspaSignatureSize))
       {
         return KaspaError::BufferTooSmall;
@@ -989,6 +1027,9 @@ namespace hexwallet
       {
         return KaspaError::BufferTooSmall;
       }
+      if (input.sigop_count != 0 &&
+          (!write_tag(&body, 4, 0) || !write_varint(&body, input.sigop_count)))
+        return KaspaError::BufferTooSmall;
       if (!write_tag(&writer, 2, 2) || !write_varint(&writer, body.position) ||
           !write_bytes(&writer, message, body.position))
       {
@@ -1037,9 +1078,8 @@ namespace hexwallet
     {
       return KaspaError::BufferTooSmall;
     }
-    // SubnetworkId { bytes bytes = 1; } ? the native id is the empty message and
-    // the reference encoder always populates the field, so it stays on the wire.
-    const uint8_t native_subnetwork[2] = {0x2a, 0x00};
+    // SubnetworkId { bytes bytes = 1; }; the native id is exactly 20 zero bytes.
+    const uint8_t native_subnetwork[24] = {0x2a, 0x16, 0x0a, 0x14};
     if (!write_bytes(&writer, native_subnetwork, sizeof(native_subnetwork)))
     {
       return KaspaError::BufferTooSmall;
@@ -1050,8 +1090,11 @@ namespace hexwallet
     {
       return KaspaError::BufferTooSmall;
     }
+    if (transaction.storage_mass != 0 &&
+        (!write_tag(&writer, 9, 0) || !write_varint(&writer, transaction.storage_mass)))
+      return KaspaError::BufferTooSmall;
     *in_out_size = writer.position;
-    return KaspaError::Ok;
+    return output_guard.commit() ? KaspaError::Ok : KaspaError::CryptoFailure;
   }
 
   const char *kaspa_error_text(KaspaError error)
@@ -1283,14 +1326,13 @@ namespace hexwallet
     secure_zero(script, sizeof(script));
     secure_zero(corrupted, sizeof(corrupted));
 
-    // Broadcast encoding pinned to prost (the encoder the reference node uses)
-    // for a single-input/single-output transaction with a synthetic signature.
     KaspaTransaction wire = {};
     wire.version = 0;
     wire.input_count = 1;
     wire.output_count = 1;
     memcpy(wire.inputs[0].previous_outpoint.transaction_id, previous, 32);
     wire.inputs[0].sequence = 0;
+    wire.inputs[0].sigop_count = 1;
     wire.inputs[0].script_version = 0;
     wire.inputs[0].script_size = 34;
     memcpy(wire.inputs[0].script, script1, 34);
@@ -1300,19 +1342,184 @@ namespace hexwallet
     wire.outputs[0].script_size = 34;
     memcpy(wire.outputs[0].script, script1, 34);
     static const uint8_t kExpectedWire[] = {
-        0x12, 0x69, 0x0a, 0x24, 0x0a, 0x22, 0x0a, 0x20, 0x88, 0x0e, 0xb9, 0x81,
-        0x9a, 0x31, 0x82, 0x1d, 0x9d, 0x23, 0x99, 0xe2, 0xf3, 0x5e, 0x24, 0x33,
-        0xb7, 0x26, 0x37, 0xe3, 0x93, 0xd7, 0x1e, 0xcc, 0x9b, 0x8d, 0x02, 0x50,
-        0xf4, 0x91, 0x53, 0xc3, 0x12, 0x41, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x01, 0x1a,
-        0x29, 0x08, 0xe8, 0x07, 0x12, 0x24, 0x0a, 0x22, 0x20, 0x83, 0x25, 0x61,
-        0x3d, 0x2e, 0xea, 0xf7, 0x17, 0x6a, 0xc6, 0xc6, 0x70, 0xb1, 0x3c, 0x00,
-        0x43, 0x15, 0x6c, 0x42, 0x74, 0x38, 0xed, 0x72, 0xd7, 0x4b, 0x78, 0x00,
-        0x86, 0x2a, 0xd8, 0x84, 0xe8, 0xac, 0x2a, 0x00};
+        0x12,
+        0x6c,
+        0x0a,
+        0x24,
+        0x0a,
+        0x22,
+        0x0a,
+        0x20,
+        0x88,
+        0x0e,
+        0xb9,
+        0x81,
+        0x9a,
+        0x31,
+        0x82,
+        0x1d,
+        0x9d,
+        0x23,
+        0x99,
+        0xe2,
+        0xf3,
+        0x5e,
+        0x24,
+        0x33,
+        0xb7,
+        0x26,
+        0x37,
+        0xe3,
+        0x93,
+        0xd7,
+        0x1e,
+        0xcc,
+        0x9b,
+        0x8d,
+        0x02,
+        0x50,
+        0xf4,
+        0x91,
+        0x53,
+        0xc3,
+        0x12,
+        0x42,
+        0x41,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x11,
+        0x01,
+        0x20,
+        0x01,
+        0x1a,
+        0x29,
+        0x08,
+        0xe8,
+        0x07,
+        0x12,
+        0x24,
+        0x0a,
+        0x22,
+        0x20,
+        0x83,
+        0x25,
+        0x61,
+        0x3d,
+        0x2e,
+        0xea,
+        0xf7,
+        0x17,
+        0x6a,
+        0xc6,
+        0xc6,
+        0x70,
+        0xb1,
+        0x3c,
+        0x00,
+        0x43,
+        0x15,
+        0x6c,
+        0x42,
+        0x74,
+        0x38,
+        0xed,
+        0x72,
+        0xd7,
+        0x4b,
+        0x78,
+        0x00,
+        0x86,
+        0x2a,
+        0xd8,
+        0x84,
+        0xe8,
+        0xac,
+        0x2a,
+        0x16,
+        0x0a,
+        0x14,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
     uint8_t signature_scripts[kKaspaMaxInputs][kKaspaSignatureSize];
     memset(signature_scripts, 0x11, sizeof(signature_scripts));
     for (size_t index = 0; index < kKaspaMaxInputs; ++index)

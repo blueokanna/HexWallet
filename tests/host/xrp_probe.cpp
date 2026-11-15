@@ -1,6 +1,5 @@
-// Host review probe for XrpTransaction. Signing is device-only (secp256k1 is
-// stubbed in the host harness); the Python test checks the exact unsigned
-// bytes and SHA-512Half against xrpl-py.
+// Host-shim review probe for XrpTransaction. This target stubs secp256k1;
+// real-library signing and review mutation tests live in chain/signing_audit.cpp.
 #include <stdio.h>
 #include <string.h>
 

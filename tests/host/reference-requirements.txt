@@ -1,0 +1,2 @@
+# Test-only reference encoder, never linked into firmware.
+protobuf==6.33.5

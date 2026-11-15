@@ -17,6 +17,7 @@ namespace hexwallet
   constexpr size_t kKaspaMaxSignatureScriptSize = 96;
   constexpr size_t kKaspaOutpointSize = 36;
   constexpr size_t kKaspaSignatureSize = 65;
+  constexpr size_t kKaspaP2pkSignatureScriptSize = 1 + kKaspaSignatureSize;
   constexpr uint64_t kKaspaSompiPerKaspa = 100000000ULL;
   constexpr uint64_t kKaspaMaxSompi = 29000000000ULL * kKaspaSompiPerKaspa;
 
@@ -101,7 +102,8 @@ namespace hexwallet
     uint64_t compute_mass;
     uint64_t transient_mass;
     uint64_t storage_mass;
-    uint32_t request_hash; // FNV-1a over the reviewed encoding
+    uint32_t request_hash; // Short display/debug fingerprint, not authorization.
+    uint8_t review_hash[32]; // Domain-separated commitment to all reviewed fields.
   };
 
   // BLAKE2b-256 keyed transaction id over the signed transaction (the signature
@@ -136,8 +138,9 @@ namespace hexwallet
   // apply the fee policy. Call after populating inputs/outputs.
   KaspaError kaspa_review(KaspaTransaction *transaction);
 
-  // Sign every input and serialize the transaction as the protobuf
-  // TransactionMessage that gRPC SubmitTransaction expects.
+  // Revalidate the complete review, sign every input and serialize the P2P
+  // protowire TransactionMessage. gRPC uses a different RpcTransaction schema;
+  // the host must decode this message before calling SubmitTransaction.
   KaspaError kaspa_sign_transaction(const KaspaTransaction &transaction,
                                     const HdPrivateNode &master,
                                     uint8_t *out_transaction,

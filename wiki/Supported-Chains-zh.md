@@ -149,11 +149,25 @@ Theta 是唯一有两条路径的网络：TFUEL 转账走 EVM 适配器，原生
 | `ryo`  | CryptoNote 长地址，前缀 `0x2ce192` |
 | `zano` | CryptoNote `Zx` 地址，前缀 `0xc5`  |
 
-## 拒绝清单
+## 尚未完成的原生能力
 
-拒绝清单是契约的一部分，不是免责声明：屏蔽式 Zcash、Peercoin 签名、TRON NFT 与批量调用、
-Cosmos IBC/authz/amino、Dash 特殊交易、EVM 盲解码、Lightning、Stacks、把 Mimblewimble 链当钱包用，
-以及所有没有上游 SLIP-0044 编号的链。准入流程见 [准入策略](Admission-Policy-zh)。
+以下是当前代码的实际边界。地址生成、摘要原语、交易解析和可用的硬件钱包签名是不同的验收项，不能互相替代。
+
+| 链或协议 | 当前实现与缺口 |
+| --- | --- |
+| RyoCurrency | 已实现双行 MLSAG 签名/验签、旧版 Bulletproof 验证，以及 v2/v3、RingCT type-3 原生交易解析、交易 ID/签名摘要、承诺平衡和逐输入验签；独立向量覆盖 241 成员环和 16 输出。目录仍只开放长地址：发送交易构建、输入/输出归属及金额审查、uniform payment ID、设备确认和节点验收尚未接通，不能视作完整交易签名。 |
+| Zano | 已实现普通隐私输入的 CLSAG_GGX 签名/验签，正确处理资产生成元 X、承诺的 1/8 编码及三层密钥聚合，并通过固定上游验证器交叉验证。目录仍只开放标准地址：资产/范围/平衡证明、完整交易编解码与确认链路、GGXXG 质押及节点验收尚未完成。 |
+| Monero | 已有受限的 RingCT type-6、CLSAG、Bulletproof+、子地址审查与签名；不代表所有交易形式均已适配。 |
+| Zcash | 已有透明交易签名；屏蔽交易、笔记同步与零知识证明流程未完成。 |
+| Beam / 其他 Mimblewimble 链 | Beam 有 CLI 单输入交互转账和范围证明；通用钱包准入、未花费输出发现与双实机节点验收未完成。Grin 等链没有钱包适配器。 |
+| Peercoin | 已有地址与专用 sighash 测试；尚未接通原生交易解析、设备审查、签名和广播流程。 |
+| TRON NFT / 批量调用 | 部分 NFT ABI 可以解析，但后续合约准入会拒绝；因此当前没有可用 NFT 签名。批量调用未开放。 |
+| Cosmos IBC / authz / amino | 当前为 direct 模式的 MsgSend；转移 IBC denom 不等于发起 IBC MsgTransfer。跨链超时、授权语义和 amino 签名未实现。 |
+| Dash 特殊交易 | 当前仅 type-0 支付；ProRegTx 等特殊交易未实现。 |
+| EVM 未解码调用 | 有原始 calldata、哈希与费用审查；原始字节展示不提供合约执行语义保证。 |
+| Lightning / Stacks | 未实现通道状态与撤销协议，也没有 STX 原生交易适配器。 |
+
+这些缺口不会因增加目录条目或开放签名开关而消失。准入要求见 [准入策略](Admission-Policy-zh)。
 
 ## 机器生成的矩阵
 

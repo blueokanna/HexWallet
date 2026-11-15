@@ -31,7 +31,8 @@ namespace hexwallet {
 
 constexpr size_t kCosmosMaxChainId = 32;
 constexpr size_t kCosmosMaxAddress = 90;
-// "ibc/" + 64 hex characters is the longest denom a bank send can carry.
+// Display limit: fits "ibc/" + 64 hex characters. The SDK also permits longer
+// denom names; those are outside this device's current review budget.
 constexpr size_t kCosmosMaxDenom = 68;
 constexpr size_t kCosmosMaxMemo = 64;
 // Bank sends per transaction. Each one costs a full review row, so the trusted
@@ -107,6 +108,10 @@ struct CosmosReview {
 
 struct CosmosTransaction {
   CosmosReview review;
+  // Retain the exact proposal so signing can repeat parsing, policy checks and
+  // display construction without trusting mutable review fields.
+  uint8_t payload[kCosmosMaxPayload];
+  uint16_t payload_size;
   uint32_t address_index;
 };
 
@@ -118,8 +123,9 @@ CosmosError cosmos_review_payload(
     const char *from_address,
     const uint8_t public_key[kCompressedPublicKeySize], CosmosTransaction *out);
 
-// Recomputes the SignDoc digest from the stored bytes, signs it with low-S
-// secp256k1 and emits the complete TxRaw protobuf for broadcast by the phone.
+// Rebuilds the review from the saved proposal and compares every displayed
+// field and protobuf byte before signing. Emits low-S secp256k1 TxRaw.
+// Failure leaves out untouched and sets *in_out_size to zero.
 CosmosError cosmos_sign_transaction(const CosmosTransaction &transaction,
                                     const uint8_t private_key[kPrivateKeySize],
                                     uint8_t *out, size_t *in_out_size);

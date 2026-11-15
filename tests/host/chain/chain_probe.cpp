@@ -4,6 +4,7 @@
 #include <string>
 #include "ChainCommon.h"
 #include "CryptoNoteTransaction.h"
+#include "CryptoNoteSigning.h"
 #include "BeamOutput.h"
 #include "BeamAddress.h"
 #include "XelisAccount.h"
@@ -28,6 +29,8 @@
 #include "StarknetTransaction.h"
 using namespace hexwallet;
 bool run_security_regressions();
+int privacy_probe(int argc, char **argv);
+int signing_audit(const char *test);
 static void hex(const char *key, const uint8_t *p, size_t n)
 {
   printf("%s=", key);
@@ -37,6 +40,17 @@ static void hex(const char *key, const uint8_t *p, size_t n)
 }
 int main(int argc, char **argv)
 {
+  if (argc >= 2 && !strcmp(argv[1], "signing-audit"))
+    return signing_audit(argc == 3 ? argv[2] : "all");
+  if (argc >= 2 && !strncmp(argv[1], "privacy-", 8))
+    return privacy_probe(argc, argv);
+  if (argc == 2 && !strcmp(argv[1], "cryptonote-sign-selftest"))
+  {
+    const bool ok = run_cryptonote_signing_self_tests();
+    printf("cryptonote-sign=%s stage=%d error=%d\n", ok ? "pass" : "FAIL",
+           cryptonote_signing_last_stage(), cryptonote_signing_last_error());
+    return ok ? 0 : 1;
+  }
   if (argc == 2 && !strcmp(argv[1], "security-regressions"))
     return run_security_regressions() ? 0 : 1;
   if (argc == 2 && !strcmp(argv[1], "primary-assets"))
@@ -465,7 +479,6 @@ int main(int argc, char **argv)
            sighash ? "pass" : "FAIL", transaction ? "pass" : "FAIL");
     return (sighash && transaction) ? 0 : 1;
   }
-  // Cosmos TxRaw byte comparison, which needs the real curve.
   if (argc == 2 && !strcmp(argv[1], "cosmos-sign-selftest"))
   {
     const bool review = run_cosmos_self_tests();

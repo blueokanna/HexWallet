@@ -65,7 +65,7 @@ $includes = @(
 # EvmTransaction.cpp and only the device build caught it, so any source that
 # can compile with the curated include set is kept in this list.
 $sources = @(
-  "CryptoPrimitives.cpp", "Bls12381.cpp",
+  "CryptoPrimitives.cpp", "Bls12381.cpp", "RyoBulletproof.cpp", "RyoTransaction.cpp",
   "SolanaTransaction.cpp",
   "Blake2b.cpp", "Blake3.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "WalletCliPolicy.cpp", "BatteryMonitor.cpp", "KangarooTwelve.cpp", "AeternityTransaction.cpp", "AlephiumTransaction.cpp", "QuaiTransaction.cpp",
@@ -75,7 +75,7 @@ $sources = @(
   "WalletLinkCrypto.cpp", "WalletLink.cpp", "WalletNfcApdu.cpp",
   "base58.cpp", "local_bech32.cpp", "local_segwit.cpp", "keccak256.cpp",
   "local_ripemd160.cpp", "WalletAddresses.cpp", "WalletAltAddresses.cpp",
-  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
+  "CryptoNoteAddress.cpp", "CryptoNoteRingCt.cpp", "RyoMlsag.cpp", "ZanoClsag.cpp", "CryptoNoteAmounts.cpp", "CryptoNoteOutputScan.cpp", "CryptoNoteTransaction.cpp", "CryptoNoteSpend.cpp", "CryptoNoteBulletproofPlus.cpp", "CryptoNoteReview.cpp", "CryptoNoteSigning.cpp", "WalletNetworks.cpp", "QrlXmss.cpp",
   "WalletCustody.cpp", "SecureElementPort.cpp", "Se051Scp03.cpp", "Se051Provisioning.cpp", "Se051Apdu.cpp", "Se051Curves.cpp", "AirgapFrame.cpp", "RandomSource.cpp", "EinkPanel.cpp", "QrCode.cpp",
   "WalletSecurity.cpp", "Mascot.cpp", "MaidSprite.cpp",
   "WalletTokens.cpp", "WalletCatalog.cpp", "WalletMiningCatalog.cpp", "WalletSession.cpp",

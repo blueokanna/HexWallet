@@ -93,6 +93,8 @@ jobs:
       - name: Build native chain probe and production policy, run both
         shell: pwsh
         run: |
+          python -m pip install -r tests/host/reference-requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git clone --depth 1 --branch mbedtls-3.6.5 --recurse-submodules --shallow-submodules https://github.com/Mbed-TLS/mbedtls.git build/chain-mbedtls
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1

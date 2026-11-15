@@ -23,9 +23,10 @@ set(WALLET_SOURCES
   NearTransaction.cpp TezosTransaction.cpp QrlXmss.cpp QrlOtsJournal.cpp QrlOtsStore.cpp
   QrlTransaction.cpp QrlV2Transaction.cpp MlDsa87.cpp StarknetCrypto.cpp AptosTransaction.cpp StarknetTransaction.cpp WalletCustomTokens.cpp WalletCustody.cpp WalletSession.cpp SecureElementPort.cpp Se051Apdu.cpp Se051Curves.cpp RandomSource.cpp EinkPanel.cpp QrCode.cpp
   CryptoNoteAddress.cpp CryptoNoteRingCt.cpp CryptoNoteAmounts.cpp CryptoNoteSpend.cpp
-  CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp)
+  CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp CryptoNoteSigning.cpp
+  RyoMlsag.cpp ZanoClsag.cpp RyoBulletproof.cpp RyoTransaction.cpp XrpTransaction.cpp KaspaTransaction.cpp)
 list(TRANSFORM WALLET_SOURCES PREPEND "${WALLET_ROOT}/")
-add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp security_regression.cpp)
+add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp security_regression.cpp privacy_probe.cpp signing_audit.cpp)
 target_sources(chain_probe PRIVATE
   "${WALLET_ROOT}/XelisAccount.cpp" "${WALLET_ROOT}/src/xelis/Port.c"
   "${WALLET_ROOT}/src/xelis/ref10/ed25519_ref10.c"

@@ -94,6 +94,64 @@ namespace hexwallet
     {
       return error;
     }
+    CryptoNoteTxError review_signing_state(
+        const CryptoNoteSigningState *state, const uint8_t view_secret[32],
+        const uint8_t spend_secret[32], CryptoNoteReviewResult *result)
+    {
+      if (state->input_count == 0 || state->input_count > kCryptoNoteMaxSignInputs ||
+          state->output_count == 0 || state->output_count > kCryptoNoteMaxSignOutputs ||
+          state->additional_tx_key_count > kCryptoNoteMaxSignOutputs ||
+          state->input_count != state->transaction.input_count ||
+          state->output_count != state->transaction.output_count ||
+          state->ring_size != state->transaction.rct.ring_size)
+        return CryptoNoteTxError::InvalidArgument;
+      CryptoNoteReviewInput review_inputs[kCryptoNoteMaxSignInputs];
+      CryptoNoteReviewOutput review_outputs[kCryptoNoteMaxSignOutputs];
+      memset(review_inputs, 0, sizeof(review_inputs));
+      memset(review_outputs, 0, sizeof(review_outputs));
+      for (uint8_t index = 0; index < state->input_count; ++index)
+      {
+        const CryptoNoteSigningInput &input = state->inputs[index];
+        review_inputs[index].amount = input.amount;
+        review_inputs[index].real_index = input.real_index;
+        review_inputs[index].ring_size = input.ring_size;
+        memcpy(review_inputs[index].original_tx_public, input.original_tx_public,
+               kCryptoNoteKeySize);
+        review_inputs[index].output_index = input.output_index;
+        review_inputs[index].ring = input.ring;
+        review_inputs[index].key_offsets = input.key_offsets;
+        memcpy(review_inputs[index].pseudo_out_mask, input.pseudo_out_mask,
+               kCryptoNoteKeySize);
+        review_inputs[index].subaddress_major = input.subaddress_major;
+        review_inputs[index].subaddress_minor = input.subaddress_minor;
+      }
+      for (uint8_t index = 0; index < state->output_count; ++index)
+      {
+        const CryptoNoteSigningOutput &output = state->outputs[index];
+        review_outputs[index].change = output.change;
+        review_outputs[index].address_type = output.address_type;
+        review_outputs[index].tx_key_index = output.tx_key_index;
+        memcpy(review_outputs[index].spend_public, output.spend_public,
+               kCryptoNoteKeySize);
+        memcpy(review_outputs[index].view_public, output.view_public,
+               kCryptoNoteKeySize);
+        review_outputs[index].amount = output.amount;
+        review_outputs[index].subaddress_major = output.subaddress_major;
+        review_outputs[index].subaddress_minor = output.subaddress_minor;
+      }
+
+      return cryptonote_review_transaction_with_additional_keys(
+          state->transaction, view_secret, spend_secret, state->tx_secret,
+          state->additional_tx_secrets, state->additional_tx_key_count,
+          review_inputs, state->input_count, review_outputs, state->output_count, result);
+    }
+
+    bool same_summary(const CryptoNoteReviewSummary &a, const CryptoNoteReviewSummary &b)
+    {
+      return a.total_input == b.total_input && a.total_output == b.total_output &&
+             a.change == b.change && a.fee == b.fee && a.output_count == b.output_count &&
+             a.input_count == b.input_count && a.decoys_host_supplied == b.decoys_host_supplied;
+    }
   } // namespace
 
   int cryptonote_signing_last_stage() { return g_signing_stage; }
@@ -357,9 +415,6 @@ namespace hexwallet
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::NonCanonical;
     }
-    // Rendering and ownership must agree: a change line only claims a
-    // subaddress when the record carries one, and external outputs must not
-    // smuggle subaddress fields in.
     for (uint8_t index = 0; index < output_count; ++index)
     {
       const CryptoNoteSigningOutput &output = state->outputs[index];
@@ -407,48 +462,9 @@ namespace hexwallet
     // keys; the Monero review below additionally binds each output to its
     // primary or additional transaction secret.
 
-    SIGNING_STAGE(5);
-    CryptoNoteReviewInput review_inputs[kCryptoNoteMaxSignInputs];
-    CryptoNoteReviewOutput review_outputs[kCryptoNoteMaxSignOutputs];
-    memset(review_inputs, 0, sizeof(review_inputs));
-    memset(review_outputs, 0, sizeof(review_outputs));
-    for (uint8_t index = 0; index < input_count; ++index)
-    {
-      const CryptoNoteSigningInput &input = state->inputs[index];
-      review_inputs[index].amount = input.amount;
-      review_inputs[index].real_index = input.real_index;
-      review_inputs[index].ring_size = input.ring_size;
-      memcpy(review_inputs[index].original_tx_public, input.original_tx_public,
-             kCryptoNoteKeySize);
-      review_inputs[index].output_index = input.output_index;
-      review_inputs[index].ring = input.ring;
-      review_inputs[index].key_offsets = input.key_offsets;
-      memcpy(review_inputs[index].pseudo_out_mask, input.pseudo_out_mask,
-             kCryptoNoteKeySize);
-      review_inputs[index].subaddress_major = input.subaddress_major;
-      review_inputs[index].subaddress_minor = input.subaddress_minor;
-    }
-    for (uint8_t index = 0; index < output_count; ++index)
-    {
-      const CryptoNoteSigningOutput &output = state->outputs[index];
-      review_outputs[index].change = output.change;
-      review_outputs[index].address_type = output.address_type;
-      review_outputs[index].tx_key_index = output.tx_key_index;
-      memcpy(review_outputs[index].spend_public, output.spend_public,
-             kCryptoNoteKeySize);
-      memcpy(review_outputs[index].view_public, output.view_public,
-             kCryptoNoteKeySize);
-      review_outputs[index].amount = output.amount;
-      review_outputs[index].subaddress_major = output.subaddress_major;
-      review_outputs[index].subaddress_minor = output.subaddress_minor;
-    }
-
     SIGNING_STAGE(6);
-    CryptoNoteReviewResult result;
-    error = cryptonote_review_transaction_with_additional_keys(
-        state->transaction, view_secret, spend_secret, state->tx_secret,
-        state->additional_tx_secrets, state->additional_tx_key_count,
-        review_inputs, input_count, review_outputs, output_count, &result);
+    CryptoNoteReviewResult result = {};
+    error = review_signing_state(state, view_secret, spend_secret, &result);
     if (error == CryptoNoteTxError::Ok)
     {
       memcpy(state->signing_mask, result.signing_mask,
@@ -476,6 +492,8 @@ namespace hexwallet
   {
     if (seed == nullptr)
     {
+      if (in_out_size != nullptr)
+        *in_out_size = 0;
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::InvalidArgument;
     }
@@ -484,6 +502,8 @@ namespace hexwallet
     if (cryptonote_private_keys_from_seed(seed, spend_secret, view_secret) !=
         WalletError::Ok)
     {
+      if (in_out_size != nullptr)
+        *in_out_size = 0;
       cryptonote_signing_clear(state);
       secure_zero(view_secret, sizeof(view_secret));
       secure_zero(spend_secret, sizeof(spend_secret));
@@ -503,6 +523,9 @@ namespace hexwallet
       const uint8_t nonce_seed[kCryptoNoteKeySize], uint8_t *out,
       size_t *in_out_size)
   {
+    size_t output_size = in_out_size == nullptr ? 0 : *in_out_size;
+    if (in_out_size != nullptr)
+      *in_out_size = 0;
     if (state == nullptr || view_secret == nullptr || spend_secret == nullptr ||
         nonce_seed == nullptr || out == nullptr || in_out_size == nullptr)
     {
@@ -515,7 +538,21 @@ namespace hexwallet
       cryptonote_signing_clear(state);
       return CryptoNoteTxError::InvalidArgument;
     }
-    CryptoNoteTxError error = CryptoNoteTxError::Ok;
+    // Repeat ownership, output derivation, commitment/proof and fee checks at
+    // the signing boundary. A cached summary or mask is not signing authority.
+    CryptoNoteReviewResult verified = {};
+    CryptoNoteTxError error = review_signing_state(state, view_secret, spend_secret, &verified);
+    if (error == CryptoNoteTxError::Ok &&
+        (!same_summary(state->summary, verified.summary) ||
+         !crypto_constant_time_equal(&state->signing_mask[0][0],
+                                     &verified.signing_mask[0][0], sizeof(state->signing_mask))))
+      error = CryptoNoteTxError::InvalidArgument;
+    secure_zero(&verified, sizeof(verified));
+    if (error != CryptoNoteTxError::Ok)
+    {
+      cryptonote_signing_clear(state);
+      return error;
+    }
     for (uint8_t index = 0; index < state->input_count && error == CryptoNoteTxError::Ok; ++index)
     {
       const CryptoNoteSigningInput &input = state->inputs[index];
@@ -575,7 +612,11 @@ namespace hexwallet
     }
 
     if (error == CryptoNoteTxError::Ok)
-      error = cryptonote_serialize_transaction(state->transaction, out, in_out_size);
+    {
+      error = cryptonote_serialize_transaction(state->transaction, out, &output_size);
+      if (error == CryptoNoteTxError::Ok)
+        *in_out_size = output_size;
+    }
 
     cryptonote_signing_clear(state);
     return error;
@@ -648,8 +689,6 @@ namespace hexwallet
         0x4f,
         0x80,
     };
-    // Public reference-fixture keys (TEST ONLY). They match the pinned
-    // Monero prover output in src/generated/MoneroReviewProofTest.inc.
     const uint8_t view_secret[kCryptoNoteKeySize] = {0x33, 0x77, 0x01, 0xe8};
     const uint8_t spend_secret[kCryptoNoteKeySize] = {0x5a, 0x11, 0x9c, 0x42};
     SIGNING_STAGE(100);
@@ -912,6 +951,53 @@ namespace hexwallet
     static uint8_t signed_tx[kCryptoNoteMaxTxBytes];
     size_t signed_size = sizeof(signed_tx);
     const uint8_t nonce_seed[kCryptoNoteKeySize] = {0x6d, 0x11, 0x9a};
+    // Recheck the reviewed facts before creating any signature. These changes
+    // leave the original transaction bytes intact in several cases.
+    for (unsigned mutation = 0; mutation < 8; ++mutation)
+    {
+      switch (mutation)
+      {
+      case 0:
+        ++state.summary.fee;
+        break;
+      case 1:
+        ++state.summary.change;
+        break;
+      case 2:
+        ++state.outputs[0].amount;
+        break;
+      case 3:
+        memcpy(state.outputs[0].spend_public, our_spend_public, 32);
+        break;
+      case 4:
+        state.signing_mask[0][0] ^= 1;
+        break;
+      case 5:
+        state.output_count = kCryptoNoteMaxSignOutputs + 1;
+        break;
+      case 6:
+        state.input_count = 2;
+        break;
+      case 7:
+        state.transaction.rct.fee = 0;
+        break;
+      }
+      memset(signed_tx, 0xa5, sizeof(signed_tx));
+      size_t rejected_size = sizeof(signed_tx);
+      if (cryptonote_signing_sign_with_keys(&state, view_secret, spend_secret,
+                                            nonce_seed, signed_tx, &rejected_size) == CryptoNoteTxError::Ok ||
+          rejected_size != 0)
+        return false;
+      for (uint8_t byte : signed_tx)
+        if (byte != 0xa5)
+          return false;
+      for (size_t i = 0; i < sizeof(state); ++i)
+        if (reinterpret_cast<const uint8_t *>(&state)[i] != 0)
+          return false;
+      if (cryptonote_signing_prepare_with_keys("xmr", payload, offset, view_secret,
+                                               spend_secret, &state) != CryptoNoteTxError::Ok)
+        return false;
+    }
     const CryptoNoteTxError signed_error = cryptonote_signing_sign_with_keys(
         &state, view_secret, spend_secret, nonce_seed, signed_tx,
         &signed_size);
@@ -933,22 +1019,24 @@ namespace hexwallet
       if (cryptonote_serialize_transaction(zeph, request + 3, &wire_size) != CryptoNoteTxError::Ok)
         return false;
       const size_t suffix = offset - 3 - tx_size;
-      if (wire_size + suffix + 3 > sizeof(request)) return false;
+      if (wire_size + suffix + 3 > sizeof(request))
+        return false;
       request[0] = payload[0];
       request[1] = static_cast<uint8_t>(wire_size);
       request[2] = static_cast<uint8_t>(wire_size >> 8);
       memcpy(request + 3 + wire_size, payload + 3 + tx_size, suffix);
       const size_t length = wire_size + suffix + 3;
       if (cryptonote_signing_prepare_with_keys("xmr", request, length, view_secret, spend_secret, &state) ==
-            CryptoNoteTxError::Ok ||
+              CryptoNoteTxError::Ok ||
           cryptonote_signing_prepare_with_keys("zeph", request, length, view_secret, spend_secret, &state) !=
-            CryptoNoteTxError::Ok || state.summary.fee != kFee || state.summary.change != kChangeAmount)
+              CryptoNoteTxError::Ok ||
+          state.summary.fee != kFee || state.summary.change != kChangeAmount)
         return false;
       size_t signed_length = sizeof(request);
       if (cryptonote_signing_sign_with_keys(&state, view_secret, spend_secret, nonce_seed,
-            request, &signed_length) != CryptoNoteTxError::Ok ||
+                                            request, &signed_length) != CryptoNoteTxError::Ok ||
           cryptonote_parse_transaction(request, signed_length, &zeph,
-            CryptoNoteReviewNetwork::ZephyrMainnet) != CryptoNoteTxError::Ok)
+                                       CryptoNoteReviewNetwork::ZephyrMainnet) != CryptoNoteTxError::Ok)
         return false;
     }
 

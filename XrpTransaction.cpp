@@ -5,6 +5,7 @@
 
 #include "CryptoExtended.h"
 #include "CryptoPrimitives.h"
+#include "SensitiveValue.h"
 #include "base58.h"
 
 namespace hexwallet
@@ -161,8 +162,14 @@ namespace hexwallet
              !memcmp(a.destination, b.destination, sizeof(a.destination)) &&
              !memcmp(a.public_key, b.public_key, sizeof(a.public_key)) &&
              a.unsigned_size == b.unsigned_size &&
+             a.signature_offset == b.signature_offset &&
              !memcmp(a.unsigned_tx, b.unsigned_tx, sizeof(a.unsigned_tx)) &&
-             !memcmp(a.signing_hash, b.signing_hash, sizeof(a.signing_hash));
+             !memcmp(a.signing_hash, b.signing_hash, sizeof(a.signing_hash)) &&
+             !memcmp(a.source_text, b.source_text, sizeof(a.source_text)) &&
+             !memcmp(a.destination_text, b.destination_text, sizeof(a.destination_text)) &&
+             !memcmp(a.amount_text, b.amount_text, sizeof(a.amount_text)) &&
+             !memcmp(a.fee_text, b.fee_text, sizeof(a.fee_text)) &&
+             !memcmp(a.hash_text, b.hash_text, sizeof(a.hash_text));
     }
 
   } // namespace
@@ -190,7 +197,7 @@ namespace hexwallet
     if (out == nullptr)
       return XrpError::InvalidArgument;
     memset(out, 0, sizeof(*out));
-    if (payload == nullptr || public_key == nullptr || size != 50)
+    if (payload == nullptr || public_key == nullptr || size != kXrpReviewPayloadSize)
     {
       return XrpError::InvalidArgument;
     }
@@ -203,6 +210,8 @@ namespace hexwallet
     v.last_ledger_sequence = static_cast<uint32_t>(read_be(payload + 22, 4));
     v.destination_tag = static_cast<uint32_t>(read_be(payload + 26, 4));
     v.has_destination_tag = payload[1] != 0;
+    if (!v.has_destination_tag && v.destination_tag != 0)
+      return XrpError::Malformed;
     memcpy(v.destination, payload + 30, kXrpAccountSize);
     if ((public_key[0] != 2 && public_key[0] != 3) ||
         (v.amount_drops == 0 || v.amount_drops > kXrpMaxAmountDrops) ||
@@ -282,6 +291,7 @@ namespace hexwallet
       v.hash_text[2 * index + 1] = kHex[v.signing_hash[index] & 0x0f];
     }
     v.hash_text[64] = 0;
+    memcpy(out->payload, payload, sizeof(out->payload));
     return XrpError::Ok;
   }
 
@@ -289,73 +299,62 @@ namespace hexwallet
                                 const uint8_t private_key[kPrivateKeySize],
                                 uint8_t *out, size_t *in_out_size)
   {
-    if (in_out_size == nullptr)
+    SigningOutputGuard output(out, in_out_size);
+    if (!output.valid() || private_key == nullptr)
       return XrpError::InvalidArgument;
     const size_t capacity = *in_out_size;
-    *in_out_size = 0;
-    if (private_key == nullptr || out == nullptr)
-      return XrpError::InvalidArgument;
+    if (transaction.review.unsigned_size == 0 ||
+        transaction.review.unsigned_size > kXrpMaxUnsigned ||
+        transaction.review.signature_offset > transaction.review.unsigned_size)
+      return XrpError::Malformed;
     uint8_t public_key[kXrpPublicKeySize] = {};
     if (public_key_from_private(private_key, public_key) != WalletError::Ok)
     {
       return XrpError::CryptoFailure;
     }
     XrpTransaction verified = {};
-    verified.review = transaction.review;
-    uint8_t source[kXrpAccountSize] = {};
-    uint8_t hash[kXrpHashSize] = {};
-    uint8_t signing[4 + kXrpMaxUnsigned] = {};
-    crypto_hash160(public_key, sizeof(public_key), source);
-    memcpy(signing, kSigningPrefix, sizeof(kSigningPrefix));
-    memcpy(signing + 4, transaction.review.unsigned_tx, transaction.review.unsigned_size);
-    const bool binding = !memcmp(source, transaction.review.source, sizeof(source)) &&
-                         !memcmp(public_key, transaction.review.public_key, sizeof(public_key)) &&
-                         crypto_sha512_half(signing, 4 + transaction.review.unsigned_size, hash) &&
-                         !memcmp(hash, transaction.review.signing_hash, sizeof(hash));
-    secure_zero(signing, sizeof(signing));
-    if (!binding)
+    const XrpError reviewed = xrp_review_payload(transaction.payload, sizeof(transaction.payload),
+                                                public_key, &verified);
+    secure_zero(public_key, sizeof(public_key));
+    if (reviewed != XrpError::Ok || !same_review(transaction.review, verified.review))
     {
-      secure_zero(public_key, sizeof(public_key));
-      secure_zero(source, sizeof(source));
+      clear_xrp_transaction(&verified);
       return XrpError::Malformed;
     }
+    const XrpReview &v = verified.review;
     RecoverableSignature signature = {};
     uint8_t der[kXrpMaxSignature] = {};
     size_t der_size = 0;
     const WalletError sign_error = secp256k1_sign_digest_recoverable(
-        private_key, transaction.review.signing_hash, &signature);
+        private_key, v.signing_hash, &signature);
     const bool der_ok = sign_error == WalletError::Ok &&
                         encode_der(signature, der, sizeof(der), &der_size);
     secure_zero(&signature, sizeof(signature));
-    secure_zero(public_key, sizeof(public_key));
-    secure_zero(source, sizeof(source));
     if (!der_ok)
     {
       secure_zero(der, sizeof(der));
       return XrpError::CryptoFailure;
     }
-    const size_t needed = transaction.review.unsigned_size + der_size + 2;
-    if (capacity < needed || transaction.review.signature_offset >
-                                 transaction.review.unsigned_size)
+    const size_t needed = v.unsigned_size + der_size + 2;
+    if (capacity < needed)
     {
       secure_zero(der, sizeof(der));
-      *in_out_size = needed;
       return XrpError::BufferTooSmall;
     }
     size_t offset = 0;
-    memcpy(out, transaction.review.unsigned_tx, transaction.review.signature_offset);
-    offset += transaction.review.signature_offset;
+    memcpy(out, v.unsigned_tx, v.signature_offset);
+    offset += v.signature_offset;
     out[offset++] = 0x74;
     out[offset++] = static_cast<uint8_t>(der_size);
     memcpy(out + offset, der, der_size);
     offset += der_size;
-    memcpy(out + offset, transaction.review.unsigned_tx + transaction.review.signature_offset,
-           transaction.review.unsigned_size - transaction.review.signature_offset);
-    offset += transaction.review.unsigned_size - transaction.review.signature_offset;
+    memcpy(out + offset, v.unsigned_tx + v.signature_offset,
+           v.unsigned_size - v.signature_offset);
+    offset += v.unsigned_size - v.signature_offset;
     *in_out_size = offset;
     secure_zero(der, sizeof(der));
     secure_zero(&verified, sizeof(verified));
-    return XrpError::Ok;
+    return output.commit() ? XrpError::Ok : XrpError::CryptoFailure;
   }
 
   void clear_xrp_transaction(XrpTransaction *transaction)

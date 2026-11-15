@@ -9,6 +9,7 @@
 # Prerequisite (once):
 #   git clone --depth 1 --branch mbedtls-3.6.5 --recurse-submodules `
 #     --shallow-submodules https://github.com/Mbed-TLS/mbedtls.git build/chain-mbedtls
+#   python -m pip install -r tests/host/reference-requirements.txt
 param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -31,6 +32,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Alephium / Zephyr derivation failed' }
   & 'build/chain-native/Release/chain_probe.exe' security-regressions
   if ($LASTEXITCODE -ne 0) { throw 'Codec bounds or EVM review binding regression failed' }
+  & 'build/chain-native/Release/chain_probe.exe' signing-audit all
+  if ($LASTEXITCODE -ne 0) { throw 'XRP/Kaspa signing bounds or review binding failed' }
+  python tests/host/kaspa_reference.py --probe build/chain-native/Release/chain_probe.exe
+  if ($LASTEXITCODE -ne 0) { throw 'Kaspa independent wire/hash/signature regression failed' }
   $alph = Get-Content -Raw tests/fixtures/alephium/p2pkh-transfer.json | ConvertFrom-Json
   $result = & 'build/chain-native/Release/chain_probe.exe' alph $alph.seed $alph.unsignedTx $alph.index
   if ($LASTEXITCODE -ne 0 -or $result -notcontains "signed=$($alph.signature)" -or
@@ -80,6 +85,14 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'zcash sign self-test failed' }
   & 'build/chain-native/Release/chain_probe.exe' cosmos-sign-selftest
   if ($LASTEXITCODE -ne 0) { throw 'cosmos sign self-test failed' }
+  & 'build/chain-native/Release/chain_probe.exe' cryptonote-sign-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'CryptoNote sign or review binding self-test failed' }
+  python tests/host/privacy/privacy_interop.py --probe build/chain-native/Release/chain_probe.exe
+  if ($LASTEXITCODE -ne 0) { throw 'Ryo MLSAG / Zano CLSAG_GGX known-answer or adversarial regression failed' }
+  python tests/host/privacy/bulletproof_interop.py --probe build/chain-native/Release/chain_probe.exe
+  if ($LASTEXITCODE -ne 0) { throw 'Ryo original Bulletproof interoperability regression failed' }
+  python tests/host/privacy/ryo_transaction_interop.py --probe build/chain-native/Release/chain_probe.exe
+  if ($LASTEXITCODE -ne 0) { throw 'Ryo transaction codec, proof or MLSAG binding regression failed' }
   & 'build/chain-native/Release/chain_probe.exe' dash-sign-selftest
   if ($LASTEXITCODE -ne 0) { throw 'dash sign self-test failed' }
   # PSBT v0/v2 parsing and the signature both envelopes must agree on: needs real BIP32/ECDSA.

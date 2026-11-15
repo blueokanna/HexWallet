@@ -27,9 +27,6 @@ namespace hexwallet
         {"atom", "cosmos", "cosmoshub-", "uatom", "ATOM", 6},
         {"osmo", "osmo", "osmosis-", "uosmo", "OSMO", 6},
         {"tia", "celestia", "celestia", "utia", "TIA", 6},
-        // Kava's Cosmos zone and both Terra networks share the bank MsgSend
-        // encoding with the three above; only the bech32 prefix, chain-id prefix
-        // and display denom differ, so they are parameters, not new code paths.
         {"kava", "kava", "kava_2222-", "ukava", "KAVA", 6},
         {"terra", "terra", "phoenix-", "uluna", "LUNA", 6},
         {"terraclassic", "terra", "columbus-", "uluna", "LUNC", 6},
@@ -69,6 +66,8 @@ namespace hexwallet
         {
           return false;
         }
+        if (memchr(data + offset, '\0', length) != nullptr)
+          return false;
         memcpy(out, data + offset, length);
         out[length] = '\0';
         offset += length;
@@ -320,7 +319,12 @@ namespace hexwallet
 
     bool valid_denom(const char *denom, size_t size)
     {
-      if (denom == nullptr || size == 0 || size > kCosmosMaxDenom)
+      // Cosmos SDK's default denom grammar starts with a letter and has at
+      // least three characters. Our display budget is stricter than its
+      // 128-character ceiling, but must not admit invalid shorter names.
+      if (denom == nullptr || size < 3 || size > kCosmosMaxDenom ||
+          !((denom[0] >= 'a' && denom[0] <= 'z') ||
+            (denom[0] >= 'A' && denom[0] <= 'Z')))
         return false;
       for (size_t index = 0; index < size; ++index)
       {
@@ -441,6 +445,41 @@ namespace hexwallet
       return true;
     }
 
+    const CosmosChainParams *registered_chain(const CosmosChainParams *candidate)
+    {
+      // Compare identities before dereferencing a saved review pointer.
+      for (const auto &chain : kCosmosChains)
+        if (candidate == &chain)
+          return &chain;
+      return nullptr;
+    }
+
+    bool same_review(const CosmosReview &a, const CosmosReview &b)
+    {
+      // Do not compare struct padding. Include the entire fixed-size arrays so
+      // unterminated text and stale unused rows cannot reach the display.
+      return a.chain == b.chain && a.message_count == b.message_count &&
+             a.has_memo == b.has_memo && a.denom_registered == b.denom_registered &&
+             a.decimals == b.decimals && a.account_number == b.account_number &&
+             a.sequence == b.sequence && a.amount == b.amount &&
+             a.fee == b.fee && a.gas_limit == b.gas_limit &&
+             a.tx_body_size == b.tx_body_size && a.auth_info_size == b.auth_info_size &&
+             memcmp(a.to, b.to, sizeof(a.to)) == 0 &&
+             memcmp(a.amounts, b.amounts, sizeof(a.amounts)) == 0 &&
+             memcmp(a.amount_texts, b.amount_texts, sizeof(a.amount_texts)) == 0 &&
+             memcmp(a.from, b.from, sizeof(a.from)) == 0 &&
+             memcmp(a.chain_id, b.chain_id, sizeof(a.chain_id)) == 0 &&
+             memcmp(a.denom, b.denom, sizeof(a.denom)) == 0 &&
+             memcmp(a.memo, b.memo, sizeof(a.memo)) == 0 &&
+             memcmp(a.symbol, b.symbol, sizeof(a.symbol)) == 0 &&
+             memcmp(a.public_key, b.public_key, sizeof(a.public_key)) == 0 &&
+             memcmp(a.tx_body, b.tx_body, sizeof(a.tx_body)) == 0 &&
+             memcmp(a.auth_info, b.auth_info, sizeof(a.auth_info)) == 0 &&
+             memcmp(a.sign_doc_digest, b.sign_doc_digest, sizeof(a.sign_doc_digest)) == 0 &&
+             memcmp(a.amount_text, b.amount_text, sizeof(a.amount_text)) == 0 &&
+             memcmp(a.fee_text, b.fee_text, sizeof(a.fee_text)) == 0;
+    }
+
 #include "src/generated/CosmosVectorsTest.inc"
 
     bool hex_equals(const uint8_t *data, size_t size, const char *text)
@@ -555,6 +594,7 @@ namespace hexwallet
       const char *from_address,
       const uint8_t public_key[kCompressedPublicKeySize], CosmosTransaction *out)
   {
+    clear_cosmos_transaction(out);
     if (payload == nullptr || from_address == nullptr || public_key == nullptr ||
         out == nullptr || size == 0)
     {
@@ -562,7 +602,8 @@ namespace hexwallet
     }
     if (size > kCosmosMaxPayload)
       return CosmosError::Unsupported;
-    clear_cosmos_transaction(out);
+    if (registered_chain(&chain) == nullptr)
+      return CosmosError::Unsupported;
 
     PayloadReader reader = {payload, size, 0};
     uint8_t version = 0;
@@ -703,8 +744,6 @@ namespace hexwallet
     snprintf(review.denom, sizeof(review.denom), "%s", denom);
     snprintf(review.memo, sizeof(review.memo), "%s", memo);
     review.has_memo = memo_length != 0;
-    // Only the chain's own denom has pinned precision. Anything else renders as
-    // an exact base-unit integer next to the denom string the chain will parse.
     review.denom_registered =
         denom_length == strlen(chain.denom) &&
         memcmp(denom, chain.denom, denom_length) == 0;
@@ -770,6 +809,8 @@ namespace hexwallet
     }
     secure_zero(sign_doc, sizeof(sign_doc));
     out->review = review;
+    memcpy(out->payload, payload, size);
+    out->payload_size = static_cast<uint16_t>(size);
     return CosmosError::Ok;
   }
 
@@ -777,13 +818,17 @@ namespace hexwallet
                                       const uint8_t private_key[kPrivateKeySize],
                                       uint8_t *out, size_t *in_out_size)
   {
+    const size_t capacity = in_out_size == nullptr ? 0 : *in_out_size;
+    if (in_out_size != nullptr)
+      *in_out_size = 0;
     if (private_key == nullptr || out == nullptr || in_out_size == nullptr)
     {
       return CosmosError::InvalidArgument;
     }
     const CosmosReview &review = transaction.review;
-    if (review.chain == nullptr || review.tx_body_size == 0 ||
-        review.auth_info_size == 0)
+    const CosmosChainParams *chain = registered_chain(review.chain);
+    if (chain == nullptr || transaction.payload_size == 0 ||
+        transaction.payload_size > sizeof(transaction.payload))
     {
       return CosmosError::InvalidArgument;
     }
@@ -796,6 +841,21 @@ namespace hexwallet
     {
       secure_zero(public_key, sizeof(public_key));
       return CosmosError::WrongWallet;
+    }
+    uint8_t account[kAddressBytes] = {};
+    char from[kCosmosMaxAddress] = {};
+    CosmosTransaction verified = {};
+    const bool consistent =
+        crypto_hash160(public_key, sizeof(public_key), account) &&
+        bech32_encode(chain->hrp, account, sizeof(account), from, sizeof(from), false) &&
+        cosmos_review_payload(transaction.payload, transaction.payload_size, *chain,
+                              from, public_key, &verified) == CosmosError::Ok &&
+        same_review(review, verified.review);
+    clear_cosmos_transaction(&verified);
+    if (!consistent)
+    {
+      secure_zero(public_key, sizeof(public_key));
+      return CosmosError::Malformed;
     }
     uint8_t sign_doc[kCosmosMaxSignDoc];
     size_t sign_doc_size = 0;
@@ -840,9 +900,8 @@ namespace hexwallet
       secure_zero(raw, sizeof(raw));
       return CosmosError::BufferTooSmall;
     }
-    if (*in_out_size < raw_size)
+    if (capacity < raw_size)
     {
-      *in_out_size = raw_size;
       secure_zero(raw, sizeof(raw));
       return CosmosError::BufferTooSmall;
     }
@@ -886,6 +945,10 @@ namespace hexwallet
 
   bool run_cosmos_self_tests()
   {
+    if (valid_denom("a", 1) || valid_denom("ab", 2) ||
+        valid_denom("1coin", 5) || valid_denom("/coin", 5) ||
+        !valid_denom("ucoin", 5))
+      return false;
     uint8_t private_key[kPrivateKeySize];
     uint8_t public_key[kCompressedPublicKeySize];
     bool passed = hex_decode_exact(kCosmosVectorPrivateKeyHex, private_key,
@@ -975,6 +1038,42 @@ namespace hexwallet
                                        public_key, &probe) != CosmosError::Ok;
         clear_cosmos_transaction(&probe);
       }
+      const char *text_fields[] = {vector.chain_id, vector.to_address};
+      for (const char *text : text_fields)
+      {
+        const size_t length = strlen(text);
+        bool exercised = false;
+        for (size_t at = 1; passed && at + length <= payload_size; ++at)
+        {
+          if (payload[at - 1] != length || memcmp(payload + at, text, length) != 0)
+            continue;
+          uint8_t bad[kCosmosMaxPayload] = {};
+          if (payload_size + 2 > sizeof(bad))
+            return false;
+          memcpy(bad, payload, at + length);
+          bad[at - 1] = static_cast<uint8_t>(length + 2);
+          bad[at + length] = 0;
+          bad[at + length + 1] = 'X';
+          memcpy(bad + at + length + 2, payload + at + length, payload_size - at - length);
+          CosmosTransaction probe = transaction;
+          passed = cosmos_review_payload(bad, payload_size + 2, *chain,
+                                         vector.from_address, public_key, &probe) == CosmosError::Malformed &&
+                   probe.payload_size == 0 && probe.review.tx_body_size == 0;
+          exercised = true;
+          break;
+        }
+        passed = passed && exercised;
+      }
+      if (passed)
+      {
+        CosmosTransaction probe = transaction;
+        passed = cosmos_review_payload(nullptr, 0, *chain, vector.from_address,
+                                       public_key, &probe) == CosmosError::InvalidArgument &&
+                 probe.payload_size == 0 && probe.review.tx_body_size == 0;
+        CosmosChainParams unregistered = *chain;
+        passed = passed && cosmos_review_payload(payload, payload_size, unregistered,
+                                                 vector.from_address, public_key, &probe) == CosmosError::Unsupported;
+      }
       clear_cosmos_transaction(&transaction);
     }
     for (const CosmosRejectedCase &vector : kCosmosRejectedCases)
@@ -1042,7 +1141,110 @@ namespace hexwallet
                  hex_equals(signed_tx, signed_size, vector.tx_raw_hex);
         secure_zero(signed_tx, sizeof(signed_tx));
       }
-      // A payload reviewed for one key must not sign with another.
+      if (passed)
+      {
+        for (unsigned mutation = 0; mutation < 26 && passed; ++mutation)
+        {
+          CosmosTransaction changed = transaction;
+          switch (mutation)
+          {
+          case 0:
+            changed.review.to[0][0] ^= 1;
+            break;
+          case 1:
+            ++changed.review.amounts[0];
+            break;
+          case 2:
+            changed.review.amount_texts[0][0] ^= 1;
+            break;
+          case 3:
+            changed.review.from[0] ^= 1;
+            break;
+          case 4:
+            memset(changed.review.chain_id, 'x', sizeof(changed.review.chain_id));
+            break;
+          case 5:
+            changed.review.denom[0] ^= 1;
+            break;
+          case 6:
+            changed.review.memo[0] ^= 1;
+            break;
+          case 7:
+            changed.review.has_memo = !changed.review.has_memo;
+            break;
+          case 8:
+            changed.review.denom_registered = !changed.review.denom_registered;
+            break;
+          case 9:
+            changed.review.symbol[0] ^= 1;
+            break;
+          case 10:
+            ++changed.review.decimals;
+            break;
+          case 11:
+            ++changed.review.account_number;
+            break;
+          case 12:
+            ++changed.review.sequence;
+            break;
+          case 13:
+            ++changed.review.amount;
+            break;
+          case 14:
+            ++changed.review.fee;
+            break;
+          case 15:
+            ++changed.review.gas_limit;
+            break;
+          case 16:
+            changed.review.amount_text[0] ^= 1;
+            break;
+          case 17:
+            changed.review.fee_text[0] ^= 1;
+            break;
+          case 18:
+            changed.review.message_count = kCosmosMaxMessages + 1;
+            break;
+          case 19:
+            changed.review.tx_body_size = sizeof(changed.review.tx_body) + 1;
+            break;
+          case 20:
+            changed.review.auth_info_size = sizeof(changed.review.auth_info) + 1;
+            break;
+          case 21:
+            changed.payload_size = sizeof(changed.payload) + 1;
+            break;
+          case 22:
+            changed.payload[0] = 0xff;
+            break;
+          case 23:
+            changed.review.chain = nullptr;
+            break;
+          case 24:
+            changed.review.tx_body[0] ^= 1;
+            break;
+          case 25:
+            changed.review.auth_info[0] ^= 1;
+            break;
+          }
+          uint8_t output[kCosmosMaxSignedTx];
+          memset(output, 0xa5, sizeof(output));
+          size_t length = sizeof(output);
+          passed = cosmos_sign_transaction(changed, private_key, output, &length) != CosmosError::Ok &&
+                   length == 0;
+          for (uint8_t byte : output)
+            passed = passed && byte == 0xa5;
+          clear_cosmos_transaction(&changed);
+        }
+      }
+      if (passed)
+      {
+        uint8_t output[1] = {0xa5};
+        size_t length = sizeof(output);
+        passed = cosmos_sign_transaction(transaction, private_key, output, &length) ==
+                     CosmosError::BufferTooSmall &&
+                 length == 0 && output[0] == 0xa5;
+      }
       if (passed)
       {
         uint8_t other_private[kPrivateKeySize];

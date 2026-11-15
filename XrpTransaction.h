@@ -16,6 +16,7 @@ namespace hexwallet
   constexpr size_t kXrpMaxUnsigned = 192;
   constexpr size_t kXrpMaxSignature = 72;
   constexpr size_t kXrpMaxSigned = kXrpMaxUnsigned + kXrpMaxSignature + 4;
+  constexpr size_t kXrpReviewPayloadSize = 50;
   constexpr uint64_t kXrpMaxFeeDrops = 2000000;
   constexpr uint64_t kXrpMaxAmountDrops = 100000000000000000ULL;
 
@@ -58,6 +59,9 @@ namespace hexwallet
   {
     XrpReview review;
     uint32_t address_index;
+    // Original compact request, retained to rebuild all review and wire fields
+    // with the actual signing public key immediately before signing.
+    uint8_t payload[kXrpReviewPayloadSize];
   };
 
   XrpError xrp_review_payload(const uint8_t *payload, size_t size,
