@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "WalletBoardPins.h"
+#include "WalletSharedSpi.h"
 #include "WalletSecurity.h"
 
 namespace hexwallet
@@ -53,7 +54,15 @@ namespace hexwallet
 
 #if HEXWALLET_NFC_PORT_AVAILABLE
 
+#if defined(HEXWALLET_SHARED_SPI_PIN_SCK)
+    static_assert(HEXWALLET_SHARED_SPI_PIN_SCK == HEXWALLET_NFC_PIN_SCK &&
+                  HEXWALLET_SHARED_SPI_PIN_MISO == HEXWALLET_NFC_PIN_MISO &&
+                  HEXWALLET_SHARED_SPI_PIN_MOSI == HEXWALLET_NFC_PIN_MOSI,
+                  "NFC and panel must use the same SPI pins");
+    SPIClass &nfc_spi = SPI;
+#else
     SPIClass nfc_spi(HSPI);
+#endif
     NfcPortState state = NfcPortState::InitFailed;
     NfcApduHandler apdu_handler = nullptr;
     NfcSessionLostHandler session_lost = nullptr;
@@ -215,10 +224,12 @@ namespace hexwallet
     bool nci_initialize()
     {
       pinMode(HEXWALLET_NFC_PIN_IRQ, INPUT);
-      pinMode(HEXWALLET_NFC_PIN_CS, OUTPUT);
-      digitalWrite(HEXWALLET_NFC_PIN_CS, HIGH);
       pinMode(HEXWALLET_NFC_PIN_VEN, OUTPUT);
       digitalWrite(HEXWALLET_NFC_PIN_VEN, LOW);
+#if defined(HEXWALLET_NFC_PIN_DWL_REQ)
+      pinMode(HEXWALLET_NFC_PIN_DWL_REQ, OUTPUT);
+      digitalWrite(HEXWALLET_NFC_PIN_DWL_REQ, LOW);
+#endif
       delay(10);
       digitalWrite(HEXWALLET_NFC_PIN_VEN, HIGH);
       delay(20);
@@ -506,8 +517,18 @@ namespace hexwallet
     session_lost = lost_handler;
     if (!bus_ready)
     {
-      nfc_spi.begin(HEXWALLET_NFC_PIN_SCK, HEXWALLET_NFC_PIN_MISO,
-                    HEXWALLET_NFC_PIN_MOSI, HEXWALLET_NFC_PIN_CS);
+#if defined(HEXWALLET_SHARED_SPI_PIN_SCK)
+      if (!board_shared_spi_begin())
+#else
+      pinMode(HEXWALLET_NFC_PIN_CS, OUTPUT);
+      digitalWrite(HEXWALLET_NFC_PIN_CS, HIGH);
+      if (!nfc_spi.begin(HEXWALLET_NFC_PIN_SCK, HEXWALLET_NFC_PIN_MISO,
+                         HEXWALLET_NFC_PIN_MOSI, -1))
+#endif
+      {
+        state = NfcPortState::InitFailed;
+        return false;
+      }
       bus_ready = true;
     }
     const bool ok = nci_initialize();

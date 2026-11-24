@@ -7,9 +7,9 @@
 | Tool | Version used here |
 | --- | --- |
 | arduino-cli | 1.5.1 |
-| esp32 core | 3.3.10 |
+| esp32 core | 3.3.13 for board 7, 3.3.10 for the other profiles |
 | LVGL | 9.5.0 (`v9.5.0`) |
-| Python | 3.x, only for the generators and the mining test |
+| Python | 3.x for the Board 7 image check, generators and host tests |
 | Visual Studio 2022 C++ tools | host test suite (MSVC `cl.exe`) |
 | mbedTLS | 3.6.5 checkout in `build/chain-mbedtls` for the native chain tests |
 
@@ -35,10 +35,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs,PSRAM=
 P4 e-paper wallet (board 7 must be selected explicitly on `esp32p4`):
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32p4:PartitionScheme=min_spiffs,PSRAM=enabled `
-  --library "$HOME/Arduino/libraries/lvgl" `
-  --build-property compiler.cpp.extra_flags="-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" `
-  --build-property compiler.c.extra_flags="-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" .
+arduino-cli core install esp32:esp32@3.3.13
+./tools/build_p4_board.ps1
 ```
 
 Headless CLI (no LVGL, no panel):
@@ -65,7 +63,9 @@ The three flags that matter most:
 
 ## Flash layout
 
-The commands above select the core's 4 MB `min_spiffs` layout: NVS, two 1,966,080-byte OTA slots and 128 KiB SPIFFS. The complete P4 display firmware exceeds the default 1,310,720-byte application slot. Two OTA slots alone do not implement secure firmware updates. Flash capacity and partition layout must match the build; existing data needs a migration plan before changing layouts.
+Board 7 uses `partitions/hexwallet-p4-32mb.csv` and requires 32 MiB of physical flash. The post-v3 build for Arduino-ESP32 3.3.13 targets P4 v3.1–v3.99. `tools/build_p4_board.ps1` produces an 8,388,608-byte factory image for address zero. OTA slots at `0x10000` and `0x410000` each hold 3,932,160 bytes. The 24 MiB LittleFS `assets` partition occupies `0x800000` through `0x1ffffff`. The current application stores up to 64 user-declared token records there. Filesystem metadata consumes part of the partition. The stock SDK produces a diagnostic image with credential provisioning disabled.
+
+The factory image includes padding over NVS, its keys and the legacy SPIFFS volume. Use it on blank hardware. For an existing 32 MiB board using the older table, preserve these partitions and use the individual bootloader at `0x2000`, table at `0x8000`, OTA initialization data at `0xe000` and application at `0x10000` together in a maintenance session. The old second slot starts at `0x1f0000` and an app-only OTA cannot migrate the table. Secure-boot or encrypted devices need their provisioning-specific update procedure. Once migrated, an ordinary OTA writes the inactive app slot. The token store reads the existing NVS table when no asset file exists, then commits subsequent changes to LittleFS. A volume that fails to mount is formatted automatically only if every byte is erased.
 
 Display builds also enable PSRAM: `PSRAM=enabled` for P4 and `PSRAM=opi` for the board 1 S3 AMOLED. The P4 RGB565 frame requires 75,776 bytes; the board allocator prefers PSRAM for display buffers, preserving internal RAM for task stacks and other allocations. Static RAM usage from the linker is not a runtime heap budget. Verify PSRAM initialization, minimum free heap and task stack high-water marks on the board. Headless configurations do not require PSRAM.
 
@@ -92,6 +92,8 @@ Copy-Item partitions\hexwallet-16mb-ota.csv partitions.csv
 Also set `FlashSize=16M` in both build and upload FQBNs. Do not use this table on an 8 MB module. A root-level `partitions.csv` overrides the menu's partition selection; move it out of the sketch root before returning to the 4 MB builds documented here.
 
 ## Flash
+
+Use a 3.3 V UART0 adapter for board 7 ROM downloads and boot logs. Connect adapter RX to board `TX` (GPIO37), adapter TX to board `RX` (GPIO38), and join the grounds. The primary PCB routes the `USB1` data lines to GPIO22/23. In ROM download mode, `esptool --chip esp32p4 --port COMx chip-id` and `esptool --chip esp32p4 --port COMx flash-id` identify the silicon and flash before image selection.
 
 ```powershell
 arduino-cli upload -p COM7 --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs,PSRAM=opi .

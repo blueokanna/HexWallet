@@ -10,8 +10,7 @@ namespace hexwallet {
 
 // Aptos native APT transfers.
 //
-// Aptos signs a hash, not a serialized transaction:
-//   authenticator = Ed25519(sha3_256("APTOS::RawTransaction" || BCS(RawTransaction)))
+// Signing message for Ed25519 = sha3_256("APTOS::RawTransaction") || BCS(RawTransaction),
 // and the account address is sha3_256(public_key || 0x00). Both the domain
 // separator and the trailing scheme byte are easy to drop and produce a
 // signature the VM rejects, so this adapter builds the RawTransaction itself
@@ -40,7 +39,7 @@ constexpr size_t kAptosPayloadSize = 74;
 constexpr uint8_t kAptosDecimals = 8;
 constexpr uint8_t kAptosMainnetChainId = 1;
 constexpr uint8_t kAptosTestnetChainId = 2;
-constexpr size_t kAptosAuthenticatorSize = 1 + 64 + 32;
+constexpr size_t kAptosAuthenticatorSize = 1 + 1 + 32 + 1 + 64;
 
 // 0x + sha3_256(public_key || 0x00), the single-signer account address.
 bool aptos_address(const uint8_t public_key[kAptosAddressSize], char *out,
@@ -52,8 +51,8 @@ ChainError aptos_review_payload(const uint8_t *payload, size_t size,
                                 uint8_t digest[32]);
 
 // Rebuilds the RawTransaction from the payload, checks that `sender` is the
-// account `private_key` controls, and returns the 0x00 || signature || public
-// key authenticator the host embeds in a SignedTransaction.
+// account `private_key` controls, and returns the BCS Ed25519 authenticator
+// (variant 0, length-prefixed public key, length-prefixed signature).
 ChainError aptos_sign_payload(const uint8_t *payload, size_t size,
                               const char *sender,
                               const uint8_t private_key[kPrivateKeySize],

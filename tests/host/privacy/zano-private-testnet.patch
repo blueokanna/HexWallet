@@ -1,0 +1,24 @@
+diff --git a/src/currency_core/currency_config.h b/src/currency_core/currency_config.h
+--- a/src/currency_core/currency_config.h
++++ b/src/currency_core/currency_config.h
+@@ -333,16 +333,16 @@
+ #define ZANO_HARDFORK_02_AFTER_HEIGHT                   0
+ #define ZANO_HARDFORK_03_AFTER_HEIGHT                   0
+ 
+-#define ZANO_HARDFORK_04_AFTER_HEIGHT                   850
++#define ZANO_HARDFORK_04_AFTER_HEIGHT                   1
+ #define ZANO_HARDFORK_04_TIMESTAMP_ACTUAL               1778000000ull // 2026-05-05 16:53:20 UTC
+ 
+-#define ZANO_HARDFORK_05_AFTER_HEIGHT                   851
++#define ZANO_HARDFORK_05_AFTER_HEIGHT                   2
+ #define ZANO_HARDFORK_05_MIN_BUILD_VER                  474
+ 
+-#define ZANO_HARDFORK_06_AFTER_HEIGHT                   1050
++#define ZANO_HARDFORK_06_AFTER_HEIGHT                   3
+ #define ZANO_HARDFORK_06_MIN_BUILD_VER                  474
+ 
+-#define ZANO_HARDFORK_07_AFTER_HEIGHT                   500000
++#define ZANO_HARDFORK_07_AFTER_HEIGHT                   4
+ #define ZANO_HARDFORK_07_MIN_BUILD_VER                  600
+ 
+ #endif

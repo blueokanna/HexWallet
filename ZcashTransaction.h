@@ -10,7 +10,7 @@
 
 namespace hexwallet {
 
-// Zcash Overwinter/Sapling v4 transparent transactions. Signed inputs are
+// Zcash v5 and ZIP-243 fork v4 transparent transactions. Signed inputs are
 // t1 P2PKH and t3 P2SH whose redeem script is the canonical
 // `<compressed pubkey> OP_CHECKSIG` form holding this wallet's key; shielded
 // components are parsed to reject them explicitly. The host supplies prevout
@@ -38,6 +38,8 @@ constexpr uint64_t kFluxMaxZats = 440000000ULL * kZcashZatsPerZec;
 constexpr uint64_t kZcashTransparentParseMaxZats = kFluxMaxZats;
 constexpr uint32_t kZcashV4Version = 0x80000004UL;
 constexpr uint32_t kZcashSaplingVersionGroupId = 0x892F2085UL;
+constexpr uint32_t kZcashV5Version = 0x80000005UL;
+constexpr uint32_t kZcashV5VersionGroupId = 0x26A7270AUL;
 
 enum class ZcashError : uint8_t {
   Ok = 0,
@@ -73,7 +75,7 @@ struct ZcashInput {
   uint8_t script_size;
   // P2SH only: the redeem script, which must be exactly
   // `<0x21> <33-byte compressed pubkey> OP_CHECKSIG` and must HASH160 to
-  // script[2..21]. Zcash commits the redeem script as the ZIP-243 scriptCode.
+  // script[2..21]. ZIP-243 signs the redeem script. ZIP-244 signs the prevout scriptPubKey.
   // Empty for P2PKH prevouts.
   uint8_t redeem[kZcashMaxRedeemScriptSize];
   uint8_t redeem_size;
@@ -114,7 +116,7 @@ struct ZcashSigningRequest {
 //   magic "ZEC4" or "ZEC5" (4 bytes)
 //   u32 branch_id
 //   u32 unsigned_transaction_size
-//   unsigned v4 transaction bytes (every scriptSig must be empty)
+//   unsigned transaction bytes (ZEC v5, ZERO v4, every scriptSig empty)
 //   u8 input_count (must equal the transaction's vin count)
 //   input_count * { u64 value, u8 script_size + scriptPubKey,
 //                   u32 account, u8 change, u32 address_index
@@ -131,6 +133,10 @@ ZcashError zcash_parse_review_payload(const uint8_t *data, size_t size,
 ZcashError zcash_sign_request(const ZcashSigningRequest &request,
                               const HdPrivateNode &master,
                               uint8_t *out_transaction, size_t *in_out_size);
+
+// Raw ZIP-244 txid for this wallet's transparent v5 wire format. RPC displays
+// these digest bytes in reverse order for both signed and unsigned transactions.
+bool zcash_v5_txid(const uint8_t *wire, size_t size, uint32_t branch, uint8_t out[kSha256Size]);
 
 // ZIP-243 digest for any v4 transaction. `input_index` is -1 (NOT_AN_INPUT)
 // for the digest used by shielded signatures; this module only signs with a

@@ -19,13 +19,13 @@
 描述符，也没有宣称浏览器可以注册 passkey。私有钱包 NFC AID 不是标准 FIDO AID。摄像头扫码
 同样不会自动使设备具备 WebAuthn 支持。
 
-ES256 原语本身已经落地在 [src/P256Sign.h](../src/P256Sign.h)：P-256 的 Montgomery 域运算、
+ES256 原语本身已经落地在 [src/P256Sign.h](https://github.com/blueokanna/HexWallet/blob/main/src/P256Sign.h)：P-256 的 Montgomery 域运算、
 Jacobian 点加/倍、double-and-add-always 标量乘、RFC 6979 确定性 nonce、low-S 归一与严格
 DER 编码。验收用 RFC 6979 A.2.5 逐字节钉死 `r`/`s`，并验证 RFC 原文的高 `s`、篡改签名、
 零 `s`、错误摘要、私钥 `0` 与私钥 `n` 的拒绝路径。这套 KAT 曾抓出两个真 bug（模加进位分支、
 `s = (e+rd)/k` 写成了乘法），因此不能把它当成“写过就算”的模块。
 
-曲线覆盖面见 [src/EcdsaCurve.h](../src/EcdsaCurve.h)：它把 secp256k1（`a = 0`）与 secp256r1
+曲线覆盖面见 [src/EcdsaCurve.h](https://github.com/blueokanna/HexWallet/blob/main/src/EcdsaCurve.h)：它把 secp256k1（`a = 0`）与 secp256r1
 （`a = -3`）放进同一个引擎，主机上可跑，因此主机测试第一次能对“产出的签名”本身做独立验签，
 而不是只验证拒绝路径。它的 KAT 一半来自外部（RFC 6979 A.2.5、libsecp256k1 与 python-ecdsa
 互相一致的一对 `r`/`s`、一条 GRS 主网交易的链上签名），一半来自自证（`n·G` 等于无穷远点）。

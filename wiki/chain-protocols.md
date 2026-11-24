@@ -183,8 +183,26 @@ truncated to four bytes, which is why `chain_address_from_script()` switches to
 `address_from_script_groestl()` for this family — rendering a GRS output with
 the SHA-256 checksum would print an address that does not exist on that chain.
 
-Scope: P2PKH legacy inputs, one transaction at a time. P2SH and bech32 spends
-are not admitted.
+`grs` signs P2PKH. `grs49` and `grs84` sign P2SH-P2WPKH and native P2WPKH
+using Groestlcoin's single SHA-256 for the BIP143 component hashes and final digest.
+Groestlcoin Core 32.1 confirmed all three spends on regtest.
+
+### PSBT node checks
+
+Run `python tests/host/utxo_ledger_check.py <chain_probe> <network> <daemon>` with
+`NODE_PATH` pointing at `tests/host/protocol-oracles/node_modules`. The network options
+are `btc`, `ltc`, `doge`, `grs`, `bch`, `btg` and `xec`. The test derives fixture keys
+with ethers, mines outputs on the selected private node, reviews PSBT v0 and v2 through
+the phone callback, submits the signed payments and checks the confirming block.
+
+Appending `--catalog <catalog_dump>` selects every catalog profile with the signing
+algorithm of the chosen `btc`, `bch`, `grs` or `btg` node. Each profile uses its
+own derivation path. The node validates the payment under its local consensus and
+mempool rules. The dated validation log identifies the node used for each group.
+
+Dogecoin Core 1.14.9 recommends 0.01 DOGE/kB. The default wallet rate cap for `doge`
+is 1000 koinu per estimated byte and the absolute cap is 0.01 DOGE. Both the parser
+and signer enforce the limits. [Dogecoin fee recommendation](https://github.com/dogecoin/dogecoin/blob/v1.14.9/doc/fee-recommendation.md)
 
 ### VeChain (VET)
 
@@ -472,14 +490,13 @@ P2SH 多签花费（设备只持有一把钥匙）。
 
 ### Zcash (ZEC) and ZERO (ZER)
 
-The Zcash v4 transparent ZIP-243 engine runs with the mainnet NU6.2 branch id
-`0x5437f330`, SLIP-0044 coin type `133`, and t1/t3 base58 prefixes
-`0x1cb8`/`0x1cbd`. The phone-link kind is `4` with `coin_id=zec`; the payload is
-the `ZEC4`/`ZEC5` review structure documented below, built by the phone or by any
-host that reproduces this layout. The device prints ZCASH on the review screen
-and returns the complete signed v4 transaction. Shielded components and non-v4
-transaction versions are rejected, and the transparent supply cap is 21,000,000
-ZEC.
+Zcash mainnet activated NU7 at height 3,543,405 and retired every v4 transaction.
+For `coin_id=zec`, phone-link kind `4` takes a transparent v5 transaction with
+version group `0x26a7270a` and consensus branch `0x77190ad9`. The branch must
+match in the envelope and the transaction header. The device derives coin type
+133, reviews t1/t3 outputs and returns the signed v5 wire bytes. The empty Sapling
+and Orchard bundles encode as three zero counts. The transparent supply cap is
+21,000,000 ZEC. [ZIP 259](https://zips.z.cash/zip-0259) · [ZIP 225](https://zips.z.cash/zip-0225) · [ZIP 244](https://zips.z.cash/zip-0244)
 
 ZERO (`zer`) is the second entry on that engine and the reason it takes its
 parameters from the network profile instead of the file. ZERO is a Zcash fork
@@ -503,7 +520,9 @@ spend. This is the same boundary Ledger and Trezor draw for Zcash.
 
 Signed inputs are t1 P2PKH and t3 P2SH whose redeem script is exactly
 `<0x21> <33-byte compressed pubkey> OP_CHECKSIG` holding this wallet's key. For a
-t3 input, ZIP-243 commits the **redeem script** as `scriptCode`, the scriptSig is
+t3 input on ZEC, ZIP-244 commits the previous output's **scriptPubKey** and amount
+for every input. On ZERO, ZIP-243 commits the **redeem script** as `scriptCode`.
+For both formats the scriptSig is
 `push(sig + hashtype) push(redeem)`, and the fee budget is reserved with the
 bigger scriptSig (151 vbytes per input instead of 149). The device re-hashes the
 redeem script against the prevout hash and re-derives the key, so a t3 address
@@ -514,7 +533,7 @@ cannot show all of them is refused rather than signed partially blind.
 Refused: P2SH multisig or any other redeem form, a t3 prevout without its redeem
 script (`ZEC4` cannot express one), a canonical redeem script belonging to
 another key, duplicate out points, an existing scriptSig, shielded spends and
-outputs, JoinSplits, and v3/v5 transactions.
+outputs, JoinSplits, ZEC versions other than v5, and ZERO versions other than v4.
 
 Payload layout (little-endian; `ZEC5` appends the bracketed redeem record):
 
@@ -522,14 +541,34 @@ Payload layout (little-endian; `ZEC5` appends the bracketed redeem record):
 magic "ZEC4" | "ZEC5"
 u32  branch_id
 u32  unsigned_transaction_size
-u8[] unsigned v4 transaction (every scriptSig must be empty)
+u8[] unsigned transaction (ZEC v5 or ZERO v4, every scriptSig must be empty)
 u8   input_count
 input_count * { u64 value, u8 script_size + scriptPubKey,
                 u32 account, u8 change, u32 address_index
                 [, u8 redeem_size + redeem script] }
 ```
 
-Evidence: `run_zcash_sighash_self_tests()` pins official ZIP-243 vector 3, the
+`tests/host/zcash_protocol_check.py` drives the phone approval path with two inputs
+in each transaction, one P2PKH and one P2SH-P2PK. It compares every signed byte
+with `zcash-test-vectors` serialization, ZIP-244 or ZIP-243 digests, and ethers
+BIP32/ECDSA. The signed and unsigned ZEC transactions have the same ZIP-244
+transaction ID, verified against the reference implementation. The regression
+also covers the display limit and refusal of a ZEC v4 transaction carrying the NU7 branch.
+
+For historical NU6.2, `tests/host/protocol-oracles/zcash-nu62.json` preserves the two full
+transactions produced by the public-key fixture in commit `06597624`. The reference script
+independently derives the child key, computes ZIP-243, signs with ethers and compares all
+245 P2PKH bytes and 247 P2SH-P2PK bytes. The current ZEC phone path rejects both historical requests.
+
+`tests/host/zcash_ledger_check.py <chain_probe> zec <zebrad>` checks ZEC NU7 with Zebra
+v7.1.0. Run it with `zer <zerod>` for ZERO v4. Both use the same Python and Node reference
+dependencies as the byte comparisons. ZERO v4.0.0 needs the three official Sapling/Sprout
+parameter files in its platform's `ZcashParams` directory. Each test starts a private regtest
+node, mines a mature transparent output, submits two transactions approved through the
+phone callback and verifies the mined payment amounts and scripts. The second transaction
+spends both a P2PKH and a P2SH-P2PK output. ZEC uses branch `77190ad9` and ZERO `7361707a`.
+
+`run_zcash_sighash_self_tests()` pins official ZIP-243 vector 3, the
 published `zcash-test-vectors` rows, and a P2SH `scriptCode` digest produced by a
 separate Python BLAKE2b implementation of ZIP-243 that first reproduces the
 official vector byte for byte. The redeem/address binding rule is additionally
@@ -668,11 +707,13 @@ anything it cannot prove is unreserved, and `QrlOtsJournal` is that proof:
 The signer that consumes the reservation lives in `QrlXmss.cpp`: WOTS+ chains,
 the authentication path and `R = PRF(idx, sk_prf)` are all rebuilt on the
 device, and `tests/host/qrl_oracle_check.ps1` compares `xmss_Signmsg` output
-byte for byte at heights 4/6/10 and indices 0/1/last. The residual risk the
-journal cannot close is also documented in the header: a blank journal is
-indistinguishable from a wiped one, so the custody layer must treat "account
-exists in the secure element, journal blank" as a recovery event rather than
-initialising it.
+byte for byte at heights 4/6/10 and indices 0/1/last. A signing request requires
+an existing journal and fails with `StorageUnavailable` if both copies are lost.
+The signer serialises reservations and checks the expected leaf under that lock.
+A blank journal cannot establish whether the key was used on another device.
+Provisioning the initial index for a provably fresh key and recovering a used
+account's index still require a custody workflow. The firmware currently has no
+production entry point for either operation.
 
 The original `HexWallet/QRL/v1` mapping is preserved at tree index zero. Original
 builds ignored all indices; recovering one of those paths requires tree zero.
@@ -682,11 +723,9 @@ Account/change values other than zero are rejected. Failure and cancellation
 clear public outputs and wipe expanded secret workspaces. No P4 runtime or
 physical side-channel timing claim follows from the host tests.
 
-### Aeternity, RyoCurrency and Zano — address profiles only
+### Aeternity, RyoCurrency and Zano address formats
 
-These three rows exist to answer a narrow question honestly: "can the device
-derive the correct receive address for this chain?" They do not claim review or
-signing, and the catalog marks them `ADDRESS` only.
+These profiles derive receive addresses. Aeternity also supports mainnet `SpendTx` to account addresses. Ryo and Zano expose the address capability in the catalog. [Payment backend status](Capability-Review)
 
 | Chain | Path | Encoder | Pinned evidence |
 |---|---|---|---|
@@ -719,12 +758,11 @@ No address from these profiles is labeled as signable. A signing request for
 them is rejected by the signing dispatcher; it is never converted into a
 locally invented transaction.
 
-What a future signing port must add, in order, is not a new address encoder:
+The remaining integration work depends on the protocol.
 
-1. **Ryo / Zano**: their RingCT transaction versions, ring/key-image rules,
-   fee policy and a set of independently generated signed-transaction vectors.
-   Reusing Monero's RCT type-6 parser would produce a plausible but invalid
-   transaction.
+1. **Ryo and Zano** have dedicated host payment paths, including ring signatures,
+   fee checks and two private-chain receipts per currency. Both still require
+   card-backed key images, physical approval and signing on Board 7. [Validation](validation)
 2. **Beam / Grin / MWC / Epic**: the complete slate/BBS exchange state machine,
    kernel and bulletproof construction, and a receiver-side scan path. An
    address string without this is only an endpoint hint.
@@ -852,12 +890,12 @@ them; this document does not claim a remote CI run has occurred.
 - 启动自检比较 `src/generated/AlgorandVectorsTest.inc` 中的完整 SDK 签名结果，并验证错误 owner 被拒绝。
 - 修复了 SHA-512/256 多分块路径未清零 128 位长度字段高半部的问题；此前 ≥126 字节的 Algorand 交易会显示错误 txID。`extended-crypto` 自检现已包含 128 字节分块向量。
 
-## Cosmos SDK 原生 MsgSend（ATOM / OSMO / TIA）
+## Cosmos SDK 银行、IBC 和授权消息
 
 *Merged from docs/cosmos-signing.md.*
 
 实现位于 `CosmosTransaction.cpp`，接入 `WalletSigning` 与手机链路 `BEGIN_SIGN kind=8`。
-币种为 `atom`、`osmo`、`tia`，路径 `m/44'/118'/0'/0/<index>`，地址为
+六个网络配置按登记的 coin type 从 `m/44'/<coin_type>'/0'/0/<index>` 派生，地址为
 `bech32(hash160(compressed secp256k1 pubkey))`。设备返回**完整 `TxRaw` protobuf**，手机直接广播。
 
 ### 覆盖范围
@@ -867,9 +905,11 @@ them; this document does not claim a remote CI run has occurred.
 | atom | `cosmos` | `cosmoshub-` | `uatom` | 6 |
 | osmo | `osmo` | `osmosis-` | `uosmo` | 6 |
 | tia | `celestia` | `celestia` | `utia` | 6 |
+| kava | `kava` | `kava_2222-` | `ukava` | 6 |
+| terra | `terra` | `phoenix-` | `uluna` | 6 |
+| terraclassic | `terra` | `columbus-` | `uluna` | 6 |
 
-每条交易 1..4 条 `MsgSend`（v3 payload）。`SIGN_MODE_DIRECT`，单签名者，无 tip、无 feegrant、
-无 authz、无 IBC 报文。denom 默认是链的原生 denom；v2 payload 可以指定其他 denom（含
+v1–v3 每笔交易包含 1..4 条 `MsgSend`，使用 `SIGN_MODE_DIRECT` 和一个签名者。denom 默认是链的原生 denom，v2 和 v3 可以指定其他 denom（含
 `ibc/<64 hex>` 形式的凭证 denom），但只有链自身的 denom 有固定精度。`chain-id` 由手机
 提供但必须匹配网络前缀，并且完整显示在屏幕上；账户号与 sequence 也显示，批准前必须核对。
 
@@ -883,7 +923,7 @@ denom 显示策略：
 memo（v2）会完整显示在审阅页，并写入 `TxBody.memo`（field 2），因此进入 `SignDoc` 摘要；
 1..64 字节可打印 ASCII，超长或不可打印一律拒绝。
 
-### 审阅 payload（大端）
+### v1–v3 审阅 payload（大端）
 
 ```
 u8   version = 1, 2 或 3
@@ -951,8 +991,7 @@ v1 携带 memo、v2 缺 denom、非法 denom 字符、不可打印 memo、超长
 重复字段、汇总金额、逐行文案与 `TxRaw` 全部固定，并由 `chain_probe cosmos-sign-selftest`
 在真实曲线下逐字节复验。
 
-未实现：IBC 报文与超时消息、authz/feegrant、EIP-191/JSON 与 amino 签名模式、
-链上账户号/sequence 查询与广播。屏幕按键、SE050 托管和主网节点验收仍需独立证据。
+`cosmoshub-4` 与 `osmosis-1` 的 v4–v7 另支持一条固定路由的原生 ICS-20 转账、单笔原生 Amino 付款、限额授权或撤销银行转账授权。手机广播前重建签名字节并核对 RPC chain ID。隔离双链已验证双向到账和确认回执。其他授权类型、feegrant、任意 Amino 消息及实卡签名待验收。[v4–v7 字段与通道](Chain-Payloads-zh#cosmos) · [节点回执](validation)
 
 ## NEAR 签名边界
 

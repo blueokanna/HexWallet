@@ -47,6 +47,7 @@ namespace hexwallet
     // True when secure_boot_enabled came from CONFIG_SECURE_BOOT (compiled-in
     // bootloader policy) rather than a runtime eFuse read.
     bool secure_boot_from_config;
+    bool secure_boot_key_policy_verified;
     bool running_from_ota_slot;
     bool app_elf_sha256_valid;
     uint8_t app_elf_sha256[32];
@@ -56,6 +57,7 @@ namespace hexwallet
   TrustLevel trust_level(const TrustState &state);
 
   bool trust_signing_allowed(const TrustState &state);
+  bool board_credential_storage_ready();
 
   constexpr size_t kReviewSealSize = 32;
   constexpr size_t kReviewSealNonceSize = 8;

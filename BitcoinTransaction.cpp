@@ -451,6 +451,30 @@ namespace hexwallet
       return false;
     }
 
+    bool allowed_fee(const BitcoinChainParams &chain, uint64_t fee, uint32_t vbytes)
+    {
+      // Dogecoin Core v1.14.9 recommends 0.01 DOGE/kB, or 1000 koinu/byte.
+      const uint64_t limit = chain.network_id && !strcmp(chain.network_id, "doge")
+                               ? HEXWALLET_MAX_DOGE_FEE_RATE : HEXWALLET_MAX_BITCOIN_FEE_RATE;
+      return vbytes != 0 && fee <= HEXWALLET_MAX_BITCOIN_FEE_SATS && fee <= limit * vbytes;
+    }
+
+    bool chain_supports_spend(const BitcoinChainParams &chain, BitcoinSpendType type)
+    {
+      if (type == BitcoinSpendType::TaprootBip86)
+        return taproot_network(chain);
+      if (chain.sighash == SighashFamily::ForkId)
+        return type == BitcoinSpendType::LegacyP2pkh || chain.fork_id == kBitcoinGoldForkId;
+      return sighash_family_is_legacy(chain.sighash);
+    }
+
+    // PSBT_IN_SIGHASH_TYPE declares the signature suffix. The consensus checker
+    // inserts its network's fork ID into the high bits when hashing the preimage.
+    uint32_t signature_hash_flag(const BitcoinChainParams &chain)
+    {
+      return chain.sighash == SighashFamily::ForkId ? kSighashForkIdAll : kSighashAll;
+    }
+
     TransactionError parse_derivation(const uint8_t *key, size_t key_size,
                                       const uint8_t *value, size_t value_size,
                                       const HdPrivateNode &master, const BitcoinChainParams &chain, BitcoinInput *input,
@@ -759,9 +783,7 @@ namespace hexwallet
       uint64_t utxo_value = 0;
       uint8_t utxo_script[kBitcoinMaxScriptSize + 1] = {};
       uint8_t utxo_script_size = 0;
-      const uint32_t expected_sighash = chain.sighash == SighashFamily::ForkId
-                                            ? (chain.fork_id << 8) | kSighashForkIdAll
-                                            : kSighashAll;
+      const uint32_t expected_sighash = signature_hash_flag(chain);
       while (true)
       {
         const uint8_t *key;
@@ -791,13 +813,7 @@ namespace hexwallet
           secure_zero(tap_internal_key, sizeof(tap_internal_key));
           if (result != TransactionError::Ok)
             return result;
-          const bool family_ok =
-              input->spend_type == BitcoinSpendType::TaprootBip86
-                  ? taproot_network(chain)
-                  : (sighash_family_is_legacy(chain.sighash) ||
-                     (chain.sighash == SighashFamily::ForkId &&
-                      input->spend_type == BitcoinSpendType::LegacyP2pkh));
-          if (!family_ok)
+          if (!chain_supports_spend(chain, input->spend_type))
             return TransactionError::Unsupported;
           return path_matches_spend_type(*input, chain) ? TransactionError::Ok : TransactionError::WrongWallet;
         }
@@ -1142,9 +1158,7 @@ namespace hexwallet
       uint8_t utxo_script_size = 0;
       const uint8_t *non_witness_utxo = nullptr;
       size_t non_witness_utxo_size = 0;
-      const uint32_t expected_sighash = chain.sighash == SighashFamily::ForkId
-                                            ? (chain.fork_id << 8) | kSighashForkIdAll
-                                            : kSighashAll;
+      const uint32_t expected_sighash = signature_hash_flag(chain);
       while (true)
       {
         const uint8_t *key;
@@ -1367,13 +1381,7 @@ namespace hexwallet
       secure_zero(tap_internal_key, sizeof(tap_internal_key));
       if (result != TransactionError::Ok)
         return result;
-      const bool family_ok =
-          input->spend_type == BitcoinSpendType::TaprootBip86
-              ? taproot_network(chain)
-              : (sighash_family_is_legacy(chain.sighash) ||
-                 (chain.sighash == SighashFamily::ForkId &&
-                  input->spend_type == BitcoinSpendType::LegacyP2pkh));
-      if (!family_ok)
+      if (!chain_supports_spend(chain, input->spend_type))
         return TransactionError::Unsupported;
       return path_matches_spend_type(*input, chain) ? TransactionError::Ok : TransactionError::WrongWallet;
     }
@@ -2199,7 +2207,7 @@ namespace hexwallet
       return TransactionError::InvalidAmount;
     parsed.fee = parsed.input_total - parsed.output_total;
     parsed.estimated_vbytes = estimated_vbytes(parsed);
-    if (parsed.fee > HEXWALLET_MAX_BITCOIN_FEE_SATS || parsed.estimated_vbytes == 0 || parsed.fee > HEXWALLET_MAX_BITCOIN_FEE_RATE * static_cast<uint64_t>(parsed.estimated_vbytes))
+    if (!allowed_fee(chain, parsed.fee, parsed.estimated_vbytes))
     {
       return TransactionError::FeePolicy;
     }
@@ -2426,10 +2434,7 @@ namespace hexwallet
           taproot_bip86_output_key(input.public_key + 1, output_key) == WalletError::Ok &&
           crypto_constant_time_equal(output_key, input.taproot_output_key, sizeof(output_key));
       secure_zero(output_key, sizeof(output_key));
-      const bool family_ok =
-          input.spend_type == BitcoinSpendType::TaprootBip86
-              ? request.chain.sighash == SighashFamily::Bitcoin
-              : (sighash_family_is_legacy(request.chain.sighash) || legacy);
+      const bool family_ok = chain_supports_spend(request.chain, input.spend_type);
       const bool hash_ok =
           input.spend_type == BitcoinSpendType::TaprootBip86
               ? true
@@ -2456,7 +2461,9 @@ namespace hexwallet
     if (input_total > maximum_money(request.chain) || output_total > maximum_money(request.chain))
       return TransactionError::InvalidAmount;
     const uint32_t expected_vbytes = estimated_vbytes(request);
-    if (input_total < output_total || input_total != request.input_total || output_total != request.output_total || input_total - output_total != request.fee || request.fee > HEXWALLET_MAX_BITCOIN_FEE_SATS || request.estimated_vbytes == 0 || request.estimated_vbytes != expected_vbytes || request.fee > HEXWALLET_MAX_BITCOIN_FEE_RATE * static_cast<uint64_t>(request.estimated_vbytes))
+    if (input_total < output_total || input_total != request.input_total || output_total != request.output_total ||
+        input_total - output_total != request.fee || request.estimated_vbytes != expected_vbytes ||
+        !allowed_fee(request.chain, request.fee, expected_vbytes))
     {
       return TransactionError::FeePolicy;
     }

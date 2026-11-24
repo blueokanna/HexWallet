@@ -13,7 +13,7 @@
 | QRL 端口命名 | `QrlXmss.h` 的 `struct QrlOtsStorage` 与 `QrlOtsJournal.h` 的 `class QrlOtsStorage` 同名，两个头文件同时包含时无法编译。端口改名为 `QrlOtsPort`，持久化协议仍叫 `QrlOtsStorage`。 |
 | Chia | 目录从 ADDRESS 改为 SIGN。BLS12-381 的私密标量运算已迁到固定基线 blst（`third_party/blst`，`HEXWALLET_BLST_FORCE_32BIT` 强制 32-bit limb，宿主机与 MCU 编译同一份代码），签名为 `AGG_SIG_ME` 增广方案。 |
 | DOT / KSM | 目录从 ADDRESS 改为 SIGN。`DOT2` 载荷的 signed extensions 与 `spec_version`/`transaction_version` 钉死在构建期（DOT 2005002/26、KSM 2005001/26），genesis 固定；`CheckMetadataHash` 以 mode 0 进入签名载荷。不符者以 `RuntimeMismatch` 拒绝。历史 `DOT1` 布局只在宿主测试构建可见。 |
-| Aptos | 新增 `AptosTransaction`：`sha3-256(pk ‖ 0x00)` 地址、`0x1::aptos_account::transfer` 的 BCS `RawTransaction`、`sha3-256("APTOS::RawTransaction" ‖ BCS)` 签名消息、`0x00 ‖ sig ‖ pk` authenticator。 |
+| Aptos | 新增 `AptosTransaction` 和 `0x1::aptos_account::transfer`。2026-11-23 修正了早期签名消息和 authenticator 编码，当前格式见 `chain-support.md`。 |
 | EVM | 任意 calldata 与合约创建原本已在 `evm_parse_for_review()` 里实现（未知选择器走 opaque 审阅、创建交易设备自算 `keccak256(rlp([sender, nonce]))[12..]` 作为“预期创建地址”），但目录文案仍写着“拒绝”。文案改为陈述实际行为。 |
 | 构建 | `build.ps1` 用 clang-cl 编译 blst 这一个 C99 单元（MSVC 没有 VLA），并把它加进所有链接行；`device_compile_check.ps1` 用目标 C 编译器单独编译 `src/BlstBackend.c`，并要求 `QrlOtsStore.cpp` 以 `-DARDUINO` 的真实包含集编译一次，确保 NVS 分支不是“只在宿主编译过”。 |
 
@@ -42,4 +42,4 @@
 
 ## 后续状态
 
-同日晚些时候，`third_party/blst` 已整体删除：BLS12-381 的 Fp/Fp2、G1/G2、压缩编码与 RFC 9380 hash-to-curve 现由仓内 [Bls12381.cpp](../Bls12381.cpp) 实现，blspy 与 RFC 9380 J.10.1 向量继续作为验收门槛。本文其余内容记录的是当时的状态。
+同日晚些时候，`third_party/blst` 已整体删除：BLS12-381 的 Fp/Fp2、G1/G2、压缩编码与 RFC 9380 hash-to-curve 现由仓内 [Bls12381.cpp](https://github.com/blueokanna/HexWallet/blob/main/Bls12381.cpp) 实现，blspy 与 RFC 9380 J.10.1 向量继续作为验收门槛。本文其余内容记录的是当时的状态。

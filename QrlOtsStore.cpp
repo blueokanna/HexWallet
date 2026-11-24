@@ -1,6 +1,7 @@
 #include "QrlOtsStore.h"
 
 #include <string.h>
+#include <atomic>
 
 #include "CryptoPrimitives.h"
 
@@ -12,6 +13,7 @@ namespace hexwallet {
 namespace {
 
 QrlOtsSlotPort *g_platform_port = nullptr;
+std::atomic_flag reservation_in_progress = ATOMIC_FLAG_INIT;
 
 #if defined(ARDUINO)
 
@@ -53,8 +55,7 @@ class QrlOtsNvsPort : public QrlOtsSlotPort {
     slot_key(tag, slot, key);
     nvs_handle_t handle = 0;
     if (nvs_open(kQrlOtsNamespace, NVS_READWRITE, &handle) != ESP_OK) return false;
-    // nvs_set_blob() only lands in flash after nvs_commit(); returning true
-    // before that would let a signature outlive the index that authorises it.
+    // The reservation protocol also reads both committed slots back.
     const bool ok = nvs_set_blob(handle, key, data, size) == ESP_OK &&
                     nvs_commit(handle) == ESP_OK;
     nvs_close(handle);
@@ -109,16 +110,6 @@ bool QrlOtsAccount::write_slot(uint8_t slot, const QrlOtsRecord &record) {
   return ok;
 }
 
-QrlOtsError QrlOtsAccount::bind() {
-  uint32_t mark = 0;
-  const QrlOtsError state = qrl_ots_high_water(*this, tag_, &mark);
-  if (state == QrlOtsError::Ok) return QrlOtsError::Ok;
-  // Only a provably blank journal may be bound. A foreign or unreadable record
-  // means this account has history, and starting over would reuse leaves.
-  if (state != QrlOtsError::Unknown) return state;
-  return qrl_ots_initialise(*this, tag_);
-}
-
 QrlOtsError QrlOtsAccount::next_index(uint32_t *index) {
   if (index == nullptr) return QrlOtsError::InvalidArgument;
   return qrl_ots_high_water(*this, tag_, index);
@@ -139,10 +130,12 @@ bool QrlOtsAccount::port_reserve(void *context, const uint8_t key_id[32],
   if (self == nullptr) return false;
   // The signer may only consume the leaf it was told about. A jump would skip
   // leaves without proof, so it is refused here rather than burned silently.
-  if (next_high_water != expected + 1U) return false;
+  if (next_high_water != expected + 1U || reservation_in_progress.test_and_set()) return false;
   uint32_t reserved = 0;
-  if (qrl_ots_reserve(*self, self->tag_, &reserved) != QrlOtsError::Ok) return false;
-  return reserved == expected;
+  const bool ok = self->next_index(&reserved) == QrlOtsError::Ok && reserved == expected &&
+                  qrl_ots_reserve(*self, self->tag_, &reserved) == QrlOtsError::Ok && reserved == expected;
+  reservation_in_progress.clear();
+  return ok;
 }
 
 QrlOtsPort QrlOtsAccount::port() {

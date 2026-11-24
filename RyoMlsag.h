@@ -26,6 +26,8 @@ namespace hexwallet
     size_t ring_size;
   };
 
+  bool ryo_validate_ring(const RyoRingMember *ring, size_t count);
+
   // Two-row Simple/Bulletproof MLSAG: spend*G = P and mask_delta*G = C-Cpseudo.
   // prehash is the validated RingCT pre-MLSAG hash, NOT an arbitrary host digest
   // accepted by the wallet UI. entropy must come from the device RNG. Nonces are

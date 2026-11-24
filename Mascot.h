@@ -124,6 +124,7 @@ namespace hexwallet
   constexpr uint32_t kMascotReactionMs = 20UL * 1000UL;
   constexpr uint32_t kMascotFrameMinMs = 30UL * 1000UL;
   constexpr uint32_t kMascotAnimationMs = 2400UL;
+  constexpr uint32_t kMascotActionFrameMs = 400UL;
   constexpr uint8_t kMascotAnimationFrames = 4;
   constexpr uint32_t kMascotActionCooldownMs = 2UL * 1000UL;
 
@@ -154,7 +155,7 @@ namespace hexwallet
   MascotSnapshot mascot_snapshot(const MascotInputs &inputs, uint32_t now_ms);
 
   bool mascot_take_frame_request(uint32_t now_ms);
-  bool mascot_take_animation_tick(uint32_t now_ms);
+  bool mascot_take_animation_tick(uint32_t now_ms, MascotMood mood = MascotMood::Calm);
   void mascot_reset();
   bool run_mascot_self_tests();
 

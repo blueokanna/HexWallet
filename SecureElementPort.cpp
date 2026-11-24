@@ -121,6 +121,7 @@ namespace hexwallet
         }
       }
       memcpy(state, shifted, sizeof(shifted));
+      secure_zero(shifted, sizeof(shifted));
     }
 
     void mix_columns(uint8_t state[16])
@@ -158,6 +159,7 @@ namespace hexwallet
         }
       }
       memcpy(state, shifted, sizeof(shifted));
+      secure_zero(shifted, sizeof(shifted));
     }
 
     void inv_mix_columns(uint8_t state[16])
@@ -326,6 +328,7 @@ namespace hexwallet
         schedule->round_keys[offset + index] =
             static_cast<uint8_t>(schedule->round_keys[offset + index - 16] ^ word[index]);
       }
+      secure_zero(word, sizeof(word));
     }
   }
 
@@ -390,8 +393,7 @@ namespace hexwallet
     cmac_double(subkey1, subkey1);
     cmac_double(subkey1, subkey2);
 
-    const size_t block_count = size == 0 ? 1 : (size + 15) / 16;
-    const size_t full_blocks = block_count - 1;
+    const size_t full_blocks = size == 0 ? 0 : (size - 1) / 16;
     uint8_t chaining[16] = {};
     for (size_t block = 0; block < full_blocks; ++block)
     {

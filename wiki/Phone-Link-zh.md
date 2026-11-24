@@ -2,7 +2,7 @@
 
 [English](Phone-Link) · [首页](Home-zh)
 
-所有操作由手机发起。钱包只做审查、授权和签名，它不构造交易，也不连节点。协议版本是 **2**：
+链路操作由手机发起，已签交易也由手机提交节点。钱包按适配器解析或重建交易，供本机审阅、批准和签名。协议版本是 **2**。
 v1 的对端和 v2 的设备必须直接失败，因为临时密钥交换从 Ed25519 群上的 ECDH 换成了 Curve25519，
 同一段 transcript 会派生出不同的密钥。
 
@@ -95,7 +95,7 @@ session_id = LE32(hash[0..3])
 ## 应用层
 
 ```text
-Request.payload  = request_id(4) | opcode(1) | 参数…
+Request.payload  = opcode(1) | request_id(4) | 参数…
 Response.payload = request_id(4) | status(1) | 数据…
 ```
 
@@ -109,6 +109,20 @@ Response.payload = request_id(4) | status(1) | 数据…
 | 0x06 | RESULT | review_id(8) | `pending`，或 status + 长度 + 已签名交易 |
 | 0x07 | CANCEL | review_id(8) | rejected |
 
+Ryo 省略可选子地址参数时，按原有规则将账户和索引映射为地址。显式 `(0, 0)` 选择该 BIP32 子密钥的标准地址。如果两种请求得到的地址不同，显式标准地址的显示路径带 `+0/0` 后缀。Zano 在每个 BIP32 子密钥上使用标准地址，并拒绝非零子地址参数。完整路径超出显示字段容量时请求失败。
+
+发布目录对两种币开放地址。`TEST_RYO_PHONE_PAYMENTS=ON` 主机探针还接受 `ryo`、类型 `5` 的 `BEGIN_SIGN`，支持一个外部长标准地址和可选找零。16 字节应用头后可放 16,368 字节。载荷依次为版本 `1`、小端 16 位未签交易长度、交易字节、32 字节交易私钥、收款人公开花费与查看密钥，以及每个输入的资金记录。记录包含 16 位真实环位置、64 位资金输出序号、资金交易公钥、64 字节 ECDH 数据、伪输出掩码和环成员。每个环成员含 64 位绝对输出索引、一次性公钥与承诺。
+
+手机核对输入归属和带签名的 key image。设备核对收款、找零、费用和完整 payment ID，再接受本地批准。每笔费用上限为 0.1 RYO。`RESULT` 只返回一次签名字节，手机复核交易并校验主网创世哈希后广播。隔离链测试由脚本提交，官方只读钱包独立扫出两笔收款。[回执](validation)
+
+Zano 专用主机探针接受一至两个输入、每环 16 个成员、两个输出的普通 v4 原生资产付款。固件检查输入归属，重建两个输出，显示收款人、金额、找零、固定费用 0.01 ZANO 及八字节 payment ID。恰好花完时两个输出均付给同一收款人。一次性批准后，手机验证每个 CLSAG_GGX 签名及整笔付款证明。广播函数核对主网创世哈希，隔离测试链由脚本另行提交。[回执](validation)
+
+ETH 和 SOL 的 `BEGIN_SIGN` 参数顺序为 `币种名长度(1) | ASCII 币种名 | kind(1) | 地址索引(4，小端) | 载荷长度(2，小端) | 载荷`。ETH 使用 `eth` 和 kind 2，载荷为未签名的 EIP-155、2930 或 1559 交易。以太坊主网 Lido `submit(address)` 和 Uniswap V2 Router02 `swapExactETHForTokens` 有专用审阅页。SOL 使用 `sol` 和 kind 6，载荷为单签名者、静态账户的 legacy 或 v0 消息。原生质押支持委托和停用已有质押账户。
+
+经典兑换支持 devnet 的 SPL Token Swap（`SwapsVeCiPHMUAtzQWZw7RjsKjgCjhwU55QGu4U1Szw`）和主网的 Orca V2（`9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP`）。指令依次传入池、池授权地址、付款人兼转账授权人、付款代币账户、输入金库、输出金库、收款代币账户、池代币 mint、手续费账户和经典 SPL Token 程序，共 10 个账户。设备显示这些地址，以及按最小单位计的投入量和最低收取量。手机需在目标集群查询两侧金库，核对输入及输出代币的 mint。14 账户的 Token-2022 格式和额外的主机手续费账户均不在支持范围内。[SPL 部署表](https://spl.solana.com/token-swap) · [Orca SDK](https://github.com/orca-so/typescript-sdk)
+
+审阅期间保持认证连接。手机用八字节审阅 ID 调用 `RESULT` 取回签名交易，NFC 离场会撤销批准。运行 `npm ci --prefix tools --ignore-scripts` 安装广播适配器的锁定依赖。`tools/phone_broadcast.cjs` 接收 `BEGIN_SIGN` 的原始字节、`RESULT` 返回的字节和手机的 RPC 回调。ETH 适配器核对发送方和链 ID，SOL 适配器核对付款人、集群创世哈希和近期区块哈希。返回值是节点受理的交易 ID。手机可用 `eth_getTransactionReceipt` 或 `getSignatureStatuses` 跟踪执行结果。
+
 `kind` 决定解析器：1 UTXO/PSBT、2 EVM、3 Kaspa、4 Zcash、5 CryptoNote（XMR）、6 Solana、7 TRON、
 8 Cosmos、9 Stellar、10 Algorand、11 NEAR、12 Tezos、13 XRP、14 Chain（VET、ICX、TON、DCR、CKB、ADA、
 HIVE、SUI、FIL、DOT、KSM）、15 Dash。`BEGIN_SIGN` 最多 16384 字节，超出返回 `invalid`，绝不截断。
@@ -120,6 +134,12 @@ bit0 表示 InstantSend 意图。设备会显示这个声明，说明锁是它�
 
 派生地址和签名都要求钱包会话已解锁。解锁走 USB CLI（`auth begin`、`auth unlock`），链路本身永远不传 PIN。
 `ADDRESS` 永远不返回私钥；密钥生成代价太高的适配器在链路上直接拒绝。
+
+## Ethereum DApp 连接
+
+手机钱包为每个获准的 HTTPS 顶层页面调用 `tools/ethereum_provider.cjs` 的 `createEthereumConnection({origin, approveOrigin, exchange, rpc, index})`。从钱包浏览器取得 origin，每次桥接请求都核对调用方页面。配对传输、授权弹窗和 RPC 保留在钱包端。页面使用 EIP-1193 `provider`，通过 `announceEthereumProvider` 参与 EIP-6963 发现。`eth_requestAccounts` 请求 `m/44'/60'/0'/0/index` 的地址，`eth_sendTransaction` 另需设备审阅。该适配器绑定 Ethereum 链 ID 1。
+
+页面导航、NFC 离场或钱包锁定时调用 `disconnect()`，关闭配对会话并移除公告监听器。传输实现须处理传给 `exchange` 的中止信号。手机在广播前核对签名交易的原始字节、付款账户和 RPC 链 ID。Chromium 回归使用公开测试种子与固件应用回调。实体手机配对和 SE051 实卡签名仍待验收。[测试证据](validation)
 
 ## 链路保护了什么
 

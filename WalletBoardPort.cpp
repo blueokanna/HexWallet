@@ -1,12 +1,19 @@
 #include "WalletBoardPort.h"
 #include "Se051ArduinoPort.h"
 #include "WalletBoardPins.h"
+#include "WalletSharedSpi.h"
 #include "EinkFrame.h"
 #include "SecureElementPort.h"
 #include "WalletSecurity.h"
 
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
 #include "EinkPanel.h"
+#include <atomic>
+#include <string.h>
+#if defined(ARDUINO_ARCH_ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 #endif
 
 #include <Arduino.h>
@@ -381,8 +388,7 @@ namespace hexwallet
       if (size != 0)
       {
         digitalWrite(HEXWALLET_EPD_PIN_DC, HIGH);
-        for (size_t index = 0; index < size; ++index)
-          SPI.transfer(data[index]);
+        SPI.writeBytes(data, size);
       }
       digitalWrite(HEXWALLET_EPD_PIN_CS, HIGH);
       SPI.endTransaction();
@@ -408,8 +414,7 @@ namespace hexwallet
       SPI.beginTransaction(SPISettings(HEXWALLET_EPD_SPI_FREQ, MSBFIRST, SPI_MODE0));
       digitalWrite(HEXWALLET_EPD_PIN_CS, LOW);
       digitalWrite(HEXWALLET_EPD_PIN_DC, HIGH);
-      for (size_t i = 0; i < size; ++i)
-        SPI.transfer(data[i]);
+      SPI.writeBytes(data, size);
       digitalWrite(HEXWALLET_EPD_PIN_CS, HIGH);
       SPI.endTransaction();
       return true;
@@ -430,14 +435,10 @@ namespace hexwallet
 
     static bool epd_native_init()
     {
-      pinMode(HEXWALLET_EPD_PIN_CS, OUTPUT);
-      digitalWrite(HEXWALLET_EPD_PIN_CS, HIGH);
+      if (!board_shared_spi_begin()) return false;
       pinMode(HEXWALLET_EPD_PIN_DC, OUTPUT);
       pinMode(HEXWALLET_EPD_PIN_RST, OUTPUT);
       pinMode(HEXWALLET_EPD_PIN_BUSY, INPUT);
-      SPI.begin(HEXWALLET_SHARED_SPI_PIN_SCK, HEXWALLET_SHARED_SPI_PIN_MISO,
-                HEXWALLET_SHARED_SPI_PIN_MOSI, -1);
-
       EinkPanelConfig config = {};
       config.width = HEXWALLET_EPD_WIDTH;
       config.height = HEXWALLET_EPD_HEIGHT;
@@ -560,7 +561,54 @@ namespace hexwallet
     static bool s_eink_dirty = false;
     static uint32_t s_eink_dirty_ms = 0;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-    static EinkDamage s_eink_damage;
+    static uint8_t *s_last_mono_frame = nullptr;
+    static bool s_have_mono_frame = false;
+    static EinkDamage s_mono_damage;
+    static uint32_t s_last_panel_update_ms = 0;
+    constexpr uint32_t kPanelIdleSleepMs = 30000;
+    enum class PanelJob { Idle, Running, Complete, Failed };
+    static std::atomic<PanelJob> s_panel_job{PanelJob::Idle};
+    static EinkRect s_panel_window;
+    static bool s_panel_partial, s_panel_frame_current;
+
+    static void refresh_panel_frame()
+    {
+      const size_t size = s_epd_native.frame_bytes();
+      const bool ok = s_epd_native.wake() &&
+          (s_panel_partial ? s_epd_native.partial_refresh(s_eink_bw, size, s_panel_window)
+                           : s_epd_native.full_refresh(s_eink_bw, size)) == EinkRefreshResult::Ok;
+      s_panel_job.store(ok ? PanelJob::Complete : PanelJob::Failed, std::memory_order_release);
+    }
+
+#if defined(ARDUINO_ARCH_ESP32)
+    static TaskHandle_t s_panel_task = nullptr;
+    static void panel_task(void *)
+    {
+      for (;;)
+      {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (s_panel_job.load(std::memory_order_acquire) == PanelJob::Running) refresh_panel_frame();
+      }
+    }
+#elif defined(HEXWALLET_SHARED_SPI_TEST)
+    static bool s_test_defer_refresh = false;
+#endif
+
+    static void collect_panel_frame(PanelJob job)
+    {
+      if (job == PanelJob::Failed) g_display_ready = false;
+      else
+      {
+        if (s_last_mono_frame)
+        {
+          memcpy(s_last_mono_frame, s_eink_bw, s_epd_native.frame_bytes());
+          s_have_mono_frame = true;
+        }
+        s_last_panel_update_ms = millis();
+        if (s_panel_frame_current) g_review_frame_pending = false;
+      }
+      s_panel_job.store(PanelJob::Idle, std::memory_order_relaxed);
+    }
 #endif
 
 #if !defined(HEXWALLET_EPD_NATIVE_SSD1680)
@@ -575,45 +623,59 @@ namespace hexwallet
 
     static void eink_service()
     {
-      if (!s_eink_dirty)
-        return;
+#if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+      const PanelJob job = s_panel_job.load(std::memory_order_acquire);
+      if (job == PanelJob::Running) return;
+      if (job != PanelJob::Idle)
+      {
+        collect_panel_frame(job);
+        if (!g_display_ready) return;
+      }
+      if (!s_eink_dirty && s_have_mono_frame && !s_epd_native.sleeping() &&
+          millis() - s_last_panel_update_ms >= kPanelIdleSleepMs &&
+          s_epd_native.sleep() != EinkRefreshResult::Ok)
+        g_display_ready = false;
+#endif
+      if (!s_eink_dirty) return;
       if (millis() - s_eink_dirty_ms < 120U)
         return;
       s_eink_dirty = false;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
       if (s_eink_bw == nullptr || g_draw_buf == nullptr)
         return;
-      eink_convert_frame(g_draw_buf, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
-      const size_t size = s_epd_native.frame_bytes();
-      EinkRefreshResult result = EinkRefreshResult::BusFault;
-      EinkRect window = s_eink_damage.bounds();
-      const uint32_t right = static_cast<uint32_t>(window.x) + window.width;
-      window.x = static_cast<uint16_t>(window.x & ~static_cast<uint16_t>(7));
-      window.width = static_cast<uint16_t>(((right + 7U) & ~7U) - window.x);
-
-      const bool partial = s_epd_native.partial_supported() &&
-                           !s_eink_damage.empty() &&
-                           !s_epd_native.full_refresh_due() &&
-                           !s_eink_damage.prefers_full_refresh(60);
-      if (partial)
-      {
-        result = s_epd_native.partial_refresh(s_eink_bw, size, window);
-        if (result == EinkRefreshResult::PartialUnsupported)
-        {
-          result = s_epd_native.full_refresh(s_eink_bw, size);
-        }
-      }
-      else
-      {
-        result = s_epd_native.full_refresh(s_eink_bw, size);
-      }
-      s_eink_damage.reset(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
-      if (result != EinkRefreshResult::Ok)
+      const auto width = board_display_width(), height = board_display_height();
+      const EinkRect dirty = s_have_mono_frame ? s_mono_damage.bounds() : EinkRect{0, 0, width, height};
+      if (!eink_pack_landscape(g_draw_buf, width, height, dirty, kEpdConvertDepth,
+                               s_eink_bw, s_epd_native.frame_bytes()))
       {
         g_display_ready = false;
         return;
       }
-      g_review_frame_pending = false;
+      s_mono_damage.reset(width, height);
+      EinkRect window{0, 0, HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT};
+      if (s_have_mono_frame)
+      {
+        window = eink_mono_changes(s_last_mono_frame, s_eink_bw);
+        if (window.width == 0)
+        {
+          g_review_frame_pending = false;
+          return;
+        }
+      }
+      s_panel_partial = s_epd_native.partial_supported() &&
+          uint32_t(window.width) * window.height * 100 < uint32_t(kEink29Width) * kEink29Height * 60;
+      s_panel_window = window;
+      s_panel_frame_current = true;
+      s_panel_job.store(PanelJob::Running, std::memory_order_release);
+#if defined(ARDUINO_ARCH_ESP32)
+      xTaskNotifyGive(s_panel_task);
+#else
+#if defined(HEXWALLET_SHARED_SPI_TEST)
+      if (s_test_defer_refresh) return;
+#endif
+      refresh_panel_frame();
+      collect_panel_frame(s_panel_job.load(std::memory_order_acquire));
+#endif
 #elif HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
       if (s_eink_bw == nullptr || g_draw_buf == nullptr)
         return;
@@ -633,20 +695,16 @@ namespace hexwallet
 
     static void eink_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     {
-      g_review_frame_pending = true;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-      if (area != nullptr && area->x2 >= area->x1 && area->y2 >= area->y1)
-      {
-        const EinkRect rect = {
-            static_cast<uint16_t>(area->x1), static_cast<uint16_t>(area->y1),
-            static_cast<uint16_t>(area->x2 - area->x1 + 1),
-            static_cast<uint16_t>(area->y2 - area->y1 + 1)};
-        s_eink_damage.add(rect);
-      }
+      s_panel_frame_current = false;
+      if (kEpdColorMode == EinkColorMode::Mono)
+        s_mono_damage.add({uint16_t(area->x1), uint16_t(area->y1), uint16_t(area->x2 - area->x1 + 1),
+                           uint16_t(area->y2 - area->y1 + 1)});
 #endif
+      g_review_frame_pending = true;
       (void)area;
       (void)px_map;
-      if (lv_display_flush_is_last(disp))
+      if (lv_display_flush_is_last(disp) && !s_eink_dirty)
       {
         s_eink_dirty = true;
         s_eink_dirty_ms = millis();
@@ -711,6 +769,15 @@ namespace hexwallet
 
     static uint32_t button_key(uint8_t mask)
     {
+#if HEXWALLET_BOARD == HEXWALLET_BOARD_ESP32P4_EINK
+      // Looking at the bottom-side keys with the panel on the left: SW4..SW1 nets.
+      switch (mask) {
+        case 8: return LV_KEY_ENTER;
+        case 4: return LV_KEY_PREV;
+        case 2: return LV_KEY_NEXT;
+        default: return LV_KEY_ESC;
+      }
+#else
       if ((mask & 0x01) != 0)
         return LV_KEY_PREV;
       if ((mask & 0x02) != 0)
@@ -720,6 +787,7 @@ namespace hexwallet
       if ((mask & 0x08) != 0)
         return LV_KEY_ESC;
       return LV_KEY_ENTER;
+#endif
     }
 
     static void buttons_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
@@ -861,6 +929,12 @@ namespace hexwallet
       free(s_eink_bw);
       s_eink_bw = nullptr;
       s_eink_dirty = false;
+#if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+      free(s_last_mono_frame);
+      s_last_mono_frame = nullptr;
+      s_have_mono_frame = false;
+      s_mono_damage.reset(board_display_width(), board_display_height());
+#endif
 #endif
     }
 
@@ -915,7 +989,7 @@ namespace hexwallet
   bool board_partial_refresh_supported()
   {
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-    return s_epd_native.partial_supported();
+    return g_display_ready && kEpdColorMode == EinkColorMode::Mono;
 #else
     return false;
 #endif
@@ -932,7 +1006,9 @@ namespace hexwallet
 
   uint16_t board_display_width()
   {
-#if defined(HEXWALLET_DISPLAY_KIND_COLOR)
+#if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+    return HEXWALLET_EPD_HEIGHT;
+#elif defined(HEXWALLET_DISPLAY_KIND_COLOR)
     return HEXWALLET_LCD_WIDTH;
 #elif defined(HEXWALLET_DISPLAY_KIND_EINK)
     return HEXWALLET_EPD_WIDTH;
@@ -943,7 +1019,9 @@ namespace hexwallet
 
   uint16_t board_display_height()
   {
-#if defined(HEXWALLET_DISPLAY_KIND_COLOR)
+#if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+    return HEXWALLET_EPD_WIDTH;
+#elif defined(HEXWALLET_DISPLAY_KIND_COLOR)
     return HEXWALLET_LCD_HEIGHT;
 #elif defined(HEXWALLET_DISPLAY_KIND_EINK)
     return HEXWALLET_EPD_HEIGHT;
@@ -1160,19 +1238,35 @@ namespace hexwallet
                                     kEpdConvertDepth)));
     if (s_eink_bw == nullptr)
       return false;
-    s_eink_damage.reset(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
+    if (kEpdColorMode == EinkColorMode::Mono)
+    {
+      s_last_mono_frame = static_cast<uint8_t *>(board_alloc(eink_frame_bytes(kEink29Width, kEink29Height)));
+      if (s_last_mono_frame == nullptr)
+      {
+        release_display();
+        return false;
+      }
+    }
     if (!epd_native_init())
     {
       Serial.println("ERR: e-paper panel did not initialise");
       release_display();
       return false;
     }
-    if (!lvgl_register_display(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT,
+    memset(s_eink_bw, 0, s_epd_native.frame_bytes());
+    if (!lvgl_register_display(board_display_width(), board_display_height(),
                                true, eink_flush_cb))
     {
       release_display();
       return false;
     }
+#if defined(ARDUINO_ARCH_ESP32)
+    if (!s_panel_task && xTaskCreate(panel_task, "hexwallet-epd", 4096, nullptr, 1, &s_panel_task) != pdPASS)
+    {
+      release_display();
+      return false;
+    }
+#endif
     g_display_ready = true;
 #elif HEXWALLET_HAS_GXEPD2 && defined(HEXWALLET_EPD_DRIVER_CLASS)
     s_eink_bw = static_cast<uint8_t *>(
@@ -1244,7 +1338,7 @@ namespace hexwallet
 #if HEXWALLET_ENABLE_LVGL && defined(HEXWALLET_DISPLAY_KIND_EINK)
     s_eink_dirty = false;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-    s_eink_damage.reset(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT);
+    s_panel_frame_current = false;
 #endif
 #endif
   }

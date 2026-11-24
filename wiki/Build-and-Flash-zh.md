@@ -7,9 +7,9 @@
 | 工具 | 这里使用的版本 |
 | --- | --- |
 | arduino-cli | 1.5.1 |
-| esp32 core | 3.3.10 |
+| esp32 core | 7 号板使用 3.3.13，其余档位使用 3.3.10 |
 | LVGL | 9.5.0（`v9.5.0`） |
-| Python | 3.x，只用于生成器和 mining 测试 |
+| Python | 3.x，用于 7 号板镜像检查、生成器和主机测试 |
 | Visual Studio 2022 C++ 工具 | host 测试套件（MSVC `cl.exe`） |
 | mbedTLS | `build/chain-mbedtls` 下的 3.6.5，用于原生链测试 |
 
@@ -35,10 +35,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs,PSRAM=
 P4 墨水屏钱包（`esp32p4` 上必须显式指定 7 号板）：
 
 ```powershell
-arduino-cli compile --fqbn esp32:esp32:esp32p4:PartitionScheme=min_spiffs,PSRAM=enabled `
-  --library "$HOME/Arduino/libraries/lvgl" `
-  --build-property compiler.cpp.extra_flags="-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" `
-  --build-property compiler.c.extra_flags="-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7" .
+arduino-cli core install esp32:esp32@3.3.13
+./tools/build_p4_board.ps1
 ```
 
 无屏 CLI（不要 LVGL，不要面板）：
@@ -68,7 +66,9 @@ P4 无屏版将最后一个命令的目标改为 `esp32p4`，仍使用 6 号板�
 
 ## Flash 分区
 
-上述命令使用 core 自带的 4 MB `min_spiffs` 布局：保留 NVS 和两个各 1,966,080 字节的 OTA 槽，SPIFFS 为 128 KiB。P4 显示版接通 LVGL 输入路径后已超过默认 1,310,720 字节应用槽，因此不能继续使用默认分区。分区有两个 OTA 槽不代表固件已经实现完整的安全更新流程。烧录时必须使用与构建一致的 Flash 容量和分区表；更换分区表前要处理已有数据迁移。
+7 号板使用 `partitions/hexwallet-p4-32mb.csv`，要求物理 Flash 为 32 MiB。Arduino-ESP32 3.3.13 的 post-v3 构建面向 P4 v3.1–v3.99。`tools/build_p4_board.ps1` 生成恰好 8,388,608 字节的出厂镜像，写入起点为 `0x0`。两个 OTA 槽分别从 `0x10000` 和 `0x410000` 开始，每槽 3,932,160 字节。`assets` 占用 `0x800000` 至 `0x1ffffff`，共 24 MiB，其中一部分用于 LittleFS 元数据。当前应用在此保存最多 64 条用户声明的代币记录。预编译 SDK 产出诊断镜像，此镜像禁止写入认证凭据。
+
+出厂镜像在 NVS、NVS 密钥和旧 SPIFFS 的位置也有填充字节，适用于空板。使用旧表的 32 MiB 板迁移时应保留这三个分区，在一次维护操作中分别写入 `0x2000` 的引导程序、`0x8000` 的分区表、`0xe000` 的 OTA 初始化数据和 `0x10000` 的应用。旧版第二槽从 `0x1f0000` 开始，仅 OTA 更新应用无法完成布局迁移。已启用安全启动或加密的设备须使用其配置对应的升级流程。迁移后的常规 OTA 只写非活动应用槽。若币种数据文件尚不存在，钱包读取旧 NVS 代币表，下次修改时写入 LittleFS。挂载失败时，仅在逐字节确认整个分区均已擦除后才会自动格式化。
 
 `partitions/hexwallet-16mb-ota.csv` 是 16 MB 布局，含恢复镜像和两个 5 MB OTA 槽：
 
@@ -90,6 +90,8 @@ Copy-Item partitions\hexwallet-16mb-ota.csv partitions.csv
 同时在构建和上传的 FQBN 中设置 `FlashSize=16M`。不要在 8 MB 模组上用这张表。根目录存在 `partitions.csv` 时，它会覆盖菜单选择的分区；需要回到本页的 4 MB 构建时，先将该文件移出 sketch 根目录。
 
 ## 刷机
+
+7 号板的 ROM 下载和首启日志使用 3.3 V UART0。将 USB 转串口适配器的 RX 接板上 `TX`（GPIO37），TX 接板上 `RX`（GPIO38），并共地。主 PCB 的 `USB1` 数据线接 GPIO22/23。首次连接可在 ROM 下载模式执行 `esptool --chip esp32p4 --port COMx chip-id` 和 `esptool --chip esp32p4 --port COMx flash-id`，核对硅片修订及 Flash 容量后再选择镜像。
 
 ```powershell
 arduino-cli upload -p COM7 --fqbn esp32:esp32:esp32s3:PartitionScheme=min_spiffs,PSRAM=opi .

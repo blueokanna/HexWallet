@@ -65,7 +65,7 @@ $includes = @(
 # EvmTransaction.cpp and only the device build caught it, so any source that
 # can compile with the curated include set is kept in this list.
 $sources = @(
-  "CryptoPrimitives.cpp", "Bls12381.cpp", "RyoBulletproof.cpp", "RyoTransaction.cpp",
+  "CryptoPrimitives.cpp", "Bls12381.cpp", "RyoBulletproof.cpp", "RyoTransaction.cpp", "RyoPhonePayment.cpp",
   "SolanaTransaction.cpp",
   "Blake2b.cpp", "Blake3.cpp", "Blake256.cpp", "Groestl512.cpp", "ThetaTransaction.cpp", "CryptoExtended.cpp", "Ed25519.cpp", "BlsG1.cpp",
   "WalletCliPolicy.cpp", "BatteryMonitor.cpp", "KangarooTwelve.cpp", "AeternityTransaction.cpp", "AlephiumTransaction.cpp", "QuaiTransaction.cpp",

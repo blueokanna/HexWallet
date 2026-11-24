@@ -54,6 +54,8 @@ int main(int argc, char **argv) {
   CHECK(&active_secure_element_profile() == &software_only_profile());
   CHECK(!wallet_session_custody_available());
   CHECK(wallet_session_generate() == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_generate("TREZOR") == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_import("public test", "TREZOR") == WalletError::CustodyUnavailable);
   CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") == WalletError::CustodyUnavailable);
   CHECK(!wallet_session_is_loaded());
   memset(seed, 0xa5, sizeof(seed));

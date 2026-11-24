@@ -5,6 +5,19 @@
 主机怎么把交易交给设备，设备又还回什么。CLI 上一律是十六进制，手机链路上是带长度前缀的二进制；
 两边跑的是同一份解析代码。
 
+## Cosmos
+
+手机链路 `kind=8` 返回带签名的 protobuf `TxRaw`。六个 Cosmos 网络配置的 v1–v3 支持 direct 模式的一至四条银行转账。v4–v7 每笔只有一条原生币消息，chain ID 固定为 `cosmoshub-4` 或 `osmosis-1`，memo 为空。共同头部为 `version:u8, chain_id:text, account_number:u64, sequence:u64, fee:u64, gas_limit:u64`。整数为大端，每个文本字段前有一字节长度。
+
+| 版本 | 头部后的字段顺序 | 批准的内容 |
+| --- | --- | --- |
+| 4 | `amount:u64, receiver:text, source_channel:text, timeout_ns:u64` | 从 Hub 的 `transfer/channel-141` 向 Osmosis 转账，或从 Osmosis 的 `transfer/channel-0` 向 Hub 转账。接收地址须用对端前缀，超时为非零 Unix 纳秒时间戳。 |
+| 5 | `amount:u64, receiver:text` | 一条原生 `MsgSend`，使用 legacy Amino JSON 签名模式（127）。 |
+| 6 | `grantee:text` | 撤销该被授权人的 `/cosmos.bank.v1beta1.MsgSend` 权限。 |
+| 7 | `spend_limit:u64, grantee:text, expiry_seconds:u64` | 设置正数限额及 Unix 秒到期时间。被授权人可在额度内向任意地址付款，同类旧授权会被替换。 |
+
+设备重建消息与费用、核对账户公钥，并在批准前显示操作内容。`broadcastCosmos()` 按手机原始请求复核签名字节，源链内存池接收后返回交易哈希。ICS-20 还须按通道及包序号核对对端到账和源链确认。未送达的付款超时后，中继器提交超时证明，发送者才能收到退款。隔离 Gaia 和 Osmosis 已确认两个方向到账，并验证另一笔 3.456789 ATOM 的超时退款。[节点回执与复现步骤](validation) · [Hub/Osmosis 通道登记](https://github.com/cosmos/chain-registry/blob/master/_IBC/cosmoshub-osmosis.json)
+
 ## Zephyr、Alephium 和 Quantus
 
 **Zephyr** 使用手机链路 `kind=5` 和 `coin_id=zeph`。设备要求普通 ZPH 输入和带 view tag 的 ZPH 输出，换币相关的报价高度、销毁量和铸造量必须为零。设备重建前缀并验证 BP+、输入归属、找零及 CLSAG。诱饵和未花费状态仍需节点确认。[主网测试交易](https://explorer.zephyrprotocol.com/tx/7e2f3d9d1b5deaf3db873d5fe5d6c54272d127a84aa04ddc18bd46e66a9a7c12)
@@ -92,7 +105,7 @@ output_count * { u64 value, u16 script_version, u8 script_size + script }
 "ZEC4" | "ZEC5"
 u32 branch_id
 u32 unsigned_transaction_size
-未签名 v4 交易字节          （每个 scriptSig 必须为空）
+未签名 NU7 v5 交易字节      （每个 scriptSig 必须为空）
 u8  input_count             （必须等于交易的 vin 数量）
 input_count * {
       u64 value, u8 script_size + scriptPubKey,
@@ -102,7 +115,7 @@ input_count * {
 ```
 
 `ZEC4` 不能携带 P2SH prevout。`ZEC5` 给每个输入恰好加一条 redeem 记录；设备会用 t3 地址重新哈希它，
-并且只接受单钥 `CHECKSIG` 脚本。载荷必须在最后一个输入记录之后结束。`zec sign <code>` 返回已签名 v4 交易。
+并且只接受单钥 `CHECKSIG` 脚本。载荷必须在最后一个输入记录之后结束。载荷与交易头的分支 ID 均为 `0x77190ad9`。`zec sign <code>` 返回已签名 v5 交易，以及按节点 RPC 显示顺序编码的 ZIP-244 `txid`。[ZIP 259](https://zips.z.cash/zip-0259) · [ZIP 244](https://zips.z.cash/zip-0244)
 
 ## CryptoNote（Monero）
 

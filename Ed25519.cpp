@@ -442,22 +442,16 @@ bool ge_ge_words(const uint64_t left[4], const uint64_t right[4]) {
   return true;
 }
 
-void sub_words(uint64_t out[4], const uint64_t right[4], const uint64_t left[4]) {
-  uint64_t borrow = 0;
-  for (int index = 0; index < 4; ++index) {
-    const uint64_t subtrahend = right[index] + borrow;
-    out[index] = left[index] - subtrahend;
-    borrow = left[index] < subtrahend ? 1 : 0;
-  }
-}
-
-void reduce_mod_l(uint64_t *value, size_t word_count, uint8_t out[32]) {
-  static const uint64_t kL[4] = {
+const uint64_t kScalarOrder[4] = {
     UINT64_C(0x5812631a5cf5d3ed),
     UINT64_C(0x14def9dea2f79cd6),
     UINT64_C(0x0000000000000000),
     UINT64_C(0x1000000000000000),
-  };
+};
+
+// At each bit acc < 2L, so exactly one trial subtraction is sufficient.
+void reduce_mod_l(const uint64_t *value, size_t word_count, uint8_t out[32]) {
+  uint64_t difference[4];
   uint64_t acc[4] = { 0, 0, 0, 0 };
 
   const size_t total_bits = word_count * 64;
@@ -467,16 +461,21 @@ void reduce_mod_l(uint64_t *value, size_t word_count, uint8_t out[32]) {
       acc[index] = (acc[index] << 1) | (acc[index - 1] >> 63);
     }
     acc[0] = (acc[0] << 1) | incoming;
-    if (ge_ge_words(acc, kL)) {
-      uint64_t tmp[4];
-      sub_words(tmp, kL, acc);
-      memcpy(acc, tmp, sizeof(acc));
+    uint64_t borrow = 0;
+    for (int index = 0; index < 4; ++index) {
+      const uint64_t partial = acc[index] - kScalarOrder[index];
+      difference[index] = partial - borrow;
+      borrow = (acc[index] < kScalarOrder[index]) | (partial < borrow);
     }
+    const uint64_t keep = uint64_t(0) - borrow;
+    for (int index = 0; index < 4; ++index)
+      acc[index] = (acc[index] & keep) | (difference[index] & ~keep);
   }
   for (int index = 0; index < 4; ++index) {
     store_le64_word(out + index * 8, acc[index]);
   }
   secure_zero(acc, sizeof(acc));
+  secure_zero(difference, sizeof(difference));
 }
 
 void sc_reduce_32(uint8_t scalar[32]) {
@@ -556,7 +555,7 @@ void sc_muladd(uint8_t out[32], const uint8_t *a, const uint8_t *b,
   for (int index = 0; index < 4; ++index) {
     wide[index] = add64_carry(wide[index], cw[index], carry, &carry);
   }
-  for (int index = 4; index < 8 && carry; ++index) {
+  for (int index = 4; index < 8; ++index) {
     uint64_t next = 0;
     wide[index] = add64_carry(wide[index], 0, carry, &next);
     carry = next;
@@ -567,13 +566,6 @@ void sc_muladd(uint8_t out[32], const uint8_t *a, const uint8_t *b,
   secure_zero(cw, sizeof(cw));
   secure_zero(wide, sizeof(wide));
 }
-
-const uint64_t kScalarOrder[4] = {
-  UINT64_C(0x5812631a5cf5d3ed),
-  UINT64_C(0x14def9dea2f79cd6),
-  UINT64_C(0x0000000000000000),
-  UINT64_C(0x1000000000000000),
-};
 
 // out = (c - a * b) mod L.
 void sc_mulsub(uint8_t out[32], const uint8_t *a, const uint8_t *b,
@@ -594,17 +586,10 @@ void sc_mulsub(uint8_t out[32], const uint8_t *a, const uint8_t *b,
     const uint64_t borrow2 = partial < borrow;
     borrow = borrow1 | borrow2;
   }
-  if (borrow != 0) {
-    uint64_t carry = 0;
-    for (int index = 0; index < 4; ++index) {
-      const uint64_t sum1 = diff[index] + kScalarOrder[index];
-      const uint64_t carry1 = sum1 < diff[index];
-      const uint64_t sum2 = sum1 + carry;
-      const uint64_t carry2 = sum2 < sum1;
-      diff[index] = sum2;
-      carry = carry1 | carry2;
-    }
-  }
+  const uint64_t correction = uint64_t(0) - borrow;
+  uint64_t carry = 0;
+  for (int index = 0; index < 4; ++index)
+    diff[index] = add64_carry(diff[index], kScalarOrder[index] & correction, carry, &carry);
   for (int index = 0; index < 4; ++index) {
     store_le64_word(out + index * 8, diff[index]);
   }
@@ -999,9 +984,13 @@ bool sha512(const uint8_t *data, size_t size, uint8_t out[64]) {
 }  // namespace
 
 bool ed25519_public_key(const uint8_t seed[32], uint8_t out_public[32]) {
-  if (seed == nullptr || out_public == nullptr) return false;
+  if (out_public == nullptr) return false;
   uint8_t hash[64];
-  if (!sha512(seed, 32, hash)) return false;
+  if (seed == nullptr || !sha512(seed, 32, hash)) {
+    secure_zero(hash, sizeof(hash));
+    secure_zero(out_public, 32);
+    return false;
+  }
   hash[0] &= 248;
   hash[31] &= 127;
   hash[31] |= 64;
@@ -1016,7 +1005,8 @@ bool ed25519_public_key(const uint8_t seed[32], uint8_t out_public[32]) {
 
 bool ed25519_public_key_expanded(const uint8_t scalar[32],
                                  uint8_t out_public[32]) {
-  if (scalar == nullptr || out_public == nullptr) return false;
+  if (out_public == nullptr) return false;
+  if (scalar == nullptr) { secure_zero(out_public, 32); return false; }
   fe rx, ry;
   scalarmult_base(rx, ry, scalar);
   encode_point(out_public, rx, ry);
@@ -1027,7 +1017,9 @@ bool ed25519_public_key_expanded(const uint8_t scalar[32],
 
 bool ed25519_sign(const uint8_t seed[32], const uint8_t *message,
                   size_t message_size, uint8_t out_signature[64]) {
-  if (seed == nullptr || out_signature == nullptr || (message == nullptr && message_size != 0)) {
+  if (out_signature == nullptr) return false;
+  if (seed == nullptr || (message == nullptr && message_size != 0)) {
+    secure_zero(out_signature, 64);
     return false;
   }
   uint8_t hash[64] = {};
@@ -1079,6 +1071,8 @@ bool ed25519_sign_expanded(const uint8_t kL[32], const uint8_t kR[32],
     secure_zero(hash, sizeof(hash));
     secure_zero(r_digest, sizeof(r_digest));
     secure_zero(k_bytes, sizeof(k_bytes));
+    secure_zero(rx, sizeof(rx));
+    secure_zero(ry, sizeof(ry));
     return false;
   }
   sc_reduce_64(r_digest, r_scalar);
@@ -1103,6 +1097,8 @@ bool ed25519_sign_expanded(const uint8_t kL[32], const uint8_t kR[32],
     secure_zero(r_scalar, sizeof(r_scalar));
     secure_zero(k_bytes, sizeof(k_bytes));
     secure_zero(r_encoded, sizeof(r_encoded));
+    secure_zero(rx, sizeof(rx));
+    secure_zero(ry, sizeof(ry));
     return false;
   }
   uint8_t k_scalar[32];
@@ -1219,12 +1215,11 @@ bool ed25519_verify(const uint8_t public_key[32], const uint8_t *message,
 
 bool ed25519_ecdh(const uint8_t seed[32], const uint8_t peer_public[32],
                   uint8_t out_shared[32]) {
-  if (seed == nullptr || peer_public == nullptr || out_shared == nullptr) {
-    return false;
-  }
+  if (out_shared == nullptr) return false;
   uint8_t hash[64];
-  if (!sha512(seed, 32, hash)) {
+  if (seed == nullptr || peer_public == nullptr || !sha512(seed, 32, hash)) {
     secure_zero(hash, sizeof(hash));
+    secure_zero(out_shared, 32);
     return false;
   }
   hash[0] &= 248;
@@ -1278,7 +1273,9 @@ void fe_cswap(fe a, fe b, int swap) {
 
 bool x25519_scalar_mult(const uint8_t scalar[32], const uint8_t point[32],
                         uint8_t out[32]) {
-  if (scalar == nullptr || point == nullptr || out == nullptr) {
+  if (out == nullptr) return false;
+  if (scalar == nullptr || point == nullptr) {
+    secure_zero(out, 32);
     return false;
   }
   // RFC 7748 section 5: clamp the scalar, and mask the unusable high bit of the
@@ -1378,6 +1375,7 @@ bool x25519_ecdh(const uint8_t scalar[32], const uint8_t peer_public[32],
   if (out == nullptr) return false;
   uint8_t shared[32];
   if (!x25519_scalar_mult(scalar, peer_public, shared)) {
+    secure_zero(out, 32);
     return false;
   }
   // RFC 7748 section 6.1: a zero shared secret means the peer sent a
@@ -1395,18 +1393,28 @@ bool x25519_ecdh(const uint8_t scalar[32], const uint8_t peer_public[32],
 }
 
 bool ed25519_public_to_x25519(const uint8_t ed_public[32], uint8_t out[32]) {
-  if (ed_public == nullptr || out == nullptr) return false;
-  fe y, one, numerator, denominator;
-  fe_frombytes(y, ed_public);  // the sign bit is not part of y
+  if (out == nullptr) return false;
+  fe x, y, one, numerator, denominator;
+  uint8_t order[32], check[32];
+  for (int i = 0; i < 4; ++i) store_le64_word(order + i * 8, kScalarOrder[i]);
+  static const uint8_t identity[32] = {1};
+  if (!ed_public || !edwards_decompress(x, y, ed_public) ||
+      crypto_constant_time_equal(ed_public, identity, 32)) {
+    secure_zero(out, 32);
+    return false;
+  }
+  fe lx, ly;
+  scalarmult_point(lx, ly, x, y, order);
+  encode_point(check, lx, ly);
+  if (!crypto_constant_time_equal(check, identity, 32)) {
+    secure_zero(out, 32);
+    return false;
+  }
   fe_1(one);
   // u = (1 + y) / (1 - y); it maps the Ed25519 base point (y = 4/5) onto
   // u = 9, the Curve25519 base point.
   fe_add(numerator, one, y);
   fe_sub(denominator, one, y);
-  if (fe_iszero(denominator)) {
-    secure_zero(y, sizeof(y));
-    return false;
-  }
   fe inverse;
   fe_invert(inverse, denominator);
   fe u;
@@ -1421,10 +1429,11 @@ bool ed25519_public_to_x25519(const uint8_t ed_public[32], uint8_t out[32]) {
 }
 
 bool ed25519_seed_to_x25519(const uint8_t seed[32], uint8_t out[32]) {
-  if (seed == nullptr || out == nullptr) return false;
+  if (out == nullptr) return false;
   uint8_t hash[64];
-  if (!sha512(seed, 32, hash)) {
+  if (seed == nullptr || !sha512(seed, 32, hash)) {
     secure_zero(hash, sizeof(hash));
+    secure_zero(out, 32);
     return false;
   }
   // The same hashed pre-key Ed25519 uses for its own scalar. Clamping is left
@@ -1438,7 +1447,9 @@ bool ed25519_seed_to_x25519(const uint8_t seed[32], uint8_t out[32]) {
 bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
                            const uint32_t *path, size_t path_size,
                            uint8_t out_private[32]) {
-  if (seed == nullptr || seed_size == 0 || out_private == nullptr || (path == nullptr && path_size != 0)) {
+  if (out_private == nullptr) return false;
+  if (seed == nullptr || seed_size == 0 || (path == nullptr && path_size != 0)) {
+    secure_zero(out_private, 32);
     return false;
   }
   static const uint8_t kSlip10Key[] = "ed25519 seed";
@@ -1446,6 +1457,8 @@ bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
   uint8_t private_key[32];
   uint8_t chain_code[32];
   if (!crypto_hmac_sha512(kSlip10Key, sizeof(kSlip10Key) - 1, seed, seed_size, i)) {
+    secure_zero(i, sizeof(i));
+    secure_zero(out_private, 32);
     return false;
   }
   memcpy(private_key, i, 32);
@@ -1462,6 +1475,8 @@ bool slip10_ed25519_derive(const uint8_t *seed, size_t seed_size,
     data[35] = static_cast<uint8_t>(index >> 8);
     data[36] = static_cast<uint8_t>(index);
     if (!crypto_hmac_sha512(chain_code, 32, data, sizeof(data), i)) {
+      secure_zero(i, sizeof(i));
+      secure_zero(out_private, 32);
       secure_zero(private_key, sizeof(private_key));
       secure_zero(chain_code, sizeof(chain_code));
       secure_zero(data, sizeof(data));

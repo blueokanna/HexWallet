@@ -52,6 +52,8 @@ namespace hexwallet
   bool EinkPanel::begin(const EinkBus &bus, const EinkPanelConfig &config)
   {
     stats_ = {};
+    sleeping_ = false;
+    needs_baseline_ = true;
     config_ = {};
     if (bus.command == nullptr || bus.reset == nullptr || bus.busy == nullptr ||
         bus.delay_ms == nullptr || bus.data == nullptr)
@@ -253,26 +255,24 @@ namespace hexwallet
     const size_t start_byte = window.x / 8;
     const size_t width_bytes = eink_row_bytes(window.width);
     uint8_t chunk[kChunk];
+    size_t filled = 0;
     if (!command(ram_command, nullptr, 0))
       return false;
     for (uint16_t row = 0; row < window.height; ++row)
     {
       const uint8_t *source =
           bitmap + static_cast<size_t>(window.y + row) * stride + start_byte;
-      size_t remaining = width_bytes;
-      const uint8_t *cursor = source;
-      while (remaining != 0)
+      for (size_t i = 0; i < width_bytes; ++i)
       {
-        const size_t take = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
-        for (size_t i = 0; i < take; ++i)
-          chunk[i] = static_cast<uint8_t>(~cursor[i]);
-        if (!data(chunk, take))
-          return false;
-        cursor += take;
-        remaining -= take;
+        chunk[filled++] = static_cast<uint8_t>(~source[i]);
+        if (filled == sizeof(chunk))
+        {
+          if (!data(chunk, filled)) return false;
+          filled = 0;
+        }
       }
     }
-    return true;
+    return filled == 0 || data(chunk, filled);
   }
 
   bool EinkPanel::push_window_color(const uint8_t *bitmap, size_t size,
@@ -409,6 +409,7 @@ namespace hexwallet
       return result;
     ++stats_.full_refreshes;
     stats_.partials_since_full = 0;
+    needs_baseline_ = false;
     return EinkRefreshResult::Ok;
   }
 
@@ -433,7 +434,7 @@ namespace hexwallet
     }
     // Differential waveforms require a known old frame. The first update and
     // exhausted ghosting budget always establish a complete new baseline.
-    if (stats_.full_refreshes == 0 || full_refresh_due())
+    if (needs_baseline_ || full_refresh_due())
       return full_refresh(bitmap, size);
     // Complete WS layout from SSD1680 section 6.7. Voltage/end settings must
     // travel with the LUT; an OTP load must not replace this register content.
@@ -500,6 +501,7 @@ namespace hexwallet
       if (!command(0x07, &check, 1))
         return EinkRefreshResult::BusFault;
       stats_.initialised = false;
+      sleeping_ = true;
       return EinkRefreshResult::Ok;
     }
     const uint8_t mode = kDeepSleepMode;
@@ -508,7 +510,39 @@ namespace hexwallet
       return EinkRefreshResult::BusFault;
     }
     stats_.initialised = false;
+    sleeping_ = true;
     return EinkRefreshResult::Ok;
+  }
+
+  bool EinkPanel::wake()
+  {
+    if (!sleeping_)
+      return stats_.initialised;
+    sleeping_ = false;
+    needs_baseline_ = true;
+    stats_.partials_since_full = 0;
+    stats_.initialised = begin_panel();
+    return stats_.initialised;
+  }
+
+  EinkRect eink_mono_changes(const uint8_t *previous, const uint8_t *next)
+  {
+    constexpr uint16_t stride = kEink29Width / 8;
+    uint16_t left = stride, right = 0, top = kEink29Height, bottom = 0;
+    for (uint16_t y = 0; y < kEink29Height; ++y, previous += stride, next += stride)
+    {
+      if (memcmp(previous, next, stride) == 0) continue;
+      if (top == kEink29Height) top = y;
+      bottom = y + 1;
+      for (uint16_t x = 0; x < stride; ++x)
+      {
+        if (previous[x] == next[x]) continue;
+        if (x < left) left = x;
+        if (x >= right) right = x + 1;
+      }
+    }
+    if (right == 0) return {};
+    return {uint16_t(left * 8), top, uint16_t((right - left) * 8), uint16_t(bottom - top)};
   }
 
   void EinkDamage::reset(uint16_t width, uint16_t height)

@@ -11,8 +11,8 @@ bool wallet_session_is_loaded();
 // False when production custody is required but no real SE-backed wallet
 // session backend is integrated. Hardware presence alone is insufficient.
 bool wallet_session_custody_available();
-WalletError wallet_session_generate();
-WalletError wallet_session_import(const char *mnemonic);
+WalletError wallet_session_generate(const char *passphrase = "");
+WalletError wallet_session_import(const char *mnemonic, const char *passphrase = "");
 WalletError wallet_session_load_master(HdPrivateNode *master);
 WalletError wallet_session_load_seed(uint8_t out_seed[kSeedSize]);
 void wallet_session_clear();

@@ -6,6 +6,7 @@
 #include <esp_system.h>
 #include <stdio.h>
 #include <string.h>
+#include <new>
 
 #include "CryptoPrimitives.h"
 #include "CryptoNoteAddress.h"
@@ -29,6 +30,7 @@ namespace hexwallet
   {
 
     WalletSigningSession active;
+    static_assert(sizeof(RyoPhonePayment) <= sizeof(CryptoNoteSigningState), "Ryo exceeds the CryptoNote session budget");
 
     bool deadline_reached(uint32_t now, uint32_t deadline)
     {
@@ -448,6 +450,8 @@ namespace hexwallet
       {
       case EvmTransactionError::Ok:
         return WalletSigningError::Ok;
+      case EvmTransactionError::WrongNetwork:
+        return WalletSigningError::WrongNetwork;
       case EvmTransactionError::WrongWallet:
         return WalletSigningError::WrongWallet;
       case EvmTransactionError::FeePolicy:
@@ -575,10 +579,88 @@ namespace hexwallet
       return wallet_session_load_master(master) == WalletError::Ok;
     }
 
+    struct RyoPaymentJob {
+      RyoPhonePayment &payment;
+      const uint8_t *payload;
+      size_t payload_size;
+      uint8_t *signed_tx;
+      size_t *signed_size;
+      const uint8_t *spend;
+      const uint8_t *view;
+      WalletSigningError result;
+    };
+
+    void prepare_ryo_payment(void *context) {
+      auto &job = *static_cast<RyoPaymentJob *>(context);
+      job.result = ryo_phone_prepare(job.payload, job.payload_size, job.spend, job.view, job.payment)
+                     ? WalletSigningError::Ok : WalletSigningError::ParseFailed;
+    }
+
+    void sign_ryo_payment(void *context) {
+      auto &job = *static_cast<RyoPaymentJob *>(context);
+      const auto &p = job.payment;
+      SensitiveValue<uint8_t[32]> entropy;
+      if (!random_fill_checked(entropy.get(), 32)) return;
+      // A full MLSAG workspace is ~15 KiB. Keep it off the worker stack,
+      // which is also used by Bulletproof verification and scalar operations.
+      RyoMlsagSignature *workspace = new (std::nothrow) RyoMlsagSignature;
+      if (!workspace) return;
+      const bool ok = ryo_sign_spend(p.wire, p.wire_size, p.sources, p.input_count, job.spend, job.view,
+          p.tx_secret, p.review.recipient, p.review, entropy.get(), workspace, job.signed_tx, job.signed_size);
+      secure_zero(workspace, sizeof(*workspace));
+      delete workspace;
+      if (ok) job.result = WalletSigningError::Ok;
+    }
+
+    WalletSigningError execute_ryo_job(WalletWorkerJob run, RyoPaymentJob &job) {
+      const NetworkProfile *network = find_network_profile("ryo");
+      SensitiveValue<HdPrivateNode> master;
+      SensitiveValue<uint8_t[32]> spend, view;
+      if (!network || !load_master(&master.get()) || derive_cryptonote_keys(master.get(), *network, 0, 0,
+          job.payment.address_index, spend.get(), view.get()) != WalletError::Ok) return WalletSigningError::NoWallet;
+      job.spend = spend.get();
+      job.view = view.get();
+      job.result = WalletSigningError::CryptoFailure;
+      const auto result = wallet_worker_execute(run, &job, HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait);
+      if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
+      return result == WalletWorkerResult::Completed ? job.result : WalletSigningError::Unsupported;
+    }
+
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+    struct ZanoPaymentJob {
+      ZanoPhonePayment &payment;
+      const uint8_t *spend, *view;
+      uint8_t *result;
+      size_t *size;
+      bool ok;
+    };
+    void run_zano_payment(void *ctx) {
+      auto &job = *static_cast<ZanoPaymentJob *>(ctx);
+      job.ok = job.result ? zano_phone_sign(job.payment,job.spend,job.view,job.result,job.size)
+                          : zano_phone_review(job.payment,job.spend,job.view,job.payment.review);
+    }
+    WalletSigningError execute_zano_payment(uint8_t *out, size_t *size) {
+      auto &p = active.request.zano;
+      const auto *network = find_network_profile("zano");
+      SensitiveValue<HdPrivateNode> master;
+      SensitiveValue<uint8_t[32]> spend, view;
+      if (!network || !load_master(&master.get()) || derive_cryptonote_keys(master.get(),*network,0,0,p.address_index,
+          spend.get(),view.get()) != WalletError::Ok) return WalletSigningError::NoWallet;
+      ZanoPaymentJob job{p,spend.get(),view.get(),out,size,false};
+      const auto result = wallet_worker_execute(run_zano_payment,&job,HEXWALLET_WORKER_JOB_TIMEOUT_MS,millis,service_crypto_wait);
+      if (result == WalletWorkerResult::TimedOut) return WalletSigningError::Expired;
+      if (result != WalletWorkerResult::Completed) return WalletSigningError::Unsupported;
+      if (!job.ok) return out ? WalletSigningError::CryptoFailure : WalletSigningError::ParseFailed;
+      return WalletSigningError::Ok;
+    }
+#endif
+
     void decision_callback(bool approved)
     {
       if (active.kind == WalletSigningKind::None || active.consumed)
         return;
+      // The confirmation page replaces the sealed review before phone collection.
+      approved = approved && wallet_ui_review_authorize(active.display_digest);
       if (approved)
       {
         active.approved = true;
@@ -593,20 +675,23 @@ namespace hexwallet
       wallet_ui_set_decision_callback(nullptr);
       wallet_ui_show_catalog();
       wallet_ui_set_status(approved
-                               ? "Approved. Tap the phone again to collect the signature."
+                               ? "Approved. Keep the phone connected to collect the signature."
                                : "Rejected. Nothing was signed.");
     }
 
     void show_review(const char *network_name, uint64_t fee, uint64_t fee_rate,
                      const char *fee_text, const WalletUiTransactionOutput *outputs,
                      size_t output_count, const char *total_text = nullptr,
-                     const char *note = nullptr, const char *fee_label = nullptr)
+                     const char *note = nullptr, const char *fee_label = nullptr,
+                     const char *approval_code = nullptr)
     {
       WalletUiTransactionReview review = {};
       review.network = network_name;
-      review.output_count = output_count > kWalletUiMaxTransactionOutputs
-                                ? kWalletUiMaxTransactionOutputs
-                                : output_count;
+      if (output_count > kWalletUiMaxTransactionOutputs || (output_count && !outputs)) {
+        wallet_ui_show_refusal("Cannot display the complete transaction. Review rejected.");
+        return;
+      }
+      review.output_count = output_count;
       for (size_t index = 0; index < review.output_count; ++index)
       {
         review.outputs[index] = outputs[index];
@@ -617,9 +702,9 @@ namespace hexwallet
       review.fee_label = fee_label;
       review.total_text = total_text;
       review.note = note;
-      review.approval_code = nullptr;
-      review.show_decision_buttons = true;
-      wallet_ui_set_decision_callback(decision_callback);
+      review.approval_code = approval_code;
+      review.show_decision_buttons = approval_code == nullptr;
+      wallet_ui_set_decision_callback(review.show_decision_buttons ? decision_callback : nullptr);
       wallet_ui_show_transaction(review);
     }
 
@@ -660,11 +745,12 @@ namespace hexwallet
                                   ? request.remote_address_text
                                   : request.recipient_address;
       output = {0, amount, recipient,
-                request.opaque ? evm_operation_text(request) : (request.has_call ? evm_token_standard_name(request.call.standard) : "NATIVE")};
+                request.has_call ? evm_token_standard_name(request.call.standard) : evm_operation_text(request)};
       char details[kEvmReviewTextSize];
       if (!evm_review_details(request, details, sizeof(details)))
         return false;
       output.details = details;
+      output.ownership_is_label = true; // Operation/standard names come from firmware enums.
       char fee[128];
       snprintf(fee, sizeof(fee), "%s %s", request.maximum_fee_text,
                request.network == nullptr ? "?" : request.network->symbol);
@@ -793,7 +879,6 @@ namespace hexwallet
     bool show_cosmos_review(const CosmosTransaction &request)
     {
       const CosmosReview &review = request.review;
-      WalletUiTransactionOutput output = {};
       char details[384];
       char memo[kCosmosMaxMemo + 16] = {};
       if (review.has_memo)
@@ -828,6 +913,41 @@ namespace hexwallet
       }
       if (written < 0 || static_cast<size_t>(written) >= sizeof(details))
         return false;
+      using Action = CosmosReview::Action;
+      if (review.action == Action::GrantSend || review.action == Action::RevokeSend) {
+        const bool grant = review.action == Action::GrantSend;
+        char operation[128];
+        const int n = grant ? snprintf(operation, sizeof(operation), "GRANT BANK SEND\nSPEND LIMIT %s", review.amount_text) :
+                              snprintf(operation, sizeof(operation), "REVOKE BANK SEND");
+        if (n < 0 || static_cast<size_t>(n) >= sizeof(operation)) return false;
+        const size_t remaining = sizeof(details) - written;
+        int added = snprintf(details + written, remaining, "\nGRANTER\n%s\nAUTHORITY\n/cosmos.bank.v1beta1.MsgSend", review.from);
+        if (added < 0 || static_cast<size_t>(added) >= remaining) return false;
+        written += added;
+        if (grant) {
+          added = snprintf(details + written, sizeof(details) - written, "\nALLOWED RECIPIENTS\nANY\nEXPIRES (Unix seconds)\n%llu",
+                           static_cast<unsigned long long>(review.grant_expiry_seconds));
+          if (added < 0 || static_cast<size_t>(added) >= sizeof(details) - written) return false;
+        }
+        const WalletUiTransactionOutput authority{0, operation, review.to[0], "GRANTEE", details, true};
+        show_review(review.chain->symbol, review.fee, 0, review.fee_text, &authority, 1, nullptr,
+                    grant ? "This grantee can spend up to the limit to any recipient without your further approval. An existing bank-send grant is replaced." :
+                            "Removes this grantee's bank-send authority over your account.", "FEE");
+        return true;
+      }
+      if (review.legacy_amino) {
+        const size_t remaining = sizeof(details) - written;
+        const int added = snprintf(details + written, remaining, "\nSIGN MODE\nLEGACY AMINO JSON");
+        if (added < 0 || static_cast<size_t>(added) >= remaining) return false;
+      }
+      if (review.source_channel[0]) {
+        const size_t remaining = sizeof(details) - written;
+        const int added = snprintf(details + written, remaining,
+                                   "\nICS-20 SOURCE\ntransfer/%s\nDESTINATION\n%s\nSENDER\n%s\nTIMEOUT (Unix ns)\n%llu",
+                                   review.source_channel, !strcmp(review.chain_id, "cosmoshub-4") ? "osmosis-1" : "cosmoshub-4",
+                                   review.from, static_cast<unsigned long long>(review.timeout_timestamp_ns));
+        if (added < 0 || static_cast<size_t>(added) >= remaining) return false;
+      }
       if (review.message_count == 0 || review.message_count > kCosmosMaxMessages)
       {
         return false;
@@ -842,7 +962,6 @@ namespace hexwallet
                           review.denom_registered ? review.symbol : "DENOM",
                           index == 0 ? details : nullptr};
       }
-      output = outputs[0];
       char total[192];
       const int total_written = snprintf(total, sizeof(total), "%s + %s",
                                          review.amount_text, review.fee_text);
@@ -853,9 +972,9 @@ namespace hexwallet
       show_review(review.chain == nullptr ? "COSMOS" : review.chain->symbol,
                   review.fee, 0, review.fee_text, outputs, review.message_count,
                   total,
-                  review.denom_registered
-                      ? "Offline review. Chain id, account number and sequence are supplied by the phone and shown here; verify them before approving. Every MsgSend is listed with its own recipient and amount; the memo is committed in TxBody. IBC and authz messages are refused."
-                      : "Offline review of a denom without pinned metadata: each amount is the exact base-unit integer the chain will move. Verify the denom string before approving. IBC and authz messages are refused.",
+                   review.source_channel[0] ? "Cross-chain transfer. Channel state, destination time and relay must be checked on chain." :
+                   review.denom_registered ? "Verify the chain ID, account number and sequence supplied by the phone."
+                                           : "Verify the denom. Each amount is in exact base units.",
                   "FEE");
       return true;
     }
@@ -881,7 +1000,7 @@ namespace hexwallet
         if (n < 0 || static_cast<size_t>(n) >= sizeof(details[i]))
           return false;
         outputs[i] = {op.amount, op.amount_text, op.destination,
-                      op.type == 0 ? "CREATE ACCOUNT" : "PAYMENT", details[i]};
+                      op.type == 0 ? "CREATE ACCOUNT" : "PAYMENT", details[i], true};
       }
       constexpr const char *memo_names[] = {"NONE", "TEXT", "ID", "HASH", "RETURN HASH"};
       if (v.memo_type > 4)
@@ -954,7 +1073,7 @@ namespace hexwallet
                                         v.lease_hex[0] ? v.lease_hex : "NONE", v.note_hex[0] ? v.note_hex : "NONE");
       if (note_written < 0 || static_cast<size_t>(note_written) >= sizeof(scratch.note))
         return false;
-      scratch.output = {v.amount, v.amount_text, v.recipient, "EXTERNAL", scratch.details};
+      scratch.output = {v.amount, v.amount_text, v.recipient, "EXTERNAL", scratch.details, true};
       show_review("ALGORAND", v.fee, 0, scratch.fee, &scratch.output, 1,
                   v.amount_text, scratch.note, "FEE");
       return true;
@@ -992,7 +1111,7 @@ namespace hexwallet
                                static_cast<unsigned>(v.action_count));
         if (n < 0 || static_cast<size_t>(n) >= sizeof(scratch.details[i]))
           return false;
-        scratch.outputs[i] = {0, scratch.amounts[i], v.receiver, "EXTERNAL", scratch.details[i]};
+        scratch.outputs[i] = {0, scratch.amounts[i], v.receiver, "EXTERNAL", scratch.details[i], true};
       }
       const int note_written = snprintf(scratch.note, sizeof(scratch.note),
                                         "NEAR PROTOCOL\nSIGNER\n%s\nPUBLIC KEY\n%s\nBLOCK HASH\n%s\nNONCE\n%llu\n"
@@ -1040,7 +1159,7 @@ namespace hexwallet
         if (n < 0 || static_cast<size_t>(n) >= sizeof(scratch.details[i]))
           return false;
         scratch.outputs[i] = {op.amount, scratch.amounts[i], op.recipient,
-                              op.reveal ? "OWN ACCOUNT" : "EXTERNAL", scratch.details[i]};
+                              op.reveal ? "OWN ACCOUNT" : "EXTERNAL", scratch.details[i], true};
       }
       if (!tezos_format_amount(v.total_fee, scratch.fee, sizeof(scratch.fee)) ||
           !tezos_format_amount(v.total, scratch.total, sizeof(scratch.total)))
@@ -1082,7 +1201,7 @@ namespace hexwallet
           return false;
         memcpy(details + used, tag, static_cast<size_t>(n) + 1);
       }
-      output = {v.amount_drops, v.amount_text, v.destination_text, "EXTERNAL", details};
+      output = {v.amount_drops, v.amount_text, v.destination_text, "EXTERNAL", details, true};
       show_review("XRP", v.fee_drops, 0, v.fee_text, &output, 1, v.amount_text,
                   "Offline review. Sequence and last ledger are supplied by the phone; "
                   "the ledger must be current at submission. A destination tag is required "
@@ -1092,19 +1211,18 @@ namespace hexwallet
       return true;
     }
 
-    bool show_chain_review(const ChainTransaction &request)
+    bool show_chain_review(const ChainTransaction &request, const char *approval_code = nullptr)
     {
-      static char details[kChainMaxCalls][kChainCallAddressSize + 12];
+      static char details[kChainMaxCalls][kChainCallAddressSize + sizeof("USER-DECLARED TOKEN\n")];
       static char note[512];
       WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
-      const size_t calls = request.review.call_count > kChainMaxCalls
-                               ? kChainMaxCalls
-                               : request.review.call_count;
+      const size_t calls = request.review.call_count;
+      if (calls > kChainMaxCalls || calls > kWalletUiMaxTransactionOutputs) return false;
       bool declared_token = false;
       if (calls == 0)
       {
         outputs[0] = {0, request.review.amount, request.review.recipient, "NATIVE",
-                      request.review.extra};
+                      request.review.extra, true};
       }
       else
       {
@@ -1124,7 +1242,7 @@ namespace hexwallet
                             details[index]};
         }
       }
-      snprintf(note, sizeof(note),
+      const int written = snprintf(note, sizeof(note),
                "FROM %s\nADDRESS INDEX %lu\nOffline review. Verify the destination, "
                "amount and fees. Node state and network selection must be checked "
                "before broadcast. Some protocols do not bind a chain ID in their "
@@ -1132,6 +1250,7 @@ namespace hexwallet
                request.review.sender, static_cast<unsigned long>(request.address_index),
                calls > 1 ? "\nMULTI CALL: each row is one call, in execution order."
                          : "");
+      if (written < 0 || static_cast<size_t>(written) >= sizeof(note)) return false;
       if (calls > 0 && declared_token)
       {
         const size_t used = strlen(note);
@@ -1143,7 +1262,7 @@ namespace hexwallet
         memcpy(note + used, warning, strlen(warning) + 1);
       }
       show_review(request.review.symbol, 0, 0, request.review.fee, outputs,
-                  calls == 0 ? 1 : calls, nullptr, note, "FEE");
+                  calls == 0 ? 1 : calls, nullptr, note, "FEE", approval_code);
       return true;
     }
 
@@ -1169,21 +1288,26 @@ namespace hexwallet
       show_review("KASPA", request.fee, 0, fee, outputs, count);
     }
 
-    bool show_zcash_review(const ZcashSigningRequest &request)
+    bool show_zcash_review(const ZcashSigningRequest &request, const char *approval_code = nullptr)
     {
+      const NetworkProfile *network = find_network_profile(request.chain.network_id);
+      if (!network || !request.output_count || request.output_count > kWalletUiMaxTransactionOutputs ||
+          request.output_count > kZcashMaxOutputs || request.input_count > kZcashMaxInputs) return false;
       WalletUiTransactionOutput outputs[kWalletUiMaxTransactionOutputs] = {};
       char amounts[kWalletUiMaxTransactionOutputs][32] = {};
       char input_addresses[kZcashMaxInputs][kAddressTextSize] = {};
-      const size_t count = request.output_count > kWalletUiMaxTransactionOutputs
-                               ? kWalletUiMaxTransactionOutputs
-                               : request.output_count;
+      auto format_amount = [network](uint64_t value, char (&text)[32]) {
+        const int length = snprintf(text, sizeof(text), "%llu.%08lu %s",
+                                    static_cast<unsigned long long>(value / kZcashZatsPerZec),
+                                    static_cast<unsigned long>(value % kZcashZatsPerZec), network->symbol);
+        return length > 0 && static_cast<size_t>(length) < sizeof(text);
+      };
+      const size_t count = request.output_count;
       for (size_t index = 0; index < count; ++index)
       {
-        snprintf(amounts[index], sizeof(amounts[index]), "%llu.%08lu ZEC",
-                 static_cast<unsigned long long>(request.outputs[index].value / kZcashZatsPerZec),
-                 static_cast<unsigned long>(request.outputs[index].value % kZcashZatsPerZec));
+        if (!format_amount(request.outputs[index].value, amounts[index])) return false;
         outputs[index] = {request.outputs[index].value, amounts[index],
-                          request.outputs[index].address, "EXTERNAL"};
+                          request.outputs[index].address, "EXTERNAL", nullptr, true};
       }
       size_t shown = count;
       bool has_p2sh_input = false;
@@ -1202,17 +1326,16 @@ namespace hexwallet
           return false;
         }
         has_p2sh_input = true;
-        outputs[shown++] = {input.value, nullptr, input_addresses[index],
-                            "P2SH INPUT"};
+        if (!format_amount(input.value, amounts[shown])) return false;
+        outputs[shown] = {input.value, amounts[shown], input_addresses[index], "P2SH INPUT", nullptr, true};
+        ++shown;
       }
-      char fee[64];
-      snprintf(fee, sizeof(fee), "%llu.%08lu ZEC",
-               static_cast<unsigned long long>(request.fee / kZcashZatsPerZec),
-               static_cast<unsigned long>(request.fee % kZcashZatsPerZec));
-      show_review("ZCASH", request.fee, 0, fee, outputs, shown, nullptr,
+      char fee[32];
+      if (!format_amount(request.fee, fee)) return false;
+      show_review(network->name, request.fee, 0, fee, outputs, shown, nullptr,
                   has_p2sh_input
                       ? "P2SH inputs list the t3 address whose redeem script is spent. The firmware re-hashes that script against the address before signing."
-                      : nullptr);
+                      : nullptr, "FEE", approval_code);
       return true;
     }
     bool show_dash_review(const DashTransaction &request)
@@ -1232,7 +1355,7 @@ namespace hexwallet
         snprintf(amounts[shown], sizeof(amounts[shown]), "%llu.%08lu DASH",
                  static_cast<unsigned long long>(output.value / kDashDuffsPerDash),
                  static_cast<unsigned long>(output.value % kDashDuffsPerDash));
-        outputs[shown] = {output.value, amounts[shown], output.address, "TO"};
+        outputs[shown] = {output.value, amounts[shown], output.address, "TO", nullptr, true};
         ++shown;
       }
       for (size_t index = 0; index < request.input_count; ++index)
@@ -1247,7 +1370,7 @@ namespace hexwallet
                  static_cast<unsigned long>(input.address_index),
                  static_cast<unsigned long>(input.sequence));
         outputs[shown] = {input.value, amounts[shown], input.address, "VERIFIED INPUT",
-                          input_details[index]};
+                          input_details[index], true};
         ++shown;
       }
       char fee[64];
@@ -1269,6 +1392,60 @@ namespace hexwallet
       show_review("DASH", request.fee, 0, fee, outputs, shown, nullptr, note, "FEE");
       return true;
     }
+
+    bool show_ryo_review(const RyoSpendReview &review)
+    {
+      const NetworkProfile *network = find_network_profile("ryo");
+      if (!network) return false;
+      const auto prefix = cryptonote_profile_for(*network).standard_address_prefix;
+      const auto &payment = review.payment;
+      char receiver[kCryptoNoteMaxAddressSize], change_address[kCryptoNoteMaxAddressSize];
+      if (cryptonote_address_from_public_keys(prefix, review.recipient.spend, review.recipient.view,
+          receiver, sizeof(receiver)) != WalletError::Ok ||
+          cryptonote_address_from_public_keys(prefix, review.wallet.spend, review.wallet.view,
+          change_address, sizeof(change_address)) != WalletError::Ok) return false;
+      auto format = [](uint64_t amount, char (&text)[32]) {
+        snprintf(text, sizeof(text), "%llu.%09llu RYO", static_cast<unsigned long long>(amount / 1000000000),
+                 static_cast<unsigned long long>(amount % 1000000000));
+      };
+      char amount[32], change[32], fee[32], total[32];
+      format(payment.amount, amount);
+      format(payment.change, change);
+      format(payment.fee, fee);
+      format(payment.amount + payment.fee, total);
+      char id[80] = "Payment ID: none";
+      if (payment.has_payment_id) {
+        for (size_t i = 0; i < sizeof(payment.payment_id); ++i)
+          snprintf(id + 12 + 2 * i, 3, "%02x", static_cast<unsigned>(payment.payment_id[i]));
+      }
+      WalletUiTransactionOutput outputs[] = {{payment.amount, amount, receiver, "EXTERNAL", id, true},
+                                             {payment.change, change, change_address, "CHANGE", nullptr, true}};
+      show_review("RYO", payment.fee, 0, fee, outputs, payment.change ? 2 : 1, total,
+                  "Ring members supplied by phone. Chain membership is unverified offline.", "FEE");
+      return true;
+    }
+
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+    bool show_zano_review(const ZanoPaymentReview &r) {
+      char receiver[kCryptoNoteMaxAddressSize], payer[kCryptoNoteMaxAddressSize];
+      if (cryptonote_address_from_public_keys(0xc5,r.recipient_spend,r.recipient_view,receiver,sizeof(receiver)) != WalletError::Ok ||
+          cryptonote_address_from_public_keys(0xc5,r.payer_spend,r.payer_view,payer,sizeof(payer)) != WalletError::Ok) return false;
+      auto format = [](uint64_t value,char (&out)[36]) {
+        snprintf(out,sizeof(out),"%llu.%012llu ZANO",static_cast<unsigned long long>(value/1000000000000ULL),
+                 static_cast<unsigned long long>(value%1000000000000ULL));
+      };
+      char amount[36], change[36], fee[36], total[36], id[32] = "Payment ID: none";
+      format(r.amount,amount); format(r.change,change); format(kZanoPhoneFee,fee); format(r.amount+kZanoPhoneFee,total);
+      if (r.payment_id) {
+        uint8_t bytes[8]; chain_write_u64_le(r.payment_id,bytes);
+        chain_hex(bytes,sizeof(bytes),id+12,sizeof(id)-12);
+      }
+      WalletUiTransactionOutput outputs[] = {{r.amount,amount,receiver,"EXTERNAL",id,true},{r.change,change,payer,"CHANGE",nullptr,true}};
+      show_review("ZANO",kZanoPhoneFee,0,fee,outputs,r.change ? 2 : 1,total,
+                  "Ring members supplied by phone. Chain membership is unverified offline.","FEE");
+      return true;
+    }
+#endif
 
     bool show_cryptonote_review(const CryptoNoteSigningState &request)
     {
@@ -1306,7 +1483,7 @@ namespace hexwallet
           return false;
         }
         outputs[index] = {output.amount, amounts[index], addresses[index],
-                          output.change ? "CHANGE" : "EXTERNAL"};
+                          output.change ? "CHANGE" : "EXTERNAL", nullptr, true};
         if (!output.change)
           external_total += output.amount;
       }
@@ -1333,6 +1510,22 @@ namespace hexwallet
     {
       static_assert(kSolanaMaxTransfers <= kWalletUiMaxTransactionOutputs,
                     "Every SOL transfer must be displayed");
+      if (request.program.call != SolanaProgramCall::None)
+      {
+        char details[1200], fee[48];
+        if (!solana_program_details(request, details, sizeof(details))) return false;
+        const bool orca = request.program.call == SolanaProgramCall::OrcaSwap;
+        const bool swap = orca || request.program.call == SolanaProgramCall::Swap;
+        const char *action = orca ? "Orca classic swap" : swap ? "SPL Token Swap" :
+            (request.program.call == SolanaProgramCall::Delegate ? "Delegate existing stake" : "Deactivate stake");
+        WalletUiTransactionOutput output{0, action, nullptr, nullptr, details};
+        snprintf(fee, sizeof(fee), "%llu lamports", static_cast<unsigned long long>(request.estimated_fee));
+        show_review("SOLANA", request.estimated_fee, 0, fee, &output, 1, nullptr,
+            swap ? "Raw token units. Verify input and output mints from the pool vaults on the intended cluster." :
+                   "Applies to the existing stake account balance. Check its balance, authority and cluster before broadcasting.",
+            "EST. FEE");
+        return true;
+      }
       if (request.transfer_count == 0 || request.transfer_count > kSolanaMaxTransfers)
         return false;
       struct Scratch
@@ -1340,7 +1533,7 @@ namespace hexwallet
         WalletUiTransactionOutput outputs[kSolanaMaxTransfers];
         char addresses[kSolanaMaxTransfers][45];
         char amounts[kSolanaMaxTransfers][64];
-        char details[kSolanaMaxTransfers][176];
+        char details[kSolanaMaxTransfers][224];
       };
       static Scratch scratch;
       secure_zero(&scratch, sizeof(scratch));
@@ -1370,7 +1563,7 @@ namespace hexwallet
         const SolanaTransfer &transfer = request.transfers[i];
         if (!solana_format_amount(transfer, amounts[i], sizeof(amounts[i])))
           return false;
-        outputs[i] = {transfer.amount, amounts[i], addresses[i], "EXTERNAL", nullptr};
+        outputs[i] = {transfer.amount, amounts[i], addresses[i], "EXTERNAL", nullptr, true};
         if (transfer.kind != SolanaTransferKind::Native)
         {
           has_tokens = true;
@@ -1470,6 +1663,20 @@ namespace hexwallet
           return WalletSigningError::InvalidArgument;
         }
         break;
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+      case WalletSigningKind::Zano:
+        if (!show_zano_review(active.request.zano.review)) {
+          wallet_signing_clear();
+          return WalletSigningError::InvalidArgument;
+        }
+        break;
+#endif
+      case WalletSigningKind::Ryo:
+        if (!show_ryo_review(active.request.ryo.review)) {
+          wallet_signing_clear();
+          return WalletSigningError::InvalidArgument;
+        }
+        break;
       case WalletSigningKind::CryptoNote:
         if (!show_cryptonote_review(active.request.cryptonote))
         {
@@ -1544,10 +1751,69 @@ namespace hexwallet
       case WalletSigningKind::None:
         return WalletSigningError::InvalidArgument;
       }
+      if (!wallet_ui_review_digest(active.display_digest))
+      {
+        wallet_signing_clear();
+        return WalletSigningError::CryptoFailure;
+      }
       return WalletSigningError::Ok;
     }
 
   } // namespace
+
+  bool wallet_show_code_review(const ChainTransaction &request, const char *approval_code)
+  {
+    return approval_code && show_chain_review(request, approval_code);
+  }
+
+  bool wallet_show_code_review(const ZcashSigningRequest &request, const char *approval_code)
+  {
+    return approval_code && show_zcash_review(request, approval_code);
+  }
+
+  // The worker drains each operation before returning, including after a timeout.
+  template <typename Operation>
+  static bool execute_crypto_operation(Operation &op)
+  {
+    return wallet_worker_execute([](void *ctx) { (*static_cast<Operation *>(ctx))(); }, &op,
+        HEXWALLET_WORKER_JOB_TIMEOUT_MS, millis, service_crypto_wait) == WalletWorkerResult::Completed;
+  }
+
+  WalletError wallet_derive_for_display(const HdPrivateNode &master, const uint8_t *seed,
+      const NetworkProfile &network, uint32_t account, uint32_t change, uint32_t index, DerivedAddress *out)
+  {
+    if (network.encoding != AddressEncoding::Evm && network.derivation != DerivationStyle::SolanaBip44)
+      return derive_address(master, seed, network, account, change, index, out);
+    WalletError result = WalletError::CryptoFailure;
+    auto derive = [&] { result = derive_address(master, seed, network, account, change, index, out); };
+    if (execute_crypto_operation(derive)) return result;
+    clear_derived_address(out);
+    return WalletError::CryptoFailure;
+  }
+
+  EvmTransactionError wallet_worker_review_evm(const uint8_t *transaction, size_t size,
+      const NetworkProfile &network, const HdPrivateNode &master, uint32_t index, EvmSigningRequest *out)
+  {
+    EvmTransactionError error = EvmTransactionError::CryptoFailure;
+    auto parse = [&] { error = evm_parse_for_review(transaction, size, network, master, index, out); };
+    if (execute_crypto_operation(parse)) return error;
+    clear_evm_request(out);
+    return EvmTransactionError::CryptoFailure;
+  }
+
+  EvmTransactionError wallet_worker_sign_evm(const EvmSigningRequest &request,
+      const HdPrivateNode &master, uint8_t *out, size_t *size)
+  {
+    if (!size) return EvmTransactionError::InvalidArgument;
+    if (!out) { *size = 0; return EvmTransactionError::InvalidArgument; }
+    const size_t capacity = *size;
+    EvmTransactionError error = EvmTransactionError::CryptoFailure;
+    auto sign = [&] { error = evm_sign_transaction(request, master, out, size); };
+    if (execute_crypto_operation(sign)) return error;
+    secure_zero(out, capacity);
+    *size = 0;
+    return EvmTransactionError::CryptoFailure;
+  }
 
   void wallet_signing_clear()
   {
@@ -1632,7 +1898,7 @@ namespace hexwallet
     if (!load_master(&master))
       return WalletSigningError::NoWallet;
     wallet_signing_clear();
-    const EvmTransactionError error = evm_parse_for_review(
+    const EvmTransactionError error = wallet_worker_review_evm(
         transaction, transaction_size, *network, master, address_index,
         &active.request.evm);
     secure_zero(&master, sizeof(master));
@@ -1645,18 +1911,17 @@ namespace hexwallet
     return finish_review(now_ms);
   }
 
-  WalletSigningError wallet_signing_begin_kaspa(const uint8_t *payload,
+  WalletSigningError wallet_signing_begin_kaspa(const char *network_id, const uint8_t *payload,
                                                 size_t payload_size,
                                                 uint32_t now_ms)
   {
     wallet_signing_clear();
+    if (!network_id || strcmp(network_id, "kas") || !catalog_can_sign(network_id))
+      return WalletSigningError::Unsupported;
     if (payload == nullptr || payload_size == 0)
     {
       return WalletSigningError::InvalidArgument;
     }
-    if (!catalog_can_sign("kas"))
-      return WalletSigningError::Unsupported;
-    wallet_signing_clear();
     const KaspaError error =
         kaspa_parse_review_payload(payload, payload_size, &active.request.kaspa);
     if (error != KaspaError::Ok)
@@ -1686,7 +1951,7 @@ namespace hexwallet
     const ZcashNetworkPolicy *zcash_policy =
         find_zcash_network_policy(network_id);
     if (network == nullptr || policy == nullptr ||
-        policy->family != SighashFamily::ZcashZip243 || zcash_policy == nullptr ||
+        (policy->family != SighashFamily::ZcashZip243 && policy->family != SighashFamily::ZcashZip244) || zcash_policy == nullptr ||
         !catalog_can_sign(network_id))
     {
       return WalletSigningError::Unsupported;
@@ -1767,6 +2032,36 @@ namespace hexwallet
       return WalletSigningError::InvalidArgument;
     }
     const NetworkProfile *network = find_network_profile(network_id);
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+    if (!strcmp(network_id,"zano")) {
+      auto &payment = active.request.zano;
+      if (!catalog_can_sign(network_id)) return WalletSigningError::Unsupported;
+      if (payload_size > sizeof(payment.payload) || address_index >= kHardenedOffset) return WalletSigningError::InvalidArgument;
+      wallet_ui_show_busy("Verifying Zano payment...");
+      payment.address_index = address_index; payment.size = payload_size;
+      memcpy(payment.payload,payload,payload_size);
+      const auto result = execute_zano_payment(nullptr,nullptr);
+      if (result != WalletSigningError::Ok) { wallet_signing_clear(); wallet_ui_set_status("Zano payment review failed."); return result; }
+      active.kind = WalletSigningKind::Zano;
+      return finish_review(millis());
+    }
+#endif
+    if (!strcmp(network_id, "ryo")) {
+      if (!catalog_can_sign(network_id)) return WalletSigningError::Unsupported;
+      if (payload_size > kRyoPhonePayloadMax || address_index >= kHardenedOffset) return WalletSigningError::InvalidArgument;
+      auto &payment = active.request.ryo;
+      payment.address_index = address_index;
+      wallet_ui_show_busy("Verifying Ryo payment...");
+      RyoPaymentJob job{payment, payload, payload_size, nullptr, nullptr};
+      const auto result = execute_ryo_job(prepare_ryo_payment, job);
+      if (result != WalletSigningError::Ok) {
+        wallet_signing_clear();
+        wallet_ui_set_status("Ryo payment review failed.");
+        return result;
+      }
+      active.kind = WalletSigningKind::Ryo;
+      return finish_review(millis());
+    }
     if (!catalog_can_sign(network_id) || network == nullptr ||
         network->encoding != AddressEncoding::CryptoNote ||
         cryptonote_review_policy(network_id) == nullptr)
@@ -1829,12 +2124,14 @@ namespace hexwallet
       secure_zero(seed, sizeof(seed));
       return WalletSigningError::NoWallet;
     }
-    const bool derived = solana_derive_key(seed, address_index, child) && ed25519_public_key(child, payer);
+    SolanaError error = SolanaError::CryptoFailure;
+    auto parse = [&] {
+      if (solana_derive_key(seed, address_index, child) && ed25519_public_key(child, payer))
+        error = solana_review_message(message, size, payer, &active.request.solana);
+    };
+    if (!execute_crypto_operation(parse)) error = SolanaError::CryptoFailure;
     secure_zero(seed, sizeof(seed));
     secure_zero(child, sizeof(child));
-    const SolanaError error = derived
-                                  ? solana_review_message(message, size, payer, &active.request.solana)
-                                  : SolanaError::CryptoFailure;
     secure_zero(payer, sizeof(payer));
     if (error != SolanaError::Ok)
     {
@@ -2188,18 +2485,6 @@ namespace hexwallet
       wallet_signing_clear();
       return WalletSigningError::NotApproved;
     }
-    // The panel must have finished committing this review before anything is
-    // signed, and the review seal must still be armed and unused. APPROVE is only
-    // produced by a button on a rendered frame, so this also catches a stale
-    // approval that outlived its own screen.
-    if (board_has_display())
-    {
-      if (!board_display_review_ready() || !wallet_ui_review_authorize())
-      {
-        wallet_signing_clear();
-        return WalletSigningError::NotApproved;
-      }
-    }
     // A build that demands verified boot refuses to hand out signatures from an
     // unprotected device (secure boot and flash encryption both off).
     if (!trust_signing_allowed(trust_state()))
@@ -2420,6 +2705,21 @@ namespace hexwallet
       }
       return map_cosmos_error(error);
     }
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+    if (active.kind == WalletSigningKind::Zano) {
+      wallet_ui_show_busy("Signing Zano payment...");
+      const auto result = execute_zano_payment(out,in_out_size);
+      wallet_signing_clear();
+      return result;
+    }
+#endif
+    if (active.kind == WalletSigningKind::Ryo) {
+      wallet_ui_show_busy("Signing Ryo payment...");
+      RyoPaymentJob job{active.request.ryo, nullptr, 0, out, in_out_size};
+      const auto result = execute_ryo_job(sign_ryo_payment, job);
+      wallet_signing_clear();
+      return result;
+    }
     if (active.kind == WalletSigningKind::CryptoNote)
     {
       const auto *policy = cryptonote_review_policy(active.request.cryptonote.network);
@@ -2491,7 +2791,7 @@ namespace hexwallet
                                                       in_out_size));
       break;
     case WalletSigningKind::Evm:
-      result = map_evm_error(evm_sign_transaction(active.request.evm, master,
+      result = map_evm_error(wallet_worker_sign_evm(active.request.evm, master,
                                                   out, in_out_size));
       break;
     case WalletSigningKind::Kaspa:
@@ -2504,6 +2804,10 @@ namespace hexwallet
                                                   out, in_out_size));
       break;
     case WalletSigningKind::None:
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+    case WalletSigningKind::Zano:
+#endif
+    case WalletSigningKind::Ryo:
     case WalletSigningKind::Dash:
     case WalletSigningKind::CryptoNote:
     case WalletSigningKind::Solana:
@@ -2595,8 +2899,10 @@ namespace hexwallet
                    WalletSigningError::InvalidArgument;
     ok = ok && wallet_signing_begin_evm("eth", 0, &empty, 0, 0) ==
                    WalletSigningError::InvalidArgument;
-    ok = ok && wallet_signing_begin_kaspa(&empty, 0, 0) ==
+    ok = ok && wallet_signing_begin_kaspa("kas", &empty, 0, 0) ==
                    WalletSigningError::InvalidArgument;
+    ok = ok && wallet_signing_begin_kaspa("eth", &empty, 0, 0) ==
+                   WalletSigningError::Unsupported && !wallet_signing_active();
     ok = ok && wallet_signing_begin_zcash("zec", &empty, 0, 0) ==
                    WalletSigningError::InvalidArgument;
     ok = ok && wallet_signing_begin_dash("dash", &empty, 0, 0) ==
@@ -2615,7 +2921,8 @@ namespace hexwallet
                    WalletSigningError::InvalidArgument;
     static bool worker_job_ran = false;
     worker_job_ran = false;
-    if (wallet_worker_ready() || wallet_worker_start())
+    const bool already_started = wallet_worker_ready();
+    if (already_started || wallet_worker_start())
     {
       const bool queued = wallet_worker_begin(
           [](void *context)
@@ -2623,9 +2930,12 @@ namespace hexwallet
           &worker_job_ran);
       if (queued)
       {
-        ok = ok && wallet_worker_wait(HEXWALLET_WORKER_JOB_TIMEOUT_MS) && worker_job_ran;
+        ok = wallet_worker_wait(HEXWALLET_WORKER_JOB_TIMEOUT_MS) && worker_job_ran && ok;
       }
+      ok = ok && queued;
+      if (!already_started) wallet_worker_stop();
     }
+    else ok = false;
     active.kind = WalletSigningKind::Bitcoin;
     active.approved = true;
     ok = ok && wallet_signing_sign(nullptr, &output_size) == WalletSigningError::InvalidArgument && !wallet_signing_active();

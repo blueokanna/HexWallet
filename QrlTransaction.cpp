@@ -322,13 +322,10 @@ namespace hexwallet
       return ChainError::BufferTooSmall;
 
     QrlOtsAccount account(*port, public_key.get());
-    // A blank journal is bound to index zero here and nowhere else. The custody
-    // layer must treat a blank journal on a funded account as a recovery event:
-    // this path cannot tell a fresh account from a wiped one.
-    QrlOtsError ots = account.bind();
+    // A signing request cannot establish that this XMSS key has never been used.
+    // Only account creation may initialise a journal for a proven fresh key.
     uint32_t leaf = 0;
-    if (ots == QrlOtsError::Ok)
-      ots = account.next_index(&leaf);
+    const QrlOtsError ots = account.next_index(&leaf);
     if (ots != QrlOtsError::Ok)
       return map_ots_error(ots);
 
@@ -543,6 +540,8 @@ namespace hexwallet
                                         &owned_review, owned_digest) == ChainError::Ok;
         uint8_t signed_data[kQrlMaxSignedSize];
         TestPort port;
+        QrlOtsAccount test_account(port, public_key);
+        account_ok = account_ok && qrl_ots_initialise(test_account, test_account.tag()) == QrlOtsError::Ok;
         size_t signed_size = sizeof(signed_data);
         const ChainError first = qrl_sign_payload(
             &port, signed_payload, payload_size, account_text, seed, 0, signed_data,
@@ -576,6 +575,12 @@ namespace hexwallet
                        ChainError::StorageUnavailable &&
                    refused_size == 0;
           port.fail = false;
+          // Loss of both durable copies after signing must leave the store empty.
+          port.written[0] = port.written[1] = false;
+          refused_size = sizeof(second);
+          passed = passed && qrl_sign_payload(&port, signed_payload, payload_size, account_text,
+              seed, 0, second, &refused_size) == ChainError::StorageUnavailable && refused_size == 0 &&
+              !port.written[0] && !port.written[1];
         }
         secure_zero(signed_data, sizeof(signed_data));
         secure_zero(signed_payload, sizeof(signed_payload));

@@ -14,6 +14,8 @@
 *.ilk
 __pycache__/
 build/
+tools/node_modules/
+tests/host/protocol-oracles/node_modules/
 tests/host/obj/
 tests/host/obj-clang/
 tests/host/obj-device/

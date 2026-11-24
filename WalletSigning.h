@@ -6,6 +6,8 @@
 
 #include "BitcoinTransaction.h"
 #include "CryptoNoteSigning.h"
+#include "RyoPhonePayment.h"
+#include "ZanoPhonePayment.h"
 #include "EvmTransaction.h"
 #include "CosmosTransaction.h"
 #include "DashTransaction.h"
@@ -40,6 +42,10 @@ enum class WalletSigningKind : uint8_t {
   Xrp,
   Chain,
   Dash,
+  Ryo,
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+  Zano,
+#endif
 };
 
 enum class WalletSigningError : uint8_t {
@@ -55,6 +61,7 @@ enum class WalletSigningError : uint8_t {
   Expired,
   AlreadyConsumed,
   BufferTooSmall,
+  WrongNetwork,
 };
 
 constexpr uint32_t kWalletSigningReviewMs = 2UL * 60UL * 1000UL;
@@ -66,6 +73,7 @@ constexpr size_t kWalletSigningReviewIdSize = 8;
 struct WalletSigningSession {
   WalletSigningKind kind;
   uint8_t review_id[kWalletSigningReviewIdSize];
+  uint8_t display_digest[kReviewSealSize];
   uint32_t created_ms;
   uint32_t expires_ms;
   bool approved;
@@ -78,6 +86,10 @@ struct WalletSigningSession {
     ZcashSigningRequest zcash;
     DashTransaction dash;
     CryptoNoteSigningState cryptonote;
+    RyoPhonePayment ryo;
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+    ZanoPhonePayment zano;
+#endif
     SolanaTransaction solana;
     TronTransaction tron;
     CosmosTransaction cosmos;
@@ -102,7 +114,13 @@ WalletSigningError wallet_signing_begin_evm(const char *network_id,
                                             const uint8_t *transaction,
                                             size_t transaction_size,
                                             uint32_t now_ms);
-WalletSigningError wallet_signing_begin_kaspa(const uint8_t *payload,
+EvmTransactionError wallet_worker_review_evm(const uint8_t *transaction, size_t size,
+    const NetworkProfile &network, const HdPrivateNode &master, uint32_t index, EvmSigningRequest *out);
+EvmTransactionError wallet_worker_sign_evm(const EvmSigningRequest &request,
+    const HdPrivateNode &master, uint8_t *out, size_t *size);
+WalletError wallet_derive_for_display(const HdPrivateNode &master, const uint8_t *seed,
+    const NetworkProfile &network, uint32_t account, uint32_t change, uint32_t index, DerivedAddress *out);
+WalletSigningError wallet_signing_begin_kaspa(const char *network_id, const uint8_t *payload,
                                               size_t payload_size,
                                               uint32_t now_ms);
 WalletSigningError wallet_signing_begin_zcash(const char *network_id,
@@ -172,6 +190,9 @@ WalletSigningError wallet_signing_sign(uint8_t *out, size_t *in_out_size);
 bool wallet_signing_tick(uint32_t now_ms);
 void wallet_signing_clear();
 bool wallet_signing_active();
+// Serial confirmation uses the same transaction fields as the phone review.
+bool wallet_show_code_review(const ChainTransaction &request, const char *approval_code);
+bool wallet_show_code_review(const ZcashSigningRequest &request, const char *approval_code);
 const WalletSigningSession *wallet_signing_session();
 WalletSigningKind wallet_signing_kind();
 const char *wallet_signing_error_text(WalletSigningError error);

@@ -66,7 +66,7 @@ SIGN is the compiled catalog's code capability, not node acceptance, complete pr
 | bitcoincandy | CDY / Bitcoin Candy | — | UNMAPPED | No explicit native-network mapping |
 | bitcoincash | BCH / Bitcoin Cash | bch | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
 | bitcoincash2 | BCH2 / BitcoinCash II | — | UNMAPPED | No explicit native-network mapping |
-| bitcoingold | BTG / Bitcoin Gold | btg | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
+| bitcoingold | BTG / Bitcoin Gold | btg | SIGN | P2PKH PSBT signing with Bitcoin Gold ForkID 79 |
 | bitcoinii | BC2 / Bitcoin II | — | UNMAPPED | No explicit native-network mapping |
 | bitcoinknots | BTCB2 / Bitcoin Knots | — | UNMAPPED | No explicit native-network mapping |
 | bitcoinknotscash | XBTC / Bitcoin Knots Cash | — | UNMAPPED | No explicit native-network mapping |
@@ -520,7 +520,7 @@ SIGN is the compiled catalog's code capability, not node acceptance, complete pr
 | yenten | YTN / Yenten | — | UNMAPPED | No explicit native-network mapping |
 | yerbas | YERB / Yerbas | — | UNMAPPED | No explicit native-network mapping |
 | zano | ZANO / Zano | zano | ADDRESS | CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled |
-| zcash | ZEC / Zcash | zec | SIGN | Zcash v4 transparent ZIP-243 review and signing (NU6.2) |
+| zcash | ZEC / Zcash | zec | SIGN | NU7 v5 transparent ZIP-244 review and signing |
 | zclassic | ZCL / Zclassic | — | UNMAPPED | No explicit native-network mapping |
 | zenprotocol | ZP / Zen Protocol | — | UNMAPPED | No explicit native-network mapping |
 | zentcash | ZTC / Zent Cash | — | UNMAPPED | No explicit native-network mapping |

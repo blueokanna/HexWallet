@@ -23,10 +23,25 @@ int main(int argc, char **argv) {
     return catalog && mining && tokens && custom && admission ? 0 : 1;
   }
   const bool detailed = argc == 2 && strcmp(argv[1], "--native") == 0;
-  if (argc > 1 && !detailed) return 2;
+  const bool psbt = argc == 2 && strcmp(argv[1], "--psbt") == 0;
+  if (argc > 1 && !detailed && !psbt) return 2;
   for (size_t index = 0; index < hexwallet::wallet_catalog_count(); ++index) {
     hexwallet::WalletCatalogEntry entry;
     if (!hexwallet::wallet_catalog_at_sorted(index, &entry)) continue;
+    if (psbt) {
+      const auto *policy = hexwallet::find_network_signing_policy(entry.id);
+      if (!policy || !hexwallet::wallet_catalog_has(entry, hexwallet::WalletCapabilitySigning)) continue;
+      const char *family = nullptr;
+      switch (policy->family) {
+        case hexwallet::SighashFamily::Bitcoin: family = "bitcoin"; break;
+        case hexwallet::SighashFamily::ForkId: family = "forkid"; break;
+        case hexwallet::SighashFamily::GroestlLegacy: family = "groestl"; break;
+        default: continue;
+      }
+      printf("%s|%lu|%lu|%s|%lu\n", entry.id, static_cast<unsigned long>(entry.network->bip_purpose),
+             static_cast<unsigned long>(entry.network->derivation_coin_type), family, static_cast<unsigned long>(policy->fork_id));
+      continue;
+    }
     unsigned caps = 0;
     if (hexwallet::wallet_catalog_has(entry, hexwallet::WalletCapabilityAddress)) caps |= 1;
     if (hexwallet::wallet_catalog_has(entry, hexwallet::WalletCapabilityTransactionReview)) caps |= 2;

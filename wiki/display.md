@@ -136,7 +136,7 @@ OMNIVISION OV9281 是 **MIPI CSI-2** 器件（1280×800 全局快门，8/10-bit 
 ## 伙伴：DeepSeek-chan（`Mascot`）
 
 主屏使用用户参考图衍生的长发、女仆头饰、鲸尾角色，短名为 `DS-CHAN`。
-原图、生成说明、可复现转换脚本与像素预览见 [素材说明](../assets/mascot/README.md)。
+原图、生成说明、可复现转换脚本与像素预览见 [素材说明](https://github.com/blueokanna/HexWallet/blob/main/assets/mascot/README.md)。
 八张 64×64 单色位图共 4 KiB，通过独立的 `MaidSprite` 模块提供给 LVGL canvas。
 128 像素宽的屏幕采用纵向排列，角色不受全局字号缩放影响，不会被裁成半张脸。
 

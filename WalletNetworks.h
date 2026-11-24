@@ -109,6 +109,7 @@ namespace hexwallet
   // Transaction signing policy.  Deliberately separate from NetworkProfile so an
   // address profile can never imply a signing capability: a network may be
   // signed only when it has an explicit row here.
+  constexpr uint32_t kBitcoinGoldForkId = 79; // BTCGPU v0.17.3, src/script/interpreter.h
   enum class SighashFamily : uint8_t
   {
     None = 0,    // no transaction signing
@@ -122,6 +123,7 @@ namespace hexwallet
     // SIGHASH_FORKID on this chain. Groestl-512 is used for the address
     // checksum and the block hash, NOT for the signature hash.
     GroestlLegacy,
+    ZcashZip244, // transparent v5 transaction signatures
   };
 
   // True for the families whose signature hash is the pre-BIP143 transaction

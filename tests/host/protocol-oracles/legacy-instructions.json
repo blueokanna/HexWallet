@@ -1,0 +1,117 @@
+{
+  "sources": {
+    "delegate": "@solana/web3.js@1.98.4 StakeProgram.delegate",
+    "deactivate": "@solana/web3.js@1.98.4 StakeProgram.deactivate",
+    "swap": "@solana/spl-token-swap@0.4.4 TokenSwap.swapInstruction"
+  },
+  "delegate": {
+    "programAddress": "Stake11111111111111111111111111111111111111",
+    "data": "02000000",
+    "accounts": [
+      {
+        "address": "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+        "role": 1
+      },
+      {
+        "address": "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu",
+        "role": 0
+      },
+      {
+        "address": "SysvarC1ock11111111111111111111111111111111",
+        "role": 0
+      },
+      {
+        "address": "SysvarStakeHistory1111111111111111111111111",
+        "role": 0
+      },
+      {
+        "address": "StakeConfig11111111111111111111111111111111",
+        "role": 0
+      },
+      {
+        "address": "DHMbxQoRFocMyhJXcUn88Rp2FwoXmxHXuaA32dYb3ATZ",
+        "role": 2
+      }
+    ]
+  },
+  "deactivate": {
+    "programAddress": "Stake11111111111111111111111111111111111111",
+    "data": "05000000",
+    "accounts": [
+      {
+        "address": "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+        "role": 1
+      },
+      {
+        "address": "SysvarC1ock11111111111111111111111111111111",
+        "role": 0
+      },
+      {
+        "address": "DHMbxQoRFocMyhJXcUn88Rp2FwoXmxHXuaA32dYb3ATZ",
+        "role": 2
+      }
+    ]
+  },
+  "swap": {
+    "programAddress": "SwapsVeCiPHMUAtzQWZw7RjsKjgCjhwU55QGu4U1Szw",
+    "data": "018096980000000000e703000000000000",
+    "accounts": [
+      {
+        "address": "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+        "role": 0
+      },
+      {
+        "address": "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu",
+        "role": 0
+      },
+      {
+        "address": "DHMbxQoRFocMyhJXcUn88Rp2FwoXmxHXuaA32dYb3ATZ",
+        "role": 2
+      },
+      {
+        "address": "GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse",
+        "role": 1
+      },
+      {
+        "address": "EdmxWPmx2WH6WgFfTdu9xfkYf3k1g5wD1zccTVySEEh1",
+        "role": 1
+      },
+      {
+        "address": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+        "role": 1
+      },
+      {
+        "address": "AKkzLhjhyFtM9j7WAhbaqYpFe49cXeJBg2kzLRC2PnNa",
+        "role": 1
+      },
+      {
+        "address": "GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB",
+        "role": 1
+      },
+      {
+        "address": "2KW2XRd9kwqet15Aha2oK3tYvd3nWbTFH1MBiRAv1BE1",
+        "role": 1
+      },
+      {
+        "address": "J2xccRtuG43drESLYznHhLhQkLTdfepcKYbiQ9BsJVaf",
+        "role": 0
+      },
+      {
+        "address": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+        "role": 0
+      },
+      {
+        "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "role": 0
+      },
+      {
+        "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "role": 0
+      },
+      {
+        "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "role": 0
+      }
+    ]
+  }
+}

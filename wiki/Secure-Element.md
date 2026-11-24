@@ -52,6 +52,10 @@ the point: "the cable is connected" is not "the owner is present".
 | Handle-based wallet | Derivation, review and signing must stop taking a plaintext seed or private key |
 | Device-unique keys | Host key protection and device provisioning are not in the tree |
 
+Plug & Trust Mini `04.07.01` exposes `Se05x_API_ECDSASign` and `Se05x_API_EdDSASign` with a key object ID. `Se05x_API_HKDF_Extended` can target a derived key ID. A review of the pinned host library found no documented command for BIP32 scalar addition, CryptoNote signed key images, Ryo MLSAG or Zano CLSAG_GGX. Both private-chain payment tests used software-held test keys. The I²C port passed its host test and compiled against the Board 7 SDK. Acceptance still requires a supported applet operation and a real card for each requested signing path. [Pinned APDU declarations](https://github.com/NXP/plug-and-trust/blob/7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2/hostlib/hostLib/se05x_03_xx_xx/se05x_APDU_apis.h)
+
+`se051_pin_derive_bip39_seed()` encodes the extended PBKDF2 object form available in SDK configurations for applets ≥ 7.2. It selects HMAC-SHA512, 2,048 iterations and 64 output bytes. The command references distinct objects for the normalized mnemonic, salt and derived HMAC key. A fake transport checks the command and status-only reply. Provisioning the objects through an authenticated session, target-card support and using the result for non-exportable BIP32 remain unverified. BIP38 uses a separate scrypt and AES path. [Pinned SDK implementation](https://github.com/NXP/plug-and-trust/blob/7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2/hostlib/hostLib/se05x_03_xx_xx/se05x_04_xx_APDU_impl.h#L1874-L1960)
+
 ## Deliberate refusals
 
 - A curve that was created but not fully parameterised is reported as **Absent**, not as usable. A

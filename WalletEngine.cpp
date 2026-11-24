@@ -326,11 +326,14 @@ namespace hexwallet
                                 uint32_t address_index, QrlProgressHook progress,
                                 void *context, DerivedAddress *out)
   {
-    if (out == nullptr || account >= kHardenedOffset || change >= kHardenedOffset || address_index >= kHardenedOffset || network.bip_purpose >= kHardenedOffset || network.derivation_coin_type >= kHardenedOffset)
+    if (out == nullptr) return WalletError::InvalidArgument;
+    clear_derived_address(out);
+    if (account >= kHardenedOffset || change >= kHardenedOffset || address_index >= kHardenedOffset ||
+        network.bip_purpose >= kHardenedOffset || network.derivation_coin_type >= kHardenedOffset ||
+        (network.derivation == DerivationStyle::SolanaBip44 && change != 0))
     {
       return WalletError::InvalidArgument;
     }
-    memset(out, 0, sizeof(*out));
     out->network = &network;
     if (!build_path_text(network, account, change, address_index, out->path,
                          sizeof(out->path)))
@@ -410,7 +413,7 @@ namespace hexwallet
     }
 
     // Ed25519 networks use SLIP-0010 from the seed.
-    if (network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Aeternity || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::StellarStrKey || network.encoding == AddressEncoding::NearImplicit || network.encoding == AddressEncoding::Ss58Ed25519 || network.encoding == AddressEncoding::TonAddress || network.encoding == AddressEncoding::SuiEd25519 || network.encoding == AddressEncoding::HederaKeyAlias || network.encoding == AddressEncoding::IcpPrincipal || network.encoding == AddressEncoding::SiaV2 || network.encoding == AddressEncoding::Nem || network.encoding == AddressEncoding::IcpLedgerAccount)
+    if (network.encoding == AddressEncoding::AptosEd25519 || network.encoding == AddressEncoding::Ed25519Base58 || network.encoding == AddressEncoding::Aeternity || network.encoding == AddressEncoding::Ed25519Base32 || network.encoding == AddressEncoding::Ed25519Blake2bBase58 || network.encoding == AddressEncoding::Ed25519Blake2b224Bech32 || network.encoding == AddressEncoding::StellarStrKey || network.encoding == AddressEncoding::NearImplicit || network.encoding == AddressEncoding::Ss58Ed25519 || network.encoding == AddressEncoding::TonAddress || network.encoding == AddressEncoding::SuiEd25519 || network.encoding == AddressEncoding::HederaKeyAlias || network.encoding == AddressEncoding::IcpPrincipal || network.encoding == AddressEncoding::SiaV2 || network.encoding == AddressEncoding::Nem || network.encoding == AddressEncoding::IcpLedgerAccount)
     {
       if (seed == nullptr)
       {
@@ -437,10 +440,15 @@ namespace hexwallet
     if (network.encoding == AddressEncoding::CryptoNote)
     {
       const CryptoNoteAddressProfile profile = cryptonote_profile_for(network);
-      result = cryptonote_address_from_seed_at(profile, child.private_key, account,
-                                               address_index, out->address,
-                                               sizeof(out->address),
-                                               out->private_key);
+      // A profile without subaddresses still has independent BIP32 children.
+      // Its account and index have already been applied by hd_private_derive_path.
+      if (profile.subaddress_prefix == 0)
+        result = cryptonote_address_from_seed(profile, child.private_key, out->address,
+                                              sizeof(out->address), out->private_key);
+      else
+        result = cryptonote_address_from_seed_at(profile, child.private_key, account,
+                                                 address_index, out->address,
+                                                 sizeof(out->address), out->private_key);
     }
     else if (network.encoding == AddressEncoding::Evm || network.encoding == AddressEncoding::QuaiCyprus1 ||
              network.encoding == AddressEncoding::Tron ||
@@ -623,6 +631,17 @@ namespace hexwallet
       secure_zero(address, sizeof(*address));
   }
 
+  static WalletError cryptonote_keys_at_path(const HdPrivateNode &master, const char *path,
+                                             uint8_t *spend, uint8_t *view)
+  {
+    HdPrivateNode child;
+    WalletError result = hd_private_derive_path(&master, path, &child);
+    if (result == WalletError::Ok)
+      result = cryptonote_private_keys_from_seed(child.private_key, spend, view);
+    secure_zero(&child, sizeof(child));
+    return result;
+  }
+
   WalletError derive_cryptonote_keys(const HdPrivateNode &master,
                                      const NetworkProfile &network,
                                      uint32_t account, uint32_t change,
@@ -641,14 +660,7 @@ namespace hexwallet
     {
       return WalletError::InvalidArgument;
     }
-    HdPrivateNode child;
-    WalletError result = hd_private_derive_path(&master, path, &child);
-    if (result == WalletError::Ok)
-    {
-      result = cryptonote_private_keys_from_seed(child.private_key,
-                                                 out_spend_key, out_view_key);
-    }
-    secure_zero(&child, sizeof(child));
+    WalletError result = cryptonote_keys_at_path(master, path, out_spend_key, out_view_key);
     secure_zero(path, sizeof(path));
     if (result != WalletError::Ok)
     {
@@ -675,42 +687,31 @@ namespace hexwallet
                                            uint32_t subaddress_minor,
                                            DerivedAddress *out)
   {
-    if (out == nullptr || network.encoding != AddressEncoding::CryptoNote)
-    {
+    if (out == nullptr) return WalletError::InvalidArgument;
+    clear_derived_address(out);
+    if (network.encoding != AddressEncoding::CryptoNote || account >= kHardenedOffset ||
+        change >= kHardenedOffset || address_index >= kHardenedOffset ||
+        network.bip_purpose >= kHardenedOffset || network.derivation_coin_type >= kHardenedOffset)
       return WalletError::InvalidArgument;
-    }
-    WalletError result =
-        derive_address(master, nullptr, network, account, change, address_index, out);
-    if (result != WalletError::Ok || (subaddress_major == 0 && subaddress_minor == 0))
-    {
-      return result;
-    }
-
+    const CryptoNoteAddressProfile profile = cryptonote_profile_for(network);
+    const bool standard = subaddress_major == 0 && subaddress_minor == 0;
+    if (!standard && profile.subaddress_prefix == 0)
+      return WalletError::InvalidArgument;
+    char path[kDerivationPathTextSize];
+    if (!build_path_text(network, account, change, address_index, path, sizeof(path)))
+      return WalletError::BufferTooSmall;
     uint8_t spend_key[kCryptoNoteKeySize];
     uint8_t view_key[kCryptoNoteKeySize];
-    result = derive_cryptonote_keys(master, network, account, change,
-                                    address_index, spend_key, view_key);
-    if (result != WalletError::Ok)
-    {
-      clear_derived_address(out);
-      return result;
-    }
-
-    const CryptoNoteAddressProfile profile = cryptonote_profile_for(network);
-    if (profile.subaddress_prefix == 0)
-    {
-      clear_derived_address(out);
-      return WalletError::InvalidArgument;
-    }
+    WalletError result = cryptonote_keys_at_path(master, path, spend_key, view_key);
     uint8_t sub_secret[kCryptoNoteKeySize];
     uint8_t sub_public[kCryptoNoteKeySize];
     uint8_t sub_view[kCryptoNoteKeySize];
-    result = cryptonote_subaddress_keys(spend_key, view_key, subaddress_major,
-                                        subaddress_minor, sub_secret, sub_public,
-                                        sub_view);
+    if (result == WalletError::Ok)
+      result = cryptonote_subaddress_keys(spend_key, view_key, subaddress_major,
+                                          subaddress_minor, sub_secret, sub_public, sub_view);
     if (result == WalletError::Ok)
     {
-      result = cryptonote_address_from_public_keys(profile.subaddress_prefix,
+      result = cryptonote_address_from_public_keys(standard ? profile.standard_address_prefix : profile.subaddress_prefix,
                                                    sub_public, sub_view,
                                                    out->address,
                                                    sizeof(out->address));
@@ -720,18 +721,21 @@ namespace hexwallet
       // Signing re-derives this scalar per input, but reporting it keeps the
       // "address and key agree" invariant visible to callers.
       memcpy(out->private_key, sub_secret, kCryptoNoteKeySize);
-      const size_t used = strlen(out->path);
-      if (used < sizeof(out->path))
+      out->network = &network;
+      const size_t used = strlen(path);
+      memcpy(out->path, path, used + 1);
+      // A nonzero legacy index can select a subaddress implicitly. Distinguish
+      // an explicit standard address on that same child in the displayed path.
+      if (!standard || (profile.subaddress_prefix && (account || address_index)))
       {
-        snprintf(out->path + used, sizeof(out->path) - used, "+%lu/%lu",
-                 static_cast<unsigned long>(subaddress_major),
-                 static_cast<unsigned long>(subaddress_minor));
+        const size_t available = sizeof(out->path) - used;
+        const int n = snprintf(out->path + used, available, "+%lu/%lu",
+                               static_cast<unsigned long>(subaddress_major),
+                               static_cast<unsigned long>(subaddress_minor));
+        if (n < 0 || static_cast<size_t>(n) >= available) result = WalletError::BufferTooSmall;
       }
     }
-    else
-    {
-      clear_derived_address(out);
-    }
+    if (result != WalletError::Ok) clear_derived_address(out);
     secure_zero(spend_key, sizeof(spend_key));
     secure_zero(view_key, sizeof(view_key));
     secure_zero(sub_secret, sizeof(sub_secret));

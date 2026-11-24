@@ -2,6 +2,8 @@
 
 [English](Boards-and-Display) · [首页](Home-zh)
 
+当前界面见[中英文逐格图库](UI-Gallery)：44 个状态、88 张独立 296 × 128 PNG，均由主机上的 LVGL 9.5.0 和实际墨水屏帧转换生成。可用 [HTML 图库](ui-gallery/index.html) 筛选语言，点击每格查看原图。修复、测试、镜像摘要和未完成范围见[本轮界面审计](UI-Audit-2026-11-24-zh)。旧 `P4-Review.png` 保留为历史画面。
+
 引脚表在 `WalletBoardPins.h`，一块板一段，每个值都来自原理图或厂家引脚图。不根据板名猜引脚。
 
 ## 板型
@@ -14,10 +16,14 @@
 | 4 | T-Deck Max | 240×320 GDEQ031T10 / UC8253，SPI | 未验证 | 只有 BOOT 键可用；触摸挂在 XL9555 后面，没有接线 |
 | 5 | T-Echo Lite Kit | 176×192，SPI | TCA8418 键盘 | 只有 nRF52840 引脚表，本仓库没有 nRF52 编译目标 |
 | 6 | 无屏 | 无 | BOOT：S3 GPIO0，P4 GPIO35 | 串口 CLI；默认拒绝缺少可信本地显示的签名批准 |
-| 7 | HexWallet P4 rev A | 128×296 SSD1680，SPI | 4 个按键（SW1–SW4） | SE051C2HQ1 走 I²C，PN7161 走共享 SPI |
+| 7 | HexWallet P4 rev A | 296×128 横屏，SSD1680 SPI | 确定、上一个、下一个、返回 | SE051C2HQ1 走 I²C，PN7161 走共享 SPI |
 
 7 号板取自 EasyEDA 工程 `c26102103`；每个引脚注释都写明封装焊盘，上电前可以从 P4 数据手册重新推出 GPIO 列。
-面板和 PN7161 共用 SCK/MOSI/MISO，各自独立片选。
+面板和 PN7161 共用 GPIO7（SCK）、GPIO8（MOSI）和 GPIO9（MISO）。面板只写，片选为 GPIO16；PN7161 的片选为 GPIO13，时钟为 1 MHz。两个驱动从同一入口初始化 SPI。墨水屏任务在等待 BUSY 时释放总线，NFC 可在显示传输之间通信。黑白屏按字节对齐转换 LVGL 重绘区域，跳过相同帧，连续 30 秒没有画面变化后休眠。
+
+这份 rev A 主 PCB 的 USB1 D−、D+ 分别经 `DM`、`DP` 网络接到 U1 封装焊盘 24、25，U1 符号将它们映射为 GPIO22、GPIO23。P4 默认 USB Serial/JTAG 使用 GPIO24、GPIO25，高速 PHY 使用封装焊盘 49、50。这两对焊盘均未接到 USB1。要从这个接口使用原生 USB 枚举或 ROM USB 下载，需要改板接线。[乐鑫 USB PHY 引脚表](https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_overview/usb_phy.html)
+
+默认 ROM UART0 则在板上引出。标为 `TX` 的焊盘连接 U1 焊盘 69（GPIO37），`RX` 连接 U1 焊盘 70（GPIO38）。复位开关的器件位号为 `SW1`（EN），下载绑带开关为 `SW2`（GPIO35）。四个界面按键的器件位号是 `按键1` 至 `按键4`，它们使用的网络名恰好也叫 `SW1` 至 `SW4`。串口适配器需使用 3.3 V 逻辑、共地和收发交叉接线。[乐鑫 P4 硬件设计指南](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32p4/schematic-checklist-esp32p4.html)
 
 ## 墨水屏档位
 
@@ -42,7 +48,7 @@
 
 批准屏障只在刷新成功之后释放。BUSY 超时或 SPI 失败永远不算"交易已经显示"。
 
-P4 审阅正文使用 SW1/SW2 向上、向下滚动，包括高度超过一屏的长字段。SW3 进入决定区，默认选中“拒绝”；SW1/SW2 切换操作，单独按下 SW3 执行，SW4 拒绝。跨页面按住的按键、多键组合以及未释放就换键，都不能产生新的批准。
+按屏幕在左、面向四个应用键的方向，PCB 背面从左至右为按键4（GPIO30，确定）、按键3（GPIO31，上一个）、按键2（GPIO32，下一个）、按键1（GPIO33，返回）。上一个和下一个可以滚动超过一屏的字段。确定先选中拒绝，切换到批准后需另行按住确定 750 毫秒，返回可直接拒绝。独立的 BOOT 键（GPIO35）负责运行时长按切换 USB 数据。实体装配方向有待实板核验。
 
 板级初始化负责 `lv_init()`、LVGL 9 的毫秒时钟回调、显示设备和按键组。电子纸使用原生 RGB565 持久帧缓冲，彩屏使用 `RGB565_SWAPPED` 传输格式；禁用全局字节交换，避免局部刷新修改帧缓冲中未重绘的像素。初始化失败时释放已分配资源，重试不累积缓冲区。
 

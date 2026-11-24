@@ -199,12 +199,12 @@ namespace hexwallet
                        const uint8_t *policy, size_t policy_size,
                        Se051PinSession *session)
   {
-    if (send == nullptr || session == nullptr || policy == nullptr ||
-        policy_size == 0)
+    if (session == nullptr) return false;
+    se051_pin_reset(session);
+    if (send == nullptr || policy == nullptr || policy_size == 0)
     {
       return false;
     }
-    se051_pin_reset(session);
     uint8_t command[kSe051MaxApdu];
     size_t command_size = 0;
     if (!se051_apdu_session_create(auth_object_id, command, sizeof(command),
@@ -219,7 +219,6 @@ namespace hexwallet
       secure_zero(command, sizeof(command));
       return false;
     }
-    session->state = Se051PinState::SessionCreated;
     if (!se051_apdu_session_policy(policy, policy_size, command, sizeof(command),
                                    &command_size) ||
         !run_command(send, context, command, command_size, &session->last_status))
@@ -233,19 +232,22 @@ namespace hexwallet
       return false;
     }
     secure_zero(command, sizeof(command));
+    session->state = Se051PinState::SessionCreated;
     return true;
   }
 
   bool se051_pin_verify(Se051Sender send, void *context, const uint8_t *user_id,
                         size_t user_id_size, Se051PinSession *session)
   {
-    if (send == nullptr || session == nullptr)
+    if (session == nullptr)
       return false;
     if (session->state != Se051PinState::SessionCreated &&
         session->state != Se051PinState::Authenticated)
     {
       return false;
     }
+    session->state = Se051PinState::SessionCreated;
+    if (send == nullptr) return false;
     uint8_t command[kSe051MaxApdu];
     size_t command_size = 0;
     if (!se051_apdu_verify_session_user_id(user_id, user_id_size, command,

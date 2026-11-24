@@ -100,6 +100,61 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tests/host/build_chain_native.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check out Zcash reference serialization and signature digests
+        uses: actions/checkout@v4
+        with:
+          repository: zcash/zcash-test-vectors
+          ref: 78321beacb0e0477e33cd002b56585a107c2708c
+          path: HexWallet/build/ledger-tests/zcash-reference
+
+      - name: Compare phone transaction review and broadcast with independent SDKs
+        shell: pwsh
+        run: |
+          npm ci --prefix tools --ignore-scripts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm ci --prefix tests/host/protocol-oracles --ignore-scripts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:NODE_PATH = (Resolve-Path tests/host/protocol-oracles/node_modules).Path
+          node tests/host/protocol_sdk_check.cjs build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tests/host/privacy/address_interop.cjs build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tests/host/privacy/zano_ledger_check.cjs build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake -S tests/host/chain -B build/zano-phone-host -A x64 -DTEST_ZANO_PHONE_PAYMENTS=ON
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build/zano-phone-host --config Release --target chain_probe --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tests/host/privacy/zano_phone_check.cjs build/zano-phone-host/Release/chain_probe.exe build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $nodes = @(
+            @{ network='btc'; url='https://bitcoincore.org/bin/bitcoin-core-32.1/bitcoin-32.1-win64.zip'; hash='b5b0c2cd007d69e96880907c79f9ae19ae82728f95fc8c923b4a07dab795b45d'; binary='bitcoin-32.1/bin/bitcoind.exe' },
+            @{ network='doge'; url='https://github.com/dogecoin/dogecoin/releases/download/v1.14.9/dogecoin-1.14.9-win64.zip'; hash='45864cedc210e6d573c7efd5f6694a440147d9773c4a8851a99882a2727ad804'; binary='dogecoin-1.14.9/bin/dogecoind.exe' },
+            @{ network='btg'; url='https://github.com/BTCGPU/BTCGPU/releases/download/v0.17.3/bitcoin-gold-0.17.3-win64.zip'; hash='f50a9a50cfcdb3471a50ff3cff7229f13e83a647221dae0cf5666a3e7fda05a0'; binary='bitcoin-gold-0.17.3/bin/bgoldd.exe' }
+          )
+          foreach ($node in $nodes) {
+            $dir = "build/$($node.network)-core"
+            Invoke-WebRequest $node.url -OutFile "$dir.zip"
+            if ((Get-FileHash "$dir.zip").Hash -ne $node.hash) { throw "Archive digest mismatch for $($node.network)" }
+            Expand-Archive "$dir.zip" $dir
+            python tests/host/utxo_ledger_check.py build/chain-native/Release/chain_probe.exe $node.network "$dir/$($node.binary)"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          $env:PYTHONPATH = (Resolve-Path build/ledger-tests/zcash-reference).Path
+          python tests/host/zcash_protocol_check.py build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip install aptos-sdk==0.11.0
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tests/host/aptos_protocol_check.py build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip install --only-binary=:all: solders==0.29.0
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tests/host/solana_ledger_check.py build/chain-native/Release/chain_probe.exe --deployed-swaps
+
       - name: Check out Beam reference sources
         uses: actions/checkout@v4
         with:
@@ -265,6 +320,8 @@ jobs:
 
   firmware-build:
     name: Device build (${{ matrix.profile }})
+    env:
+      DEVICE_CORE_VERSION: ${{ matrix.board == 7 && '3.3.13' || '3.3.10' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -294,13 +351,13 @@ jobs:
           curl -fsSL --retry 5 --retry-all-errors https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s "$ARDUINO_CLI_VERSION"
           "$HOME/bin/arduino-cli" version
 
-      - name: Install ESP32 core ${{ env.ESP32_CORE_VERSION }}
+      - name: Install ESP32 core ${{ env.DEVICE_CORE_VERSION }}
         run: |
           export PATH="$HOME/bin:$PATH"
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32@${{ env.ESP32_CORE_VERSION }}
+          arduino-cli core install esp32:esp32@${{ env.DEVICE_CORE_VERSION }}
 
       - name: Install LVGL 9 (required by the sketch)
         run: |
@@ -314,6 +371,7 @@ jobs:
         run: pwsh -File tools/prepare_lvgl.ps1 -Directory "$HOME/Arduino/libraries/lvgl"
 
       - name: Compile and link selected board profile
+        if: matrix.board != 7
         run: |
           export PATH="$HOME/bin:$PATH"
           # LV_CONF_INCLUDE_SIMPLE makes lvgl pick up lv_conf.h from the
@@ -324,3 +382,13 @@ jobs:
             --build-property "compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=${{ matrix.board }}" \
             --build-property "compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=${{ matrix.board }}" \
             .
+      - name: Compile the production PCB layout for P4 v3
+        if: matrix.board == 7
+        shell: pwsh
+        run: ./tools/build_p4_board.ps1 -ArduinoCli "$HOME/bin/arduino-cli"
+      - name: Check Board 7 data retention and interrupted file writes
+        if: matrix.board == 7
+        run: |
+          python -m venv build/littlefs-test
+          build/littlefs-test/bin/python -m pip install --only-binary=:all: littlefs-python==0.19.0
+          build/littlefs-test/bin/python tests/host/p4_storage_check.py build/hexwallet-p4-v3

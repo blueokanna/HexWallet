@@ -10,6 +10,7 @@
 #include "SensitiveValue.h"
 #include "WalletCustody.h"
 #include "WalletCustomTokens.h"
+#include "WalletSession.h"
 
 using namespace hexwallet;
 
@@ -122,6 +123,14 @@ namespace
     EvmSigningRequest reviewed{};
     CHECK(evm_parse_for_review(wire, wire_size, *network, master.get(), 0, &reviewed) == EvmTransactionError::Ok);
     CHECK(reviewed.has_call && !reviewed.opaque && strcmp(reviewed.amount_text, "1") == 0);
+    uint8_t *abi = nullptr;
+    for (size_t i = 0; i + sizeof(calldata) <= wire_size; ++i)
+      if (!memcmp(wire + i, calldata, sizeof(calldata))) abi = wire + i;
+    CHECK(abi);
+    abi[4] = 1; // Nonzero high address byte on a registered ERC-20 transfer.
+    EvmSigningRequest invalid{};
+    CHECK(evm_parse_for_review(wire, wire_size, *network, master.get(), 0, &invalid) != EvmTransactionError::Ok);
+    abi[4] = 0;
     uint8_t signed_wire[kEvmMaxSignedTransactionSize + 1];
     size_t signed_size = sizeof(signed_wire) - 1;
     CHECK(evm_sign_transaction(reviewed, master.get(), signed_wire, &signed_size) == EvmTransactionError::Ok);
@@ -160,7 +169,27 @@ namespace
 
 bool run_security_regressions()
 {
+  const char *words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  uint8_t actual[kSeedSize], expected[kSeedSize];
+  size_t expected_size;
+  CHECK(chain_parse_hex("c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553"
+                        "1f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04",
+                        expected, sizeof(expected), &expected_size) && expected_size == sizeof(expected));
+  CHECK(wallet_session_import(words, "TREZOR") == WalletError::Ok);
+  CHECK(wallet_session_import(words, nullptr) == WalletError::InvalidArgument);
+  CHECK(wallet_session_load_seed(actual) == WalletError::Ok && !memcmp(actual, expected, sizeof(expected)));
+  wallet_session_clear();
+  CHECK(wallet_session_load_seed(actual) != WalletError::Ok);
+  for (auto byte : actual) CHECK(!byte);
   CHECK(codecs() && evm_registry_binding() && run_aeternity_self_tests());
+  const auto *sol = find_network_profile("sol");
+  HdPrivateNode master{};
+  uint8_t seed[kSeedSize] = {};
+  DerivedAddress address;
+  memset(&address, 0xa5, sizeof(address));
+  CHECK(sol && derive_address(master, seed, *sol, 0, 1, 0, &address) == WalletError::InvalidArgument);
+  const auto *bytes = reinterpret_cast<const uint8_t *>(&address);
+  for (size_t i = 0; i < sizeof(address); ++i) CHECK(bytes[i] == 0);
   const auto *stark = find_network_profile("stark");
   CHECK(stark != nullptr);
   const auto custody = plan_key_custody(*stark, se051c2hq1_profile());

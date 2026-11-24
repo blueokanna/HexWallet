@@ -2,8 +2,7 @@
 
 [中文](Phone-Link-zh) · [Home](Home)
 
-The phone starts every operation. The wallet reviews, authorizes and signs; it never builds a
-transaction and never talks to a node. Protocol version is **2**; a v1 peer and a v2 device must
+The phone starts every link operation and submits signed transactions to the node. The wallet parses or reconstructs the transaction according to its adapter, shows it for local approval and signs. Protocol version is **2**. A v1 peer and a v2 device must
 fail, because the ephemeral exchange changed from Ed25519-group ECDH to Curve25519 and would derive
 different keys from the same transcript.
 
@@ -99,7 +98,7 @@ A lost SELECT or a missing fragment discards the partial frame.
 ## Application layer
 
 ```text
-Request.payload  = request_id(4) | opcode(1) | arguments…
+Request.payload  = opcode(1) | request_id(4) | arguments…
 Response.payload = request_id(4) | status(1) | data…
 ```
 
@@ -112,6 +111,22 @@ Response.payload = request_id(4) | status(1) | data…
 | 0x05 | BEGIN_SIGN | coin, kind, address_index, payload | review_id(8) |
 | 0x06 | RESULT | review_id(8) | `pending`, or status + length + signed transaction |
 | 0x07 | CANCEL | review_id(8) | rejected |
+
+For Ryo, omitting the optional subaddress pair preserves the legacy mapping from account and index. Explicit `(0, 0)` selects the standard address of that BIP32 child. When those choices give different addresses, the explicit standard address has `+0/0` in its displayed path. Zano uses a standard address at every BIP32 child and rejects a nonzero subaddress pair. An address request fails if its complete path exceeds the display field.
+
+The release catalog exposes addresses for both currencies. The `TEST_RYO_PHONE_PAYMENTS=ON` host probe also accepts `BEGIN_SIGN` for `ryo`, kind `5`, with one external long standard address and optional change. Its 16-byte application header leaves 16,368 bytes for the payment. The payload contains version `1`, a little-endian 16-bit unsigned transaction length, the transaction bytes, a 32-byte transaction secret, the recipient's public spend and view keys, and one funding record per input. Each record contains the 16-bit real ring position, 64-bit funding output number, funding public key, 64-byte ECDH data, pseudo-output mask and the ring members. Each member consists of a 64-bit absolute output index, destination key and commitment.
+
+The phone verifies input ownership and signed key images. The device checks the recipient, change, fee and full payment ID before enabling local approval. The fee cap is 0.1 RYO. `RESULT` returns the signed bytes once. The phone verifies them against the reviewed transaction and checks the mainnet genesis hash before broadcast. The private-fork test submits separately and a stock view-only wallet scans both receipts. [Receipts](validation)
+
+The Zano host probe accepts an ordinary v4 native payment with one or two inputs, 16 members per ring and two outputs. It checks input ownership, reconstructs both outputs and displays the recipient, amount, change, fixed 0.01 ZANO fee and eight-byte payment ID. An exact spend splits the amount between two outputs to the same recipient. After one-time approval the phone verifies each CLSAG_GGX and all payment proofs. Its broadcast helper checks the mainnet genesis. The test harness submits to a private testnet. [Receipts](validation)
+
+For Ethereum and Solana, encode `BEGIN_SIGN` arguments as `coin_length(1) | coin ASCII | kind(1) | address_index(4 LE) | payload_length(2 LE) | payload`. Ethereum (`eth`, kind 2) takes the unsigned EIP-155, EIP-2930 or EIP-1559 serialization. Mainnet Lido `submit(address)` and Uniswap V2 Router02 `swapExactETHForTokens` have dedicated reviews. Solana (`sol`, kind 6) takes serialized legacy or v0 **message** bytes with one signer and static accounts. The stake operations delegate or deactivate an existing stake account.
+
+Classic swaps use the 10-account layout deployed by SPL Token Swap on devnet (`SwapsVeCiPHMUAtzQWZw7RjsKjgCjhwU55QGu4U1Szw`) and Orca V2 on mainnet (`9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP`). Supply the pool, pool authority, payer as transfer authority, source token account, input vault, output vault, destination token account, pool mint, fee account and classic SPL Token program, in that order. The review shows the account addresses, input and minimum output in raw units. The phone must resolve the two vaults on the intended cluster to identify the input and output mints. The 14-account Token-2022 layout and an extra host fee account are unsupported. [SPL deployments](https://spl.solana.com/token-swap) · [Orca SDK](https://github.com/orca-so/typescript-sdk)
+
+Keep the authenticated link connected during review. Send `RESULT` with the eight-byte review ID until the device returns a terminal status. On success, send the returned signed transaction bytes to `eth_sendRawTransaction` or base64-encode them for Solana `sendTransaction` with `encoding: "base64"`. The phone checks the intended network, nonce or recent blockhash, and tracks the RPC receipt or signature status. Losing the NFC field clears the approval.
+
+Install the adapter's pinned dependencies with `npm ci --prefix tools --ignore-scripts`. `tools/phone_broadcast.cjs` accepts `unsigned` from `BEGIN_SIGN`, `signed` from `RESULT`, and an `rpc(method, params)` callback that returns the JSON-RPC result. `broadcastEthereum` also takes the verified `sender` and `chainId`. `broadcastSolana` takes the verified `payer` and the intended cluster's `genesisHash`. Each returns the node-accepted transaction ID. Use `eth_getTransactionReceipt` or `getSignatureStatuses` to track inclusion and execution.
 
 `kind` selects the parser: 1 UTXO/PSBT, 2 EVM, 3 Kaspa, 4 Zcash, 5 CryptoNote (XMR), 6 Solana,
 7 TRON, 8 Cosmos, 9 Stellar, 10 Algorand, 11 NEAR, 12 Tezos, 13 XRP, 14 Chain (VET, ICX, TON, DCR,
@@ -126,6 +141,12 @@ the lock is a quorum decision it cannot verify, and produces the same signed byt
 Address derivation and signing need an unlocked wallet session. Unlock happens over the USB CLI
 (`auth begin`, `auth unlock`); the link itself never carries a PIN. `ADDRESS` never returns a private
 key, and adapters whose key generation is too expensive for the link are refused there.
+
+## Ethereum DApp connection
+
+The phone creates one `createEthereumConnection({origin, approveOrigin, exchange, rpc, index})` from `tools/ethereum_provider.cjs` per authorized top-level HTTPS document. Obtain the origin from the wallet browser and check the calling frame on every bridge request. Keep the transport, permission prompt and RPC in the wallet. Expose the returned `provider` to the page through EIP-1193 and `announceEthereumProvider` through EIP-6963. `eth_requestAccounts` requests the device address at `m/44'/60'/0'/0/index`. `eth_sendTransaction` separately requires local review. This adapter is bound to Ethereum chain ID 1.
+
+On navigation, field loss or lock, call `disconnect()`, close the paired session and remove the announcement listener. The bearer must honor the abort signal passed to `exchange`. A signed result is checked against the approved bytes, account and RPC chain before submission. The Chromium tests drive the firmware application callback with a public test seed. Physical phone pairing and SE051 signing await hardware acceptance. [Test evidence](validation)
 
 ## What the link protects
 

@@ -4,6 +4,7 @@
 #include "CryptoExtended.h"
 #include "CryptoPrimitives.h"
 #include "SolanaDerivation.h"
+#include "base58.h"
 #include "WalletConfig.h"
 #include "WalletCustomTokens.h"
 
@@ -29,6 +30,14 @@ namespace hexwallet
     {
       return crypto_constant_time_equal(a, b, 32);
     }
+    // Stake11111111111111111111111111111111111111 and its canonical sysvars.
+    constexpr uint8_t kStakeProgram[32] = {6,161,216,23,145,55,84,42,152,52,55,189,254,42,122,178,85,127,83,92,138,120,114,43,104,164,157,192,0,0,0,0};
+    constexpr uint8_t kClock[32] = {6,167,213,23,24,199,116,201,40,86,99,152,105,29,94,182,139,94,184,163,155,75,109,92,115,85,91,33,0,0,0,0};
+    constexpr uint8_t kStakeHistory[32] = {6,167,213,23,25,53,132,208,254,237,155,179,67,29,19,32,107,229,68,40,27,87,184,86,108,197,55,95,244,0,0,0};
+    constexpr uint8_t kStakeConfig[32] = {6,161,216,23,165,2,5,11,104,7,145,230,206,109,184,142,30,91,113,80,246,31,198,121,10,78,180,209,0,0,0,0};
+    // @solana/spl-token-swap 0.4.4 TOKEN_SWAP_PROGRAM_ID, classic SPL tokens.
+    constexpr uint8_t kSwapProgram[32] = {6,165,60,214,45,140,150,136,85,76,163,132,250,242,149,59,133,4,255,95,119,86,21,196,185,198,183,129,191,180,128,180};
+    constexpr uint8_t kOrcaV2[32] = {126,84,119,26,87,166,241,76,169,228,2,213,74,238,69,247,55,138,202,54,92,123,22,154,126,200,63,81,130,178,152,240};
     uint64_t little(const uint8_t *p, size_t n)
     {
       uint64_t v = 0;
@@ -141,6 +150,9 @@ namespace hexwallet
           if (indices[a] >= account_count)
             return SolanaError::Malformed;
         used[program] = true;
+        const auto key = [&](size_t role) { return accounts + 32 * indices[role]; };
+        // Each program operation gets its own review. Compute budget may precede it.
+        if (out->program.call != SolanaProgramCall::None) return SolanaError::Unsupported;
         if (equal(accounts + 32 * program, kSystemProgram))
         {
           if (data_size != 12 || little(data, 4) != 2 || index_count != 2 ||
@@ -187,9 +199,10 @@ namespace hexwallet
             if (previous.kind == SolanaTransferKind::Native)
               continue;
             const bool same_mint = equal(previous.mint, mint);
-            if ((same_mint && previous.decimals != data[9]) || (!same_mint &&
-                                                                (equal(previous.source, source) || equal(previous.recipient, source) ||
-                                                                 equal(previous.source, destination) || equal(previous.recipient, destination))))
+            const bool shared_account = equal(previous.source, source) || equal(previous.recipient, source) ||
+                                        equal(previous.source, destination) || equal(previous.recipient, destination);
+            if (same_mint ? previous.decimals != data[9] ||
+                            (previous.kind == SolanaTransferKind::SplToken2022) != token2022 : shared_account)
               return SolanaError::Malformed;
           }
           SolanaTransfer &transfer = out->transfers[out->transfer_count++];
@@ -213,6 +226,48 @@ namespace hexwallet
           for (size_t j = 0; j < index_count; ++j)
             used[indices[j]] = true;
         }
+        else if (equal(accounts + 32 * program, kStakeProgram))
+        {
+          if (out->transfer_count || data_size != 4) return SolanaError::Unsupported;
+          const uint32_t operation = static_cast<uint32_t>(little(data, 4));
+          const bool delegate = operation == 2;
+          if (!delegate && operation != 5) return SolanaError::Unsupported;
+          const bool legacy = index_count == (delegate ? 6 : 3);
+          if ((!legacy && index_count != (delegate ? 3 : 2)) || indices[0] == 0 ||
+              indices[0] >= writable || indices[index_count - 1] != 0)
+            return SolanaError::Unsupported;
+          if (legacy && (!equal(key(delegate ? 2 : 1), kClock) ||
+              (delegate && (!equal(key(3), kStakeHistory) || !equal(key(4), kStakeConfig)))))
+            return SolanaError::Unsupported;
+          for (size_t j = 1; j + 1 < index_count; ++j)
+          {
+            if (indices[j] < writable || indices[j] == program || used[indices[j]]) return SolanaError::Unsupported;
+            used[indices[j]] = true;
+          }
+          used[indices[0]] = true;
+          out->program.call = delegate ? SolanaProgramCall::Delegate : SolanaProgramCall::Deactivate;
+          memcpy(out->program.keys[0], key(0), 32);
+          if (delegate) memcpy(out->program.keys[1], key(1), 32);
+        }
+        else if (equal(accounts + 32 * program, kSwapProgram) || equal(accounts + 32 * program, kOrcaV2))
+        {
+          if (out->transfer_count || data_size != 17 || data[0] != 1 || index_count != 10 ||
+              indices[2] != 0 || !equal(key(9), kTokenProgram) || indices[9] < writable)
+            return SolanaError::Unsupported;
+          used[indices[9]] = true;
+          for (size_t j = 0; j < 9; ++j)
+          {
+            const bool must_write = j >= 2 && j <= 8;
+            if ((indices[j] < writable) != must_write || (j != 2 && used[indices[j]]))
+              return SolanaError::Unsupported;
+            memcpy(out->program.keys[j], key(j), 32);
+            used[indices[j]] = true;
+          }
+          out->program.call = equal(accounts + 32 * program, kOrcaV2) ? SolanaProgramCall::OrcaSwap : SolanaProgramCall::Swap;
+          out->program.input_units = little(data + 1, 8);
+          out->program.minimum_output_units = little(data + 9, 8);
+          if (!out->program.input_units) return SolanaError::Malformed;
+        }
         else if (equal(accounts + 32 * program, kComputeBudget))
         {
           if (out->transfer_count || index_count != 0 || data_size == 0)
@@ -235,7 +290,7 @@ namespace hexwallet
         else
           return SolanaError::Unsupported;
       }
-      if (out->transfer_count == 0 || have_limit != have_price)
+      if ((!out->transfer_count && out->program.call == SolanaProgramCall::None) || (have_price && !have_limit))
         return SolanaError::Unsupported;
       for (size_t i = 0; i < account_count; ++i)
         if (!used[i])
@@ -265,6 +320,7 @@ namespace hexwallet
         return SolanaError::Malformed;
       memcpy(out->payer, payer, 32);
       memcpy(out->blockhash, blockhash, 32);
+      if (!crypto_sha256(message, size, out->message_hash)) return SolanaError::CryptoFailure;
       memcpy(out->message, message, size);
       out->message_size = static_cast<uint16_t>(size);
       return SolanaError::Ok;
@@ -311,6 +367,42 @@ namespace hexwallet
     return true;
   }
 
+  bool solana_program_details(const SolanaTransaction &review, char *out, size_t size)
+  {
+    if (!out || !size) return false;
+    out[0] = '\0';
+    size_t used = 0;
+    const auto append_key = [&](const char *label, const uint8_t *key)
+    {
+      char address[45];
+      size_t length = sizeof(address);
+      if (!b58enc(address, &length, key, 32)) return false;
+      const int n = snprintf(out + used, size - used, "%s\n%s\n", label, address);
+      if (n < 0 || size_t(n) >= size - used) return false;
+      used += size_t(n);
+      return true;
+    };
+    const auto &program = review.program;
+    if (program.call == SolanaProgramCall::Swap || program.call == SolanaProgramCall::OrcaSwap)
+    {
+      const int n = snprintf(out, size, "INPUT (raw units) %llu\nMINIMUM OUTPUT (raw units) %llu\n%s",
+          static_cast<unsigned long long>(program.input_units), static_cast<unsigned long long>(program.minimum_output_units),
+          program.minimum_output_units ? "" : "NO MINIMUM OUTPUT PROTECTION\n");
+      if (n < 0 || size_t(n) >= size) return false;
+      used = size_t(n);
+      const char *labels[] = {"POOL", "POOL AUTHORITY", "TRANSFER AUTHORITY / PAYER", "FROM TOKEN ACCOUNT",
+          "POOL INPUT ACCOUNT", "POOL OUTPUT ACCOUNT", "TO TOKEN ACCOUNT", "POOL MINT", "POOL FEE ACCOUNT"};
+      for (size_t i = 0; i < 9; ++i)
+        if (!append_key(labels[i], program.keys[i])) return false;
+      return append_key("SWAP PROGRAM", program.call == SolanaProgramCall::OrcaSwap ? kOrcaV2 : kSwapProgram) &&
+             append_key("TOKEN PROGRAM", kTokenProgram);
+    }
+    if (program.call != SolanaProgramCall::Delegate && program.call != SolanaProgramCall::Deactivate) return false;
+    return append_key("STAKE ACCOUNT", program.keys[0]) &&
+           (program.call != SolanaProgramCall::Delegate || append_key("VALIDATOR VOTE ACCOUNT", program.keys[1])) &&
+           append_key("STAKER / PAYER", review.payer) && append_key("STAKE PROGRAM", kStakeProgram);
+  }
+
   bool solana_derive_key(const uint8_t seed[kSeedSize], uint32_t index, uint8_t child[32])
   {
     if (child == nullptr)
@@ -342,10 +434,12 @@ namespace hexwallet
   SolanaError solana_sign_transaction(const SolanaTransaction &reviewed,
                                       const uint8_t seed[kSeedSize], uint8_t *out, size_t *in_out_size)
   {
-    if (out == nullptr || in_out_size == nullptr)
+    if (in_out_size == nullptr)
       return SolanaError::InvalidArgument;
     const size_t capacity = *in_out_size;
     *in_out_size = 0;
+    if (out == nullptr) return SolanaError::InvalidArgument;
+    secure_zero(out, capacity);
     uint8_t child[32] = {}, payer[32] = {}, signature[64] = {};
     SolanaTransaction checked = {};
     SolanaError error = SolanaError::CryptoFailure;
@@ -360,7 +454,10 @@ namespace hexwallet
             checked.estimated_fee != reviewed.estimated_fee ||
             checked.priority_fee != reviewed.priority_fee ||
             checked.version0 != reviewed.version0 || !equal(checked.payer, reviewed.payer) ||
-            !equal(checked.blockhash, reviewed.blockhash))
+            !equal(checked.blockhash, reviewed.blockhash) || !equal(checked.message_hash, reviewed.message_hash) ||
+            checked.program.call != reviewed.program.call || checked.program.input_units != reviewed.program.input_units ||
+            checked.program.minimum_output_units != reviewed.program.minimum_output_units ||
+            memcmp(checked.program.keys, reviewed.program.keys, sizeof(checked.program.keys)) != 0)
           error = SolanaError::Malformed;
         for (size_t i = 0; i < checked.transfer_count && error == SolanaError::Ok; ++i)
           if (!equal(checked.transfers[i].recipient, reviewed.transfers[i].recipient) ||
@@ -368,7 +465,10 @@ namespace hexwallet
               !equal(checked.transfers[i].mint, reviewed.transfers[i].mint) ||
               checked.transfers[i].amount != reviewed.transfers[i].amount ||
               checked.transfers[i].decimals != reviewed.transfers[i].decimals ||
-              checked.transfers[i].kind != reviewed.transfers[i].kind)
+              checked.transfers[i].kind != reviewed.transfers[i].kind ||
+              checked.transfers[i].token_user_declared != reviewed.transfers[i].token_user_declared ||
+              memcmp(checked.transfers[i].token_symbol, reviewed.transfers[i].token_symbol,
+                     sizeof(checked.transfers[i].token_symbol)) != 0)
             error = SolanaError::Malformed;
         if (error == SolanaError::Ok && capacity < checked.message_size + 65u)
           error = SolanaError::BufferTooSmall;
@@ -501,7 +601,12 @@ namespace hexwallet
     passed = passed &&
              solana_sign_transaction(tampered, seed, signed_message,
                                      &signed_size) == SolanaError::Malformed &&
-             signed_size == 0;
+              signed_size == 0;
+    for (uint8_t byte : signed_message) passed = passed && byte == 0;
+    // The registration was removed after the declared review.
+    signed_size = sizeof(signed_message);
+    passed = passed && solana_sign_transaction(declared, seed, signed_message, &signed_size) ==
+                           SolanaError::Malformed && signed_size == 0;
 
     // Every truncated prefix is refused, and a message for another wallet is
     // rejected before any field is displayed.
@@ -521,6 +626,7 @@ namespace hexwallet
                  SolanaError::WrongWallet;
 
     secure_zero(seed, sizeof(seed));
+    secure_zero(child, sizeof(child));
     secure_zero(&reviewed, sizeof(reviewed));
     secure_zero(&declared, sizeof(declared));
     secure_zero(signed_message, sizeof(signed_message));

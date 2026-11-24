@@ -224,8 +224,11 @@
 
 #define HEXWALLET_EPD_WIDTH 128
 #define HEXWALLET_EPD_HEIGHT 296
-#define HEXWALLET_EPD_PIN_SCK 7    // pad 7
-#define HEXWALLET_EPD_PIN_MOSI 8   // pad 8
+#define HEXWALLET_SHARED_SPI_PIN_SCK 7
+#define HEXWALLET_SHARED_SPI_PIN_MOSI 8
+#define HEXWALLET_SHARED_SPI_PIN_MISO 9
+#define HEXWALLET_EPD_PIN_SCK HEXWALLET_SHARED_SPI_PIN_SCK
+#define HEXWALLET_EPD_PIN_MOSI HEXWALLET_SHARED_SPI_PIN_MOSI
 #define HEXWALLET_EPD_PIN_MISO -1  // panel is write-only on the shared bus
 #define HEXWALLET_EPD_PIN_CS 16    // pad 17
 #define HEXWALLET_EPD_PIN_DC 19    // pad 20
@@ -235,12 +238,6 @@
 // frame upload under 5 ms without pushing the panel's setup times.
 #define HEXWALLET_EPD_SPI_FREQ 8000000U
 
-// SCK/MOSI/MISO/CS are shared between the panel and the PN7161, so the bus is
-// initialised once here with the MISO line the panel itself never reads.
-#define HEXWALLET_SHARED_SPI_PIN_SCK 7
-#define HEXWALLET_SHARED_SPI_PIN_MOSI 8
-#define HEXWALLET_SHARED_SPI_PIN_MISO 9
-
 // NXP SE051C2HQ1 on its own I2C bus, plus a hardware reset line.
 #define HEXWALLET_SE051_I2C_SDA 10    // pad 11
 #define HEXWALLET_SE051_I2C_SCL 11    // pad 12
@@ -249,18 +246,19 @@
 
 // PN7161 NFC front end in SPI mode; NSS is its own chip select.
 #define HEXWALLET_NFC_PN7161 1
-#define HEXWALLET_NFC_PIN_SCK 7    // pad 7
-#define HEXWALLET_NFC_PIN_MOSI 8   // pad 8
-#define HEXWALLET_NFC_PIN_MISO 9   // pad 10
+#define HEXWALLET_NFC_PIN_SCK HEXWALLET_SHARED_SPI_PIN_SCK
+#define HEXWALLET_NFC_PIN_MOSI HEXWALLET_SHARED_SPI_PIN_MOSI
+#define HEXWALLET_NFC_PIN_MISO HEXWALLET_SHARED_SPI_PIN_MISO
 #define HEXWALLET_NFC_PIN_CS 13    // pad 14
 #define HEXWALLET_NFC_PIN_IRQ 14   // pad 15
 #define HEXWALLET_NFC_PIN_VEN 15   // pad 16
+#define HEXWALLET_NFC_PIN_DWL_REQ 34 // U1 pad 65, U3 pad 2; low for normal NFC firmware
 
 #define HEXWALLET_PIN_BUTTON_1 33  // pad 64, SW1
 #define HEXWALLET_PIN_BUTTON_2 32  // pad 63, SW2
 #define HEXWALLET_PIN_BUTTON_3 31  // pad 61, SW3
 #define HEXWALLET_PIN_BUTTON_4 30  // pad 60, SW4
-#define HEXWALLET_PIN_USER_BUTTON HEXWALLET_PIN_BUTTON_1
+#define HEXWALLET_PIN_USER_BUTTON 35  // BOOT (switch designator SW2), independent of the four application keys
 
 // R11/R12 on the BAT_ADC net are the same device id, i.e. an equal divider, so
 // the shared 1:2 scaling in read_battery_mv() is correct for this board.

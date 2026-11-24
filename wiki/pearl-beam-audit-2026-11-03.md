@@ -18,7 +18,7 @@
 
 修复的共性问题是原 PSBT 校验将所有网络的 coin type 固定为 `0'`。这会拒绝其他链的正常派生路径，并让错误路径与网络标签混用。现在解析输入、校验找零和最终签名使用同一网络参数，摘要计算的独立测试接口不受此策略限制。
 
-验证程序见 [pearl_audit](../tests/host/pearl_audit/README.md)。预期地址、摘要和完整交易来自官方 Go 实现；固件使用自己的 C++/Mbed TLS 实现比对。P2MR、XMSS、脚本树、多签没有通过本次测试获得准入。官方 XMSS 接口是有状态签名，不能因为现有 QRL 模块也叫 XMSS 就直接复用参数、状态或密钥。
+验证程序见 [pearl_audit](https://github.com/blueokanna/HexWallet/blob/main/tests/host/pearl_audit/README.md)。预期地址、摘要和完整交易来自官方 Go 实现；固件使用自己的 C++/Mbed TLS 实现比对。P2MR、XMSS、脚本树、多签没有通过本次测试获得准入。官方 XMSS 接口是有状态签名，不能因为现有 QRL 模块也叫 XMSS 就直接复用参数、状态或密钥。
 
 ## BEAM
 

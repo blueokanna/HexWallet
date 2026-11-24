@@ -88,9 +88,9 @@ bool custom_token_deserialize(const uint8_t *blob, size_t size,
                               CustomTokenRecord *records, size_t capacity,
                               size_t *count);
 
-// One blob, written whole. `load` returns false when nothing has been stored or
-// when the blob does not verify; the caller then starts from an empty table
-// rather than guessing. `save` must be durable before it returns true.
+// One blob, written whole. An empty device store loads successfully with count
+// zero. A failed read or invalid blob makes binding fail and clears the RAM
+// table. `save` must be durable before it returns true.
 struct CustomTokenStore {
   void *context;
   bool (*load)(void *, CustomTokenRecord *records, size_t capacity, size_t *count);
@@ -110,8 +110,8 @@ enum class CustomTokenError : uint8_t {
 // Installs the persistence backend and loads the table. Without a store the
 // table lives in RAM only, which is what the host self-tests use.
 bool custom_tokens_bind_store(const CustomTokenStore &store);
-// Device backend: one NVS blob under the "hxctok" namespace. Returns false when
-// nothing was stored yet, which the caller treats as an empty table.
+// Board 7 uses LittleFS and reads the legacy hxctok/table blob until the
+// first file commit. Other boards persist the registry directly in NVS.
 bool custom_tokens_nvs_begin();
 
 size_t custom_token_count();

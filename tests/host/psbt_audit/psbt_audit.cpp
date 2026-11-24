@@ -43,7 +43,10 @@ struct Options
   bool bad_output_key = false, duplicate_amount = false, duplicate_input = false;
   bool mix_versions = false, explicit_v0 = false, trailing = false, script_key_data = false, zero_height = false;
   int flags_size = 0, flags = 0, psbt_version = 2;
-  uint32_t height = 0, sequence = 0xfffffffdU;
+  uint32_t height = 0, time = 0, sequence = 0xfffffffdU;
+  bool omit_sequence = false;
+  bool second_input = false;
+  uint32_t second_sequence = 0xffffffffU;
 };
 static Bytes fixture(const Options &o)
 {
@@ -81,7 +84,7 @@ static Bytes fixture(const Options &o)
   {
     field(b, {251}, le(o.psbt_version, 4));
     field(b, {2}, le(2, 4));
-    field(b, {4}, {uint8_t(o.duplicate_input ? 2 : 1)});
+    field(b, {4}, {uint8_t(o.duplicate_input || o.second_input ? 2 : 1)});
     field(b, {5}, {1});
     if (o.flags_size)
       field(b, {6}, le(o.flags, o.flags_size));
@@ -104,7 +107,7 @@ static Bytes fixture(const Options &o)
       field(b, {251}, le(0, 4));
   }
   b.push_back(0);
-  for (int i = 0; i < (o.duplicate_input ? 2 : 1); ++i)
+  for (int i = 0; i < (o.duplicate_input || o.second_input ? 2 : 1); ++i)
   {
     Bytes utxo = le(100000, 8);
     utxo.push_back(uint8_t(script.size()));
@@ -133,9 +136,10 @@ static Bytes fixture(const Options &o)
     if (o.v2)
     {
       field(b, {14}, txid);
-      field(b, {15}, le(0, 4));
-      field(b, {16}, le(o.sequence, 4));
-      if (o.height || o.zero_height)
+      field(b, {15}, le(o.second_input ? i : 0, 4));
+      if (!o.omit_sequence) field(b, {16}, le(i == 0 ? o.sequence : o.second_sequence, 4));
+      if (i == 0 && o.time) field(b, {17}, le(o.time, 4));
+      if (i == 0 && (o.height || o.zero_height))
         field(b, {18}, le(o.height, 4));
     }
     b.push_back(0);
@@ -143,7 +147,7 @@ static Bytes fixture(const Options &o)
   if (o.v2)
   {
     if (o.amount)
-      field(b, {3}, le(99000, 8));
+      field(b, {3}, le(o.second_input ? 199000 : 99000, 8));
     if (o.duplicate_amount)
       field(b, {3}, le(99000, 8));
     if (o.output_script)
@@ -463,6 +467,10 @@ int main()
   o = base;
   o.output_script = false;
   check("reject missing script", parse(o, &v2) == TransactionError::MissingField);
+  o.amount = false;
+  check("empty v2 output map", parse(o, &v2) == TransactionError::MissingField);
+  o.output_key = true;
+  check("v2 output derivation alone", parse(o, &v2) == TransactionError::MissingField);
   o = base;
   o.duplicate_amount = true;
   check("reject duplicate amount", parse(o, &v2) == TransactionError::DuplicateField);
@@ -483,6 +491,18 @@ int main()
   check("required height applied", parse(o, &v2) == TransactionError::Ok && v2.lock_time == 100);
   o.sequence = 0xffffffffU;
   check("reject ineffective required locktime", parse(o, &v2) != TransactionError::Ok);
+  o = base;
+  o.time = 500000001;
+  check("required time applied", parse(o, &v2) == TransactionError::Ok && v2.lock_time == o.time);
+  o.omit_sequence = true;
+  check("omitted sequence defaults to final for required time", parse(o, &v2) == TransactionError::Unsupported);
+  o.omit_sequence = false;
+  o.second_input = true;
+  o.sequence = 0xffffffffU;
+  check("required time ineffective with two final inputs", parse(o, &v2) == TransactionError::Unsupported);
+  o.second_sequence = 0xfffffffeU;
+  check("one nonfinal input activates transaction-wide required time",
+        parse(o, &v2) == TransactionError::Ok && v2.lock_time == o.time);
   o = base;
   o.zero_height = true;
   check("reject zero required height", parse(o, &v2) == TransactionError::NonCanonical);

@@ -161,8 +161,7 @@ namespace hexwallet
   bool se051_apdu_ecdh(uint32_t object_id, const uint8_t *peer_public,
                        size_t peer_public_size, uint8_t *out, size_t capacity,
                        size_t *out_size);
-  // The in-card HMAC the BIP32 derivation design needs: HMAC over `data` with
-  // the key living in the object. Nothing leaves the card.
+  // The HMAC key stays in the object. The response contains the MAC.
   bool se051_apdu_hmac(uint32_t object_id, uint8_t mac_operation,
                        const uint8_t *data, size_t data_size, uint8_t *out,
                        size_t capacity, size_t *out_size);
@@ -292,6 +291,14 @@ namespace hexwallet
   // True only for a session that the card has authenticated and that is not
   // locked. This is the condition the custody gate needs.
   bool se051_pin_authenticated(const Se051PinSession *session);
+
+  // Object form of the extended PBKDF2 command. The caller supplies the
+  // authenticated session transport, an HMAC object containing the NFKD
+  // mnemonic, a salt object containing "mnemonic" + NFKD passphrase, and a
+  // distinct HMAC destination allocated for the seed. Accepts status only.
+  bool se051_pin_derive_bip39_seed(Se051Sender send, void *context,
+                                   const Se051PinSession *session, uint32_t words_id,
+                                   uint32_t salt_id, uint32_t seed_id);
 
   // Runs one HMAC inside an authenticated session.
   bool se051_pin_hmac(Se051Sender send, void *context,

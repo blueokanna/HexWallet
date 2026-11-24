@@ -13,6 +13,8 @@ set(wallet_sources
   WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp
   Bls12381.cpp base58.cpp local_bech32.cpp local_segwit.cpp keccak256.cpp local_ripemd160.cpp
   Groestl512.cpp ThetaTransaction.cpp ChainCommon.cpp ChainTransaction.cpp
+  AeternityTransaction.cpp AlephiumTransaction.cpp Blake3.cpp QuaiTransaction.cpp
+  QuantusAccount.cpp QuantusTransaction.cpp
   VeChainTransaction.cpp IconTransaction.cpp PolkadotTransaction.cpp SuiTransaction.cpp
   FilecoinTransaction.cpp TonTransaction.cpp TonCell.cpp DecredTransaction.cpp
   CkbTransaction.cpp ZcashTransaction.cpp CardanoDerivation.cpp CardanoTransaction.cpp

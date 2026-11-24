@@ -2,11 +2,10 @@
 
 [English](Supported-Chains) · [首页](Home-zh)
 
-目录里有 215 个钱包条目，覆盖 247 个编译进来的网络配置。一个条目 = 一条派生路径 + 一套审查/签名策略。
-它不代表节点接受过交易。
+固件内置 246 个网络配置，钱包目录对外提供 214 个条目。逐链节点回执及 SDK 比对结果见[验证记录](validation)。
 
 能力位是字面意思：`address` 能派生并显示地址，`review` 能把载荷解析成可审查字段，`sign` 能产出签名，
-`token-account` 表示该网络有 token 登记表。只有四个条目没有 `sign`，也只有一个条目没有 `address`。
+`token-account` 表示该网络有代币登记表。RyoCurrency 和 Zano 仅开放收款地址。Hive 提供账户密钥签名，没有收款地址。
 
 ## UTXO 及同类
 
@@ -17,7 +16,7 @@
 | `btc44`                                                                          | BIP44                   | P2PKH、legacy sighash，legacy 输入需要 `non_witness_utxo`                                                                                             |
 | `btc86`                                                                          | BIP86                   | P2TR key-path、`SIGHASH_DEFAULT`/`ALL`、无脚本树                                                                                                      |
 | `prl`                                                                            | BIP86                   | Pearl 主网，只支持 Taproot key-path；不做 P2MR、XMSS 或脚本路径                                                                                       |
-| `zec`                                                                            | BIP44                   | v4 透明交易、ZIP-243、t1 P2PKH 与 t3 P2SH-P2PK、NU6.2                                                                                                 |
+| `zec` | BIP44 | NU7 v5 透明交易、ZIP-244、t1 P2PKH 与 t3 P2SH-P2PK |
 | `dash`                                                                           | BIP44                   | 专用适配器：type-0 普通支付、legacy 摘要、P2PKH/P2SH 输出；每个输入带资助交易，手续费是算出来的而不是主机给的；InstantSend 意图会显示，锁离线不可验证 |
 | `kas`                                                                            | BIP44                   | BIP340 Schnorr、v0 交易、`SIGHASH_ALL`、KIP-0009 mass                                                                                                 |
 | `ltc`、`ltc49`、`ltc84`、`doge`、`rvn`、`vtc*`、`btg*`、`dgb*`、`grs*`、`axe` 等 | 各自配置                | 核对过 sighash 家族的 UTXO 分叉：legacy、BIP143、`SIGHASH_FORKID`、Groestl-512                                                                        |
@@ -101,7 +100,7 @@ Bitcoin legacy 签名器绝不用来猜。
 
 Theta 是唯一有两条路径的网络：TFUEL 转账走 EVM 适配器，原生 `SendTx` 走 Theta 适配器，载荷格式决定走哪条。
 
-18 条网络上固定了 78 条 token 记录（`WalletTokens.cpp`）。用户可以在设备上自加 token；审查界面会标注
+19 个网络共内置 80 条代币记录（`WalletTokens.cpp`）。用户可在设备上登记自定义代币，审阅界面会标注
 "自加"，而且它们永远不改变被签名的字节。
 
 ## 原生适配器
@@ -119,7 +118,7 @@ Theta 是唯一有两条路径的网络：TFUEL 转账走 EVM 适配器，原生
 | `xlm`                                                  | SEP-0005、主网 XDR Payment/CreateAccount、发行资产与 memo 审查；最多 8 个操作                                                                                      |
 | `sol`                                                  | Legacy/v0、System Transfer、SPL 与 Token-2022 `TransferChecked`、精确 mint/账户审查；不做 ALT、不建 ATA                                                            |
 | `xrp`                                                  | 原生 Payment、规范 XRPL 二进制、SHA-512Half；不做发行货币、path、memo、部分支付、多签                                                                              |
-| `atom`、`osmo`、`tia`、`kava`、`terra`、`terraclassic` | 1–4 条 `MsgSend`、`SIGN_MODE_DIRECT`、可选 memo；不做 IBC、authz、wasm、amino 签名                                                                                 |
+| `atom`、`osmo`、`tia`、`kava`、`terra`、`terraclassic` | 1–4 条 direct `MsgSend`，可选 memo。`cosmoshub-4` 与 `osmosis-1` 另支持固定通道的原生 ICS-20、限额银行转账授权及撤销、单笔原生 legacy Amino `MsgSend`。[载荷](Chain-Payloads-zh#cosmos) |
 | `ada`                                                  | Conway body 审查与 Ed25519-BIP32 签名；body 不带输入金额/所有者，余额需要节点                                                                                      |
 | `algo`                                                 | 规范 MessagePack `pay`/`axfer`、genesis/手续费/轮次校验、ASA opt-in；仅主网                                                                                        |
 | `apt`                                                  | Aptos 转账载荷，Ed25519 认证密钥派生                                                                                                                               |
@@ -155,14 +154,14 @@ Theta 是唯一有两条路径的网络：TFUEL 转账走 EVM 适配器，原生
 
 | 链或协议 | 当前实现与缺口 |
 | --- | --- |
-| RyoCurrency | 已实现双行 MLSAG 签名/验签、旧版 Bulletproof 验证，以及 v2/v3、RingCT type-3 原生交易解析、交易 ID/签名摘要、承诺平衡和逐输入验签；独立向量覆盖 241 成员环和 16 输出。目录仍只开放长地址：发送交易构建、输入/输出归属及金额审查、uniform payment ID、设备确认和节点验收尚未接通，不能视作完整交易签名。 |
-| Zano | 已实现普通隐私输入的 CLSAG_GGX 签名/验签，正确处理资产生成元 X、承诺的 1/8 编码及三层密钥聚合，并通过固定上游验证器交叉验证。目录仍只开放标准地址：资产/范围/平衡证明、完整交易编解码与确认链路、GGXXG 质押及节点验收尚未完成。 |
+| RyoCurrency | 发布目录开放长地址。专用主机探针支持单个外部收款人和可选找零。手机侧构建 v3 付款，固件经一次性模拟按键批准后签名。官方 `ryod` 在隔离分叉确认单输入和双输入各一笔。实板和卡内托管仍待验收。[验证记录](validation) |
+| Zano | 手机逐字节重编码并验证两笔已有主网付款。专用主机探针审阅和签署了两笔新建的普通 v4 原生资产付款，每个输入的环有 16 个成员，两笔均在隔离测试链确认。发布目录开放标准地址，卡内签名及 GGXXG 质押待验收。[验证记录](validation) |
 | Monero | 已有受限的 RingCT type-6、CLSAG、Bulletproof+、子地址审查与签名；不代表所有交易形式均已适配。 |
 | Zcash | 已有透明交易签名；屏蔽交易、笔记同步与零知识证明流程未完成。 |
 | Beam / 其他 Mimblewimble 链 | Beam 有 CLI 单输入交互转账和范围证明；通用钱包准入、未花费输出发现与双实机节点验收未完成。Grin 等链没有钱包适配器。 |
 | Peercoin | 已有地址与专用 sighash 测试；尚未接通原生交易解析、设备审查、签名和广播流程。 |
 | TRON NFT / 批量调用 | 部分 NFT ABI 可以解析，但后续合约准入会拒绝；因此当前没有可用 NFT 签名。批量调用未开放。 |
-| Cosmos IBC / authz / amino | 当前为 direct 模式的 MsgSend；转移 IBC denom 不等于发起 IBC MsgTransfer。跨链超时、授权语义和 amino 签名未实现。 |
+| Cosmos IBC / authz / amino | Hub `transfer/channel-141` 与 Osmosis `transfer/channel-0` 的限时 ICS-20 已通过 CosmJS 对照和隔离双链中继、到账及确认。两链也已执行单笔原生 Amino 付款、带正额度与到期时间的 `SendAuthorization` 和对 `MsgSend` 的撤销。其他路由、任意授权、feegrant 和通用 Amino 仍待适配。[验证记录](validation) |
 | Dash 特殊交易 | 当前仅 type-0 支付；ProRegTx 等特殊交易未实现。 |
 | EVM 未解码调用 | 有原始 calldata、哈希与费用审查；原始字节展示不提供合约执行语义保证。 |
 | Lightning / Stacks | 未实现通道状态与撤销协议，也没有 STX 原生交易适配器。 |

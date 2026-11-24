@@ -11,7 +11,7 @@ powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 ```
 
 用 MSVC 配合"指定版本 ESP32 core 的 mbedTLS 头文件"编译固件源码，然后跑 `host_test.exe`。
-72 项具名检查各打一行，例如：
+每项检查单独输出结果。以下是部分检查名称。
 
 ```text
 crypto-primitives=pass      bip39=pass              bip32=pass
@@ -63,9 +63,9 @@ Monero/Zephyr 在签名前再次验证输入归属、输出派生、金额承诺
 
 XRP/Kaspa 的 `chain_probe signing-audit all` 使用真实密码库，覆盖 22/29 项审阅篡改、数组越界和短输出缓冲区。XRP 从保留的原始载荷重新构建完整审阅；Kaspa 重算费用、地址与质量，并用 256 位摘要绑定所有已审阅字段和派生路径。失败时签名输出清零。
 
-`kaspa_reference.py` 使用固定上游 schema 和 Google Protobuf 独立比较 4 组广播编码、72 个 sighash、交易 ID 与质量；另外独立验证真实固件生成的 Schnorr 签名。安装 `tests/host/reference-requirements.txt` 后运行；`build_chain_native.ps1` 和 CI 已接入。来源、校验和及边界见 [Kaspa 参考测试](../tests/fixtures/kaspa/README.md)。
+`kaspa_reference.py` 使用固定上游 schema 和 Google Protobuf 独立比较 4 组广播编码、72 个 sighash、交易 ID 与质量；另外独立验证真实固件生成的 Schnorr 签名。安装 `tests/host/reference-requirements.txt` 后运行；`build_chain_native.ps1` 和 CI 已接入。来源、校验和及边界见 [Kaspa 参考测试](https://github.com/blueokanna/HexWallet/blob/main/tests/fixtures/kaspa/README.md)。
 
-这些测试验证指定代码路径。它们没有完成 Ryo/Zano 签名适配，也不能替代 MCU 实机时延、断电恢复、节点接收与独立安全审计。新增复核会增加设备计算时间，发布前必须测量 worker 栈高水位和最坏执行时间。
+上述用例验证各自的代码路径。Ryo 和 Zano 的隔离节点付款回执列在下文。MCU 上的最坏执行时间、worker 栈高水位、实板断电恢复与独立安全审计仍待实测。
 
 ## 独立审计夹具
 
@@ -79,17 +79,21 @@ XRP/Kaspa 的 `chain_probe signing-audit all` 使用真实密码库，覆盖 22/
 | `tests/host/qrl_oracle_check.ps1` | qrllib 的 `xmss_Signmsg` 逐字节对比 |
 | `tests/host/qr_cross_check.cpp` | nayuki QR 参考实现 |
 
-## 全绿说明什么
+## 隐私付款与浏览器测试
 
-它说明代码与本仓库的向量、参照实现一致。它**不**说明：
+在仓库根目录执行 `python tests/host/privacy/payment_interop.py --probe <chain_probe.exe>`。116 项检查覆盖 Ryo v3 收款与找零的两种顺序、uniform payment ID、单输入及双输入签名，以及 Zano post-HF6 普通输出构造与扫描。Ryo 签名前核对输入归属、环索引、金额、范围证明和分叉手续费下限。金额守恒且手续费少一个原子单位的付款在审阅时被拒绝。Zano 收款端核对显式原生资产及隐藏资产的 ID、金额与承诺。增加 `--oracle <privacy_oracle.dll>` 可用固定上游 MLSAG 实现验证每个夹具输入。Release 与 ASan/UBSan 均已通过。
 
-- 节点会接受这笔交易；这棵树里没有任何测试会广播；
-- 设备能挡住物理攻击者；
-- 真实 SE051 会接受这些 APDU；
-- 你的板子上屏幕、触摸、NFC 前端、摄像头真的能用；
-- 这些字节序列没有侧信道泄漏。
+安装 `tests/host/protocol-oracles` 的锁定依赖后，`tests/host/privacy/address_interop.cjs` 可独立派生密钥、编码 CryptoNote Base58，核对手机 `ADDRESS` 返回值与屏幕回调。执行 `python tests/host/privacy/native_rpc_check.py --probe <chain_probe> --ryod <ryod> --ryo-validator <ryo-address-validator> --zanod <zanod>` 可复现官方发布程序的结果。脚本创建临时离线节点，检查 Ryo 创世状态提交失败且内存池为空。
 
-正因为这些缺口，[首页](Home-zh) 把项目定性为"未完成硬件验收"。
+使用 `TEST_RYO_PHONE_PAYMENTS=ON` 构建专用探针，再运行 `python tests/host/privacy/ryo_ledger_check.py --probe <专用探针> --oracle <privacy_oracle.dll> --ryod <ryod> --wallet-rpc <ryo-wallet-rpc>`。官方节点确认单输入和双输入付款。官方只读钱包用收款查看密钥独立恢复两笔金额与 32 字节 payment ID。`phone_payment_check.py` 还覆盖拒绝、取消、超时、离场、一次性批准、费率上限及 16,384 字节应用帧。[回执](validation)
+
+安装 `tools` 的锁定依赖后，离线运行 `node tests/host/privacy/zano_ledger_check.cjs <chain_probe>`。夹具保存两笔 Zano 主网交易的原始字节和全部 48 条环记录。测试核对节点前缀哈希、费用、逐字节重编码、固件 CLSAG_GGX 验签及手机端整笔证明验证，拒绝每个截断位置及费用、环、签名和证明的篡改。发布目录对两种币开放地址。
+
+以 `-DTEST_ZANO_PHONE_PAYMENTS=ON` 另建专用探针，运行 `node tests/host/privacy/zano_phone_check.cjs <专用探针> <默认探针>`，检查单输入及双输入付款的模拟批准和手机签后验证。`zano_private_ledger.py` 使用提前激活硬分叉的固定测试网节点，开采成熟输出，核对入池、入块和节点保存的交易字节。上游只读钱包用八字节 payment ID 独立检出两笔交易。完整命令见 `tests/host/privacy/README.md`。[回执](validation)
+
+`tests/host/ethereum_ledger_check.cjs <chain_probe> <anvil> [归档 RPC]` 将批准的交易提交至本地 Anvil 节点。用 `npm ci --prefix tools --ignore-scripts` 安装锁定依赖，并将 `tools/node_modules` 加入 `NODE_PATH`。浏览器测试另在测试目录安装 `playwright-core@1.55.0`，将其 `node_modules` 加入 `NODE_PATH`，并将 `HEXWALLET_BROWSER` 设为 Chromium 可执行文件。分叉测试固定 Ethereum 高度 20,000,000，核对 ETH 余额、Lido 份额、USDC 到账和 ERC-721 所有者。拒签、审阅中离场、签名后 RPC 换链均须产生零次广播。主机测试管道模拟设备按键和手机传输。
+
+逐链记录注明了哪些币种通过原生节点或 SDK 对照。实卡认证、侧信道、屏幕时序和手机 NFC 互通还需要硬件证据。[逐链回执](validation)
 
 ## 怎么加测试
 
@@ -104,7 +108,7 @@ XRP/Kaspa 的 `chain_probe signing-audit all` 使用真实密码库，覆盖 22/
 
 `bulletproof_interop.py` 验证 Ryo 的旧版 64 位 Bulletproof。13 组向量包含上游固定有效/无效证明、零金额、`2^64−1`，以及 1/2/3/4/5/8/9/16 输出形状。独立生成的证明同时通过固定上游 `bulletproof_VERIFY` 和固件验证器；两个验证方也都拒绝各组成项的篡改。
 
-传入 `--oracle` 时，脚本执行双向交叉验证：上游验证固件签名，固件验证独立生成的签名；额外重构测试密钥对应的真实 nonce，检查重复熵跨消息、跨环使用时没有 nonce 重用。上游库使用固定源码中的原始 `MLSAG_Ver` / `verify_CLSAG_GGX` 函数及上游 ref10、Keccak，不链接固件密码学代码。源码版本、校验和与复现命令见 [独立验证器说明](../tests/host/privacy/README.md)。
+传入 `--oracle` 时，脚本执行双向交叉验证：上游验证固件签名，固件验证独立生成的签名；额外重构测试密钥对应的真实 nonce，检查重复熵跨消息、跨环使用时没有 nonce 重用。上游库使用固定源码中的原始 `MLSAG_Ver` / `verify_CLSAG_GGX` 函数及上游 ref10、Keccak，不链接固件密码学代码。源码版本、校验和与复现命令见 [独立验证器说明](https://github.com/blueokanna/HexWallet/blob/main/tests/host/privacy/README.md)。
 
 这组测试证明的是签名内核的协议兼容性，不覆盖完整交易广播、设备上的侧信道或故障注入。Ryo/Zano 的交易签名准入仍保持关闭。
 

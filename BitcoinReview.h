@@ -27,7 +27,9 @@ inline bool bitcoin_prepare_review(const BitcoinSigningRequest &request,
     return false;
   const NetworkProfile *network = find_network_profile(request.chain.network_id);
   if (network == nullptr) return false;
-  const bool pearl = !strcmp(network->id, "prl");
+  const char *fee_unit = nullptr;
+  if (!strcmp(network->id, "prl")) fee_unit = "grain";
+  if (!strcmp(network->id, "doge")) fee_unit = "koinu";
   WalletUiTransactionReview review = {};
   review.network = network->id;
   review.output_count = request.output_count;
@@ -35,16 +37,16 @@ inline bool bitcoin_prepare_review(const BitcoinSigningRequest &request,
   review.fee_rate = request.fee / request.estimated_vbytes;
   for (size_t i = 0; i < request.output_count; ++i) {
     const BitcoinOutput &output = request.outputs[i];
-    if (pearl && !chain_format_units(output.value, 8, "PRL", text->amounts[i], sizeof(text->amounts[i])))
+    if (fee_unit && !chain_format_units(output.value, 8, network->symbol, text->amounts[i], sizeof(text->amounts[i])))
       return false;
-    review.outputs[i] = {output.value, pearl ? text->amounts[i] : nullptr,
-                        output.address, output.change ? "CHANGE" : (output.wallet_owned ? "WALLET" : "EXTERNAL")};
+    review.outputs[i] = {output.value, fee_unit ? text->amounts[i] : nullptr,
+                        output.address, output.change ? "CHANGE" : (output.wallet_owned ? "WALLET" : "EXTERNAL"), nullptr, true};
   }
-  if (pearl) {
+  if (fee_unit) {
     char fee[48];
-    if (!chain_format_units(request.fee, 8, "PRL", fee, sizeof(fee))) return false;
-    const int size = snprintf(text->fee, sizeof(text->fee), "%s | %llu grain/vB (floor)",
-                              fee, static_cast<unsigned long long>(review.fee_rate));
+    if (!chain_format_units(request.fee, 8, network->symbol, fee, sizeof(fee))) return false;
+    const int size = snprintf(text->fee, sizeof(text->fee), "%s | %llu %s/vB (floor)",
+                              fee, static_cast<unsigned long long>(review.fee_rate), fee_unit);
     if (size < 0 || static_cast<size_t>(size) >= sizeof(text->fee)) return false;
     review.fee_text = text->fee;
     review.fee_label = "FEE";

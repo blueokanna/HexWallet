@@ -1,14 +1,13 @@
 #include "ZcashTransaction.h"
 
-#include "RandomSource.h"
 #include <mbedtls/ecdsa.h>
-#include <mbedtls/md.h>
 #include <string.h>
 
 #include "Blake2b.h"
 #include "WalletAltAddresses.h"
 #include "WalletConfig.h"
 #include "WalletSecurity.h"
+#include "src/Secp256k1Sign.h"
 
 namespace hexwallet
 {
@@ -240,8 +239,8 @@ namespace hexwallet
              (script[1] == 0x02 || script[1] == 0x03);
     }
 
-    ZcashError parse_v4_transaction(const uint8_t *data, size_t size, TxView *view,
-                                    bool allow_script_sig)
+    ZcashError parse_transaction(const uint8_t *data, size_t size, TxView *view,
+                                 bool allow_script_sig, uint32_t v5_branch = 0)
     {
       if (data == nullptr || view == nullptr || size == 0)
       {
@@ -254,10 +253,17 @@ namespace hexwallet
       {
         return ZcashError::Truncated;
       }
-      if (view->version != kZcashV4Version ||
-          view->version_group_id != kZcashSaplingVersionGroupId)
+      if (view->version != (v5_branch ? kZcashV5Version : kZcashV4Version) ||
+          view->version_group_id != (v5_branch ? kZcashV5VersionGroupId : kZcashSaplingVersionGroupId))
       {
         return ZcashError::Unsupported;
+      }
+      if (v5_branch)
+      {
+        uint32_t branch;
+        if (!read_u32(&cursor, &branch) || !read_u32(&cursor, &view->lock_time) ||
+            !read_u32(&cursor, &view->expiry_height)) return ZcashError::Truncated;
+        if (branch != v5_branch || view->expiry_height >= 500000000UL) return ZcashError::Unsupported;
       }
       uint64_t input_count;
       ZcashError result = read_compact_size(&cursor, &input_count);
@@ -315,6 +321,19 @@ namespace hexwallet
           return ZcashError::Truncated;
         }
         output.script_size = static_cast<size_t>(script_size);
+      }
+      if (v5_branch)
+      {
+        // ZIP 225 orders the Sapling spend, Sapling output and Orchard action
+        // counts after vout. Any non-empty bundle is outside this signer.
+        for (unsigned i = 0; i < 3; ++i)
+        {
+          uint64_t count;
+          result = read_compact_size(&cursor, &count);
+          if (result != ZcashError::Ok) return result;
+          if (count) return ZcashError::Unsupported;
+        }
+        return cursor.position == size ? ZcashError::Ok : ZcashError::NonCanonical;
       }
       if (!read_u32(&cursor, &view->lock_time) ||
           !read_u32(&cursor, &view->expiry_height))
@@ -384,7 +403,7 @@ namespace hexwallet
       Blake2bState state;
       if (!blake2b_init_personal(
               &state, kSha256Size,
-              reinterpret_cast<const uint8_t *>("ZcashPrevoutHash")))
+              reinterpret_cast<const uint8_t *>(view.version == kZcashV5Version ? "ZTxIdPrevoutHash" : "ZcashPrevoutHash")))
       {
         return ZcashError::CryptoFailure;
       }
@@ -401,7 +420,7 @@ namespace hexwallet
       Blake2bState state;
       if (!blake2b_init_personal(
               &state, kSha256Size,
-              reinterpret_cast<const uint8_t *>("ZcashSequencHash")))
+              reinterpret_cast<const uint8_t *>(view.version == kZcashV5Version ? "ZTxIdSequencHash" : "ZcashSequencHash")))
       {
         return ZcashError::CryptoFailure;
       }
@@ -469,7 +488,7 @@ namespace hexwallet
       Blake2bState state;
       if (!blake2b_init_personal(
               &state, kSha256Size,
-              reinterpret_cast<const uint8_t *>("ZcashOutputsHash")))
+              reinterpret_cast<const uint8_t *>(view.version == kZcashV5Version ? "ZTxIdOutputsHash" : "ZcashOutputsHash")))
       {
         return ZcashError::CryptoFailure;
       }
@@ -488,97 +507,66 @@ namespace hexwallet
                                         : ZcashError::CryptoFailure;
     }
 
-    int random_callback(void *, unsigned char *output, size_t length)
+    bool zip244_hash(const char (&domain)[17], const uint8_t *bytes, size_t size, uint8_t out[32])
     {
-      return random_fill_checked(output, length) ? 0 : -1;
+      Blake2bState state;
+      if (!blake2b_init_personal(&state, 32, reinterpret_cast<const uint8_t *>(domain))) return false;
+      if (size) blake2b_update(&state, bytes, size);
+      return blake2b_final(&state, out);
     }
 
-    size_t der_integer(const mbedtls_mpi &value, uint8_t *out)
+    // ZIP 244 uses the same header, empty shielded digests and branch domain
+    // for the transaction ID and the signature digest.
+    bool zip244_digest(const uint8_t *header, const uint8_t *transparent, size_t size, uint8_t out[32])
     {
-      uint8_t raw[32];
-      mbedtls_mpi_write_binary(&value, raw, sizeof(raw));
-      size_t first = 0;
-      while (first + 1 < sizeof(raw) && raw[first] == 0)
-        ++first;
-      const bool prefix_zero = (raw[first] & 0x80) != 0;
-      const size_t length = sizeof(raw) - first + (prefix_zero ? 1 : 0);
-      out[0] = 0x02;
-      out[1] = static_cast<uint8_t>(length);
-      size_t position = 2;
-      if (prefix_zero)
-        out[position++] = 0;
-      memcpy(out + position, raw + first, sizeof(raw) - first);
-      secure_zero(raw, sizeof(raw));
-      return 2 + length;
+      uint8_t root[4][32];
+      char domain[17] = "ZcashTxHash_";
+      memcpy(domain + 12, header + 8, 4);
+      return zip244_hash("ZTxIdHeadersHash", header, 20, root[0]) &&
+             zip244_hash("ZTxIdTranspaHash", transparent, size, root[1]) &&
+             zip244_hash("ZTxIdSaplingHash", nullptr, 0, root[2]) &&
+             zip244_hash("ZTxIdOrchardHash", nullptr, 0, root[3]) &&
+             zip244_hash(domain, reinterpret_cast<const uint8_t *>(&root), sizeof(root), out);
     }
 
-    ZcashError sign_digest(const uint8_t private_key[kPrivateKeySize],
-                           const uint8_t digest[kSha256Size], uint8_t *der,
-                           size_t *der_size)
+    // ZIP 244 S.2, transparent-only SIGHASH_ALL. The view is the serialization
+    // of this validated request. P2SH commits to the prevout scriptPubKey.
+    ZcashError zip244_sighash(const ZcashSigningRequest &request, const uint8_t *wire,
+                              size_t size, size_t index, uint8_t out[32])
     {
-      mbedtls_ecp_group group;
-      mbedtls_mpi d;
-      mbedtls_mpi r;
-      mbedtls_mpi s;
-      mbedtls_mpi half_order;
-      mbedtls_ecp_point public_key;
-      mbedtls_ecp_group_init(&group);
-      mbedtls_mpi_init(&d);
-      mbedtls_mpi_init(&r);
-      mbedtls_mpi_init(&s);
-      mbedtls_mpi_init(&half_order);
-      mbedtls_ecp_point_init(&public_key);
-      int result = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256K1);
-      if (result == 0)
-        result = mbedtls_mpi_read_binary(&d, private_key, kPrivateKeySize);
-      if (result == 0)
+      TxView view;
+      const ZcashError parsed = parse_transaction(wire, size, &view, true, request.chain.branch_id);
+      if (parsed != ZcashError::Ok) return parsed;
+      if (index >= view.input_count || view.input_count != request.input_count) return ZcashError::InvalidArgument;
+      uint8_t amounts[kZcashMaxInputs * 8];
+      uint8_t scripts[kZcashMaxInputs * (1 + kZcashMaxScriptSize)];
+      Writer values{amounts, sizeof(amounts), 0}, prev_scripts{scripts, sizeof(scripts), 0};
+      for (size_t i = 0; i < request.input_count; ++i)
       {
-        result = mbedtls_ecdsa_sign_det_ext(
-            &group, &r, &s, &d, digest, kSha256Size, MBEDTLS_MD_SHA256,
-            random_callback, nullptr);
+        const ZcashInput &input = request.inputs[i];
+        if (input.script_size > sizeof(input.script) || !write_u64(&values, input.value) ||
+            !write_compact_size(&prev_scripts, input.script_size) ||
+            !write_bytes(&prev_scripts, input.script, input.script_size)) return ZcashError::InvalidArgument;
       }
-      if (result == 0)
-        result = mbedtls_mpi_copy(&half_order, &group.N);
-      if (result == 0)
-        result = mbedtls_mpi_shift_r(&half_order, 1);
-      if (result == 0 && mbedtls_mpi_cmp_mpi(&s, &half_order) > 0)
-      {
-        result = mbedtls_mpi_sub_mpi(&s, &group.N, &s);
-      }
-      if (result == 0)
-      {
-        result = mbedtls_ecp_mul(&group, &public_key, &d, &group.G,
-                                 random_callback, nullptr);
-      }
-      if (result == 0)
-      {
-        result = mbedtls_ecdsa_verify(&group, digest, kSha256Size, &public_key,
-                                      &r, &s);
-      }
-      uint8_t integers[70];
-      size_t integer_size = 0;
-      if (result == 0)
-      {
-        integer_size = der_integer(r, integers);
-        integer_size += der_integer(s, integers + integer_size);
-        if (*der_size < integer_size + 2)
-          result = -1;
-      }
-      if (result == 0)
-      {
-        der[0] = 0x30;
-        der[1] = static_cast<uint8_t>(integer_size);
-        memcpy(der + 2, integers, integer_size);
-        *der_size = integer_size + 2;
-      }
-      secure_zero(integers, sizeof(integers));
-      mbedtls_ecp_point_free(&public_key);
-      mbedtls_mpi_free(&half_order);
-      mbedtls_mpi_free(&s);
-      mbedtls_mpi_free(&r);
-      mbedtls_mpi_free(&d);
-      mbedtls_ecp_group_free(&group);
-      return result == 0 ? ZcashError::Ok : ZcashError::CryptoFailure;
+      const ZcashInput &input = request.inputs[index];
+      uint8_t txin[36 + 8 + 1 + kZcashMaxScriptSize + 4];
+      Writer one{txin, sizeof(txin), 0};
+      if (!write_bytes(&one, view.inputs[index].prevout, 36) || !write_u64(&one, input.value) ||
+          !write_compact_size(&one, input.script_size) || !write_bytes(&one, input.script, input.script_size) ||
+          !write_u32(&one, view.inputs[index].sequence)) return ZcashError::InvalidArgument;
+
+      struct { uint8_t type, prevouts[32], amounts[32], scripts[32], sequences[32], outputs[32], input[32]; }
+          transparent{static_cast<uint8_t>(kSighashAll)};
+      static_assert(sizeof(transparent) == 1 + 6 * 32, "ZIP 244 transparent signing preimage");
+      if (hash_prevouts(view, transparent.prevouts) != ZcashError::Ok ||
+          !zip244_hash("ZTxTrAmountsHash", amounts, values.position, transparent.amounts) ||
+          !zip244_hash("ZTxTrScriptsHash", scripts, prev_scripts.position, transparent.scripts) ||
+          hash_sequence(view, transparent.sequences) != ZcashError::Ok ||
+          hash_outputs(view, nullptr, transparent.outputs) != ZcashError::Ok ||
+          !zip244_hash("Zcash___TxInHash", txin, one.position, transparent.input) ||
+          !zip244_digest(wire, reinterpret_cast<const uint8_t *>(&transparent), sizeof(transparent), out))
+        return ZcashError::CryptoFailure;
+      return ZcashError::Ok;
     }
 
     bool verify_digest(const uint8_t public_key[kCompressedPublicKeySize],
@@ -657,9 +645,11 @@ namespace hexwallet
         return ZcashError::InvalidArgument;
       }
       Writer writer = {out_transaction, *in_out_size, 0};
-      bool ok = write_u32(&writer, request.version) &&
-                write_u32(&writer, request.version_group_id) &&
-                write_compact_size(&writer, request.input_count);
+      const bool v5 = request.version == kZcashV5Version;
+      bool ok = write_u32(&writer, request.version) && write_u32(&writer, request.version_group_id);
+      if (v5) ok = ok && write_u32(&writer, request.chain.branch_id) &&
+                   write_u32(&writer, request.lock_time) && write_u32(&writer, request.expiry_height);
+      ok = ok && write_compact_size(&writer, request.input_count);
       for (size_t index = 0; ok && index < request.input_count; ++index)
       {
         const ZcashInput &input = request.inputs[index];
@@ -695,10 +685,10 @@ namespace hexwallet
              write_compact_size(&writer, output.script_size) &&
              write_bytes(&writer, output.script, output.script_size);
       }
-      ok = ok && write_u32(&writer, request.lock_time) &&
+      if (!v5) ok = ok && write_u32(&writer, request.lock_time) &&
            write_u32(&writer, request.expiry_height) &&
-           write_u64(&writer, static_cast<uint64_t>(request.value_balance)) &&
-           write_compact_size(&writer, 0) && write_compact_size(&writer, 0) &&
+            write_u64(&writer, static_cast<uint64_t>(request.value_balance));
+      ok = ok && write_compact_size(&writer, 0) && write_compact_size(&writer, 0) &&
            write_compact_size(&writer, 0);
       if (!ok)
         return ZcashError::BufferTooSmall;
@@ -725,12 +715,12 @@ namespace hexwallet
       HdPrivateNode current = master;
       for (size_t depth = 0; depth < 5; ++depth)
       {
-        HdPrivateNode next;
-        const WalletError result = hd_private_derive(&current, path[depth], &next);
+        SensitiveValue<HdPrivateNode> next;
+        const WalletError result = hd_private_derive(&current, path[depth], &next.get());
         secure_zero(&current, sizeof(current));
         if (result != WalletError::Ok)
           return false;
-        current = next;
+        current = next.get();
       }
       uint8_t hash[kRipemd160Size];
       const bool public_ok =
@@ -750,7 +740,7 @@ namespace hexwallet
             crypto_constant_time_equal(input.redeem + 1, out_public,
                                        kCompressedPublicKeySize);
       }
-      memcpy(out_private, current.private_key, kPrivateKeySize);
+      if (script_ok) memcpy(out_private, current.private_key, kPrivateKeySize);
       secure_zero(&current, sizeof(current));
       secure_zero(hash, sizeof(hash));
       return script_ok;
@@ -760,7 +750,7 @@ namespace hexwallet
     {
       // version+group, vin count, vout count, lock, expiry, valueBalance and
       // the three zero component counts.
-      uint64_t size = 29;
+      uint64_t size = request.version == kZcashV5Version ? 25 : 29;
       for (size_t index = 0; index < request.input_count; ++index)
       {
         // prevout + scriptSig length + push(sig) + push(pubkey|redeem) +
@@ -773,6 +763,25 @@ namespace hexwallet
       }
       size += static_cast<uint64_t>(request.output_count) * 34;
       return size > UINT32_MAX ? 0 : static_cast<uint32_t>(size);
+    }
+
+    const ZcashNetworkPolicy *validated_chain(const ZcashChainParams &chain, bool *v5)
+    {
+      const NetworkProfile *network = find_network_profile(chain.network_id);
+      const ZcashNetworkPolicy *policy = find_zcash_network_policy(chain.network_id);
+      const NetworkSigningPolicy *signing = find_network_signing_policy(chain.network_id);
+      if (!network || !policy || !signing || network->encoding != AddressEncoding::ZcashTransparent ||
+          policy->branch_id != chain.branch_id || network->derivation_coin_type != chain.derivation_coin_type ||
+          network->alt_p2pkh_version != chain.p2pkh_version || network->alt_p2sh_version != chain.p2sh_version ||
+          (signing->family != SighashFamily::ZcashZip244 && signing->family != SighashFamily::ZcashZip243)) return nullptr;
+      *v5 = signing->family == SighashFamily::ZcashZip244;
+      return policy;
+    }
+
+    bool coinbase_prevout(const ZcashInput &input)
+    {
+      static constexpr uint8_t zero_hash[32] = {};
+      return input.previous_index == UINT32_MAX && !memcmp(input.previous_txid, zero_hash, sizeof(zero_hash));
     }
 
     bool decode_hex(const char *text, uint8_t *out, size_t capacity,
@@ -815,6 +824,18 @@ namespace hexwallet
 
   } // namespace
 
+  bool zcash_v5_txid(const uint8_t *wire, size_t size, uint32_t branch, uint8_t out[kSha256Size])
+  {
+    TxView view;
+    if (!out || !branch || parse_transaction(wire, size, &view, true, branch) != ZcashError::Ok ||
+        !view.input_count || !view.output_count) return false;
+    uint8_t parts[3][32];
+    return hash_prevouts(view, parts[0]) == ZcashError::Ok &&
+           hash_sequence(view, parts[1]) == ZcashError::Ok &&
+           hash_outputs(view, nullptr, parts[2]) == ZcashError::Ok &&
+           zip244_digest(wire, reinterpret_cast<const uint8_t *>(&parts), sizeof(parts), out);
+  }
+
   ZcashError zcash_zip243_sighash_v4(const uint8_t *transaction,
                                      size_t transaction_size,
                                      const uint8_t *script_code,
@@ -838,7 +859,7 @@ namespace hexwallet
       return ZcashError::Unsupported;
     }
     TxView view;
-    ZcashError result = parse_v4_transaction(transaction, transaction_size, &view,
+    ZcashError result = parse_transaction(transaction, transaction_size, &view,
                                              true);
     if (result != ZcashError::Ok)
       return result;
@@ -1052,9 +1073,9 @@ namespace hexwallet
     {
       return ZcashError::InvalidArgument;
     }
-    const ZcashNetworkPolicy *policy =
-        find_zcash_network_policy(chain.network_id);
-    if (policy == nullptr || policy->branch_id != chain.branch_id)
+    bool v5 = false;
+    const ZcashNetworkPolicy *policy = validated_chain(chain, &v5);
+    if (policy == nullptr)
     {
       return ZcashError::Unsupported;
     }
@@ -1091,8 +1112,7 @@ namespace hexwallet
       return ZcashError::Truncated;
     }
     TxView view;
-    ZcashError result = parse_v4_transaction(transaction, transaction_size,
-                                             &view, false);
+    ZcashError result = parse_transaction(transaction, transaction_size, &view, false, v5 ? chain.branch_id : 0);
     if (result != ZcashError::Ok)
       return result;
     if (view.input_count == 0 || view.output_count == 0)
@@ -1195,6 +1215,7 @@ namespace hexwallet
                              (static_cast<uint32_t>(view.inputs[index].prevout[34]) << 16) |
                              (static_cast<uint32_t>(view.inputs[index].prevout[35]) << 24);
       input.sequence = view.inputs[index].sequence;
+      if (coinbase_prevout(input)) return ZcashError::Unsupported;
       input.value = value;
       input.script_size = *script_size;
       memcpy(input.script, script, *script_size);
@@ -1244,7 +1265,7 @@ namespace hexwallet
         return ZcashError::InvalidAmount;
       }
     }
-    if (parsed.input_total < parsed.output_total)
+    if (parsed.input_total > policy->max_zats || parsed.input_total < parsed.output_total)
     {
       return ZcashError::InvalidAmount;
     }
@@ -1269,20 +1290,20 @@ namespace hexwallet
                                 const HdPrivateNode &master,
                                 uint8_t *out_transaction, size_t *in_out_size)
   {
+    SigningOutputGuard output_guard(out_transaction, in_out_size);
     if (out_transaction == nullptr || in_out_size == nullptr ||
         request.input_count == 0 || request.input_count > kZcashMaxInputs ||
         request.output_count == 0 || request.output_count > kZcashMaxOutputs ||
-        request.version != kZcashV4Version ||
-        request.version_group_id != kZcashSaplingVersionGroupId ||
+        request.expiry_height >= 500000000UL ||
         request.value_balance != 0 || request.chain.branch_id == 0 ||
         request.chain.derivation_coin_type == 0)
     {
       return ZcashError::InvalidArgument;
     }
-    const ZcashNetworkPolicy *zcash_policy =
-        find_zcash_network_policy(request.chain.network_id);
-    if (zcash_policy == nullptr ||
-        zcash_policy->branch_id != request.chain.branch_id)
+    bool v5 = false;
+    const ZcashNetworkPolicy *zcash_policy = validated_chain(request.chain, &v5);
+    if (zcash_policy == nullptr || request.version != (v5 ? kZcashV5Version : kZcashV4Version) ||
+        request.version_group_id != (v5 ? kZcashV5VersionGroupId : kZcashSaplingVersionGroupId))
     {
       return ZcashError::Unsupported;
     }
@@ -1306,6 +1327,7 @@ namespace hexwallet
       const ZcashInput &input = request.inputs[index];
       const bool p2pkh = p2pkh_script(input.script, input.script_size);
       const bool p2sh = p2sh_script(input.script, input.script_size);
+      if (coinbase_prevout(input)) return ZcashError::Unsupported;
       if (input.value > zcash_policy->max_zats ||
           (!p2pkh && !p2sh) ||
           (p2pkh && input.redeem_size != 0) ||
@@ -1326,7 +1348,7 @@ namespace hexwallet
       }
     }
     const uint32_t expected_vbytes = estimated_vbytes(request);
-    if (input_total < output_total || input_total != request.input_total ||
+    if (input_total > zcash_policy->max_zats || input_total < output_total || input_total != request.input_total ||
         output_total != request.output_total ||
         input_total - output_total != request.fee ||
         expected_vbytes == 0 || request.estimated_vbytes != expected_vbytes ||
@@ -1369,14 +1391,15 @@ namespace hexwallet
         script_code_size = request.inputs[index].redeem_size;
       }
       uint8_t digest[kSha256Size];
-      result = zcash_zip243_sighash_v4(
+      result = v5 ? zip244_sighash(request, unsigned_transaction, unsigned_size, index, digest) : zcash_zip243_sighash_v4(
           unsigned_transaction, unsigned_size, script_code, script_code_size,
           static_cast<int32_t>(index), kSighashAll,
           request.inputs[index].value, request.chain.branch_id, digest);
       size_t der_size = sizeof(signatures[index]) - 1;
-      if (result == ZcashError::Ok)
+      if (result == ZcashError::Ok &&
+          !secp256k1_sign_der(private_key, digest, signatures[index], &der_size))
       {
-        result = sign_digest(private_key, digest, signatures[index], &der_size);
+        result = ZcashError::CryptoFailure;
       }
       if (result == ZcashError::Ok && der_size > kZcashMaxDerSignatureSize)
       {
@@ -1400,6 +1423,7 @@ namespace hexwallet
     secure_zero(signatures, sizeof(signatures));
     secure_zero(signature_sizes, sizeof(signature_sizes));
     secure_zero(public_keys, sizeof(public_keys));
+    if (result == ZcashError::Ok && !output_guard.commit()) return ZcashError::BufferTooSmall;
     return result;
   }
 
@@ -1494,7 +1518,7 @@ namespace hexwallet
       secure_zero(vector_digest, sizeof(vector_digest));
     }
     const ZcashChainParams chain = {
-        "zec", 0x1cb8, 0x1cbd, 0x5437f330, 133};
+        "zer", 0x1cb8, 0x1cbd, 0x7361707a, 323};
     static const uint8_t kPrevout[36] = {
         0xa8, 0xc6, 0x85, 0x47, 0x82, 0x65, 0xf4, 0xc1,
         0x4d, 0xad, 0xa6, 0x51, 0x96, 0x9c, 0x45, 0xa6,
@@ -1547,7 +1571,7 @@ namespace hexwallet
              zcash_zip243_sighash_v4(unsigned_transaction,
                                      unsigned_writer.position, kP2shScriptCode,
                                      sizeof(kP2shScriptCode), 0, kSighashAll,
-                                     50000000, chain.branch_id,
+                                     50000000, 0x5437f330, // historical ZIP-243 digest fixture
                                      p2sh_digest) == ZcashError::Ok &&
              crypto_constant_time_equal(p2sh_digest, kP2shDigest,
                                         sizeof(kP2shDigest));
@@ -1834,7 +1858,7 @@ namespace hexwallet
       master.chain_code[index] = static_cast<uint8_t>(0x80 + index);
     }
     const uint32_t path[5] = {
-        44U | kHardenedOffset, 133U | kHardenedOffset, kHardenedOffset, 0, 0};
+        44U | kHardenedOffset, 323U | kHardenedOffset, kHardenedOffset, 0, 0};
     HdPrivateNode current = master;
     bool derived = true;
     for (size_t depth = 0; depth < 5; ++depth)
@@ -1864,7 +1888,7 @@ namespace hexwallet
         0x8a, 0xbd, 0xaa, 0x52, 0x1c, 0xd1, 0xff, 0x2d, 0xee, 0x6f,
         0xac, 0x18, 0x71, 0x88, 0xac};
     ZcashSigningRequest request = {};
-    request.chain = {"zec", 0x1cb8, 0x1cbd, 0x5437f330, 133};
+    request.chain = {"zer", 0x1cb8, 0x1cbd, 0x7361707a, 323};
     request.version = kZcashV4Version;
     request.version_group_id = kZcashSaplingVersionGroupId;
     request.lock_time = 0;
@@ -1894,7 +1918,7 @@ namespace hexwallet
     if (passed)
     {
       TxView view;
-      passed = parse_v4_transaction(signed_transaction, signed_size, &view, true) ==
+      passed = parse_transaction(signed_transaction, signed_size, &view, true) ==
                    ZcashError::Ok &&
                view.input_count == 1 && view.output_count == 2 &&
                view.inputs[0].script_sig_size > 0;
@@ -1949,7 +1973,7 @@ namespace hexwallet
         TxView view = {};
         if (p2sh_ok)
         {
-          p2sh_ok = parse_v4_transaction(signed_transaction, p2sh_size, &view,
+          p2sh_ok = parse_transaction(signed_transaction, p2sh_size, &view,
                                          true) == ZcashError::Ok &&
                     view.input_count == 1 &&
                     view.inputs[0].script_sig_size > 36;

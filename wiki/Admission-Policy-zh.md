@@ -13,8 +13,7 @@
 | `sign` | 产出链真正验证的摘要，来源是审查过的载荷；向量通过，或有独立实现逐字节一致 |
 | `token-account` | 有合约登记表与核对过的 calldata 子集；未知 calldata 按原始字节显示 |
 
-一条链可以只有 `address`。这是合法且写清楚的状态：现在有 Aeternity、RyoCurrency、Zano。
-不允许的是"手写一张表、背后没有测试"的 `sign`。
+RyoCurrency 和 Zano 当前在目录中开放 `address`。Aeternity 还可审阅和签署向账户地址付款的原生 `SpendTx`。
 
 ## 门槛，按顺序
 

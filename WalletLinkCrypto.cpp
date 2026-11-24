@@ -215,6 +215,8 @@ namespace hexwallet
     {
       return false;
     }
+    if (size && (size - 1) / kChaChaBlockSize > UINT32_MAX - counter)
+      return false;
     uint8_t block[kChaChaBlockSize];
     size_t offset = 0;
     while (offset < size)
@@ -419,6 +421,10 @@ namespace hexwallet
     passed = link_chacha20_xor(kKey, kNonce, 1, zero, sizeof(zero), block) &&
              crypto_constant_time_equal(block, kExpectedBlock, sizeof(block)) &&
              passed;
+    uint8_t boundary[kChaChaBlockSize + 1] = {};
+    passed = !link_chacha20_xor(kKey, kNonce, UINT32_MAX, boundary, sizeof(boundary), boundary) &&
+             crypto_constant_time_equal(boundary, zero, sizeof(zero)) && boundary[kChaChaBlockSize] == 0 &&
+             link_chacha20_xor(kKey, kNonce, UINT32_MAX, boundary, kChaChaBlockSize, boundary) && passed;
 
     // RFC 5869 test case 1.
     static const uint8_t kHkdfIkm[22] = {

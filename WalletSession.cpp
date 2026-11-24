@@ -12,7 +12,7 @@ namespace hexwallet
   {
 
     constexpr size_t kMnemonicSize = 256;
-    char mnemonic[kMnemonicSize];
+    uint8_t session_seed[kSeedSize];
     bool loaded = false;
 
   }
@@ -24,32 +24,23 @@ namespace hexwallet
 
   bool wallet_session_custody_available() { return true; }
 
-  WalletError wallet_session_generate()
+  WalletError wallet_session_generate(const char *passphrase)
   {
-    wallet_session_clear();
-    if (!wallet_session_custody_available())
-      return WalletError::CustodyUnavailable;
-    const WalletError result = bip39_generate_english_24(mnemonic, sizeof(mnemonic));
-    loaded = result == WalletError::Ok;
-    if (!loaded)
-      wallet_session_clear();
-    return result;
+    SensitiveValue<char[kMnemonicSize]> words;
+    const WalletError result = bip39_generate_english_24(words.get(), sizeof(words.get()));
+    return result == WalletError::Ok ? wallet_session_import(words.get(), passphrase) : result;
   }
 
-  WalletError wallet_session_import(const char *words)
+  WalletError wallet_session_import(const char *words, const char *passphrase)
   {
-    if (!wallet_session_custody_available())
-    {
-      wallet_session_clear();
-      return WalletError::CustodyUnavailable;
-    }
-    if (words == nullptr || strlen(words) >= sizeof(mnemonic))
+    if (words == nullptr || strlen(words) >= kMnemonicSize)
       return WalletError::InvalidArgument;
-    const WalletError result = bip39_validate_english(words);
+    SensitiveValue<uint8_t[kSeedSize]> seed;
+    const WalletError result = bip39_seed_from_english(words, passphrase, seed.get());
     if (result != WalletError::Ok)
       return result;
     wallet_session_clear();
-    memcpy(mnemonic, words, strlen(words) + 1);
+    memcpy(session_seed, seed.get(), sizeof(session_seed));
     loaded = true;
     return WalletError::Ok;
   }
@@ -63,12 +54,7 @@ namespace hexwallet
       return WalletError::CustodyUnavailable;
     if (!loaded)
       return WalletError::InvalidArgument;
-    SensitiveValue<uint8_t[kSeedSize]> seed_storage;
-    auto &seed = seed_storage.get();
-    WalletError result = bip39_seed_from_english(mnemonic, "", seed);
-    if (result == WalletError::Ok)
-      result = hd_private_from_seed(seed, sizeof(seed), master);
-    secure_zero(seed, sizeof(seed));
+    WalletError result = hd_private_from_seed(session_seed, sizeof(session_seed), master);
     if (result != WalletError::Ok)
       secure_zero(master, sizeof(*master));
     return result;
@@ -83,15 +69,13 @@ namespace hexwallet
       return WalletError::CustodyUnavailable;
     if (!loaded)
       return WalletError::InvalidArgument;
-    const WalletError result = bip39_seed_from_english(mnemonic, "", out_seed);
-    if (result != WalletError::Ok)
-      secure_zero(out_seed, kSeedSize);
-    return result;
+    memcpy(out_seed, session_seed, kSeedSize);
+    return WalletError::Ok;
   }
 
   void wallet_session_clear()
   {
-    secure_zero(mnemonic, sizeof(mnemonic));
+    secure_zero(session_seed, sizeof(session_seed));
     loaded = false;
   }
 
@@ -102,8 +86,8 @@ namespace hexwallet
 {
   bool wallet_session_is_loaded() { return false; }
   bool wallet_session_custody_available() { return false; }
-  WalletError wallet_session_generate() { return WalletError::CustodyUnavailable; }
-  WalletError wallet_session_import(const char *) { return WalletError::CustodyUnavailable; }
+  WalletError wallet_session_generate(const char *) { return WalletError::CustodyUnavailable; }
+  WalletError wallet_session_import(const char *, const char *) { return WalletError::CustodyUnavailable; }
   WalletError wallet_session_load_master(HdPrivateNode *master)
   {
     if (master == nullptr)

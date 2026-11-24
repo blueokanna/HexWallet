@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "EinkPanel.h"
 
 namespace hexwallet {
 
@@ -21,6 +22,11 @@ bool eink_convert_rgb565(const uint8_t *rgb565, uint16_t width, uint16_t height,
                          size_t capacity);
 
 bool run_eink_frame_self_tests();
+
+// Update controller RAM for a dirty rectangle in the landscape LVGL buffer.
+// Logical (x,y) maps to native (height-1-y,x). Neighbouring packed pixels survive.
+bool eink_pack_landscape(const uint8_t *rgb565, uint16_t width, uint16_t height,
+                         EinkRect dirty, uint8_t depth, uint8_t *out, size_t capacity);
 
 }  // namespace hexwallet
 

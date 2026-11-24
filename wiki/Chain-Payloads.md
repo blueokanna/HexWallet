@@ -5,6 +5,19 @@
 How a host hands a transaction to the device, and what comes back. Everything is hex on the CLI and
 length-prefixed binary on the phone link; the parser is the same code in both cases.
 
+## Cosmos
+
+Phone-link kind 8 returns a signed protobuf `TxRaw`. Versions 1–3 carry one to four direct-mode bank sends across the six Cosmos profiles. Versions 4–7 each carry one native-denomination message on `cosmoshub-4` or `osmosis-1`. They use an empty memo. The header is `version:u8, chain_id:text, account_number:u64, sequence:u64, fee:u64, gas_limit:u64`. Integers are big-endian. Each text field starts with a one-byte length.
+
+| Version | Remaining fields in wire order | What the owner authorizes |
+| --- | --- | --- |
+| 4 | `amount:u64, receiver:text, source_channel:text, timeout_ns:u64` | ICS-20 `MsgTransfer` from Hub `transfer/channel-141` to Osmosis or from Osmosis `transfer/channel-0` to Hub. The receiver must have the destination prefix. The timeout is a nonzero Unix timestamp in nanoseconds. |
+| 5 | `amount:u64, receiver:text` | One native `MsgSend` in legacy Amino JSON sign mode (127). |
+| 6 | `grantee:text` | Revoke that grantee's `/cosmos.bank.v1beta1.MsgSend` authority. |
+| 7 | `spend_limit:u64, grantee:text, expiry_seconds:u64` | Set a positive bank-send spending limit until the specified Unix time. The grantee can send to any recipient. This replaces any existing bank-send grant to that grantee. |
+
+The device reconstructs the message and fee, checks the account key and shows the operation before approval. `broadcastCosmos()` verifies the approved bytes against the phone proposal and returns the source transaction hash on mempool admission. For ICS-20, use the packet sequence and channel to check destination credit and the source acknowledgement. A timed-out, undelivered transfer requires a relayer to submit the timeout proof before the sender receives a refund. Private Gaia and Osmosis nodes confirmed both directions and a separate refund of 3.456789 ATOM. [Node receipts and reproduction](validation) · [Hub/Osmosis channel registry](https://github.com/cosmos/chain-registry/blob/master/_IBC/cosmoshub-osmosis.json)
+
 ## Zephyr, Alephium and Quantus
 
 Zephyr uses phone link kind 5 with network ID `zeph`. Native ZPH inputs and tagged ZPH outputs are mandatory. Pricing height, burnt and minted amounts must be zero. The device verifies the prefix, BP+, ownership, change and CLSAG. The node checks UTXO state and ring membership. [Mainnet fixture](https://explorer.zephyrprotocol.com/tx/7e2f3d9d1b5deaf3db873d5fe5d6c54272d127a84aa04ddc18bd46e66a9a7c12)
@@ -98,7 +111,7 @@ fee and the KIP-0009 masses without a node. `kaspa sign <code>` returns the sign
 "ZEC4" | "ZEC5"
 u32 branch_id
 u32 unsigned_transaction_size
-unsigned v4 transaction bytes        (every scriptSig must be empty)
+unsigned NU7 v5 transaction bytes    (every scriptSig must be empty)
 u8  input_count                      (must equal the transaction's vin count)
 input_count * {
       u64 value, u8 script_size + scriptPubKey,
@@ -109,7 +122,7 @@ input_count * {
 
 `ZEC4` cannot carry a P2SH prevout. `ZEC5` adds exactly one redeem record per input; the device
 re-hashes it against the t3 address and accepts only a single-key `CHECKSIG` script. The payload
-must end after the last input record. `zec sign <code>` returns the signed v4 transaction.
+must end after the last input record. Use `0x77190ad9` in both branch fields. `zec sign <code>` returns the signed v5 transaction and its ZIP-244 `txid` in RPC display order. [ZIP 259](https://zips.z.cash/zip-0259) · [ZIP 244](https://zips.z.cash/zip-0244)
 
 ## CryptoNote (Monero)
 

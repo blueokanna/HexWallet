@@ -2318,6 +2318,20 @@ namespace hexwallet
 
     static const uint8_t kZeroPoint[32] = {};
     static const uint8_t kOrderOne[32] = {1};
+    // y=2 has no Edwards point. y=p is noncanonical. y=0 has order four.
+    // B + (0,-1) has y=-4/5 with the opposite x sign and a torsion component.
+    uint8_t invalid[5][32] = {{2}, {}, {}, {1}, {}};
+    memset(invalid[1], 0xff, 32);
+    invalid[1][0] = 0xed;
+    invalid[1][31] = 0x7f;
+    memset(invalid[4], 0x99, 32);
+    invalid[4][0] = 0x95;
+    for (const auto &key : invalid) {
+      memset(result, 0xa5, 32);
+      passed = selftest_report("Ed25519 conversion rejects invalid public key",
+          !ed25519_public_to_x25519(key, result) &&
+          crypto_constant_time_equal(result, kZeroPoint, 32)) && passed;
+    }
     passed = selftest_report(
                  "x25519 rejects small-order peers",
                  !x25519_ecdh(kAliceScalar, kZeroPoint, result) &&
@@ -2325,7 +2339,8 @@ namespace hexwallet
              passed;
     memset(result, 0xa5, sizeof(result));
     passed = selftest_report("x25519 rejects null input",
-                             !x25519_scalar_mult(nullptr, kV1Point, result)) &&
+                             !x25519_scalar_mult(nullptr, kV1Point, result) &&
+                             crypto_constant_time_equal(result, kZeroPoint, 32)) &&
              passed;
 
     secure_zero(result, sizeof(result));

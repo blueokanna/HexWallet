@@ -25,12 +25,17 @@
 #include "ZcashTransaction.h"
 #include "DashTransaction.h"
 #include "EvmTransaction.h"
+#include "SolanaTransaction.h"
+#include "CryptoExtended.h"
 #include "QrlXmss.h"
 #include "StarknetTransaction.h"
 using namespace hexwallet;
 bool run_security_regressions();
 int privacy_probe(int argc, char **argv);
 int signing_audit(const char *test);
+int phone_review(int argc, char **argv);
+int phone_app_pipe();
+int phone_storage_test();
 static void hex(const char *key, const uint8_t *p, size_t n)
 {
   printf("%s=", key);
@@ -38,8 +43,59 @@ static void hex(const char *key, const uint8_t *p, size_t n)
     printf("%02x", p[i]);
   puts("");
 }
+static int check_catalog_addresses()
+{
+  const uint8_t seed[64]{};
+  HdPrivateNode master{};
+  if (hd_private_from_seed(seed, sizeof(seed), &master) != WalletError::Ok) return 1;
+  size_t passed = 0;
+  const size_t count = wallet_catalog_count();
+  for (size_t i = 0; i < count; ++i)
+  {
+    WalletCatalogEntry entry{}, resolved{};
+    DerivedAddress address{};
+    if (!wallet_catalog_at(i, &entry) || !entry.id || !entry.network) return 1;
+    // The public zero seed's first eligible Cyprus-1 child is 165 (quais.js).
+    const uint32_t index = entry.network->encoding == AddressEncoding::QuaiCyprus1 ? 165 : 0;
+    const bool account_key = entry.network->encoding == AddressEncoding::GraphenePubkey;
+    const bool ok =
+                    wallet_catalog_find(entry.id, &resolved) && resolved.network == entry.network &&
+                    wallet_catalog_has(entry, WalletCapabilityAddress) != account_key &&
+                    wallet_catalog_has(entry, WalletCapabilitySigning) == wallet_catalog_has(entry, WalletCapabilityTransactionReview) &&
+                    derive_address(master, seed, *entry.network, 0, 0, index, &address) == WalletError::Ok &&
+                    address.address[0] && address.path[0];
+    printf("catalog-address %s %s %s %s\n", entry.id ? entry.id : "?", ok ? "pass" : "FAIL", address.path, address.address);
+    if (ok) ++passed;
+    clear_derived_address(&address);
+  }
+  secure_zero(&master, sizeof(master));
+  printf("catalog-addresses=%zu/%zu\n", passed, count);
+  return count && passed == count ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
+  if (argc == 2 && !strcmp(argv[1], "curve-selftest")) {
+    const bool signatures = run_crypto_extended_self_tests();
+    const bool agreement = run_x25519_self_tests();
+    printf("crypto-extended=%s x25519=%s\n", signatures ? "pass" : "FAIL", agreement ? "pass" : "FAIL");
+    return signatures && agreement ? 0 : 1;
+  }
+  if (argc == 2 && !strcmp(argv[1], "catalog-addresses")) return check_catalog_addresses();
+  if (argc >= 2 && !strcmp(argv[1], "phone-review")) return phone_review(argc, argv);
+  if (argc == 2 && !strcmp(argv[1], "phone-app-pipe")) return phone_app_pipe();
+  if (argc == 3 && !strcmp(argv[1], "zec-v5-txid"))
+  {
+    uint8_t wire[kZcashMaxTransactionSize], digest[kSha256Size];
+    size_t size;
+    const auto *policy = find_zcash_network_policy("zec");
+    if (!policy || !chain_parse_hex(argv[2], wire, sizeof(wire), &size) ||
+        !zcash_v5_txid(wire, size, policy->branch_id, digest)) return 1;
+    for (size_t i = sizeof(digest); i-- > 0;) printf("%02x", digest[i]);
+    puts("");
+    return 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "phone-storage")) return phone_storage_test();
   if (argc >= 2 && !strcmp(argv[1], "signing-audit"))
     return signing_audit(argc == 3 ? argv[2] : "all");
   if (argc >= 2 && !strncmp(argv[1], "privacy-", 8))
@@ -558,6 +614,27 @@ int main(int argc, char **argv)
     return 1;
   }
   printf("address=%s\npath=%s\n", address.address, address.path);
+  if (!strcmp(network->id, "sol"))
+  {
+    uint8_t payer[32];
+    if (!ed25519_public_key(address.private_key, payer)) return 1;
+    clear_derived_address(&address);
+    SolanaTransaction tx{};
+    if (solana_review_message(payload, payload_size, payer, &tx) != SolanaError::Ok) return 1;
+    tx.address_index = index;
+    if (tx.program.call != SolanaProgramCall::None)
+    {
+      char details[1200];
+      if (!solana_program_details(tx, details, sizeof(details))) return 1;
+      puts(details);
+    }
+    if (argc == 6) tx.program.keys[0][0] ^= 1;
+    uint8_t wire[kSolanaMaxTransaction];
+    size_t n = sizeof(wire);
+    if (solana_sign_transaction(tx, seed, wire, &n) != SolanaError::Ok) return 1;
+    hex("signed", wire, n);
+    return 0;
+  }
   clear_derived_address(&address);
 
   if (network->encoding == AddressEncoding::Evm)
@@ -625,6 +702,8 @@ int main(int argc, char **argv)
         tx.access_list[0] ^= 1;
       else if (!strcmp(argv[5], "type"))
         tx.type = static_cast<EvmTransactionType>(255);
+      else if (!strcmp(argv[5], "protocol"))
+        tx.protocol = EvmProtocolCall::None;
       else if (!strcmp(argv[5], "call-owner"))
         tx.call.secondary[0] ^= 1;
       else if (!strcmp(argv[5], "call-flags"))
@@ -712,7 +791,7 @@ int main(int argc, char **argv)
           input.redeem_size != 0 ? input.redeem : input.script;
       const size_t script_code_size =
           input.redeem_size != 0 ? input.redeem_size : input.script_size;
-      if (zcash_zip243_sighash_v4(output, output_size, script_code,
+      if (request.version == kZcashV4Version && zcash_zip243_sighash_v4(output, output_size, script_code,
                                   script_code_size, 0, 0x01, input.value,
                                   chain.branch_id, digest) == ZcashError::Ok)
       {

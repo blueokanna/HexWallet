@@ -1,7 +1,7 @@
-# Publishes wiki/*.md to the GitHub wiki repository.
+# Publishes wiki pages and their report and image attachments.
 #
-# GitHub wikis do not support subdirectories: every page is a flat .md file in
-# the wiki repository root. Files starting with "_" are special (_Sidebar.md,
+# Wiki pages are flat .md files in the wiki repository root. Image and report
+# attachments can retain their relative subdirectories. Files starting with "_" are special (_Sidebar.md,
 # _Footer.md) and are rendered on every page.
 #
 # Create the first page in the GitHub web UI once, then run this script.
@@ -31,8 +31,17 @@ if (Test-Path (Join-Path $checkout '.git')) {
   }
 }
 
-Get-ChildItem -Path $source -Filter '*.md' -File | ForEach-Object {
+Get-ChildItem -LiteralPath $source -File | Where-Object Extension -in '.md','.csv','.png' | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $checkout $_.Name) -Force
+}
+
+$gallery = Join-Path $source 'ui-gallery'
+if (Test-Path -LiteralPath $gallery) {
+  $galleryDestination = Join-Path $checkout 'ui-gallery'
+  New-Item -ItemType Directory -Force -Path $galleryDestination | Out-Null
+  Get-ChildItem -LiteralPath $gallery -File | Where-Object Extension -in '.png','.html','.json' | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $galleryDestination $_.Name) -Force
+  }
 }
 
 & git -C $checkout add --all

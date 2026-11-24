@@ -72,7 +72,6 @@ namespace hexwallet
   {
 
     constexpr UBaseType_t kWorkerPriority = 2;
-    constexpr BaseType_t kWorkerCore = 0;
 
     TaskHandle_t worker_task = nullptr;
     SemaphoreHandle_t job_ready = nullptr;
@@ -139,7 +138,7 @@ namespace hexwallet
     }
     if (xTaskCreatePinnedToCore(worker_loop, "hexwallet-crypto", HEXWALLET_WORKER_STACK_BYTES, nullptr,
                                 kWorkerPriority, &worker_task,
-                                kWorkerCore) != pdPASS)
+                                (xPortGetCoreID() + 1) % portNUM_PROCESSORS) != pdPASS)
     {
       worker_task = nullptr;
       release_primitives();

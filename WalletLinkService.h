@@ -21,6 +21,7 @@ void wallet_link_service_field_lost();
 // Lock/disconnect revokes queued APDU data, link keys, pairing and approvals.
 void wallet_link_service_reset();
 bool wallet_link_service_ready();
+bool wallet_link_service_connected();
 bool wallet_link_service_pairing_pending();
 bool wallet_link_service_confirm_pairing();
 void wallet_link_service_reject_pairing();

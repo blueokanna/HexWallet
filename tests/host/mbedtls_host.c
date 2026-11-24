@@ -385,9 +385,18 @@ void mbedtls_md_free(mbedtls_md_context_t *ctx) {
   memset(ctx, 0, sizeof(*ctx));
 }
 
+static int hmac_calls_before_failure = -1;
+
+void host_fail_hmac_after(int calls) { hmac_calls_before_failure = calls; }
+
 int mbedtls_md_hmac(const mbedtls_md_info_t *info, const unsigned char *key,
                     size_t keylen, const unsigned char *input, size_t ilen,
                     unsigned char *output) {
+  if (hmac_calls_before_failure == 0) {
+    hmac_calls_before_failure = -1;
+    return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  }
+  if (hmac_calls_before_failure > 0) --hmac_calls_before_failure;
   if (info == NULL || output == NULL || (input == NULL && ilen != 0)) {
     return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
   }

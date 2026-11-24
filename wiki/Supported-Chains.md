@@ -2,12 +2,11 @@
 
 [中文](Supported-Chains-zh) · [Home](Home)
 
-The catalog holds 215 wallet entries over 247 compiled network profiles. An entry is a derivation
-path plus a review/sign policy. It is not a statement that a node accepted a transaction.
+The firmware contains 246 network profiles. The wallet catalog exposes 214 entries. Node receipts and SDK comparisons are indexed in the [validation record](validation).
 
 Capability bits are literal: `address` derives and displays an address, `review` parses a payload
 into reviewable fields, `sign` releases a signature, `token-account` means the network has a token
-registry. Only four entries lack `sign`, and exactly one lacks `address`.
+registry. RyoCurrency and Zano expose addresses only. Hive exposes account-key signing and has no receive address.
 
 ## UTXO and UTXO-like
 
@@ -18,7 +17,7 @@ registry. Only four entries lack `sign`, and exactly one lacks `address`.
 | `btc44`                                                                          | BIP44                   | P2PKH, legacy sighash, needs `non_witness_utxo` for legacy inputs                                                                                                                                                                        |
 | `btc86`                                                                          | BIP86                   | P2TR key-path, `SIGHASH_DEFAULT`/`ALL`, no script tree                                                                                                                                                                                   |
 | `prl`                                                                            | BIP86                   | Pearl mainnet, Taproot key-path only; no P2MR, XMSS or script-path                                                                                                                                                                       |
-| `zec`                                                                            | BIP44                   | v4 transparent, ZIP-243, t1 P2PKH and t3 P2SH-P2PK, NU6.2                                                                                                                                                                                |
+| `zec` | BIP44 | NU7 v5 transparent, ZIP-244, t1 P2PKH and t3 P2SH-P2PK |
 | `dash`                                                                           | BIP44                   | Dedicated adapter: type-0 plain payments, legacy digest, P2PKH/P2SH outputs, one funding transaction per input so the reviewed fee is computed rather than supplied; InstantSend intent is displayed, the lock is not verifiable offline |
 | `kas`                                                                            | BIP44                   | BIP340 Schnorr, v0 transactions, `SIGHASH_ALL`, KIP-0009 mass                                                                                                                                                                            |
 | `ltc`, `ltc49`, `ltc84`, `doge`, `rvn`, `vtc*`, `btg*`, `dgb*`, `grs*`, `axe`, … | per profile             | UTXO forks whose sighash family was audited: legacy, BIP143, `SIGHASH_FORKID`, Groestl-512                                                                                                                                               |
@@ -105,7 +104,7 @@ raw bytes with its keccak-256, never decoded as a transfer.
 Theta is the one network with two routes: TFUEL transfers use the EVM adapter, native `SendTx`
 uses the Theta adapter, and the payload format decides which runs.
 
-78 token records are pinned across 18 networks (`WalletTokens.cpp`). User-declared tokens can be
+80 token records are pinned across 19 networks (`WalletTokens.cpp`). User-declared tokens can be
 added on the device; the review marks them as declared, and they never change the signed bytes.
 
 ## Native adapters
@@ -123,7 +122,7 @@ The exact envelope is in [Chain-Payloads](Chain-Payloads).
 | `xlm`                                                  | SEP-0005, public XDR Payment/CreateAccount, issued assets and memo review; ≤ 8 operations                                                                                                    |
 | `sol`                                                  | Legacy/v0, System Transfer, SPL and Token-2022 `TransferChecked`, exact mint/account review; no ALTs or ATA creation                                                                         |
 | `xrp`                                                  | Native Payment, canonical XRPL binary, SHA-512Half; no issued currencies, paths, memo, partial payment or multisig                                                                           |
-| `atom`, `osmo`, `tia`, `kava`, `terra`, `terraclassic` | 1–4 `MsgSend`, `SIGN_MODE_DIRECT`, optional memo; no IBC, authz, wasm or amino signing                                                                                                       |
+| `atom`, `osmo`, `tia`, `kava`, `terra`, `terraclassic` | 1–4 direct `MsgSend` messages and optional memo. `cosmoshub-4` and `osmosis-1` also accept single native ICS-20 on their pinned route, a limited bank-send grant or revocation, and single native legacy Amino `MsgSend`. [Payloads](Chain-Payloads#cosmos) |
 | `ada`                                                  | Conway body review and Ed25519-BIP32 signing; no input value/owner, so balance needs a node                                                                                                  |
 | `algo`                                                 | Canonical MessagePack `pay`/`axfer`, genesis/fee/round checks, ASA opt-in; mainnet only                                                                                                      |
 | `apt`                                                  | Aptos transfer payloads with Ed25519 authentication key derivation                                                                                                                           |
@@ -150,14 +149,14 @@ The exact envelope is in [Chain-Payloads](Chain-Payloads).
 
 | Entry  | Why                                        |
 | ------ | ------------------------------------------ |
-| `ryo`  | CryptoNote long address, prefix `0x2ce192` |
-| `zano` | CryptoNote `Zx` address, prefix `0xc5`     |
+| `ryo`  | Long standard address, prefix `0x2ce192`. The host-only v3 payment probe accepts one recipient and optional change. The phone builder and one-time firmware approval produced one- and two-input payments confirmed by stock `ryod` on a private fork. Production custody and physical device acceptance remain open. [Validation](validation) |
+| `zano` | Standard `Zx` address, prefix `0xc5`. The phone reproduced two existing mainnet payments. The opt-in host probe reviewed and signed two new ordinary v4 native payments with 16 ring members per input. An isolated testnet confirmed both. Card-backed signing and GGXXG staking remain open. [Validation](validation) |
 
 ## Refused
 
 The refusal list is part of the contract, not a caveat: shielded Zcash, Peercoin signing, TRON NFTs
-and batch calls, Cosmos IBC/authz/amino, Dash special transactions, EVM blind decoding, Lightning,
-Stacks, Mimblewimble chains as wallets, and every chain without an upstream SLIP-0044 number.
+and batch calls, additional IBC routes, arbitrary authz, feegrant, arbitrary Amino messages, Dash special transactions, EVM blind decoding, Lightning,
+Stacks and full Mimblewimble wallets. Coin types require documented provenance. Zephyr has a recorded exception for Monero's coin type 128.
 [Admission-Policy](Admission-Policy) explains how a chain gets in.
 
 ## Machine-generated matrices

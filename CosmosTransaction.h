@@ -25,9 +25,10 @@ namespace hexwallet {
 //   * Every message is shown as its own row with its own recipient and amount,
 //     and a review that cannot fit all of them is refused rather than truncated.
 //
-// Deliberately outside this surface: IBC packet/timeout messages,
-// authz/feegrant, JSON/amino signing modes, and Any messages other than the
-// bank send. Those need review semantics this firmware cannot prove offline.
+// Payload v4 is one native ICS-20 transfer on the pinned Cosmos Hub / Osmosis
+// route with a timestamp timeout. On those two chains v5 is an amino native
+// MsgSend, v6 revokes bank-send authority and v7 grants a finite native spend
+// limit with a mandatory expiry. All four versions contain exactly one message.
 
 constexpr size_t kCosmosMaxChainId = 32;
 constexpr size_t kCosmosMaxAddress = 90;
@@ -96,6 +97,11 @@ struct CosmosReview {
   uint64_t amount;  // sum of every message amount
   uint64_t fee;
   uint64_t gas_limit;
+  enum class Action : uint8_t { BankSend, IbcTransfer, RevokeSend, GrantSend } action;
+  bool legacy_amino;
+  uint64_t grant_expiry_seconds;
+  char source_channel[16];  // empty for bank sends
+  uint64_t timeout_timestamp_ns;
   uint8_t public_key[kCompressedPublicKeySize];
   uint8_t tx_body[kCosmosMaxBody];
   uint16_t tx_body_size;

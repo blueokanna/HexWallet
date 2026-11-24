@@ -12,7 +12,7 @@ powershell -ExecutionPolicy Bypass -File tests/host/build.ps1
 ```
 
 Compiles the firmware sources with MSVC against the mbedTLS headers from the exact ESP32 core, then
-runs `host_test.exe`. 72 labelled checks print one line each, for example:
+runs `host_test.exe`. Each check prints its own result. Typical labels include the following.
 
 ```text
 crypto-primitives=pass      bip39=pass              bip32=pass
@@ -67,18 +67,21 @@ These compare the firmware against something that is not the firmware:
 | `tests/host/qrl_oracle_check.ps1` | qrllib's `xmss_Signmsg` byte for byte |
 | `tests/host/qr_cross_check.cpp` | nayuki QR reference |
 
-## What a green run means
+## Payment and browser tests
 
-It means the code matches the vectors and the reference implementations in this repository. It does
-**not** mean:
+Run `python tests/host/privacy/payment_interop.py --probe <chain_probe.exe>` from the repository root. The 116 checks cover Ryo v3 recipient and change in either order, uniform payment IDs, one- and two-input signing, and Zano post-HF6 output construction and scanning. The Ryo signer checks funding ownership, ring indices, amounts, the range proof and the fork's fee floor. A balanced payment one atomic unit below the floor fails review. The Zano scanner checks the asset ID, amount and commitment for explicit native and blinded assets. Pass `--oracle <privacy_oracle.dll>` to verify each Ryo input with the pinned upstream MLSAG implementation. Release and ASan/UBSan passed.
 
-- a node will accept the transaction; no test in this tree broadcasts anything;
-- the device resists a physical attacker;
-- the SE051 accepts these APDUs on a real card;
-- the panel, touch controller, NFC front end or camera work on your board;
-- the byte sequences are free of side-channel leakage.
+With the locked `tests/host/protocol-oracles` dependencies installed, `privacy/address_interop.cjs` under `tests/host` checks the phone `ADDRESS` response and panel callback against independently derived keys and CryptoNote Base58. Run `python tests/host/privacy/native_rpc_check.py --probe <chain_probe> --ryod <ryod> --ryo-validator <ryo-address-validator> --zanod <zanod>` to repeat the release-binary checks. It creates temporary offline nodes and checks the Ryo relay refusal and empty mempool at genesis.
 
-Those gaps are why the project is described as pre-hardware in [Home](Home).
+For funded Ryo payments, run `python tests/host/privacy/ryo_ledger_check.py --probe <candidate-probe> --oracle <privacy_oracle.dll> --ryod <ryod> --wallet-rpc <ryo-wallet-rpc>`. Build the candidate probe with `TEST_RYO_PHONE_PAYMENTS=ON`. Stock `ryod` confirms one- and two-input payments. Stock `ryo-wallet-rpc` independently recovers their amounts and 32-byte payment IDs with the recipient's view key. `phone_payment_check.py` also exercises rejection, cancellation, expiry, field loss, single-use approval, the fee cap and the 16,384-byte application frame. [Receipts](validation)
+
+With the locked `tools` dependencies installed, run `node tests/host/privacy/zano_ledger_check.cjs <chain_probe>` offline. The fixtures include the original transaction bytes and all 48 ring entries for two mainnet payments. The test checks the node's prefix hash, fee, byte-for-byte encoding, firmware CLSAG_GGX verification and phone proof verification. It rejects every truncated prefix and mutations of the fee, ring, signature or proof. The release catalog exposes addresses for both currencies.
+
+Build a second probe with `-DTEST_ZANO_PHONE_PAYMENTS=ON`. Run `node tests/host/privacy/zano_phone_check.cjs <candidate-probe> <default-probe>` to exercise simulated approval and phone verification of new one- and two-input payments. `zano_private_ledger.py` uses a pinned testnet daemon with accelerated fork heights. It mines mature funds, checks pool admission and block inclusion, and compares the submitted bytes to the node's record. An upstream watch-only wallet independently finds both transactions by their eight-byte payment ID. The setup and exact commands are in `tests/host/privacy/README.md`. [Receipts](validation)
+
+`tests/host/ethereum_ledger_check.cjs <chain_probe> <anvil> [archive-rpc]` submits the approved result to a local Anvil node. Install the locked wallet dependencies with `npm ci --prefix tools --ignore-scripts` and include `tools/node_modules` in `NODE_PATH`. For real browser discovery also install `playwright-core@1.55.0` in a test directory, add its `node_modules` to `NODE_PATH` and set `HEXWALLET_BROWSER` to the Chromium executable. The archive run pins Ethereum block 20,000,000 and checks the ETH balances, Lido shares, USDC output and ERC-721 owner. Rejection, field loss during review and an RPC chain change after signing must yield zero broadcasts. The application pipe models the panel decision and phone transport.
+
+Native-node and SDK coverage varies by currency. Real-card authentication, side-channel resistance, panel timing and phone NFC interoperability require hardware evidence. [Per-chain receipts](validation)
 
 ## Adding a test
 

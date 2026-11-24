@@ -776,12 +776,19 @@ namespace hexwallet
                  uint16_t panel_width, uint16_t panel_height, uint16_t x,
                  uint16_t y, uint8_t scale)
   {
-    if (bitmap == nullptr || code.size == 0 || scale == 0)
+    if (bitmap == nullptr || code.size == 0 || code.size > kQrMaxModules || scale == 0)
       return false;
-    if (bitmap_size < eink_frame_bytes(panel_width, panel_height))
+    const uint32_t side = (code.size + 2U * kQrQuietZone) * scale;
+    if (x + side > panel_width || y + side > panel_height ||
+        bitmap_size < eink_frame_bytes(panel_width, panel_height))
       return false;
     const size_t stride = eink_row_bytes(panel_width);
-    bool fitted = true;
+    for (uint32_t py = y; py < y + side; ++py) {
+      for (uint32_t px = x; px < x + side; ++px)
+        bitmap[py * stride + px / 8] &= static_cast<uint8_t>(~(0x80U >> (px % 8)));
+    }
+    x += kQrQuietZone * scale;
+    y += kQrQuietZone * scale;
     for (uint8_t row = 0; row < code.size; ++row)
     {
       for (uint8_t column = 0; column < code.size; ++column)
@@ -793,26 +800,16 @@ namespace hexwallet
         for (uint8_t dy = 0; dy < scale; ++dy)
         {
           const uint32_t py = static_cast<uint32_t>(y) + row * scale + dy;
-          if (py >= panel_height)
-          {
-            fitted = false;
-            continue;
-          }
           for (uint8_t dx = 0; dx < scale; ++dx)
           {
             const uint32_t px = static_cast<uint32_t>(x) + column * scale + dx;
-            if (px >= panel_width)
-            {
-              fitted = false;
-              continue;
-            }
             bitmap[static_cast<size_t>(py) * stride + (px / 8)] |=
                 static_cast<uint8_t>(0x80U >> (px % 8));
           }
         }
       }
     }
-    return fitted;
+    return true;
   }
 
   namespace
@@ -1118,8 +1115,10 @@ namespace hexwallet
     memset(canvas, 0, sizeof(canvas));
     QrCode small = {};
     qr_encode(kShort, sizeof(kShort) - 1, QrEcc::Low, &small);
+    memset(canvas, 0xff, sizeof(canvas));
     passed = qr_render(small, canvas, sizeof(canvas), 128, 296, 4, 8, 4) && passed;
-    passed = (canvas[8 * eink_row_bytes(128)] & 0x0F) == 0x0F && passed;
+    passed = canvas[8 * eink_row_bytes(128)] == 0xf0 && passed;
+    passed = canvas[24 * eink_row_bytes(128) + 2] == 0x0f && passed;
     memset(canvas, 0, sizeof(canvas));
     passed = !qr_render(small, canvas, sizeof(canvas), 128, 296, 120, 8, 4) && passed;
     passed = !qr_render(small, canvas, 16, 128, 296, 0, 0, 4) && passed;

@@ -67,6 +67,42 @@
 #include "../../WalletTokens.h"
 #include "../../WalletCustomTokens.h"
 
+extern "C" void host_fail_hmac_after(int calls);
+
+static bool ecdsa_nonce_regression()
+{
+  using namespace hexwallet;
+  constexpr auto curve = EcdsaCurve::Secp256k1;
+  uint8_t key[32] = {};
+  key[31] = 1;
+  const uint8_t order[32] = {
+      0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xfe,
+      0xba,0xae,0xdc,0xe6,0xaf,0x48,0xa0,0x3b,0xbf,0xd2,0x5e,0x8c,0xd0,0x36,0x41,0x41};
+  // ethers 6.17.0 SigningKey(1).sign(order), including RFC 6979 bits2octets.
+  const uint8_t expected[64] = {
+      0xa0,0xb3,0x7f,0x8f,0xba,0x68,0x3c,0xc6,0x8f,0x65,0x74,0xcd,0x43,0xb3,0x9f,0x03,
+      0x43,0xa5,0x00,0x08,0xbf,0x6c,0xce,0xa9,0xd1,0x32,0x31,0xd9,0xe7,0xe2,0xe1,0xe4,
+      0x11,0xed,0xc8,0xd3,0x07,0x25,0x42,0x96,0x26,0x4a,0xeb,0xfc,0x3d,0xc7,0x6c,0xd8,
+      0xb6,0x68,0x37,0x3a,0x07,0x2f,0xd6,0x46,0x65,0xb5,0x00,0x00,0xe9,0xfc,0xce,0x52};
+  uint8_t output[64] = {};
+  uint8_t empty[64] = {};
+  for (int call = 0; call < 5; ++call) {
+    host_fail_hmac_after(call);
+    if (ecdsa_sign_digest(curve, key, order, output) || memcmp(output, empty, sizeof(output)))
+      return false;
+  }
+  // Exercise all three HMAC failures on the RFC 6979 rejection path. A
+  // naturally rejected secp256k1 candidate is too rare for a regression.
+  for (int call = 0; call < 3; ++call) {
+    ecdsa_detail::NonceState state{};
+    ecdsa_detail::Num candidate{};
+    host_fail_hmac_after(call);
+    if (ecdsa_detail::next_nonce(&state, ecdsa_detail::secp256k1_curve(), true, &candidate))
+      return false;
+  }
+  return ecdsa_sign_digest(curve, key, order, output) && !memcmp(output, expected, sizeof(output));
+}
+
 int main()
 {
   const bool output_scan = hexwallet::run_cryptonote_output_scan_self_tests();
@@ -132,7 +168,7 @@ const bool k12 = hexwallet::run_kangaroo_twelve_self_tests();
   const bool solana = hexwallet::run_solana_self_tests();
   const bool starknet = hexwallet::run_starknet_crypto_self_tests();
   const bool p256 = hexwallet::run_p256_self_tests();
-  const bool ecdsa_curve = hexwallet::run_ecdsa_curve_self_tests();
+  const bool ecdsa_curve = hexwallet::run_ecdsa_curve_self_tests() && ecdsa_nonce_regression();
   const bool x25519 = hexwallet::run_x25519_self_tests();
   const bool catalog = hexwallet::run_catalog_self_tests();
   const bool mining = hexwallet::run_mining_catalog_self_tests();

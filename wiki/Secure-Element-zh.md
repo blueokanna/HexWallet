@@ -50,6 +50,10 @@ SCP03 认证的是**主机**，PIN 认证的是**人**。分开是刻意的："�
 | 句柄化钱包 | 派生、审查、签名都必须停止接收明文种子或私钥 |
 | 设备唯一密钥 | 主机密钥保护和产线配钥不在树里 |
 
+Plug & Trust Mini `04.07.01` 的 `Se05x_API_ECDSASign` 和 `Se05x_API_EdDSASign` 接受密钥对象 ID，`Se05x_API_HKDF_Extended` 支持指定派生结果的对象 ID。在固定版本的主机库中未查到 BIP32 标量加法、CryptoNote 带签名的 key image、Ryo MLSAG 或 Zano CLSAG_GGX 的已公开命令。两条隔离链的付款均使用软件持有的测试密钥。I²C 端口通过了主机测试和 7 号板 SDK 编译，仍需逐项取得 applet 支持及实卡签名证据。[固定版本 APDU 声明](https://github.com/NXP/plug-and-trust/blob/7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2/hostlib/hostLib/se05x_03_xx_xx/se05x_APDU_apis.h)
+
+`se051_pin_derive_bip39_seed()` 按固定 SDK 中 applet ≥ 7.2 的扩展 PBKDF2 命令编码，选择 HMAC-SHA512、2,048 次迭代和 64 字节输出。规范化的助记词、盐和用于储存派生值的 HMAC 密钥分别通过三个对象 ID 引用。模拟传输已核对命令与仅含状态字的响应。认证会话中的对象置备、目标实卡支持和基于结果对象的不可导出 BIP32 派生仍待验证。BIP38 另需 scrypt 与 AES。[固定 SDK 实现](https://github.com/NXP/plug-and-trust/blob/7102413e0457d3dfa4fc4be686ca8ec50bd9f5e2/hostlib/hostLib/se05x_03_xx_xx/se05x_04_xx_APDU_impl.h#L1874-L1960)
+
 ## 刻意拒绝的做法
 
 - 创建了但参数没写全的曲线报 **Absent**，不报可用。半装载曲线签出固件验不过的签名，是最坏的失败模式。

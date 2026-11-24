@@ -118,7 +118,8 @@ def make_request(o, ryo, n, index, zero=False):
 
 
 def zano_context(o, d, image, k1, k2):
-    h = o.hash(d["message"] + b"".join(d["ring"]) + b"".join(d["pseudo"]) + image + k1 + k2)
+    message_scalar = scalar(int.from_bytes(d["message"], 'little'))
+    h = o.hash(message_scalar + b"".join(d["ring"]) + b"".join(d["pseudo"]) + image + k1 + k2)
     domains = [b"ZANO_HDS_CLSAG_GGX_LAYER_ZERO__\0", b"ZANO_HDS_CLSAG_GGX_LAYER_ONE___\0", b"ZANO_HDS_CLSAG_GGX_LAYER_TWO___\0"]
     mu = [o.hs(domain + h) for domain in domains]
     amount, asset = [o.mul(p, 8) for p in d["pseudo"]]

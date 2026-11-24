@@ -1,0 +1,15 @@
+{
+  "name": "hexwallet-protocol-oracles",
+  "private": true,
+  "dependencies": {
+    "@cosmjs/amino": "0.39.0",
+    "@cosmjs/proto-signing": "0.39.0",
+    "@solana-program/compute-budget": "0.20.0",
+    "@solana-program/stake": "0.11.0",
+    "@solana-program/token": "0.18.0",
+    "@solana/kit": "8.6.0",
+    "bs58": "4.0.1",
+    "cosmjs-types": "0.11.0",
+    "ethers": "6.17.0"
+  }
+}

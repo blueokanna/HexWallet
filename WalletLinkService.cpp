@@ -1,7 +1,7 @@
 #include "WalletLinkService.h"
 
 #include <Arduino.h>
-#include <Preferences.h>
+#include <nvs.h>
 #include "RandomSource.h"
 #include <esp_system.h>
 #include <stdio.h>
@@ -18,6 +18,7 @@
 #include "WalletSecurity.h"
 #include "WalletSession.h"
 #include "SensitiveValue.h"
+#include "TrustAnchor.h"
 #include "WalletSigning.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
@@ -71,11 +72,9 @@ namespace hexwallet
     constexpr uint8_t kTxChain = 14;
     constexpr uint8_t kTxDash = 15;
 
-    Preferences preferences;
     WalletLinkDevice link;
     WalletNfcApdu apdu;
     bool service_ready = false;
-    bool preferences_ready = false;
     WalletLinkTransport transport_owner = WalletLinkTransport::None;
     uint32_t transport_activity_ms = 0;
 
@@ -180,25 +179,15 @@ namespace hexwallet
       }
     };
 
-    bool load_phone_key(void *, uint8_t out[32])
-    {
-      if (!preferences_ready || !preferences.getBool(kPairedKey, false) ||
-          preferences.getBytesLength(kPhoneKey) != kPhoneKeySize)
-      {
-        return false;
-      }
-      return preferences.getBytes(kPhoneKey, out, kPhoneKeySize) == kPhoneKeySize;
-    }
-
     bool store_phone_key(void *, const uint8_t phone[32])
     {
-      if (!preferences_ready)
+      nvs_handle_t store;
+      if (nvs_open(kLinkPreferencesNamespace, NVS_READWRITE, &store) != ESP_OK)
         return false;
-      if (preferences.putBytes(kPhoneKey, phone, kPhoneKeySize) != kPhoneKeySize)
-      {
-        return false;
-      }
-      return preferences.putBool(kPairedKey, true) != 0;
+      const bool saved = nvs_set_blob(store, kPairedKey, phone, kPhoneKeySize) == ESP_OK &&
+                         nvs_commit(store) == ESP_OK;
+      nvs_close(store);
+      return saved;
     }
 
     void pair_decision(bool approved);
@@ -211,7 +200,7 @@ namespace hexwallet
       pair_decision_busy = true;
       if (approved)
       {
-        link.confirm_pairing();
+        approved = link.confirm_pairing(millis());
       }
       else
       {
@@ -275,7 +264,7 @@ namespace hexwallet
               ? derive_cryptonote_subaddress(master, *entry.network, account, change,
                                              index, subaddress[0], subaddress[1],
                                              &derived)
-              : derive_address(master, have_seed ? seed : nullptr, *entry.network,
+              : wallet_derive_for_display(master, have_seed ? seed : nullptr, *entry.network,
                                account, change, index, &derived);
       secure_zero(&master, sizeof(master));
       secure_zero(seed, sizeof(seed));
@@ -319,7 +308,7 @@ namespace hexwallet
       }
     }
 
-    bool link_signing_allowed()
+    bool link_signing_allowed(WalletTransportOperation operation)
     {
       if (wallet_cli_review_active() || link.pairing_pending() || wallet_totp_pending())
         return false;
@@ -327,7 +316,7 @@ namespace hexwallet
           wallet_session_is_loaded(), true, board_has_display(),
           battery_monitor_blocks_signing()};
       return wallet_transport_allows(WalletTransport::Nfc,
-                                     WalletTransportOperation::SigningRequest,
+                                     operation,
                                      transport_state);
     }
 
@@ -385,6 +374,14 @@ namespace hexwallet
 
     bool handle_begin_sign(Reader &reader, Writer &writer, uint32_t now_ms)
     {
+      const WalletSigningSession *existing = wallet_signing_session();
+      if ((existing && !existing->rejected) || wallet_cli_review_active() ||
+          link.pairing_pending() || wallet_totp_pending())
+        return writer.u8(kStatusNotApproved);
+      auto refuse = [&](uint8_t status, const char *reason) {
+        wallet_ui_show_refusal(reason);
+        return writer.u8(status);
+      };
       const uint8_t *coin = nullptr;
       uint8_t coin_size = 0;
       uint8_t kind = 0;
@@ -397,18 +394,18 @@ namespace hexwallet
           !reader.bytes(&payload, payload_size) || reader.offset != reader.size ||
           payload_size > kMaxRequest)
       {
-        return writer.u8(kStatusInvalid);
+        return refuse(kStatusInvalid, "Invalid signing request length or fields.");
       }
       char coin_id[33];
       if (memchr(coin, 0, coin_size) != nullptr)
-        return writer.u8(kStatusInvalid);
+        return refuse(kStatusInvalid, "Invalid network identifier.");
       memcpy(coin_id, coin, coin_size);
       coin_id[coin_size] = '\0';
 
-      if (!link_signing_allowed())
+      if (!link_signing_allowed(WalletTransportOperation::SigningRequest))
       {
-        return writer.u8(wallet_session_is_loaded() ? kStatusUnsupported
-                                                    : kStatusLocked);
+        if (!wallet_session_is_loaded()) return refuse(kStatusLocked, "No unlocked wallet for this request.");
+        return refuse(kStatusUnsupported, "Device signing conditions are unavailable.");
       }
 
       WalletSigningError error = WalletSigningError::Unsupported;
@@ -422,7 +419,7 @@ namespace hexwallet
                                          payload_size, now_ms);
         break;
       case kTxKaspa:
-        error = wallet_signing_begin_kaspa(payload, payload_size, now_ms);
+        error = wallet_signing_begin_kaspa(coin_id, payload, payload_size, now_ms);
         break;
       case kTxZcash:
         error = wallet_signing_begin_zcash(coin_id, payload, payload_size,
@@ -467,11 +464,20 @@ namespace hexwallet
         error = wallet_signing_begin_chain(coin_id, address_index, payload, payload_size, now_ms);
         break;
       default:
-        return writer.u8(kStatusUnsupported);
+        return refuse(kStatusUnsupported, "Unknown transaction format.");
       }
       if (error != WalletSigningError::Ok)
       {
-        return writer.u8(status_for_signing(error));
+        const char *reason = "Transaction validation failed.";
+        switch (error) {
+          case WalletSigningError::FeePolicy: reason = "Fee is outside the device limits."; break;
+          case WalletSigningError::Unsupported: reason = "Network or transaction operation is unsupported."; break;
+          case WalletSigningError::WrongWallet: reason = "Transaction ownership check failed."; break;
+          case WalletSigningError::WrongNetwork: reason = "Chain ID differs from the selected network."; break;
+          case WalletSigningError::ParseFailed: reason = "Cannot validate the transaction encoding or fields."; break;
+          default: break;
+        }
+        return refuse(status_for_signing(error), reason);
       }
       const WalletSigningSession *session = wallet_signing_session();
       if (session == nullptr)
@@ -501,6 +507,11 @@ namespace hexwallet
         return writer.u8(kStatusRejected);
       if (!session->approved)
         return writer.u8(kStatusPending);
+      if (!link_signing_allowed(WalletTransportOperation::ApprovalResponse))
+      {
+        wallet_signing_clear();
+        return writer.u8(wallet_session_is_loaded() ? kStatusUnsupported : kStatusLocked);
+      }
       if (writer.offset + 3 > response_capacity)
         return false;
       const size_t header_offset = writer.offset;
@@ -676,14 +687,19 @@ namespace hexwallet
       return WalletLinkStatus::Ok;
     }
 
-    uint8_t identity_seed[32];
-    WalletLinkCallbacks callbacks = {load_phone_key, store_phone_key,
+    WalletLinkCallbacks callbacks = {nullptr, store_phone_key,
                                      show_pairing_code, clear_pairing_prompt,
                                      handle_request};
 
     size_t nfc_apdu_handler(const uint8_t *apdu_bytes, size_t apdu_size,
                             uint8_t *response, size_t response_capacity)
     {
+      if (!service_ready && response && response_capacity >= 2)
+      {
+        response[0] = 0x69;
+        response[1] = 0x85;
+        return 2;
+      }
       return wallet_link_service_apdu(WalletLinkTransport::Nfc,
                                       apdu_bytes, apdu_size, millis(), response,
                                       response_capacity);
@@ -695,25 +711,51 @@ namespace hexwallet
   {
     if (service_ready)
       return true;
-    preferences_ready = preferences.begin(kLinkPreferencesNamespace, false);
-    if (!preferences_ready)
+    if (!board_credential_storage_ready()) return false;
+    nvs_handle_t store;
+    if (nvs_open(kLinkPreferencesNamespace, NVS_READWRITE, &store) != ESP_OK)
       return false;
-    if (preferences.getBytesLength(kIdentitySeedKey) == sizeof(identity_seed))
+    struct CloseStore {
+      nvs_handle_t handle;
+      ~CloseStore() { nvs_close(handle); }
+    } close_store{store};
+    uint8_t phone[kPhoneKeySize];
+    size_t length = sizeof(phone);
+    nvs_type_t type;
+    const esp_err_t pair_status = nvs_find_key(store, kPairedKey, &type);
+    const bool paired = pair_status == ESP_OK;
+    const char *phone_key = kPairedKey;
+    if (paired && type == NVS_TYPE_U8)
     {
-      if (preferences.getBytes(kIdentitySeedKey, identity_seed, sizeof(identity_seed)) != sizeof(identity_seed))
+      // Previous firmware wrote a u8 marker and a separate public key.
+      uint8_t marker = 0;
+      if (nvs_get_u8(store, kPairedKey, &marker) != ESP_OK || marker != 1) return false;
+      phone_key = kPhoneKey;
+    }
+    else if (paired && type != NVS_TYPE_BLOB) return false;
+    if (paired && (nvs_get_blob(store, phone_key, phone, &length) != ESP_OK || length != sizeof(phone))) return false;
+    if (!paired && (pair_status != ESP_ERR_NVS_NOT_FOUND ||
+        nvs_find_key(store, kPhoneKey, nullptr) != ESP_ERR_NVS_NOT_FOUND))
+      return false;
+    SensitiveValue<uint8_t[32]> seed_storage;
+    auto &identity_seed = seed_storage.get();
+    length = sizeof(identity_seed);
+    const esp_err_t status = nvs_find_key(store, kIdentitySeedKey, &type);
+    // Check for a page that the SDK invalidated during lookup before creating
+    // an identity or accepting an apparently unpaired store.
+    nvs_stats_t stats{};
+    if (nvs_get_stats(nullptr, &stats) != ESP_OK) return false;
+    if (status == ESP_ERR_NVS_NOT_FOUND && !paired)
+    {
+      if (!random_fill_checked(identity_seed, sizeof(identity_seed)) ||
+          nvs_set_blob(store, kIdentitySeedKey, identity_seed, sizeof(identity_seed)) != ESP_OK ||
+          nvs_commit(store) != ESP_OK)
         return false;
     }
-    else
-    {
-      if (preferences.isKey(kIdentitySeedKey) || !random_fill_checked(identity_seed, sizeof(identity_seed)))
-        return false;
-      if (preferences.putBytes(kIdentitySeedKey, identity_seed,
-                               sizeof(identity_seed)) != sizeof(identity_seed))
-      {
-        return false;
-      }
-    }
-    if (!link.init(identity_seed, callbacks, nullptr))
+    else if (status != ESP_OK || type != NVS_TYPE_BLOB ||
+             nvs_get_blob(store, kIdentitySeedKey, identity_seed, &length) != ESP_OK ||
+             length != sizeof(identity_seed)) return false;
+    if (!link.init(identity_seed, callbacks, nullptr, paired ? phone : nullptr))
       return false;
     if (!apdu.init(&link))
       return false;
@@ -790,6 +832,8 @@ namespace hexwallet
     return service_ready;
   }
 
+  bool wallet_link_service_connected() { return service_ready && link.session_active(); }
+
   bool wallet_link_service_pairing_pending()
   {
     return service_ready && link.pairing_pending();
@@ -802,7 +846,7 @@ namespace hexwallet
 #else
     if (!service_ready || !link.pairing_pending())
       return false;
-    const bool confirmed = link.confirm_pairing();
+    const bool confirmed = link.confirm_pairing(millis());
     if (confirmed)
     {
       wallet_ui_set_decision_callback(nullptr);
@@ -825,15 +869,11 @@ namespace hexwallet
 
   bool wallet_link_service_nfc_begin()
   {
-    if (!service_ready)
-      return false;
     return nfc_port_begin(nfc_apdu_handler, wallet_link_service_field_lost);
   }
 
   void wallet_link_service_nfc_service(uint32_t now_ms)
   {
-    if (!service_ready)
-      return;
     nfc_port_service(now_ms);
   }
 

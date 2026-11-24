@@ -589,6 +589,43 @@ namespace hexwallet
       return true;
     }
 
+    // Ethereum mainnet deployments. Match both the target and the canonical ABI.
+    EvmTransactionError identify_protocol_call(const EvmSigningRequest &r, EvmProtocolCall &kind)
+    {
+      kind = EvmProtocolCall::None;
+      if (r.network->evm_chain_id != 1 || r.contract_creation || r.data_size < 4)
+        return EvmTransactionError::Ok;
+      char contract[kAddressTextSize];
+      address_text(r.contract, contract);
+      const uint8_t *args = r.data + 4;
+      if (strcmp(contract, "0xae7ab96520de3a18e5e111b5eaab095312d7fe84") == 0 &&
+          memcmp(r.data, "\xa1\x90\x3e\xab", 4) == 0) // submit(address)
+      {
+        if (r.data_size != 36 || !is_zero(args, 12)) return EvmTransactionError::NonCanonical;
+        kind = EvmProtocolCall::LidoSubmit;
+      }
+      if (strcmp(contract, "0x7a250d5630b4cf539739df2c5dacb4c659f2488d") == 0 &&
+          memcmp(r.data, "\x7f\xf3\x6a\xb5", 4) == 0) // swapExactETHForTokens
+      {
+        if (r.data_size < 4 + 7 * 32 || !is_zero(args + 32, 31) || args[63] != 128 ||
+            !is_zero(args + 64, 12) || !is_zero(args + 128, 31))
+          return EvmTransactionError::NonCanonical;
+        const size_t token_count = args[159];
+        if (token_count < 2 || r.data_size != 4 + (5 + token_count) * 32) return EvmTransactionError::NonCanonical;
+        for (size_t i = 0; i < token_count; ++i)
+        {
+          const uint8_t *word = args + (5 + i) * 32;
+          if (!is_zero(word, 12) || is_zero(word + 12, 20)) return EvmTransactionError::NonCanonical;
+        }
+        char first[kAddressTextSize];
+        address_text(args + 5 * 32 + 12, first);
+        if (strcmp(first, "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2") != 0)
+          return EvmTransactionError::NonCanonical;
+        kind = EvmProtocolCall::UniswapV2ExactEth;
+      }
+      return EvmTransactionError::Ok;
+    }
+
   } // namespace
 
   EvmTransactionError evm_parse_transaction(const uint8_t *transaction,
@@ -709,7 +746,10 @@ namespace hexwallet
     parsed.contract_creation = to->size == 0;
     if (parsed.contract_creation && !opaque_review)
       return EvmTransactionError::Unsupported;
-    parsed.opaque = opaque_review && (parsed.contract_creation || data->size != 0);
+    if (!parsed.contract_creation && data->size != 0)
+      parsed.token = find_token(network, to->data);
+    // A registered contract keeps its typed checks even on the raw-call path.
+    parsed.opaque = opaque_review && (parsed.contract_creation || (data->size && !parsed.token));
     error = read_integer(*value, native_value, sizeof(native_value));
     if (error != EvmTransactionError::Ok)
       return error;
@@ -745,7 +785,17 @@ namespace hexwallet
     if (data->size != 0)
       memcpy(parsed.data, data->data, data->size);
 
-    if (parsed.opaque)
+    error = identify_protocol_call(parsed, parsed.protocol);
+    if (error != EvmTransactionError::Ok) return error;
+    if (parsed.protocol != EvmProtocolCall::None)
+    {
+      if (is_zero(native_value, sizeof(native_value))) return EvmTransactionError::InvalidAmount;
+      parsed.opaque = false;
+      memcpy(parsed.amount, native_value, sizeof(parsed.amount));
+      memcpy(parsed.recipient, parsed.protocol == EvmProtocolCall::LidoSubmit ? parsed.contract : parsed.data + 4 + 2 * 32 + 12,
+             sizeof(parsed.recipient));
+    }
+    else if (parsed.opaque)
     {
       memcpy(parsed.recipient, parsed.contract, sizeof(parsed.recipient));
       memcpy(parsed.amount, native_value, sizeof(parsed.amount));
@@ -762,7 +812,6 @@ namespace hexwallet
     }
     else
     {
-      parsed.token = find_token(network, parsed.contract);
       if (parsed.token != nullptr)
       {
         uint8_t metadata[384] = {};
@@ -1057,6 +1106,8 @@ namespace hexwallet
 
   const char *evm_operation_text(const EvmSigningRequest &request)
   {
+    if (request.protocol == EvmProtocolCall::LidoSubmit) return "LIDO STAKE ETH";
+    if (request.protocol == EvmProtocolCall::UniswapV2ExactEth) return "UNISWAP V2 SWAP ETH";
     if (request.contract_creation)
       return "CONTRACT CREATION";
     if (request.opaque)
@@ -1109,6 +1160,7 @@ namespace hexwallet
                          const EvmSigningRequest &request)
     {
       return reviewed.type == request.type &&
+             reviewed.protocol == request.protocol &&
              reviewed.opaque == request.opaque &&
              reviewed.contract_creation == request.contract_creation &&
              reviewed.network == request.network &&
@@ -1361,6 +1413,35 @@ namespace hexwallet
            static_cast<unsigned long long>(request.gas_price_or_max_fee));
     if (request.type == EvmTransactionType::Eip1559)
       append("MAX PRIORITY %llu WEI\n", static_cast<unsigned long long>(request.max_priority_fee));
+    if (request.protocol != EvmProtocolCall::None)
+    {
+      EvmProtocolCall kind;
+      if (identify_protocol_call(request, kind) != EvmTransactionError::Ok || kind != request.protocol)
+        return false;
+      char address[kAddressTextSize];
+      address_text(request.contract, address);
+      append("%s\nCONTRACT\n%s\nINPUT %s ETH\n", evm_operation_text(request), address, request.amount_text);
+      const uint8_t *args = request.data + 4;
+      if (kind == EvmProtocolCall::LidoSubmit)
+      {
+        address_text(args + 12, address);
+        append("stETH beneficiary is the sender\nREFERRAL\n%s\n", address);
+      }
+      else
+      {
+        char minimum[kEvmAmountTextSize], deadline[kEvmAmountTextSize];
+        if (!uint256_to_text(args, 0, minimum) || !uint256_to_text(args + 96, 0, deadline)) return false;
+        address_text(args + 64 + 12, address);
+        append("OUTPUT RECIPIENT\n%s\nMINIMUM OUTPUT (raw units) %s\nDEADLINE (Unix seconds) %s\nTOKEN PATH\n",
+               address, minimum, deadline);
+        if (is_zero(args, 32)) append("NO MINIMUM OUTPUT PROTECTION\n");
+        for (size_t i = 0; i < args[159]; ++i)
+        {
+          address_text(args + (5 + i) * 32 + 12, address);
+          append("%s\n", address);
+        }
+      }
+    }
     if (request.opaque)
     {
       uint8_t hash[32] = {};

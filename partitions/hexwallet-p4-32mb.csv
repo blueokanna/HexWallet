@@ -1,0 +1,10 @@
+# Board 7: 32 MiB flash. The factory firmware image ends at 0x800000.
+# Preserve NVS, SPIFFS and key offsets. Leave the old coredump region unused.
+# Name, Type, SubType, Offset, Size, Flags
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+app0,     app,  ota_0,    0x10000,  0x3c0000,
+spiffs,   data, spiffs,   0x3d0000, 0x20000,
+nvs_keys, data, nvs_keys, 0x400000, 0x1000, encrypted
+app1,     app,  ota_1,    0x410000, 0x3c0000,
+assets,   data, littlefs, 0x800000, 0x1800000,

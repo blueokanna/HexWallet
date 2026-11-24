@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -7,282 +8,283 @@
 #endif
 SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 
-#include "WalletBoardPort.h"
 #include "BitcoinTransaction.h"
-#include "KaspaTransaction.h"
-#include "TokenCalldata.h"
+#include "Blake3.h"
 #include "CosmosTransaction.h"
-#include "StellarTransaction.h"
-#include "TronTransaction.h"
-#include "Totp.h"
-#include "XrpTransaction.h"
 #include "CryptoExtended.h"
-#include "src/EcdsaCurve.h"
+#include "CryptoNoteAddress.h"
+#include "CryptoNoteRingCt.h"
+#include "CryptoNoteSigning.h"
+#include "CryptoNoteSpend.h"
+#include "CryptoNoteTransaction.h"
+#include "CryptoPrimitives.h"
+#include "EvmTransaction.h"
+#include "KaspaTransaction.h"
+#include "Mascot.h"
+#include "QrlXmss.h"
+#include "RandomSource.h"
 #include "Se051Apdu.h"
+#include "StellarTransaction.h"
+#include "TokenCalldata.h"
+#include "Totp.h"
+#include "TronTransaction.h"
 #include "WalletAdmission.h"
+#include "WalletBoardPort.h"
 #include "WalletCatalog.h"
 #include "WalletCli.h"
 #include "WalletConfig.h"
-#include "CryptoPrimitives.h"
-#include "RandomSource.h"
-#include "Blake3.h"
-#include "CryptoNoteAddress.h"
-#include "CryptoNoteRingCt.h"
-#include "CryptoNoteSpend.h"
-#include "CryptoNoteTransaction.h"
-#include "CryptoNoteSigning.h"
-#include "EvmTransaction.h"
-#include "ZcashTransaction.h"
-#include "QrlXmss.h"
 #include "WalletCustody.h"
+#include "WalletCustomTokens.h"
 #include "WalletEngine.h"
-#include "WalletLinkCrypto.h"
 #include "WalletLink.h"
+#include "WalletLinkCrypto.h"
 #include "WalletLinkService.h"
-#include "Mascot.h"
 #include "WalletNfcApdu.h"
 #include "WalletSecurity.h"
-#include "WalletCustomTokens.h"
 #include "WalletSigning.h"
 #include "WalletTokens.h"
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
 #include "WalletWorker.h"
+#include "XrpTransaction.h"
+#include "ZcashTransaction.h"
+#include "src/EcdsaCurve.h"
 
-namespace
-{
 
-  bool display_available = false;
-  bool security_ready = false;
-  bool last_authenticated = false;
-  enum SelfTestId : uint8_t
-  {
-    kCrypto = 0,
-    kExtended,
-    kBlake3,
-    kCryptonote,
-    kCryptonoteRingCt,
-    kCryptonoteTransaction,
-    kCryptonoteSpend,
-    kCryptonoteSigning,
-    kQrl,
-    kCustody,
-    kCatalog,
-    kAdmission,
-    kEvm,
-    kBip39,
-    kBip32,
-    kBip84,
-    kEvmDerivation,
-    kBip340,
-    kAddress,
-    kNetworks,
-    kSighash,
-    kKaspa,
-    kCalldata,
-    kTokens,
-    kTransport,
-    kBitcoin,
-    kZcashSighash,
-    kZcash,
-    kLinkCrypto,
-    kWalletLink,
-    kNfcApdu,
-    kSigning,
-    kTron,
-    kCosmos,
-    kStellar,
-    kAlgorand,
-    kNear,
-    kTezos,
-    kTotp,
-    kXrp,
-    kEcdsaCurve,
-    kX25519,
-    kSe051Apdu,
-    kSelfTestCount
-  };
+namespace {
 
-  const char *const kSelfTestNames[kSelfTestCount] = {
-      "crypto",
-      "extended",
-      "blake3",
-      "cryptonote",
-      "cryptonote-ringct",
-      "cryptonote-tx",
-      "cryptonote-spend",
-      "cryptonote-signing",
-      "qrl",
-      "custody",
-      "catalog",
-      "admission",
-      "evm",
-      "bip39",
-      "bip32",
-      "bip84",
-      "evm-derive",
-      "bip340",
-      "address",
-      "networks",
-      "sighash",
-      "kaspa",
-      "calldata",
-      "tokens",
-      "transport",
-      "bitcoin",
-      "zcash-sighash",
-      "zcash",
-      "link-crypto",
-      "wallet-link",
-      "nfc-apdu",
-      "signing",
-      "tron",
-      "cosmos",
-      "stellar",
-      "algorand",
-      "near",
-      "tezos",
-      "totp",
-      "xrp",
-      "ecdsa-curve",
-      "x25519",
-      "se051-apdu",
-  };
+bool display_available = false;
+bool security_ready = false;
+bool last_authenticated = false;
+enum SelfTestId : uint8_t {
+  kCrypto = 0,
+  kExtended,
+  kBlake3,
+  kCryptonote,
+  kCryptonoteRingCt,
+  kCryptonoteTransaction,
+  kCryptonoteSpend,
+  kCryptonoteSigning,
+  kQrl,
+  kCustody,
+  kCatalog,
+  kAdmission,
+  kEvm,
+  kBip39,
+  kBip32,
+  kBip84,
+  kEvmDerivation,
+  kBip340,
+  kAddress,
+  kNetworks,
+  kSighash,
+  kKaspa,
+  kCalldata,
+  kTokens,
+  kTransport,
+  kBitcoin,
+  kZcashSighash,
+  kZcash,
+  kLinkCrypto,
+  kWalletLink,
+  kNfcApdu,
+  kSigning,
+  kTron,
+  kCosmos,
+  kStellar,
+  kAlgorand,
+  kNear,
+  kTezos,
+  kTotp,
+  kXrp,
+  kEcdsaCurve,
+  kX25519,
+  kSe051Apdu,
+  kSelfTestCount
+};
 
-  struct SelfTestReport
-  {
-    bool passed[kSelfTestCount];
+const char *const kSelfTestNames[kSelfTestCount] = {
+    "crypto",
+    "extended",
+    "blake3",
+    "cryptonote",
+    "cryptonote-ringct",
+    "cryptonote-tx",
+    "cryptonote-spend",
+    "cryptonote-signing",
+    "qrl",
+    "custody",
+    "catalog",
+    "admission",
+    "evm",
+    "bip39",
+    "bip32",
+    "bip84",
+    "evm-derive",
+    "bip340",
+    "address",
+    "networks",
+    "sighash",
+    "kaspa",
+    "calldata",
+    "tokens",
+    "transport",
+    "bitcoin",
+    "zcash-sighash",
+    "zcash",
+    "link-crypto",
+    "wallet-link",
+    "nfc-apdu",
+    "signing",
+    "tron",
+    "cosmos",
+    "stellar",
+    "algorand",
+    "near",
+    "tezos",
+    "totp",
+    "xrp",
+    "ecdsa-curve",
+    "x25519",
+    "se051-apdu",
+};
 
-    bool all_passed() const
-    {
-      for (uint8_t index = 0; index < kSelfTestCount; ++index)
-      {
-        if (!passed[index])
-          return false;
-      }
-      return true;
+struct SelfTestReport {
+  bool passed[kSelfTestCount];
+
+  bool all_passed() const {
+    for (uint8_t index = 0; index < kSelfTestCount; ++index) {
+      if (!passed[index])
+        return false;
     }
-  };
-
-  void run_self_tests(void *context)
-  {
-    SelfTestReport *report = static_cast<SelfTestReport *>(context);
-    report->passed[kCrypto] = hexwallet::run_crypto_self_tests();
-    report->passed[kExtended] = hexwallet::run_crypto_extended_self_tests();
-    report->passed[kBlake3] = hexwallet::run_blake3_self_tests();
-    report->passed[kCryptonote] = hexwallet::run_cryptonote_self_tests();
-    report->passed[kCryptonoteRingCt] = hexwallet::run_cryptonote_ringct_self_tests();
-    report->passed[kCryptonoteTransaction] = hexwallet::run_cryptonote_transaction_self_tests();
-    report->passed[kCryptonoteSpend] = hexwallet::run_cryptonote_spend_self_tests();
-    report->passed[kCryptonoteSigning] = hexwallet::run_cryptonote_signing_self_tests();
-    report->passed[kQrl] = hexwallet::run_qrl_xmss_self_tests();
-    report->passed[kCustody] = hexwallet::run_custody_self_tests();
-    report->passed[kCatalog] = hexwallet::run_catalog_self_tests();
-    report->passed[kAdmission] = hexwallet::run_admission_self_tests();
-    report->passed[kEvm] = hexwallet::run_evm_transaction_self_test();
-    report->passed[kBip39] = hexwallet::run_bip39_self_test();
-    report->passed[kBip32] = hexwallet::run_bip32_self_test();
-    report->passed[kBip84] = hexwallet::run_bip84_self_test();
-    report->passed[kEvmDerivation] = hexwallet::run_evm_derivation_self_test();
-    report->passed[kBip340] = hexwallet::run_bip340_self_test();
-    report->passed[kAddress] = hexwallet::run_address_self_tests();
-    report->passed[kNetworks] = hexwallet::run_network_profile_self_tests();
-    report->passed[kSighash] = hexwallet::run_bitcoin_sighash_self_tests() &&
-                               hexwallet::run_groestlcoin_sighash_self_tests();
-    report->passed[kKaspa] = hexwallet::run_kaspa_self_tests();
-    report->passed[kCalldata] = hexwallet::run_token_calldata_self_tests();
-    report->passed[kTokens] = hexwallet::run_token_profile_self_tests();
-    report->passed[kTransport] = hexwallet::run_transport_policy_self_test();
-    report->passed[kBitcoin] = hexwallet::run_bitcoin_transaction_self_test();
-    report->passed[kZcashSighash] = hexwallet::run_zcash_sighash_self_tests();
-    report->passed[kZcash] = hexwallet::run_zcash_transaction_self_test();
-    report->passed[kLinkCrypto] = hexwallet::run_link_crypto_self_test();
-    report->passed[kWalletLink] = hexwallet::run_wallet_link_self_test();
-    report->passed[kNfcApdu] = hexwallet::run_wallet_nfc_apdu_self_test();
-    report->passed[kSigning] = hexwallet::run_wallet_signing_self_test();
-    report->passed[kTron] = hexwallet::run_tron_self_tests();
-    report->passed[kCosmos] = hexwallet::run_cosmos_self_tests();
-    report->passed[kStellar] = hexwallet::run_stellar_self_tests();
-    report->passed[kAlgorand] = hexwallet::run_algorand_self_tests();
-    report->passed[kNear] = hexwallet::run_near_self_tests();
-    report->passed[kTezos] = hexwallet::run_tezos_self_tests();
-    report->passed[kTotp] = hexwallet::run_totp_self_tests();
-    report->passed[kXrp] = hexwallet::run_xrp_self_tests();
-    report->passed[kEcdsaCurve] = hexwallet::run_ecdsa_curve_self_tests();
-    report->passed[kX25519] = hexwallet::run_x25519_self_tests();
-    report->passed[kSe051Apdu] = hexwallet::run_se051_apdu_self_tests();
+    return true;
   }
+};
 
-  void print_self_test_report(const SelfTestReport &report)
-  {
-    Serial.print("SELFTEST");
-    for (uint8_t index = 0; index < kSelfTestCount; ++index)
-    {
-      Serial.print(' ');
-      Serial.print(kSelfTestNames[index]);
-      Serial.print('=');
-      Serial.print(report.passed[index] ? "pass" : "FAIL");
-    }
-    Serial.println();
-  }
-
-  SelfTestReport self_test_report;
-
-#if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
-  struct SelfTestTask
-  {
-    SelfTestReport *report;
-    volatile bool finished;
-  };
-
-  void run_self_tests_task(void *context)
-  {
-    SelfTestTask *task = static_cast<SelfTestTask *>(context);
-    run_self_tests(task->report);
-    task->finished = true;
-    vTaskDelete(nullptr);
-  }
-#endif
-
+void run_self_tests(void *context) {
+  SelfTestReport *report = static_cast<SelfTestReport *>(context);
+  report->passed[kCrypto] = hexwallet::run_crypto_self_tests();
+  report->passed[kExtended] = hexwallet::run_crypto_extended_self_tests();
+  report->passed[kBlake3] = hexwallet::run_blake3_self_tests();
+  report->passed[kCryptonote] = hexwallet::run_cryptonote_self_tests();
+  report->passed[kCryptonoteRingCt] =
+      hexwallet::run_cryptonote_ringct_self_tests();
+  report->passed[kCryptonoteTransaction] =
+      hexwallet::run_cryptonote_transaction_self_tests();
+  report->passed[kCryptonoteSpend] =
+      hexwallet::run_cryptonote_spend_self_tests();
+  report->passed[kCryptonoteSigning] =
+      hexwallet::run_cryptonote_signing_self_tests();
+  report->passed[kQrl] = hexwallet::run_qrl_xmss_self_tests();
+  report->passed[kCustody] = hexwallet::run_custody_self_tests();
+  report->passed[kCatalog] = hexwallet::run_catalog_self_tests();
+  report->passed[kAdmission] = hexwallet::run_admission_self_tests();
+  report->passed[kEvm] = hexwallet::run_evm_transaction_self_test();
+  report->passed[kBip39] = hexwallet::run_bip39_self_test();
+  report->passed[kBip32] = hexwallet::run_bip32_self_test();
+  report->passed[kBip84] = hexwallet::run_bip84_self_test();
+  report->passed[kEvmDerivation] = hexwallet::run_evm_derivation_self_test();
+  report->passed[kBip340] = hexwallet::run_bip340_self_test();
+  report->passed[kAddress] = hexwallet::run_address_self_tests();
+  report->passed[kNetworks] = hexwallet::run_network_profile_self_tests();
+  report->passed[kSighash] = hexwallet::run_bitcoin_sighash_self_tests() &&
+                             hexwallet::run_groestlcoin_sighash_self_tests();
+  report->passed[kKaspa] = hexwallet::run_kaspa_self_tests();
+  report->passed[kCalldata] = hexwallet::run_token_calldata_self_tests();
+  report->passed[kTokens] = hexwallet::run_token_profile_self_tests();
+  report->passed[kTransport] = hexwallet::run_transport_policy_self_test();
+  report->passed[kBitcoin] = hexwallet::run_bitcoin_transaction_self_test();
+  report->passed[kZcashSighash] = hexwallet::run_zcash_sighash_self_tests();
+  report->passed[kZcash] = hexwallet::run_zcash_transaction_self_test();
+  report->passed[kLinkCrypto] = hexwallet::run_link_crypto_self_test();
+  report->passed[kWalletLink] = hexwallet::run_wallet_link_self_test();
+  report->passed[kNfcApdu] = hexwallet::run_wallet_nfc_apdu_self_test();
+  report->passed[kSigning] = hexwallet::run_wallet_signing_self_test();
+  report->passed[kTron] = hexwallet::run_tron_self_tests();
+  report->passed[kCosmos] = hexwallet::run_cosmos_self_tests();
+  report->passed[kStellar] = hexwallet::run_stellar_self_tests();
+  report->passed[kAlgorand] = hexwallet::run_algorand_self_tests();
+  report->passed[kNear] = hexwallet::run_near_self_tests();
+  report->passed[kTezos] = hexwallet::run_tezos_self_tests();
+  report->passed[kTotp] = hexwallet::run_totp_self_tests();
+  report->passed[kXrp] = hexwallet::run_xrp_self_tests();
+  report->passed[kEcdsaCurve] = hexwallet::run_ecdsa_curve_self_tests();
+  report->passed[kX25519] = hexwallet::run_x25519_self_tests();
+  report->passed[kSe051Apdu] = hexwallet::run_se051_apdu_self_tests();
 }
 
-// The loop task carries the serial CLI, the phone-link request path and the UI.
-// Measured with -fstack-usage on the xtensa toolchain, the deepest frames are
-// wallet_signing_begin_evm (4992 B) under the link's request handler (752 B) and
-// the CLI handlers at ~2.3 KB, against the 32 KB set by
-// SET_LOOP_TASK_STACK_SIZE above. device_compile_check.ps1 -StackBudget keeps
-// the loop-task half of that budget honest.
+void print_self_test_report(const SelfTestReport &report) {
+  Serial.print("SELFTEST");
+  for (uint8_t index = 0; index < kSelfTestCount; ++index) {
+    Serial.print(' ');
+    Serial.print(kSelfTestNames[index]);
+    Serial.print('=');
+    Serial.print(report.passed[index] ? "pass" : "FAIL");
+  }
+  Serial.println();
+}
 
-void setup()
-{
+SelfTestReport self_test_report;
+
+#if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
+struct SelfTestTask {
+  SelfTestReport *report;
+  std::atomic<bool> finished;
+};
+
+void run_self_tests_task(void *context) {
+  SelfTestTask *task = static_cast<SelfTestTask *>(context);
+  run_self_tests(task->report);
+  task->finished.store(true, std::memory_order_release);
+  vTaskDelete(nullptr);
+}
+#endif
+
+} // namespace
+
+void setup() {
 #if ARDUINO_USB_CDC_ON_BOOT && !ARDUINO_USB_MODE
   Serial.enableReboot(false);
 #endif
   Serial.begin(115200);
-  if (!hexwallet::random_init_at_boot())
-  {
-    Serial.println("FATAL: hardware entropy unavailable; wallet services disabled");
+  if (!hexwallet::random_init_at_boot()) {
+    Serial.println(
+        "FATAL: hardware entropy unavailable; wallet services disabled");
     return;
   }
 
 #if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
-  bool self_tests_queued = false;
   self_test_report = SelfTestReport{};
-  // The suite needs more stack than the worker task has, so it gets its own task
-  // sized by HEXWALLET_SELFTEST_STACK_BYTES instead of running inline in setup().
-  // The context is static so a timeout return cannot leave the task writing to a
-  // dead stack frame.
   static SelfTestTask self_test_task = {&self_test_report, false};
-  self_tests_queued =
-      xTaskCreate(run_self_tests_task, "hexwallet-selftest", HEXWALLET_SELFTEST_STACK_BYTES,
-                  &self_test_task, 1, nullptr) == pdPASS;
+  if (xTaskCreatePinnedToCore(
+          run_self_tests_task, "hexwallet-selftest",
+          HEXWALLET_SELFTEST_STACK_BYTES, &self_test_task, 1, nullptr,
+          (xPortGetCoreID() + 1) % portNUM_PROCESSORS) != pdPASS) {
+    Serial.println(
+        "FATAL: self-test task could not start; wallet services disabled");
+    return;
+  }
+  const uint32_t self_test_started = millis();
+  while (!self_test_task.finished.load(std::memory_order_acquire)) {
+    if (static_cast<uint32_t>(millis() - self_test_started) >=
+        HEXWALLET_SELFTEST_TIMEOUT_MS) {
+      Serial.println(
+          "FATAL: self-test did not finish; wallet services disabled");
+      return;
+    }
+    delay(1);
+  }
+  print_self_test_report(self_test_report);
+  if (!self_test_report.all_passed()) {
+    Serial.println(
+        "FATAL: cryptographic self-test failed; wallet services disabled");
+    return;
+  }
 #endif
 
   display_available = hexwallet::board_display_init();
-  if (display_available)
-  {
-    if (!hexwallet::wallet_ui_init())
-    {
+  if (display_available) {
+    if (!hexwallet::wallet_ui_init()) {
       Serial.println("FATAL: LVGL UI initialization failed");
       display_available = false;
     }
@@ -294,90 +296,51 @@ void setup()
     Serial.print(" (");
     Serial.print(hexwallet::board_name());
     Serial.println(")");
-  }
-  else
-  {
+  } else {
     Serial.print("WARN: no display on ");
     Serial.println(hexwallet::board_name());
   }
 
-  if (!hexwallet::mascot_nvs_begin())
-  {
+  if (!hexwallet::mascot_nvs_begin()) {
     Serial.println("INFO: companion starts fresh (no stored state)");
   }
-  if (!hexwallet::custom_tokens_nvs_begin())
-  {
+  if (!hexwallet::custom_tokens_nvs_begin()) {
     Serial.println("WARN: custom token table not available");
   }
 
-#if HEXWALLET_RUN_SELF_TESTS && HEXWALLET_DEVICE_SELF_TESTS
-  if (!self_tests_queued)
-  {
-    Serial.println("FATAL: self-test task could not start; wallet services disabled");
-    return;
-  }
-  if (display_available)
-    hexwallet::wallet_ui_show_busy("Running self-tests...");
-  const uint32_t self_test_started = millis();
-  while (!self_test_task.finished)
-  {
-    if (display_available)
-      hexwallet::wallet_ui_service();
-    if (static_cast<uint32_t>(millis() - self_test_started) >= HEXWALLET_SELFTEST_TIMEOUT_MS)
-    {
-      Serial.println("FATAL: self-test did not finish; wallet services disabled");
-      return;
-    }
-    delay(1);
-  }
-  print_self_test_report(self_test_report);
-  if (!self_test_report.all_passed())
-  {
-    Serial.println("FATAL: cryptographic self-test failed; wallet services disabled");
-    return;
-  }
-#endif
-
   security_ready = true;
-  if (!hexwallet::wallet_cli_init(display_available))
-  {
+  if (!hexwallet::wallet_cli_init(display_available)) {
     Serial.println("FATAL: authenticated CLI initialization failed");
     security_ready = false;
   }
-  if (!hexwallet::wallet_link_service_init())
-  {
-    Serial.println("WARN: phone link identity/pairing store unavailable; NFC/USB requests disabled");
+  if (!hexwallet::wallet_link_service_init()) {
+    Serial.println("WARN: phone link identity/pairing store unavailable; "
+                   "NFC/USB requests disabled");
   }
-  else if (!hexwallet::wallet_link_service_nfc_begin())
-  {
+  if (!hexwallet::wallet_link_service_nfc_begin()) {
     Serial.print("INFO nfc=");
     Serial.print(hexwallet::wallet_link_service_nfc_state());
-    Serial.println("; phone link available over USB only (define HEXWALLET_NFC_PN7161 pins to enable NFC)");
-  }
-  else
-  {
+    Serial.println();
+  } else {
     Serial.println("INFO nfc=ready (PN7161 ISO-DEP card emulation)");
   }
 }
 
-void loop()
-{
-  if (!security_ready)
-  {
+void loop() {
+  if (!security_ready) {
     delay(10);
     return;
   }
   hexwallet::wallet_cli_service();
   hexwallet::wallet_link_service_tick(millis());
   hexwallet::wallet_link_service_nfc_service(millis());
-  if (display_available)
-  {
+  if (display_available) {
     const bool authenticated = hexwallet::wallet_cli_is_authenticated();
-    if (authenticated != last_authenticated)
-    {
+    if (authenticated != last_authenticated) {
       hexwallet::wallet_ui_set_authenticated(authenticated);
       last_authenticated = authenticated;
     }
     hexwallet::wallet_ui_service();
   }
+  vTaskDelay(1);
 }

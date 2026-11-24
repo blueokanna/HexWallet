@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "WalletConfig.h"
+#include "TrustAnchor.h"
 
 namespace hexwallet {
 
@@ -18,6 +19,9 @@ struct WalletUiTransactionOutput {
   // Rendered separately, without the summary line's fixed-size buffer.
   // SPL uses this for the full mint, source account and integer precision.
   const char *details;
+  // Only firmware-authored role labels may be translated. Account names and
+  // token symbols can be request data and must remain verbatim.
+  bool ownership_is_label;
 };
 
 struct WalletUiTransactionReview {
@@ -42,6 +46,12 @@ struct WalletUiTransactionReview {
 using WalletUiDecisionCallback = void (*)(bool approved);
 void wallet_ui_set_decision_callback(WalletUiDecisionCallback callback);
 
+enum class WalletUiLanguage : uint8_t { English, Chinese };
+WalletUiLanguage wallet_ui_language();
+// Changes the menu language. An active review, pairing or OTP must be closed first.
+// The preference is held in RAM and defaults to English after power-on.
+bool wallet_ui_set_language(WalletUiLanguage language);
+
 bool wallet_ui_init();
 bool wallet_ui_ready();
 void wallet_ui_show_port_error();
@@ -59,6 +69,7 @@ bool wallet_ui_show_otp(const char *issuer, const char *account, const char *cod
                         uint64_t expires_unix);
 void wallet_ui_hide_otp();
 void wallet_ui_show_transaction(const WalletUiTransactionReview &review);
+void wallet_ui_show_refusal(const char *reason);
 
 // Trusted-verification tie between the panel and the signer.
 //
@@ -68,6 +79,8 @@ void wallet_ui_show_transaction(const WalletUiTransactionReview &review);
 // consumes it exactly once: displayed, fresh, unused. An approval that outlives
 // its own screen therefore cannot sign anything.
 bool wallet_ui_review_seal_code(char out[9]);
+bool wallet_ui_review_digest(uint8_t out[kReviewSealSize]);
+bool wallet_ui_review_authorize(const uint8_t expected[kReviewSealSize]);
 bool wallet_ui_review_authorize();
 void wallet_ui_show_pairing(uint32_t code, const char *fingerprint);
 void wallet_ui_service();

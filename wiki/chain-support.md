@@ -1,4 +1,4 @@
-> Legacy support matrix. Current documentation: [Supported-Chains](Supported-Chains) / [Supported-Chains-zh](Supported-Chains-zh).
+> Legacy support matrix. The historical Cosmos rows describe v1–v3 bank sends. For the current v4–v7 IBC, authz and Amino coverage see [Chain payloads](Chain-Payloads#cosmos) / [载荷格式](Chain-Payloads-zh#cosmos).
 
 # HexWallet - chain-support
 
@@ -46,10 +46,10 @@
 | ERG | P2PK（ProveDlog）生产签名：设备重建交易 ID 预映像、生成 56 字节 Schnorr 证明并返回完整签名交易。审核现在把**唯一对外输出**与它的**每一个代币**都显示出来：出现第二个对外输出、或代币列表放不下时直接拒绝签名（`Unsupported`/`BufferTooSmall`），退回本钱包的输出只汇总为 `CHG n` | 生产可用。手续费由主机提供（屏上标注 `HOST`，离线设备无法自证输入金额）；脚本输入、多签与非 P2PK 一律拒绝。见 [erg-xch-review-binding.md](chain-protocols.md) |
 | XCH | 生产签名。BLS12-381 的私密标量运算走**仓库内实现**（`Bls12381.cpp`，强制 32-bit limb，宿主机与 MCU 同一份代码；无 `third_party` 依赖），签名前设备自建 `(q . conditions)`、自算 `sha256tree`、自组 AGG_SIG_ME 消息并验签；EIP-2333 派生、权威 curry、bech32m 地址与 blspy 逐字节一致 | 只准入**标准 coin 花费**：每个 `CREATE_COIN` 都在屏上显示，receipt/change 计费与总额对账；CAT/NFT、plot-NFT、offer、多 coin 合并、AggregateSignature 一律拒绝。见 [erg-xch-review-binding.md](chain-protocols.md) |
 | QRL | 生产签名，两代账户分别准入。**v1**：XMSS/SHAKE-256（h=10, w=16）完整签名，签名前把一次性叶持久预留到 NVS 双槽记录并回读证明，与 qrllib `xmss_alt` 在 h=4/6/10、索引 0/1/末叶逐字节比对通过。**v2（Zond）**：`qrl2` 用 BIP44 `m/44'/238'/account'/change/index` 子私钥作 ML-DSA-87 种子，地址 `SHAKE256(01 00 00‖pk)` 显示为 `Q`+128 hex；只签 `0x02` 动态费信封，keygen/sign 与 NIST ACVP tc51/tc61 逐字节一致 | v1 只准入原生转账；v2 只准入主网 chain id 1 的动态费信封（`descriptor=010000`、`extra_params` 为空、`to` 为 64 字节账户或空）。两代都不含代币、质押、多签或跨链消息 |
-| APT | 生产签名。Ed25519 账户地址 `sha3-256(pk‖0x00)`；设备自建 `RawTransaction` BCS（`0x1::aptos_account::transfer`），签名 `sha3-256("APTOS::RawTransaction"‖BCS)`，输出 `0x00‖sig‖pk` authenticator | 仅原生 APT 转账；无 EntryFunction 任意调用、多签、赞助交易、fa 代币。向量由 Python `sha3_256` + libsodium 独立生成 |
+| APT | Ed25519 地址为 `sha3-256(pk‖0x00)`。原生转账签署 `sha3-256("APTOS::RawTransaction")‖BCS(RawTransaction)`。返回 `0x00‖0x20‖pk‖0x40‖sig` | 支持 `0x1::aptos_account::transfer`。主机测试使用 aptos-sdk 0.11.0 验证完整签名交易。生产签名还依赖卡内托管。 |
 | AE | SLIP-0010 `m/44'/457'/0'/0'/i'`，`ak_` + base58(pubkey‖SHA-256d 校验)；固定向量在 `run_alt_address_self_tests()` | 仅地址；没有经过审计的原生 spend 交易、费用策略和签名路径 |
-| RYO | BIP44 `m/44'/382'/0'/0/i`，CryptoNote 双密钥 long address，varint 前缀 `0x2ce192`；编码器复用 Monero 向量并通过 Ryo 向量 | 仅地址；Ryo 的 RingCT/交易格式未接入，不能声明收付可用 |
-| ZANO | BIP44 `m/44'/1018'/0'/0/i`，CryptoNote 双密钥 `Zx` 地址，前缀 `0xc5`；与 zano `tests/unit_tests/base58.cpp` 向量逐字节一致 | 仅地址；没有标准子地址前缀，子地址 API 返回 `InvalidArgument`；签名关闭 |
+| RYO | BIP44 `m/44'/382'/0'/0/i`，长标准地址前缀 `0x2ce192`、长子地址前缀 `0x2fe192`。手机显式指定 `(0, 0)` 返回该 BIP32 子密钥的标准地址。Ryo 官方校验器核对了 6 个地址响应 | 目录开放地址。手机构建、主机固件批准和签后复核已验证；官方 `ryod` 在隔离分叉确认两笔 25 成员环付款。实板、卡内签名及手机主网广播待验收。[验证记录](validation) |
+| ZANO | BIP44 `m/44'/1018'/0'/0/i`，非零账户及索引也派生独立的 `Zx` 标准地址。Zano 节点按给定 payment ID 编码的集成地址与独立结果一致 | 发布目录开放地址，显式非零子地址请求返回错误。两笔已有主网付款通过离线验签。两笔自建付款经主机审阅签名后在隔离测试链高度 39、40 确认。实卡签名与 GGXXG 质押待验收。[回执](validation) |
 
 ### 未接入的截图币种（明确原因）
 

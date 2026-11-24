@@ -2,6 +2,255 @@
 
 # HexWallet - validation
 
+## 2026-11-24　双语界面、88 张独立画面及 7 号板重建
+
+横屏 UI 的 Release 与 Clang ASan/UBSan 各通过 7/7：英文／中文行为与帧导出、P4 两种 SPI 初始化顺序、S3 显示生命周期。44 个命名状态的两种语言共 88 个 PBM 逐字节一致，导出为独立 PNG；ZXing-C++ 从两种语言的收款首屏均读回公开测试地址。304 字形的 Noto 子集从固定 OTF 和 `lv_font_conv@1.5.3` 重新生成，`--check` 逐字节匹配生成文件和字符清单。所有画面为主机测试夹具。详见[中文审计](UI-Audit-2026-11-24-zh)、[English audit](UI-Audit-2026-11-24) 和[逐格图库](UI-Gallery)。
+
+修复了英文按钮文字高度不足、配对指纹截断、串口确认码及配对正文无法四键滚动、重复批准回调、无效审阅残留、显示错误时 OTP 未清除和签名审阅入口静默截断输出数。不可完整显示的审阅文字（缺字、无效 UTF-8、方向控制符）不能授权。语言切换在活动审阅、配对、OTP 和待处理决定期间被禁止。真实按键事件覆盖语言切换、短按／长按、配对成功／拒绝、显示未提交及重复交付。资产夹具对 Ryo/Zano 按发布门控显示签名不可用。
+
+重建的主机 `chain_probe` 与 `production_policy` 通过安全回归、`signing-audit all`、生产托管拒绝和协议 SDK 对照。EVM 的 62 个配置、82 个原生付款签名匹配 ethers；Solana、Cosmos 和广播适配器检查通过。本轮未新增节点入块证据。UI 测试的 seal 和显示提交为模拟，不能证明真实卡内签名及显示绑定。
+
+7 号板 Arduino-ESP32 3.3.13 / P4 post-v3 / LVGL 9.5.0 构建成功，程序空间 1,513,240 字节、静态内存 242,904 字节。镜像分区、组件及 ELF 摘要校验通过。
+
+| 产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| 空板出厂镜像 | 8,388,608 | `2f4f1f140a4113b79b742c4e3ddbf523b54d39f8ba5a4ee6c6db242ccc9f1106` |
+| 应用镜像 | 1,513,984 | `4a71e5b82dcfb7d3f2dc8d19458b879417195123d728640aa34506c6f8fa6a0c` |
+| ELF | 20,759,136 | `9d477cd1c7358ec369f374b4dabd53c78c015e01fa8c043a5130d555e5a37d84` |
+| [图片摘要清单](ui-gallery/manifest.json) | — | `31f1dce7c7968e172f9796999eaa58a05e0e98fb590bd58934e549234e57d9f9` |
+
+当前本机无串口；生产创建／恢复、BIP38、相机采集、实卡签名及实板性能仍未贯通。各协议动态详情和非横屏界面未全面中文化。上述结果不扩展 214/214 地址登记的含义。产物尚未刷机或发布。
+
+## Gaia 与 Osmosis 的双向 ICS-20 到账、确认及超时退款
+
+两个独立创世分别使用官方 Gaia v14.2.0 和 Osmosis v6.4.0。每条链初始均无 IBC 客户端、连接或通道。为匹配固件的固定路径，测试将 Gaia 的起始通道编号设为 141，Osmosis 从 0 起。`@confio/relayer` 0.12.0 执行 Tendermint 轻客户端、连接和通道握手，随后提交每笔收包、确认或超时所需的证明。两端使用公开的测试账户，签名与批准在主机固件中运行。本节记录隔离链的执行结果。主网付款、实体键批准和卡内签名仍待验收。
+
+| 付款 | 源链发包高度 | 对端到账高度 | 源链结果 | 已核对的余额 |
+| --- | ---: | ---: | --- | --- |
+| Gaia → Osmosis，序号 1 | 32 | 30 | 高度 38 确认 | Osmosis 收款地址增加 1.234567 ATOM 的 ICS-20 凭证 |
+| Osmosis → Gaia，序号 1 | 35 | 43 | 高度 42 确认 | Gaia 收款地址增加 2.345678 OSMO 的 ICS-20 凭证 |
+| Gaia → Osmosis，序号 2，故意延迟中继 | 48 | 无收包 | 高度 61 超时退款 | 3.456789 ATOM 本金全额退回，发送者支付 0.002700 ATOM 手续费，对端余额无变化 |
+
+| 交易阶段 | Gaia → Osmosis | Osmosis → Gaia |
+| --- | --- | --- |
+| 源链发包 | `6D105BA91CA4E8B910C2CE32D06FC4F77B32938EAB45EC8393A648994331050F` | `8CAC2BD9CE354F64268262AFAF9B9C4C67D37257872A1D939A35C0BC89AB2ED4` |
+| 对端收包 | `417242F4804F1BF3B8EBF27C1DDDF4E48A1323C88A977549C252A2EC80E92AAC` | `2CB7549431E014935996686413A8B7E9C83E31B0625711C6812DF10DA4C71920` |
+| 源链确认 | `E115418119BE8D96DFAFB994A305E234D678D2DB2DAECFF63FD9ED247F748F4A` | `FB05334876C9973CB0948AB603A8DCA582536D561D32B8A5558003DD12A3E464` |
+
+对端余额按 `ibc/SHA256(transfer/<对端通道>/<原生面额>)` 查询。两次成功收包均记录 `received=true`，确认包结果为 `AQ==`，测试按字节核对其链上摘要。退款样本的发包交易为 `94CD998726E7495667696D3E9E3A4A502F6CA1F8F4CABA708A697DEFE67130AC`，超时交易为 `B773835489CB137949435133951F098F228EDDD4A1A84F1C5829AE912CA7AF0F`，对端查询为 `received=false`。确认和退款后，源链都已清除对应的 packet commitment。
+
+这轮双链测试的创世文件 SHA-256 为 Gaia `46BBB4B057FB761042897A352CC9F5A77A721989D4BE55EB7B71ABDA8A579E8D`、Osmosis `C5D5DDEE3ECC2287083BF50489B85D49C9516B1B5DA344B53408D4B1BC89CE8C`。Osmosis 独立付款测试另建创世 `DB7FB4DB345C631865C1161A8C214ED4B8F99685DBD8CEA13AE22FBBAC38CD2B`，在高度 4 执行 1.234567 OSMO 的 Amino 付款，高度 6 和 7 分别确认限额授权与撤销。交易 ID 依次为 `A7A027DCD69861397E60B17A860147CF6A67FA668EC0654F3CE11020CFA1DA15`、`A8FB62C64A53546BB5C5E9C429EC1BFDA44E3EDA0CF6609EE3740B250622CAB6`、`FB6F0BD65B4F12EEF5CE25A68FC5611AF49FC9F4C470F324B06C7024977A979E`。链上查询核对了限额、到期时间、撤销后的空授权和 8,100 uosmo 总手续费。
+
+### Reproduce on two private ledgers
+
+Use the official Gaia v14.2.0 and Osmosis v6.4.0 binaries and a Release `chain_probe`. The Windows SHA-256 digests are `09b57ac4116498fd1fcb193d5c7a003feefbee71c2ce62b959d25f425a41b885` and `dd6ddd48697bc984adcc1a4fe372ca4a2cd5680ddea434973383a6a5e15fffce`. Both node homes and validator keys are temporary. Each run creates fresh genesis files and prints their digests and the resulting transaction hashes. [Gaia release](https://github.com/cosmos/gaia/releases/tag/v14.2.0) · [Osmosis release](https://github.com/osmosis-labs/osmosis/releases/tag/v6.4.0)
+
+```powershell
+npm ci --prefix tools --ignore-scripts
+npm install --prefix build/ledger-tests/ibc-relayer --save-exact --ignore-scripts @confio/relayer@0.12.0
+$env:NODE_PATH = (Resolve-Path build/ledger-tests/ibc-relayer/node_modules).Path
+$probe = 'build/chain-native/Release/chain_probe.exe'
+$gaia = 'build/ledger-tests/gaia/gaiad-v14.2.0-windows-amd64.exe'
+$osmo = 'build/ledger-tests/osmosis/osmosisd-6.4.0-windows-amd64.exe'
+node tests/host/cosmos_ledger_check.cjs $probe $gaia
+node tests/host/cosmos_ledger_check.cjs $probe $osmo osmo
+node tests/host/cosmos_ibc_ledger_check.cjs $probe $gaia $osmo
+```
+
+## 2026-11-24　横屏 7 号板、Cosmos 手机广播与 Gaia 节点回执
+
+公开 BIP39 测试账户经主机固件的手机入口取得审阅和一次性签名。`tools/cosmos_payment.cjs` 根据原始请求独立重建 Cosmos 消息、手续费和签名字节，验证签名者和 RPC chain ID，然后广播。`tests/host/cosmos_ledger_check.cjs` 在独立创世的单验证人 Gaia v14.2.0 上测试。节点使用 `cosmoshub-4` 和 `uatom`，只监听本机。每笔均核对交易哈希、成功执行码和区块中的完整字节。
+
+| 操作 | 高度 | 交易 SHA-256 | 链上查询 |
+| --- | ---: | --- | --- |
+| 原生 Amino `MsgSend` | 2 | `A859C612F70F6916005A81F94E16E145B52342227C3B815DE14DCA5C77C85E0E` | 收款人新增 1,234,567 uatom |
+| `MsgGrant` | 3 | `2D793F03D8F50C21DF38FF4A54A0FC11822C5A2D1EE9F3F9AAD02C49E086BC60` | `SendAuthorization` 限额 1,234,567 uatom，到期时间与请求相同 |
+| `MsgRevoke` | 4 | `523D98DC0F3B58A63A8B139817609115B586EDEDF1404B5DC8637823F556F689` | 授权列表为空，三笔总手续费 8,100 uatom |
+
+Gaia 固定上游提交 `3aa6e5058b4cbb4729300b239abfabd9a5b5691f`，Windows 节点 SHA-256 为 `09b57ac4116498fd1fcb193d5c7a003feefbee71c2ce62b959d25f425a41b885`。安装 `tools` 的锁定依赖后运行 `node tests/host/cosmos_ledger_check.cjs <chain_probe> <gaiad>`。每次运行会创建新的临时创世和授权期限，区块哈希和授权交易哈希随之变化。[官方发行](https://github.com/cosmos/gaia/releases/tag/v14.2.0)
+
+六条链的 24 笔 direct 双收款人交易与 CosmJS 完整 `TxRaw` 匹配。两条链各再匹配五笔，分别为固定路径 ICS-20、限额授权、撤销、零费和非零费 Amino 付款。公开 REST 端点报告 Hub 高度 34,015,254 的 `transfer/channel-141` 对接 Osmosis `channel-0`，Osmosis 高度 75,928,143 的 `transfer/channel-0` 对接 Hub `channel-141`，两端均为 `STATE_OPEN`、`ORDER_UNORDERED`、`ics20-1`。这两笔主机生成的 ICS-20 尚缺中继、确认包及对端到账。上述三笔 Gaia 回执只覆盖 Hub 配置的本地付款及授权。[Hub 通道](https://rest.cosmos.directory/cosmoshub/ibc/core/channel/v1/channels/channel-141/ports/transfer) · [Osmosis 通道](https://rest.cosmos.directory/osmosis/ibc/core/channel/v1/channels/channel-0/ports/transfer)
+
+Release 和 Clang ASan/UBSan 均通过上述 34 笔完整 `TxRaw` 对照。手机广播测试覆盖两链的四种新消息，重建后核对交易、签名和 RPC chain ID。额度、被授权人或 RPC 网络与请求不符时拒绝广播。
+
+7 号板使用 Arduino-ESP32 3.3.13、P4 post-v3、LVGL 9.5.0。构建脚本检查芯片和版本，`check_p4_image.py` 验证 ELF 摘要、合并镜像、双 OTA 和 `0x800000` 起始的 24 MiB LittleFS 分区。静态内存 242,520 字节。运行时栈、功耗、残影和实体按键仍待实测。
+
+| 产物 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| 空板出厂镜像 | 8,388,608 | `bb0f7e17e51925538f1a8d8ede70bf28db13e7e01c32dcbbd19d6037fb68448c` |
+| 应用镜像 | 1,495,200 | `e070f1539e37b7af6b392c714d2dbeb955d450f4f3c9c7b8635af706b15a688b` |
+| ELF | 20,708,392 | `332c00c4691c766ce08a13c7a5faf614834b01a2e89d76fdfae4eb3842c90936` |
+| 十二幅横屏像素合图 | 9,455 | `62f8ef5544afe3498f3327a89473c162ef92f14ad3091c8e4ccaf20c7a690346` |
+
+Release 和 ASan/UBSan 的 UI 与板卡测试各通过 5/5。两套构建从最终帧导出同一份 296 × 128 横屏画面合图，ZXing 从收款页读回 `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`。主机 APDU 回归核对了认证状态和 BIP39 的对象间 PBKDF2 指令。软件会话限英文词表和至多 128 字节 ASCII passphrase。7 号板的生产会话仍返回 `CustodyUnavailable`，本机建钱包、BIP38、卡内派生签名和实拍扫码仍待贯通。[横屏画面](P4-Review.png) · [安全芯片](Secure-Element-zh)
+
+## 2026-11-24　Zano 自建付款入块与独立收款扫描
+
+手机构建器生成了两笔普通 v4 原生资产付款。主机固件从公开测试账户派生付款密钥，重建收款与找零输出，核对金额、0.01 ZANO 费用和 payment ID。模拟按键批准后，固件为每个输入生成 CLSAG_GGX。手机复核签名和全部证明，隔离脚本向本地节点提交交易。节点在内存池和区块中均返回相应交易 ID，入块后取回的完整交易与提交字节一致。
+
+| 隔离测试链高度 | 交易 ID | 输入 × 环成员 | 字节 | 收款原子单位 |
+| ---: | --- | ---: | ---: | ---: |
+| 39 | `624fc5ce0e3de58c2f0cd6348e96344486704fbdd0d9a902c680199326d881a3` | 1 × 16 | 3,206 | 12,345,678 |
+| 40 | `aacddd743c48b3200eceb5526368ff44bae858580c40c64790f19bfafbbe9e22` | 2 × 16 | 4,572 | 24,691,356 |
+
+区块哈希依次为 `20fad720ec9da672e0766c68212bf4123d0460e37ca86436c97f16bc5ea36965` 和 `0ebde3d40897c6d70c0069fd84189f6b9de5650c730940634266231dd2235554`。上游 `simplewallet` 在付款前为新建的标准地址导出只读钱包。它随后同步区块，并通过 `payments 0807060504030201` 独立查到表中两个交易 ID、高度及金额。两笔各付 10,000,000,000 原子单位手续费。较早一轮的两笔入块记录以 `8646ee31` 和 `51223c12` 开头。
+
+节点和收款钱包均编译自 Zano `b543053953f74c38a32d29a087ec586943b4a321`。测试仅将 testnet HF4 至 HF7 的 `AFTER_HEIGHT` 改为 1、2、3、4，使用创世哈希 `610f3b7d7bd87df12c4c56d7a48c111aa389700a49979d246c6366bf0243e5ed`。`zano_private_ledger.py` 使用成熟区块奖励与真实环成员。普通手机广播函数另行核对主网创世哈希。Release 与 Clang ASan/UBSan 均通过单输入恰好花完和双输入找零、错误归属、篡改、拒签、取消、超时、离场、旧 ID 及一次性领取检查。发布目录对 Zano 和 Ryo 开放地址，实板批准、卡内派生、key image 与签名仍待验收。复现命令见仓库 `tests/host/privacy/README.md`。
+
+| 7 号板本次重建 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| 8 MiB 出厂镜像 | 8,388,608 | `1b0f90e3cf3a323815f12b3b858b3738a2a9c774d4e5def88f1a6367693fa2e8` |
+| 应用镜像 | 1,487,680 | `032045159891ddb14693eeea8d3310c5f4e52f98e26d9d5af9e779e75fee652f` |
+| ELF | | `aa107579877d9da4dc73f5edc45b0d8e7e269f338a89975a95d1bfe7b834b375` |
+
+7 号板静态内存为 242,504 字节。ELF 包含 Zcash 和共享 secp256k1 DER 签名符号，`nm` 未检出 `mbedtls_ecdsa_sign` 或 Zano 主机付款入口。反汇编显示 `cache_hal_init` 从 `0x40000000` 和 `0x48000000` 起分别使用选择器 3、16，共四次调用 `Cache_Invalidate_Addr`。24 MiB LittleFS 模拟通过 17 MiB 读回、46 次断写检查、保留凭据迁移和两个 OTA 槽的写入。PSBT 审计通过 172 项，0 失败；源码清单 SHA-256 为 `92d9544de28de63a51beb61725a910d8783b0942bc2be8c8b5a31555590783ae`。
+
+默认配置重跑 `build_chain_native.ps1`，地址派生通过 214/214，日志以 `chain-native: probe and policy self-tests passed` 结束。PSBT v2 审计分别拒绝了缺少 amount、缺少 script 和空输出 map。输入要求锁定时间时，省略 sequence 按 final 处理；所有输入均为 final 时拒绝，双输入中另一输入使用 `0xfffffffe` 时接受并保留所要求的交易级锁定时间。
+
+P4 无屏、S3 无屏和 S3 显示配置也完成链接。Release 与 Clang ASan/UBSan 的 UI 和板卡测试各通过 5/5，两种构建都从最终帧导出了与 `P4-Review.png` 逐字节相同的图片。ZXing-C++ 从中解出 `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`。四张需求图与用户原件逐字节一致，双语 README 和 wiki 中 370 处相对链接均找到目标文件，公告表中 97 个来源网址均返回 HTTP 200。
+
+Chromium `158.0.8127.36` 的 DApp 通过 EIP-6963 发现测试钱包并取得账户授权。在 Ethereum 高度 20,000,000 的本地 Anvil 分叉上，ETH 转账确认，Lido 铸出 855,865,592,928,634 份额单位，Uniswap V2 兑换收到 3,808,042 个 USDC 最小单位，ERC-721 代币 1 的链上所有者变为指定收款地址。四笔回执状态均为 `0x1`。第一次使用的归档 RPC 在等待 Lido 回执时超时，更换归档 RPC 后从同一分叉高度重跑通过。主机探针使用公开测试密钥及模拟批准，仍待在实板和手机上验证相同操作。
+
+## 2026-11-24　Zano 主网验签、Ryo 官方观察钱包和固件重建
+
+| Zano 主网高度 | 普通 v4 交易 ID | 输入 × 环大小 | 字节数 |
+| ---: | --- | ---: | ---: |
+| 3,916,101 | `7b3d2ebc61f636ba0e7e8846a74ec13621c08a4fb93e692c26abadbe720a7520` | 1 × 16 | 3,206 |
+| 3,916,213 | `908710d3b0b1796916f8a2eaa6d3a882b70688297e3ec71916ee0cc877157563` | 2 × 16 | 4,572 |
+
+两笔交易的费用均为 10,000,000,000 原子单位。原始字节、区块哈希和环成员来源都在 `tests/fixtures/privacy/zano-mainnet-payments.json`。手机重编码与原始字节一致，前缀哈希与节点交易 ID 一致。手机验证 CLSAG_GGX、资产成员、范围聚合、Bulletproof+ 和余额证明，拒绝 7,778 个截断输入及各类证明的篡改。两种主机构建的固件验签器通过三个真实输入。修正前缀哈希转标量后，固定上游对照通过 11 组、337 次固件调用。Zano 付款构建、实卡签名及钱包付款的节点回执仍缺。
+
+官方 `ryod 0.6.1.0` 在隔离分叉高度 133 确认 `6310720fbc94aae9a4fb9a3bf72c553e02e44ebb5ca92e7502918567ad3e52b7`，高度 134 确认 `1cb93ff39b3688b69ab1713374e10d9cc14bdecf96a3de6aedb487b60f9daa39`。第一笔费用恰好为 0.1 RYO。官方 `ryo-wallet-rpc` 使用 testnet 创世块和同一组收款公钥，仅凭查看私钥扫出 12,345,678 和 24,691,356 原子单位，并核对交易 ID、高度、地址和全部 32 字节 payment ID。
+
+Release 与 Clang ASan/UBSan 均通过 Ryo 费用上限与上限加一的测试。一个 109 成员环的有效请求恰好占满 16,384 字节应用帧并进入审阅，增加一个偏移编码字节被拒绝。16,368 字节载荷和 10,780 字节交易缓冲区的前一字节、边界及后一字节组合共 9 项复制检查通过。
+
+| 7 号板当前产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| 出厂合并镜像 | 8,388,608 | `6df46f06f50e972e9b5d94de5d7913ce0ab5a3c5c24a23c76438d5a5bcf053af` |
+| 应用镜像 | 1,487,680 | `772f37189ddd0ee6e847d20e65721de5cc9ecd20cc43cb86022c85a7daef4fc6` |
+| 应用 ELF | | `4bbada9aa19d5fa9aa2e658f8a9ea0b787c98cb51514301ab2da0ab5cf139e27` |
+
+四种固件均完成链接。7 号板静态内存为 242,504 字节。24 MiB LittleFS 模拟通过 17 MiB 读回和 46 处断写。`nm` 确认共享 DER 签名器和 `zcash_sign_request`，`cache_hal_init` 反汇编有四次 `Cache_Invalidate_Addr` 调用。PSBT 审计通过 172 项，源码清单 SHA-256 为 `e4756fddd4b5e217472e9b88b9d7cdde99cd255dc14d117564fa25b3f7cd15c2`。实板运行时测量和实卡付款仍待验收。
+
+## 2026-11-24　Ryo 隔离链付款与 7 号板镜像
+
+官方 `ryod 0.6.1.0` 离线挖出 testnet 的前 46 个非创世区块，随后在 `--stagenet` 模式下继续使用该数据库。此次隔离分叉的创世哈希为 `7a39f4eb486def57a3ff7364f6f0f170b316e07768960f97ee7c65430c967a65`，高度 46 的哈希为 `82a1379cf489d5759cc219aa983b57ae295d3545cf8586a13127128c143081f7`。测试从分叉后挖出的成熟输出取资，按节点返回的全局索引、一次性公钥及承诺构建 25 成员环。
+
+| 输入数 | 交易哈希 | 区块高度与哈希 | 收款原子单位 |
+| --- | --- | --- | ---: |
+| 1 | `b4e5f565503db44221e13c99642ddaf69ba8b1818bb63d828c499c26a1d9828c` | 133 · `b4252482bfceaa00ad024e050e678352ebb65c807d01839aa658ec7ef8853b46` | 12,345,678 |
+| 2 | `4733cdec6c78fb967e697b4a37929498824e8ac6b940ef4af89053197b6a00b6` | 134 · `d91d8f8d2353b9619cc5209d698f322af712908ae9d113d809b2fed2348926ed` | 24,691,356 |
+
+手机侧使用查看密钥验证资金归属与金额承诺，并以真实输出的一次性公钥验证 key image 的单成员环签名。测试中的 key image 由公开测试账户生成。主机运行固件的 `BEGIN_SIGN`、模拟面板批准、worker 签名和一次性 `RESULT`。手机侧复核交易与 MLSAG，测试脚本向隔离节点提交。两笔均先出现在内存池，入块后按交易 ID 取回完整字节，收款方用查看密钥扫出金额和完整的 32 字节 payment ID。发布手机广播函数固定核对 Ryo 主网创世哈希。实卡 key image 导出、实板批准和公网付款仍待验收。
+
+Release 与 Clang ASan/UBSan 各完成四笔主机批准的付款，固定上游每轮验证 4 个原版 Bulletproof 和 6 个 MLSAG。取消请求、超时、拒绝、离场、旧请求 ID、重复领取及未获准的 Zano 签名请求均未返回签名。默认目录仅开放两币地址。PSBT 审计通过 172 项，0 失败，源码清单 SHA-256 为 `bed1dfc5f9b161b24044ef1c90cbea5ad26cc8b453c2ea061f9688150a9c90db`。
+
+| 7 号板产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| 出厂合并镜像 | 8,388,608 | `8a6ea9dedef0201116971d990f148f66b1ec28d0c1cb09fc83c46df2981f67ce` |
+| 应用镜像 | 1,487,680 | `af3d8227f9f008ea1233dd97fe201bafadbf0d684649f5a6bbf083f3da39385d` |
+| 应用 ELF | | `b6046904eed8d8362e76e679979d2b119869b06272cdc3a119ee0e4d7c7e9525` |
+
+四种固件配置均完成链接。7 号板静态内存为 242,504 字节，较缩减 Ryo 请求缓冲区前少 4,864 字节。24 MiB LittleFS 模拟通过 17 MiB 读回、46 个断写点、凭据迁移、双 OTA 和出厂写入。此 ELF 的网络配置数为 246，包含共享 DER 签名器与 `zcash_sign_request`，`cache_hal_init` 保留四次缓存失效调用。7 号板编译器报告的单函数栈帧包括 `ryo_phone_prepare` 688 字节、`ryo_bulletproof_verify` 2,848 字节及 `ed25519_extended_add_scaled` 3,824 字节。worker 运行时栈余量、实板时延和功耗仍待测量。
+
+## 2026-11-23　Ryo 费用与两币手机地址复验
+
+| 项目 | 输入与结果 |
+| --- | --- |
+| Ryo 手续费 | 上游 `FORK_FEE_V2` 按第一输入环大小计费一次，再按整笔字节数计费。两笔 25 成员环付款长 2,836 和 4,586 字节，费用分别为 13,884,765 和 14,739,257 原子单位。余额守恒且少付一个单位的付款在签名前被拒绝。 |
+| 签名后端 | `payment_interop.py` 共 116 项，Release 与 ASan/UBSan 通过。上游 `MLSAG_Ver` 接受两笔付款的全部三个输入签名，完整签名字节的 SHA-256 分别为 `98aed1a1d9577e19330ee33f9e973d1bb980989b9b6046628d32225b2eb9fbc6` 与 `902140b8930f7f9cb16ce547e6aed2a50e20987275ad9e9f8fe0c516007eabc1`。下方早一轮的两笔签名使用较低手续费。 |
+| Ryo 节点 | 官方 `ryod 0.6.1.0`，发布压缩包 SHA-256 `fd7e031c255e2c4e89edb826b7a6a34bb91555001d4ad0495d320d0f6c621902`。独立数据目录、离线主网配置、高度 1，向 `/sendrawtransaction` 提交两笔签名交易均返回 `Failed / invalid output`，内存池为空。该高度尚未启用 Bulletproof，夹具的全局输出索引也为合成值。成熟可花输入、真实环成员、当前分叉入块与收款扫描仍缺。 |
+| 手机地址入口 | 使用公开测试助记词、真实应用回调及模拟面板，在 Release 与 ASan/UBSan 核对 14 项。独立 BIP32、Keccak、Edwards25519 及 CryptoNote Base58 计算覆盖非零账户和索引、显式标准地址、子地址及路径超长拒绝。Ryo 官方校验器识别 6 个地址响应。离线 `zanod 2.2.3.609 [2ae520c]` 对 5 个有效地址响应执行 `get_integrated_address`，所得集成地址及 payment ID 均与独立结果一致。Zano 发布压缩包 SHA-256 `449caa4c21e4c24d3749374ee56ea06ea2e646861af38268738c3019bcea692c`。这些 RPC 仅验证地址编码。 |
+| PSBT 与固件 | PSBT 172 项通过，0 失败。源码清单 SHA-256 `4b0e616386b947548dbae436ae616d7651373723751e89158c4b898ee7541e6e`。四种配置均构建成功。7 号板出厂镜像 8,388,608 字节，SHA-256 `1e4bffcd968a6b8d1c6c18d3c2a1f030ad4dae674b408b4bbea0d5cae0830d96`。应用 1,468,688 字节，SHA-256 `32dba78fdf5992c7048c4a779bfb778e44a94a3a93e521fb70520d4142e46690`。应用头 ELF 摘要与实际 ELF 的 SHA-256 `6872a8b002a2fb08b2678e48244553b504d763ca79536093b37e72cb06403ae1` 一致。 |
+| 存储与 ELF | 24 MiB LittleFS 模拟通过 17 MiB 读回、46 处断写、保留凭据迁移、两个 OTA 槽与出厂镜像写入。已复核当前 ELF 的共享 DER 签名器、`zcash_sign_request`、246 个网络配置和 `cache_hal_init` 的四次缓存失效调用。 |
+
+## 2026-11-23　付款签名、浏览器与 7 号板镜像复验
+
+| 复验项目 | 产物及范围 |
+| --- | --- |
+| 全链主机套件 | 固定 Mbed TLS 3.6.5 的 `build_chain_native.ps1` 完成，输出 `chain-native: probe and policy self-tests passed`，包含本轮付款回归。`policy_check.ps1` 通过注册表与无界字符串拷贝策略检查。 |
+| Ryo 与 Zano | `payment_interop.py` 在 Release 和 Clang ASan/UBSan 构建各通过 115 项。上游 `MLSAG_Ver` 验证了 Ryo v3 单输入和双输入交易的三个签名。两笔完整签名交易的 SHA-256 分别为 `afe670a34e65508b30af8fcf436c6620ef202289fda2a06f8a40b7e880c8ae5c` 和 `7a89f99a5d7ed628764644a4073a77be573bb35feb9e05f8b92eb68a4c6036ea`。Zano 覆盖普通 Zarcanum 输出构造、归属扫描、资产和金额承诺。这些交易使用合成输入；原生节点入块待验收。 |
+| PSBT | 172 项通过，0 项失败。`BitcoinTransaction.cpp` SHA-256 `ddb5f1980e505f27c80b7141908abb53633ce072dc61b2b38c11db50d6b0edac`，本轮 `build/psbt-audit/source-hashes.json` SHA-256 `9c849044d877ca41a852c8e287b28a267408bfecfc90bc52c748445ec621ee88`。 |
+| Chromium DApp | Chromium 158.0.8127.36 的页面通过 ethers EIP-6963 发现、请求账户并提交交易。公开测试密钥、模拟设备按键和应用层测试管道。设备拒签、审阅中离场、签后 RPC 换链、同一载荷被另一把密钥签名，四种情况下合计零次广播，nonce 未变。 |
+| Ethereum 本地分叉 | 高度 20,000,000 的归档状态。ETH 转账 `0x06735e8183cf556ebf66a568c1684eeeab210bf009802715c490a04eecb1c52a`，Lido `0xa1d4ef450a6a1e0245c236113d83e6c058a8e0dd79292cb3ff72858c3768f8dc` 增加 855865592928634 份额，Uniswap V2 `0x10de43a40be126d25f6f54c6b9a4945adce14e923ed69d0d03e51671f149bd45` 到账 3808042 USDC 最小单位，ERC-721 `0xb9f00c20d1fc7568647ba7d84ee6835ad503dde05ebb584a6f337f2606eec00d` 核对新所有者。四笔回执状态均为 `0x1`，仅广播至本地 Anvil。 |
+| 新 7 号板诊断固件 | 合并镜像 8,388,608 字节，SHA-256 `7407dc55a8b303f64d9d5d2d7bf03bc66399e1d6fcda36dca6cfec88ab83ecc4`。应用 1,468,480 字节，SHA-256 `f96a546c4393fb2dbf461143e8ac5ef24b1c2bfa3dbf40b0a2e809a9abd51c1f`。内嵌 ELF 摘要 `7784868df5e09b81953fe6616c07838d04b21724474f6875d02437d7aebeca0d` 与 ELF 文件一致。S3 有屏、S3 无屏和 P4 无屏配置均完成链接。 |
+| Flash 与公告 | 在本轮出厂镜像上重跑 24 MiB LittleFS 模拟，17 MiB 读回、46 个断写点、旧凭据迁移、两个 OTA 槽和出厂写入检查均通过。ELF 中 `kNetworkProfileCount` 为 246。重新核对了共享 DER 签名器符号与 `cache_hal_init` 的四处失效调用。[97 条公告](P4-Advisories-2026-11-23.csv) |
+
+上一轮新增付款输出解码时，出厂镜像 SHA-256 为 `21ce2dcf1534364faee7ac4b702749441f5984538f23460aaa47fe44a24495c6`，应用 SHA-256 为 `6e63e6826e69037a84e76a1d1090145bf526636bf1844b8129dcfebf75810b89`，ELF SHA-256 为 `b6c61fb9cb74d10b5ead68db6938218f7ba9a74036c367a078691e74aec5ca2c`。下方保留更早两轮各自的镜像记录。四份原始截图的逐项核对及实物验收缺口见[功能与安全核对](Capability-Review-zh)。
+
+## 2026-11-23 当前源码复核
+
+| 项目 | 实际执行及结果 |
+| --- | --- |
+| Bitcoin PSBT | `tests/host/psbt_audit/run.ps1` 重新构建并执行，172 项通过，0 项失败，退出码 0。`BitcoinTransaction.cpp` 的 SHA-256 为 `ddb5f1980e505f27c80b7141908abb53633ce072dc61b2b38c11db50d6b0edac`。逐项结果和运行前后校验的源码清单位于 `build/psbt-audit`。 |
+| v2 输出 map | 遇到终止符后同时检查 amount 和 script。缺任一项、两项均缺、只有派生字段均返回 `MissingField`。真实归属和伪造归属分别通过或拒绝。 |
+| required locktime | 高度和时间锁分别进入最终交易。省略 sequence 时按 final 处理。所有输入均 final 时拒绝强制锁定请求，另一个输入设置非 final 即可使整笔交易的锁定生效。 |
+| 曲线 | Ed25519 与 X25519 主机自检通过，含 RFC 7748 的 1,000 次迭代及 Ed25519 公钥转换。转换拒绝非规范编码、无曲线点、单位元、小阶和含扭率分量的点，失败输出清零。Clang ASan/UBSan 构建通过同一组测试。 |
+| 隐私证明 | 固定上游验证器对照 Ryo MLSAG、Zano CLSAG_GGX，共 11 组、337 次固件调用。Ryo 原版 Bulletproof 共 13 组、48 次调用。Ryo v2/v3 type-3 完整交易验证共 4 组夹具、214 次调用。两币的真实付款构建、卡内签名及各自节点的入块记录仍缺。 |
+| 屏幕 | 普通及 ASan/UBSan 构建各通过 5 项 UI/板卡测试。三幅单色帧导出的 PNG 字节一致，SHA-256 为 `8da76505c88cff13a77074323294770e070728503af9bfd3680207c2ade096d3`。ZXing 从完整收款页读取 `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`。[显示画面](P4-Review.png) |
+| 7 号板构建 | 合并镜像 8,388,608 字节，SHA-256 `96ac914f4d4d18de5305a299d1718277644800e1497bfd7616a8b0c20da2cff5`。应用 1,468,480 字节，SHA-256 `5a7d96e2235be4ee6eaca93d9b8d639c7edc10635ccc5813946ca866c0f71304`。ELF SHA-256 `a04d44c20a09e7ae4b7a67efef77b3edc0a22ad80f30542a0d97718e8fb3d4d6`。板卡仍待实测。 |
+
+## 2026-11-23　7 号板诊断镜像和主机验收
+
+7 号板使用 Arduino-ESP32 3.3.13 和 LVGL 9.5.0 构建。该轮空板镜像 `HexWallet.ino.merged.bin` 的 SHA-256 为 `6356dffc6bad91e131fedb4755efa3ac81dbaefa87a7631b526f2ec18b57840b`。应用 `HexWallet.ino.bin` 为 1,467,664 字节，SHA-256 为 `a7a42a6ffb7ebd97490153cfd6862712456bd3a8e4c65918a7cdac5f6e6529b2`。该轮公告使用的 ELF 摘要为 `e4afa56737470757888761e5a53e9c0d05d61099dd18502bb9b3260d49ef8027`。
+
+| 检查项 | 已验证的范围 |
+| --- | --- |
+| Flash | 32 MiB 布局，出厂镜像 8,388,608 字节，`assets` 分区 25,165,824 字节。镜像与二进制分区表由 `tools/check_p4_image.py` 校验。 |
+| 代币持久化 | `p4_token_storage` 链接固件的注册表、编解码和存储代码。在主机上验证旧版 NVS 迁移、首次提交、短写、同步失败、关闭失败、替换失败，以及删除最后一条记录后重新挂载。 |
+| 断电和升级模拟 | `p4_storage_check.py` 在 LittleFS 模拟 Flash 上写入并读回 17 MiB，覆盖 16 MiB 地址边界；46 个写入中断点均能恢复完整记录。按构建的 `flash_args` 模拟旧布局迁移后，NVS、密钥及 SPIFFS 保留；模拟两个 OTA 槽的擦写后，数据区摘要一致。 |
+| 目录和 EVM | 214 个目录配置通过地址或账户公钥派生与能力一致性检查。62 个 EVM 配置的 82 笔原生转账经过手机协议审阅，签名字节与 ethers 一致；同时检查链 ID、付款地址、收款地址、金额和最高费用。 |
+| Bitcoin Gold | Core v0.17.3 的本地 regtest 在高度 2002 确认了三笔固件签名交易，分别花费 P2PKH、P2SH-P2WPKH 和 P2WPKH 输出。每笔交易对比 PSBT v0 和 v2，两者均接受显式或默认 `0x41`，并拒绝 Bitcoin 的 `0x01`。 |
+| Bitcoin | Bitcoin Core 32.1 在 regtest 高度 111 确认四笔付款，覆盖 P2PKH、嵌套及原生 SegWit 和 BIP86 Taproot。Taproot 的 64 字节 DEFAULT 和 65 字节 ALL 签名分别通过 `testmempoolaccept`，其中 DEFAULT 交易入块。 |
+| Litecoin 和 Groestlcoin | Litecoin Core 0.21.5.8 在高度 111、Groestlcoin Core 32.1 在高度 126 各确认三笔付款，均覆盖 P2PKH、P2SH-P2WPKH 和 P2WPKH。Litecoin 验证范围为透明交易。 |
+| Dogecoin | Dogecoin Core 1.14.9 以默认费用策略在高度 111 确认 P2PKH 付款 `d6437a9e222fede9a61fbdc8b55c631470cd5c743f6696a89420f7179dc3ddef`。主机捕获的审阅金额以 DOGE 显示，费用为 0.00193 DOGE。对同一笔付款，费率上限再加一个 koinu 时，两种 PSBT 均被拒绝。 |
+| Bitcoin Cash 和 eCash | Bitcoin Cash Node 29.2.0 与 Bitcoin ABC 0.34.5 在各自 regtest 高度 111 各确认一笔 ForkID 0 的 P2PKH 付款。与节点核对脚本和金额时，BCH 使用八位小数，XEC 使用两位小数。 |
+| ZERO | 使用 v4.0.0 发布包中的 `zerod` 在隔离 regtest 上开采 720 个区块使 coinbase 成熟。节点在高度 721 确认固件签出的第一笔付款，在高度 722 确认合并 P2PKH 和 P2SH-P2PK 两个输入的第二笔付款。两笔均核对上链输出脚本和金额。 |
+| ZEC | Zebra v7.1.0 在隔离 regtest 高度 105 激活 NU7，并在高度 106、107 确认了两笔 ZIP-244 交易。第二笔交易同时花费 P2PKH 和 P2SH-P2PK 输出。 |
+| 本地账本 | ETH 主网高度 20,000,000 的本地 Anvil 分叉执行转账、Lido、Uniswap V2、ERC-721，4 笔回执均为 `0x1`。Solana LiteSVM 执行 8 笔，覆盖 SOL 转账、单发行量 SPL 转账、委托与停用、SPL Token Swap 和 Orca。 |
+| 其他独立核验 | Aptos 的两个链 ID 已与 SDK 对照完整签名交易。ZEC NU7、ZERO 和历史 ZEC NU6.2 透明交易已与独立序列化及签名逐字节比对。 |
+| Aptos 本地入块 | 官方 Aptos CLI 9.6.0 运行单验证人节点，使用隔离创世和链 ID 2。经手机协议批准的付款在区块 11、账本版本 22 执行成功。收款地址增加 12,345,678 octas，付款地址扣除相同本金和 10,335 gas × 100 octas。交易 ID `0x6013b9236f34906141fc2420f8314b1ed911c188d203e2c17db355847960dd04`，区块 `0x90392f87d525ec5debaccf533cd4c7972f3c9c2ae54f42b97717227e85a36168`。 |
+| Cosmos SDK | ATOM、OSMO、TIA、KAVA、LUNA 和 LUNC 各测四组账户号与序号，覆盖两个字段分别为零和非零。24 笔双收款人付款均经手机协议回调审阅，逐项核对派生地址、路径、收款人、金额、费用、链 ID、备注和签名后的完整 `TxRaw`。其中六笔使用空的费用币种列表表示零费用。对照实现为 CosmJS 0.39.0。本次为离线 SDK 对照，六条链的原生节点验收待完成。 |
+
+实板待测项目包括 32 MiB Flash 的高地址寻址、断电恢复、共享 SPI 同时刷屏和 NFC 通信、刷新延迟与残影、功耗、任务栈余量，以及 SE051 实卡签名到手机广播。生产钱包会话当前返回 `CustodyUnavailable`。完整的逐链节点验收仍待完成。
+
+| 本次本地账本 | 高度 | 双输入交易 ID | 区块哈希 |
+| --- | ---: | --- | --- |
+| ZEC NU7 | 107 | `8c6ccbc63cb7ef88c19e960bfdcd8b8b3dfdb55f0547220c8387583239bfa3a6` | `b7c4ce3877916b5227c60a94094fcf2dbdb8cdff4364076291e73f3a300a5faa` |
+| ZERO | 722 | `0731277a60c0945b879195823f337cae2ae5b6ff2337aed3c490058a0faf9069` | `0e999532d0a65a89593d9228b80f3e1ccc5b28962cfc1d9a3bdb1cb94b42447e` |
+
+下表列出按币种启动原生节点的 16 笔 PSBT 付款。每个配置在主机上对同一付款分别审阅 PSBT v0 和 v2，两种格式生成同一笔交易。区块高度属于各自独立的 regtest。
+
+| 节点 | 高度 | 配置 | 交易 ID |
+| --- | ---: | --- | --- |
+| Bitcoin Core 32.1 | 111 | `btc44` | `2f400f2422b911b8d6e04186955ad0ca157268c215380db89fdda9a7b2dedc58` |
+| Bitcoin Core 32.1 | 111 | `btc49` | `869c7d8b8570937beebfef3a201ed1828568d93a6cdb563c2fbfeb74e9292a34` |
+| Bitcoin Core 32.1 | 111 | `btc` | `72f52d3e9b2f6f42e502a92d4543b03105b0e80064cd09c0d6ec8cc68a17939f` |
+| Bitcoin Core 32.1 | 111 | `btc86` | `dbd2db96301c83f1969915c37a68b64bc4ca90873101b6eab2f764d582cc2b78` |
+| Litecoin Core 0.21.5.8 | 111 | `ltc` | `be0f33946e55d9d3d0adbb7949ad5258197e13f29e99a6e98797130c7dcaf20f` |
+| Litecoin Core 0.21.5.8 | 111 | `ltc49` | `6fdcbfdb42f89e4e15ecb7b8714e3a03e17fab2c215a2c8bad069cb35a4477e4` |
+| Litecoin Core 0.21.5.8 | 111 | `ltc84` | `0213801a79abb256a4141ba7afd742ad906da0d80a8ce778fb5227e66f3265bb` |
+| Dogecoin Core 1.14.9 | 111 | `doge` | `d6437a9e222fede9a61fbdc8b55c631470cd5c743f6696a89420f7179dc3ddef` |
+| Groestlcoin Core 32.1 | 126 | `grs` | `830bc1568b7bf05d9f5a82bc4547fa6203815d0fb3c0579830f87346815328b9` |
+| Groestlcoin Core 32.1 | 126 | `grs49` | `9cd00bcc39226d1af65e3997f1085d3c0f35ce2754a157d88dfc17a9ae71ecb1` |
+| Groestlcoin Core 32.1 | 126 | `grs84` | `62b342a02a80810f80caae2f42cb5718643eb4e7c3bac5a9eb077d9734a4b62e` |
+| Bitcoin Gold Core 0.17.3 | 2002 | `btg` | `52382912016e703e88eb6885f35b78b987d2c5cd2d5438d641369c3ad1b7629e` |
+| Bitcoin Gold Core 0.17.3 | 2002 | `btg49` | `8e3f077749243bebcea21b166d71249a223a0947fb32fcda975e6d3d9787c9f0` |
+| Bitcoin Gold Core 0.17.3 | 2002 | `btg84` | `c854367706d7e93b96c9d92879281e4ff98f7110e668acbdedcd3d830d4a8c03` |
+| Bitcoin Cash Node 29.2.0 | 111 | `bch` | `6539f995d69e71dc4f3408b3db145dfe09c4a845e565db899270fe8dbd59c5aa` |
+| Bitcoin ABC 0.34.5 | 111 | `xec` | `0d72eaaa575db27628a8ffe7495a58378741c3c31aa0fce09715e494745b8e5e` |
+
+另一次运行按签名算法遍历 `catalog_dump --psbt` 导出的 106 个配置。每个配置使用自己的派生路径与签名规则，通过指定节点的脚本检查并入块。原生节点版本、升级高度、费用规则和共识差异仍需在各派生币自己的节点上验收。
+
+| 验证节点 | 配置数 | 高度 | 区块哈希 |
+| --- | ---: | ---: | --- |
+| Bitcoin Core 32.1 | 97 | 198 | `5144c71f999fd6f2af0b4ae31ec46aa3c5a6ae4f38c757e03fc123fd01cd64a6` |
+| Bitcoin Cash Node 29.2.0，ForkID 0 | 3 | 111 | `074d630ae07159cb2243608bbaf0408e0ecc0a3c69d55fb7cddfc14077756d0b` |
+| Groestlcoin Core 32.1 | 3 | 126 | `000064ca8ef22c08a1f6c5c7f820da1792553f0994a1323a848519de1397d232` |
+| Bitcoin Gold Core 0.17.3，ForkID 79 | 3 | 2002 | `6314518750694a645eb6d79ded6b5d8b8a9eb10ff3005870d92b64b97f97d090` |
+
+Aptos 可用 `python tests/host/aptos_ledger_check.py <chain_probe> <aptos-cli> <head.mrb>` 复验。脚本使用 `aptos-sdk==0.11.0`，在临时目录生成单独的验证人和创世数据，校验框架包摘要后通过本机 REST 接口提交并查询交易。[Aptos CLI 9.6.0](https://github.com/aptos-labs/aptos-core/releases/tag/aptos-cli-v9.6.0) · [同版本框架包](https://raw.githubusercontent.com/aptos-labs/aptos-core/aptos-cli-v9.6.0/aptos-move/framework/cached-packages/src/head.mrb)
+
 最新本地回归及未验收边界见 [2026-10-31 生产签名补齐记录](hardening-2026-10-31.md) 与 [2026-10-31 代币登记与自定义代币](hardening-2026-10-31-tokens.md)。历史记录保留当时运行范围，不代表后续修改自动通过。
 
 ## 2026-11-01：Groestlcoin 锚定交易取证（结论：先要 Groestl-512）
@@ -258,8 +507,7 @@ Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512
   （`2492c60788b47055994e5d123b02482202f38262`），`diff --exit-code` 保证没被本地改过。
 - `build.ps1`：`chain.qrl` 用真实种子走完整路径——派生账户、重建 QRL 转账预映像、
   预留叶、签名、自检验签，并验证第二次签名使用下一片叶、写入失败时不释放签名。
-- `chain.aptos`：地址、`RawTransaction` BCS 摘要与 Ed25519 authenticator 与
-  Python `hashlib.sha3_256` + libsodium 独立实现逐字节一致；零金额、错误 chain id、
+- `chain.aptos` 和 `aptos_protocol_check.py` 使用 aptos-sdk 0.11.0 核对签名消息和 BCS authenticator，并验证主网及测试网 ID 对应的本地签名交易。零金额、错误 chain id、
   未准入 EntryFunction、零收款、截断与“密钥不拥有该地址”全部拒绝。
 - `chain.polkadot`：`DOT2` 摘要用独立 Python `blake2b` 复现；`spec_version` 不在钉死
   表内时返回 `RuntimeMismatch`。
@@ -313,7 +561,7 @@ Bitcoin 那套（`SHA256d`）。这推翻了我上一轮"txid 用双 Groestl-512
 - **RyoCurrency**：CryptoNote long address 的 3 字节 varint 前缀 `0x2ce192` 已用官方 `cryptonote_config.h` 和 dev-fund 地址逐字节复核；`RYoL...` 向量在 `run_cryptonote_self_tests()`。
 - **Zano**：直接复现 `hyle-team/zano/tests/unit_tests/base58.cpp` 的 `ZxDqHy6...` 向量；`0xc5` 前缀和双密钥 body 一致。
 - 这三条链**没有**交易审阅/签名路径，目录能力只有 `ADDRESS`。不要把地址可用当成收付可用。
-- Beam / Grin / MimbleWimbleCoin / Epic Cash 没有静态链上地址；Swap / Evolution / VeriBlock 没有 SLIP-0044 coin type。原因与拒绝策略见 [chain-protocols.md](chain-protocols.md#aeternity-ryocurrency-和-zano--address-profiles-only)。
+- Beam / Grin / MimbleWimbleCoin / Epic Cash 没有静态链上地址；Swap / Evolution / VeriBlock 没有 SLIP-0044 coin type。原因与拒绝策略见 [准入策略](Admission-Policy-zh)。
 
 ## 2026-10-23 验证记录
 

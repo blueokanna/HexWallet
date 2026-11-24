@@ -14,8 +14,7 @@ lie and gets reverted.** Everything else here is how that rule is applied.
 | `sign` | the exact digest the chain verifies, produced from the reviewed payload, with a passing vector or an independent implementation agreeing byte for byte |
 | `token-account` | a registry of contracts with a reviewed calldata subset; unknown calldata is shown as raw bytes |
 
-A chain can be `address` only. That is a legitimate, documented state: Aeternity, RyoCurrency and
-Zano are there today. What is not allowed is `sign` with a hand-written table and no test behind it.
+RyoCurrency and Zano currently expose `address` in the catalog. Aeternity also reviews and signs native `SpendTx` payments to account addresses.
 
 ## The gate, in order
 

@@ -19,6 +19,11 @@ namespace hexwallet
   {
 
     constexpr char kMsgSendTypeUrl[] = "/cosmos.bank.v1beta1.MsgSend";
+    constexpr char kMsgTransferTypeUrl[] = "/ibc.applications.transfer.v1.MsgTransfer";
+    constexpr char kMsgGrantTypeUrl[] = "/cosmos.authz.v1beta1.MsgGrant";
+    constexpr char kMsgRevokeTypeUrl[] = "/cosmos.authz.v1beta1.MsgRevoke";
+    constexpr char kSendAuthorizationTypeUrl[] = "/cosmos.bank.v1beta1.SendAuthorization";
+    using Action = CosmosReview::Action;
     constexpr char kPubKeyTypeUrl[] = "/cosmos.crypto.secp256k1.PubKey";
     constexpr uint64_t kSignModeDirect = 1;
     constexpr size_t kAddressBytes = 20;
@@ -139,6 +144,8 @@ namespace hexwallet
 
       bool uint64(uint32_t field, uint64_t value)
       {
+        // Direct signing uses proto3 scalar fields with implicit presence.
+        if (value == 0) return ok;
         return tag(field, 0) && varint(value);
       }
     };
@@ -255,57 +262,67 @@ namespace hexwallet
       *size = writer.size;
       return writer.ok;
     }
-    bool messages_incomplete(
-        const char to[kCosmosMaxMessages][kCosmosMaxAddress],
-        const uint64_t *amounts, size_t message_count)
+    bool write_send_grant(ProtoWriter &msg, const uint8_t *coin, size_t coin_size, uint64_t expiry)
     {
-      if (to == nullptr || amounts == nullptr || message_count == 0 ||
-          message_count > kCosmosMaxMessages)
-      {
-        return true;
-      }
-      for (size_t index = 0; index < message_count; ++index)
-      {
-        if (to[index][0] == '\0' || amounts[index] == 0)
-          return true;
-      }
-      return false;
+      uint8_t auth_bytes[96], any_bytes[160], time_bytes[12], grant_bytes[192];
+      ProtoWriter auth(auth_bytes, sizeof(auth_bytes)), any(any_bytes, sizeof(any_bytes));
+      ProtoWriter time(time_bytes, sizeof(time_bytes)), grant(grant_bytes, sizeof(grant_bytes));
+      return auth.bytes(1, coin, coin_size) && any.string(1, kSendAuthorizationTypeUrl) &&
+             any.bytes(2, auth_bytes, auth.size) && time.uint64(1, expiry) &&
+             grant.bytes(1, any_bytes, any.size) && grant.bytes(2, time_bytes, time.size) &&
+             msg.bytes(3, grant_bytes, grant.size);
     }
 
     bool build_tx_body(uint8_t *out, size_t capacity, size_t *size,
-                       const char *from,
-                       const char to[kCosmosMaxMessages][kCosmosMaxAddress],
-                       const uint64_t *amounts, size_t message_count,
-                       const char *denom, const char *memo)
+                       const CosmosReview &review)
     {
-      if (messages_incomplete(to, amounts, message_count))
-        return false;
       ProtoWriter writer(out, capacity);
-      for (size_t index = 0; index < message_count; ++index)
+      for (size_t index = 0; index < review.message_count; ++index)
       {
         uint8_t coin[96];
         size_t coin_size = 0;
-        if (!build_coin(coin, sizeof(coin), &coin_size, denom, amounts[index]))
+        if (!build_coin(coin, sizeof(coin), &coin_size, review.denom, review.amounts[index]))
         {
           return false;
         }
         uint8_t message[256];
         ProtoWriter msg(message, sizeof(message));
-        msg.string(1, from);
-        msg.string(2, to[index]);
-        msg.bytes(3, coin, coin_size);
+        const char *type_url = kMsgSendTypeUrl;
+        const bool ibc = review.action == Action::IbcTransfer;
+        msg.string(1, ibc ? "transfer" : review.from);
+        msg.string(2, ibc ? review.source_channel : review.to[index]);
+        switch (review.action) {
+        case Action::BankSend:
+          msg.bytes(3, coin, coin_size);
+          break;
+        case Action::IbcTransfer:
+          type_url = kMsgTransferTypeUrl;
+          msg.bytes(3, coin, coin_size);
+          msg.string(4, review.from);
+          msg.string(5, review.to[index]);
+          msg.bytes(6, "", 0); // ibc-go's non-nullable Height, both components zero
+          msg.uint64(7, review.timeout_timestamp_ns);
+          break;
+        case Action::RevokeSend:
+          type_url = kMsgRevokeTypeUrl;
+          msg.string(3, kMsgSendTypeUrl);
+          break;
+        case Action::GrantSend:
+          type_url = kMsgGrantTypeUrl;
+          if (!write_send_grant(msg, coin, coin_size, review.grant_expiry_seconds)) return false;
+          break;
+        }
         if (!msg.ok)
           return false;
         uint8_t any[kCosmosMaxBody];
         ProtoWriter any_writer(any, sizeof(any));
-        any_writer.string(1, kMsgSendTypeUrl);
+        any_writer.string(1, type_url);
         any_writer.bytes(2, message, msg.size);
         if (!any_writer.ok)
           return false;
         writer.bytes(1, any, any_writer.size);
       }
-      if (memo != nullptr && memo[0] != '\0')
-        writer.string(2, memo);
+      if (review.has_memo) writer.string(2, review.memo);
       *size = writer.size;
       return writer.ok;
     }
@@ -349,7 +366,7 @@ namespace hexwallet
     bool build_auth_info(uint8_t *out, size_t capacity, size_t *size,
                          const uint8_t public_key[kCompressedPublicKeySize],
                          const char *denom, uint64_t fee, uint64_t gas_limit,
-                         uint64_t sequence)
+                         uint64_t sequence, bool legacy_amino)
     {
       uint8_t pubkey_message[40];
       ProtoWriter pubkey_message_writer(pubkey_message, sizeof(pubkey_message));
@@ -364,7 +381,7 @@ namespace hexwallet
         return false;
       uint8_t single[8];
       ProtoWriter single_writer(single, sizeof(single));
-      single_writer.uint64(1, kSignModeDirect);
+      single_writer.uint64(1, legacy_amino ? 127 : kSignModeDirect);
       if (!single_writer.ok)
         return false;
       uint8_t mode_info[16];
@@ -379,15 +396,16 @@ namespace hexwallet
       signer_writer.uint64(3, sequence);
       if (!signer_writer.ok)
         return false;
-      uint8_t fee_coin[64];
-      size_t fee_coin_size = 0;
-      if (!build_coin(fee_coin, sizeof(fee_coin), &fee_coin_size, denom, fee))
-      {
-        return false;
-      }
       uint8_t fee_message[96];
       ProtoWriter fee_writer(fee_message, sizeof(fee_message));
-      fee_writer.bytes(1, fee_coin, fee_coin_size);
+      if (fee != 0)
+      {
+        uint8_t fee_coin[64];
+        size_t fee_coin_size = 0;
+        if (!build_coin(fee_coin, sizeof(fee_coin), &fee_coin_size, denom, fee))
+          return false;
+        fee_writer.bytes(1, fee_coin, fee_coin_size);
+      }
       fee_writer.uint64(2, gas_limit);
       if (!fee_writer.ok)
         return false;
@@ -410,6 +428,28 @@ namespace hexwallet
       writer.uint64(4, account_number);
       *size = writer.size;
       return writer.ok;
+    }
+
+    // All interpolated strings are pinned denoms and chain IDs or canonical
+    // bech32 addresses. This amino schema accepts an empty memo only.
+    bool amino_send_digest(const CosmosReview &r, uint8_t digest[kSha256Size])
+    {
+      char fee_coin[96] = {};
+      if (r.fee) {
+        const int n = snprintf(fee_coin, sizeof(fee_coin), "{\"amount\":\"%llu\",\"denom\":\"%s\"}",
+                               static_cast<unsigned long long>(r.fee), r.denom);
+        if (n < 0 || static_cast<size_t>(n) >= sizeof(fee_coin)) return false;
+      }
+      char doc[768];
+      const int n = snprintf(doc, sizeof(doc),
+          "{\"account_number\":\"%llu\",\"chain_id\":\"%s\",\"fee\":{\"amount\":[%s],\"gas\":\"%llu\"},"
+          "\"memo\":\"\",\"msgs\":[{\"type\":\"cosmos-sdk/MsgSend\",\"value\":{\"amount\":[{\"amount\":\"%llu\","
+          "\"denom\":\"%s\"}],\"from_address\":\"%s\",\"to_address\":\"%s\"}}],\"sequence\":\"%llu\"}",
+          static_cast<unsigned long long>(r.account_number), r.chain_id, fee_coin,
+          static_cast<unsigned long long>(r.gas_limit), static_cast<unsigned long long>(r.amounts[0]),
+          r.denom, r.from, r.to[0], static_cast<unsigned long long>(r.sequence));
+      return n > 0 && static_cast<size_t>(n) < sizeof(doc) &&
+             crypto_sha256(reinterpret_cast<const uint8_t *>(doc), n, digest);
     }
 
     bool build_tx_raw(uint8_t *out, size_t capacity, size_t *size,
@@ -459,6 +499,10 @@ namespace hexwallet
       // Do not compare struct padding. Include the entire fixed-size arrays so
       // unterminated text and stale unused rows cannot reach the display.
       return a.chain == b.chain && a.message_count == b.message_count &&
+             a.action == b.action && a.legacy_amino == b.legacy_amino &&
+             a.grant_expiry_seconds == b.grant_expiry_seconds &&
+             a.timeout_timestamp_ns == b.timeout_timestamp_ns &&
+             memcmp(a.source_channel, b.source_channel, sizeof(a.source_channel)) == 0 &&
              a.has_memo == b.has_memo && a.denom_registered == b.denom_registered &&
              a.decimals == b.decimals && a.account_number == b.account_number &&
              a.sequence == b.sequence && a.amount == b.amount &&
@@ -615,15 +659,45 @@ namespace hexwallet
     uint8_t message_count = 0;
     size_t chain_length = 0, denom_length = 0, memo_length = 0;
     uint64_t account_number = 0, sequence = 0, fee = 0, gas = 0;
+    char channel[sizeof(CosmosReview::source_channel)] = {};
+    uint64_t timeout_ns = 0;
+    uint64_t grant_expiry = 0;
+    Action action = Action::BankSend;
+    const char *receiver_hrp = chain.hrp;
     if (!reader.u8(&version) ||
-        (version != 1 && version != 2 && version != 3) ||
+        (version < 1 || version > 7) ||
         !reader.bytes(chain_id, kCosmosMaxChainId, &chain_length) ||
         chain_length == 0 || !reader.u64(&account_number) ||
         !reader.u64(&sequence))
     {
       return CosmosError::Malformed;
     }
-    if (version >= 3)
+    if (version >= 4)
+    {
+      const bool hub = !strcmp(chain.network_id, "atom") && !strcmp(chain_id, "cosmoshub-4");
+      const bool osmosis = !strcmp(chain.network_id, "osmo") && !strcmp(chain_id, "osmosis-1");
+      if (!hub && !osmosis) return CosmosError::Unsupported;
+      size_t length;
+      if (!reader.u64(&fee) || !reader.u64(&gas) || (version != 6 && !reader.u64(&amounts[0])) ||
+          !reader.bytes(recipients[0], kCosmosMaxAddress - 1, &length)) return CosmosError::Malformed;
+      if (version == 4) {
+        action = Action::IbcTransfer;
+        if (!reader.bytes(channel, sizeof(channel) - 1, &length) || !reader.u64(&timeout_ns) ||
+            !timeout_ns) return CosmosError::Malformed;
+        if (strcmp(channel, hub ? "channel-141" : "channel-0")) return CosmosError::Unsupported;
+        receiver_hrp = hub ? "osmo" : "cosmos";
+      } else if (version == 6) {
+        action = Action::RevokeSend;
+      } else if (version == 7) {
+        action = Action::GrantSend;
+        if (!reader.u64(&grant_expiry) || !grant_expiry || grant_expiry > 253402300799ULL)
+          return CosmosError::Malformed; // google.protobuf.Timestamp ends in year 9999.
+      }
+      message_count = 1;
+      snprintf(denom, sizeof(denom), "%s", chain.denom);
+      denom_length = strlen(denom);
+    }
+    else if (version == 3)
     {
       // v3: one fee for the whole body, then denom, memo and the message list.
       if (!reader.u64(&fee) || !reader.u64(&gas) ||
@@ -704,17 +778,17 @@ namespace hexwallet
     for (uint8_t index = 0; index < message_count; ++index)
     {
       uint8_t recipient[kAddressBytes];
-      if (!decode_account_address(chain.hrp, recipients[index], recipient))
+      if (!decode_account_address(receiver_hrp, recipients[index], recipient))
       {
         return CosmosError::Malformed;
       }
-      if (amounts[index] == 0)
+      if (amounts[index] == 0 && action != Action::RevokeSend)
         return CosmosError::InvalidAmount;
       if (strcmp(recipients[index], from_address) == 0)
       {
         return CosmosError::InvalidAmount;
       }
-      if (bytes_equal(sender, recipient, kAddressBytes))
+      if (version != 4 && bytes_equal(sender, recipient, kAddressBytes))
       {
         return CosmosError::InvalidAmount;
       }
@@ -722,10 +796,12 @@ namespace hexwallet
         return CosmosError::InvalidAmount;
       total += amounts[index];
     }
-    if (total == 0)
-      return CosmosError::InvalidAmount;
-
     CosmosReview review = {};
+    review.action = action;
+    review.legacy_amino = version == 5;
+    review.grant_expiry_seconds = grant_expiry;
+    memcpy(review.source_channel, channel, sizeof(channel));
+    review.timeout_timestamp_ns = timeout_ns;
     review.chain = &chain;
     snprintf(review.from, sizeof(review.from), "%s", from_address);
     snprintf(review.chain_id, sizeof(review.chain_id), "%s", chain_id);
@@ -782,15 +858,13 @@ namespace hexwallet
     }
 
     size_t body_size = 0, auth_size = 0, sign_doc_size = 0;
-    if (!build_tx_body(review.tx_body, sizeof(review.tx_body), &body_size,
-                       review.from, review.to, review.amounts,
-                       review.message_count, review.denom, review.memo) ||
+    if (!build_tx_body(review.tx_body, sizeof(review.tx_body), &body_size, review) ||
         body_size > UINT16_MAX)
     {
       return CosmosError::BufferTooSmall;
     }
     if (!build_auth_info(review.auth_info, sizeof(review.auth_info), &auth_size,
-                         public_key, chain.denom, fee, gas, sequence) ||
+                         public_key, chain.denom, fee, gas, sequence, review.legacy_amino) ||
         auth_size > UINT16_MAX)
     {
       return CosmosError::BufferTooSmall;
@@ -799,10 +873,11 @@ namespace hexwallet
     review.auth_info_size = static_cast<uint16_t>(auth_size);
 
     uint8_t sign_doc[kCosmosMaxSignDoc];
-    if (!build_sign_doc(sign_doc, sizeof(sign_doc), &sign_doc_size,
-                        review.tx_body, review.tx_body_size, review.auth_info,
-                        review.auth_info_size, review.chain_id, account_number) ||
-        !crypto_sha256(sign_doc, sign_doc_size, review.sign_doc_digest))
+    const bool hashed = review.legacy_amino ? amino_send_digest(review, review.sign_doc_digest) :
+        build_sign_doc(sign_doc, sizeof(sign_doc), &sign_doc_size, review.tx_body, review.tx_body_size,
+                       review.auth_info, review.auth_info_size, review.chain_id, account_number) &&
+        crypto_sha256(sign_doc, sign_doc_size, review.sign_doc_digest);
+    if (!hashed)
     {
       secure_zero(sign_doc, sizeof(sign_doc));
       return CosmosError::CryptoFailure;
@@ -851,32 +926,16 @@ namespace hexwallet
         cosmos_review_payload(transaction.payload, transaction.payload_size, *chain,
                               from, public_key, &verified) == CosmosError::Ok &&
         same_review(review, verified.review);
-    clear_cosmos_transaction(&verified);
     if (!consistent)
     {
+      clear_cosmos_transaction(&verified);
       secure_zero(public_key, sizeof(public_key));
-      return CosmosError::Malformed;
-    }
-    uint8_t sign_doc[kCosmosMaxSignDoc];
-    size_t sign_doc_size = 0;
-    uint8_t digest[kSha256Size];
-    const bool built =
-        build_sign_doc(sign_doc, sizeof(sign_doc), &sign_doc_size, review.tx_body,
-                       review.tx_body_size, review.auth_info,
-                       review.auth_info_size, review.chain_id,
-                       review.account_number) &&
-        crypto_sha256(sign_doc, sign_doc_size, digest);
-    secure_zero(sign_doc, sizeof(sign_doc));
-    if (!built || !bytes_equal(digest, review.sign_doc_digest, sizeof(digest)))
-    {
-      secure_zero(public_key, sizeof(public_key));
-      secure_zero(digest, sizeof(digest));
       return CosmosError::Malformed;
     }
     RecoverableSignature signature = {};
     const WalletError signed_error =
-        secp256k1_sign_digest_recoverable(private_key, digest, &signature);
-    secure_zero(digest, sizeof(digest));
+        secp256k1_sign_digest_recoverable(private_key, verified.review.sign_doc_digest, &signature);
+    clear_cosmos_transaction(&verified);
     secure_zero(public_key, sizeof(public_key));
     if (signed_error != WalletError::Ok)
     {

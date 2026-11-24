@@ -30,8 +30,16 @@ try {
 
   & 'build/chain-native/Release/chain_probe.exe' alph-zeph-selftest
   if ($LASTEXITCODE -ne 0) { throw 'Alephium / Zephyr derivation failed' }
+  & 'build/chain-native/Release/chain_probe.exe' curve-selftest
+  if ($LASTEXITCODE -ne 0) { throw 'Curve and signature vectors failed' }
   & 'build/chain-native/Release/chain_probe.exe' security-regressions
   if ($LASTEXITCODE -ne 0) { throw 'Codec bounds or EVM review binding regression failed' }
+  & 'build/chain-native/Release/chain_probe.exe' phone-storage
+  if ($LASTEXITCODE -ne 0) { throw 'Phone pairing storage regression failed' }
+  & 'build/chain-native/Release/cli_auth_storage.exe'
+  if ($LASTEXITCODE -ne 0) { throw 'CLI credential storage regression failed' }
+  & 'build/chain-native/Release/p4_token_storage.exe'
+  if ($LASTEXITCODE -ne 0) { throw 'Board 7 token persistence regression failed' }
   & 'build/chain-native/Release/chain_probe.exe' signing-audit all
   if ($LASTEXITCODE -ne 0) { throw 'XRP/Kaspa signing bounds or review binding failed' }
   python tests/host/kaspa_reference.py --probe build/chain-native/Release/chain_probe.exe
@@ -77,6 +85,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'wallet self-test failed' }
   & 'build/chain-native/Release/chain_probe.exe' primary-assets
   if ($LASTEXITCODE -ne 0) { throw 'Primary asset address derivation or signing capability failed' }
+  & 'build/chain-native/Release/chain_probe.exe' catalog-addresses
+  if ($LASTEXITCODE -ne 0) { throw 'Catalog address derivation or capability lookup failed' }
   & 'build/chain-native/Release/chain_probe.exe' chain-selftest
   if ($LASTEXITCODE -ne 0) { throw 'chain_probe self-test failed' }
   # Real BIP32/ECDSA is linked here, so this runs the device-only Zcash signer
@@ -93,6 +103,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Ryo original Bulletproof interoperability regression failed' }
   python tests/host/privacy/ryo_transaction_interop.py --probe build/chain-native/Release/chain_probe.exe
   if ($LASTEXITCODE -ne 0) { throw 'Ryo transaction codec, proof or MLSAG binding regression failed' }
+  python tests/host/privacy/payment_interop.py --probe build/chain-native/Release/chain_probe.exe
+  if ($LASTEXITCODE -ne 0) { throw 'Ryo payment decoding or Zano output fields failed' }
+  & 'build/chain-native/Release/chain_probe.exe' privacy-ryo-phone-bounds
+  if ($LASTEXITCODE -ne 0) { throw 'Ryo phone copy boundary failed' }
   & 'build/chain-native/Release/chain_probe.exe' dash-sign-selftest
   if ($LASTEXITCODE -ne 0) { throw 'dash sign self-test failed' }
   # PSBT v0/v2 parsing and the signature both envelopes must agree on: needs real BIP32/ECDSA.

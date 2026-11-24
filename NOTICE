@@ -71,6 +71,14 @@ compile check; no NXP source is redistributed here.
 NXP SE051 APDU constants were cross-checked against the public generated APDU
 layer in that repository; the applet specification itself is not public.
 
+Chinese UI font subset
+----------------------
+src/generated/UiChineseFont.inc is a 14px, 1bpp subset of Noto Sans CJK SC Regular.
+Copyright (c) 2014-2021 Adobe (http://www.adobe.com/).
+The font data is licensed under SIL Open Font License 1.1, retained in
+assets/fonts/OFL.txt. The source revision, digest and reproduction steps are in
+assets/fonts/README.md. The font license applies to the embedded font data.
+
 GxEPD2 (T-Deck Max only) - licensing conflict, read before distributing
 ----------------------------------------------------------------------
 Board 4 (HEXWALLET_BOARD_T_DECK_MAX) compiles against GxEPD2 by Jean-Marc

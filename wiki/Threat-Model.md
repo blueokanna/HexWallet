@@ -26,12 +26,12 @@ What this device is supposed to survive, what it currently survives, and what it
 | 4 | Unpaired phone impersonates the paired one | Mitigated | Ed25519 identity keys pinned at pairing; a different key is refused |
 | 5 | Thief brute-forces the PIN | Partially mitigated | PBKDF2-SHA256, 120000 iterations + exponential backoff. An attacker who dumps NVS can attack the verifier offline at full speed |
 | 6 | Thief reads the seed from flash | Out of scope today | Device builds refuse to store a seed at all; when SE custody lands, the seed must never be in MCU flash |
-| 7 | Attacker replaces the firmware | Mitigated only when secure boot + flash encryption are on | Both are off by default; `HEXWALLET_REQUIRE_VERIFIED_BOOT=1` makes signing refuse, but it is not the default |
-| 8 | Attacker reads the display bus or I2C | Not mitigated | No encryption or integrity on the panel or SE bus; physical access to those traces is game over for confidentiality |
+| 7 | Firmware replacement | Board 7 requires verified boot for wallet operations | Its diagnostic SDK disables Secure Boot and Flash Encryption. Production provisioning and anti-rollback require hardware acceptance |
+| 8 | Panel or SE bus access | Panel SPI has no cryptographic integrity. SCP03 protects authenticated SE commands and responses | Real-card provisioning and production custody over SCP03 are unverified |
 | 9 | Fault injection (voltage/clock glitch) on the MCU | Not mitigated | No glitch detector, no redundant control-flow checks, no certified MCU |
 | 10 | Side-channel leakage from curve operations | Partially mitigated | Constant-time comparisons and a DRBG are used; the bignum code is not uniformly constant-time, and the SE is not a signing backend yet |
 | 11 | Entropy source fails silently | Mitigated | Continuous health tests; a failed block latches the wallet closed for the boot |
-| 12 | Parser bug reachable from host input (memory corruption) | Reduced, not eliminated | Fixed buffers, length checks, `-W3`/UBSan builds, a policy check for unbounded copies. There is no fuzz harness and no formal verification |
+| 12 | Parser memory corruption | Fixed buffers, length checks, sanitizer runs and deterministic mutation tests | Continuous coverage-guided fuzzing across parsers and link framing, and formal verification, remain open |
 | 13 | NFC relay attack | Not mitigated | Frames can be relayed; the signature still needs a physical press on a display that shows the real recipient |
 | 14 | Compromised link identity key in NVS | Partially mitigated | An attacker can impersonate the device to the phone; they cannot sign, because signing needs the PIN session and the display |
 | 15 | Malicious supply chain (fake board, altered SE firmware) | Out of scope | The firmware cannot prove the silicon is genuine |
@@ -42,8 +42,7 @@ What this device is supposed to survive, what it currently survives, and what it
 
 - **No node validation.** The device never talks to a network. It cannot know whether a UTxO exists,
   whether a decoy is real, whether a nonce is unused, or whether a contract is what its name says.
-- **No multi-party protocols.** Multisig, Lightning, Mimblewimble slate exchange, Stacks and
-  threshold schemes are not implemented, so their threat models do not apply.
+- **Multi-party protocols.** Bitcoin has P2WSH multisig script and digest primitives. Its spending adapter still needs multisig review and witness assembly. Beam has a single-input interactive CLI payment. Lightning channel state and revocation, Grin and general threshold protocols need separate adapters. [Supported chains](Supported-Chains)
 - **No plausible deniability.** One wallet, one PIN.
 - **No hardware certification.** Nothing here is evaluated to FIPS 140-3, CC EAL or any smart-card
   protection profile.

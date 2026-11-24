@@ -29,6 +29,14 @@ namespace hexwallet
     SplToken,
     SplToken2022
   };
+  enum class SolanaProgramCall : uint8_t { None, Delegate, Deactivate, Swap, OrcaSwap };
+  struct SolanaProgramReview
+  {
+    SolanaProgramCall call;
+    uint8_t keys[9][32]; // Pool through fee account for swap, stake and vote accounts for delegate.
+    uint64_t input_units;
+    uint64_t minimum_output_units;
+  };
   struct SolanaTransfer
   {
     uint8_t recipient[32];
@@ -50,6 +58,8 @@ namespace hexwallet
     uint32_t address_index;
     uint8_t payer[32];
     uint8_t blockhash[32];
+    uint8_t message_hash[32];
+    SolanaProgramReview program;
     SolanaTransfer transfers[kSolanaMaxTransfers];
     uint8_t transfer_count;
     uint64_t total_lamports;
@@ -63,6 +73,7 @@ namespace hexwallet
   bool solana_derive_key(const uint8_t seed[kSeedSize], uint32_t address_index,
                          uint8_t child[32]);
   bool solana_format_amount(const SolanaTransfer &transfer, char *out, size_t size);
+  bool solana_program_details(const SolanaTransaction &review, char *out, size_t size);
   SolanaError solana_sign_transaction(const SolanaTransaction &reviewed,
                                       const uint8_t seed[kSeedSize], uint8_t *out, size_t *in_out_size);
   // Legacy Transfer/TransferChecked parsing, custom-label lookup, signing and

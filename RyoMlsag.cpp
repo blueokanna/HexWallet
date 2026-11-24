@@ -7,22 +7,6 @@ namespace hexwallet
   {
     using namespace privacy;
 
-    bool validate(const uint8_t *message, const RyoRingMember *ring, size_t n,
-                  const uint8_t *pseudo)
-    {
-      if (!message || !ring || n < 2 || n > kRyoMaxRingSize || !point(pseudo))
-        return false;
-      for (size_t i = 0; i < n; ++i)
-      {
-        if (!point(ring[i].destination) || !point(ring[i].commitment))
-          return false;
-        for (size_t j = 0; j < i; ++j)
-          if (equal(ring[i].destination, ring[j].destination))
-            return false;
-      }
-      return true;
-    }
-
     bool round(const uint8_t *message, const RyoRingMember &member,
                const uint8_t *pseudo, const uint8_t *image, const uint8_t *c,
                const uint8_t *s0, const uint8_t *s1, uint8_t *next, bool signing)
@@ -45,6 +29,17 @@ namespace hexwallet
     }
   }
 
+  bool ryo_validate_ring(const RyoRingMember *ring, size_t n)
+  {
+    if (!ring || n < 2 || n > kRyoMaxRingSize) return false;
+    for (size_t i = 0; i < n; ++i) {
+      if (!point(ring[i].destination) || !point(ring[i].commitment)) return false;
+      for (size_t j = 0; j < i; ++j)
+        if (equal(ring[i].destination, ring[j].destination)) return false;
+    }
+    return true;
+  }
+
   bool ryo_mlsag_verify(const uint8_t message[32], const RyoRingMember *ring,
                         size_t n, const uint8_t pseudo[32],
                         const RyoMlsagSignature &sig)
@@ -58,7 +53,7 @@ namespace hexwallet
                         size_t n, const uint8_t pseudo[32],
                         const RyoMlsagSignatureView &sig)
   {
-    if (!validate(message, ring, n, pseudo) || sig.ring_size != n ||
+    if (!message || !point(pseudo) || !ryo_validate_ring(ring, n) || sig.ring_size != n ||
         !sig.responses || !point(sig.key_image) || !scalar(sig.challenge))
       return false;
     uint8_t c[32];
@@ -84,7 +79,7 @@ namespace hexwallet
     if (!out)
       return false;
     memset(out, 0, sizeof(*out));
-    if (!validate(message, ring, n, pseudo) || index >= n || !entropy ||
+    if (!message || !point(pseudo) || !ryo_validate_ring(ring, n) || index >= n || !entropy ||
         !scalar(spend, false) || !scalar(mask_delta))
       return false;
     uint8_t expected[32], delta[32], hp[32];

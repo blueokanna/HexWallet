@@ -6,8 +6,8 @@
 
 | 登记表 | 规模 | 来源 | 生成 / 检查 |
 | --- | --- | --- | --- |
-| 网络配置 | 247 | `WalletNetworks.cpp` + `src/generated/WalletForkProfiles.inc` | `tools/fork_registry.json`，由 `policy_check.ps1` 校验 |
-| 钱包目录 | 215 条 | `WalletCatalog.cpp` + 生成的分叉目录 | `tests/host/catalog_dump.exe` |
+| 网络配置 | 246 | `WalletNetworks.cpp` 与 `src/generated/WalletForkProfiles.inc` | 固件 ELF 中的 `kNetworkProfileCount` |
+| 钱包目录 | 214 条 | `WalletCatalog.cpp` 与生成的分叉目录 | `tests/host/catalog_dump.exe` |
 | Token 记录 | 19 条网络共 80 条 | `WalletTokens.cpp` | `tools/token_audit.ps1`、`tests/host/evm_access_list_check.ps1` |
 | 矿池身份 | 520 条列表中的 121 条 | `src/generated/WalletMiningCatalog.inc` | `tools/generate_mining_catalog.py --check` |
 
@@ -30,9 +30,7 @@
 
 - **固定记录**（`WalletTokens.cpp`）：合约地址、精度、符号、名称；19 条网络共 80 条。合约逐字节匹配
   才会解码该调用。
-- **用户自加记录**：最多 64 个资产（`kCustomTokenMax`），以 `HXCT` 版本 2 + 摘要存进 NVS。
-  审查界面会标注"自加"，而且它们永远不改变被签名的字节。EVM、Stellar、NFT 都可以声明；
-  但 NFT 声明不会打开 NFT 转账，因为根本没有 NFT 合约登记表。
+- **用户声明记录**最多保存 64 个资产的显示信息。7 号板在下一次成功保存时将旧版 NVS 表迁移至 LittleFS `assets` 分区。界面标明用户声明的元数据，NFT 转账准入取决于网络、合约及调用格式。[交易载荷](Chain-Payloads-zh)
 - **不接受主机提供的精度。** 未知 token 显示精确 base unit，例如 `1500000 raw`，不猜小数点。
 
 ## 矿池身份

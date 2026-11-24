@@ -47,9 +47,12 @@ namespace hexwallet
     BufferTooSmall,
   };
 
+  enum class EvmProtocolCall : uint8_t { None, LidoSubmit, UniswapV2ExactEth };
+
   struct EvmSigningRequest
   {
     EvmTransactionType type;
+    EvmProtocolCall protocol;
     bool opaque;
     bool contract_creation;
     const NetworkProfile *network;

@@ -57,12 +57,6 @@ bool decode_hex(const char *text, uint8_t *out, size_t capacity,
   return true;
 }
 
-bool load_phone_key(void *, uint8_t out[32]) {
-  if (!store.present) return false;
-  memcpy(out, store.phone, 32);
-  return true;
-}
-
 bool store_phone_key(void *, const uint8_t phone[32]) {
   memcpy(store.phone, phone, 32);
   store.present = true;
@@ -121,7 +115,7 @@ int main() {
     0xdb, 0x99, 0xed, 0xaa, 0xf1, 0xbb, 0x03, 0xcc,
     0x15, 0xdd, 0x27, 0xee, 0x39, 0xff, 0x4b, 0x10,
   };
-  WalletLinkCallbacks callbacks = { load_phone_key, store_phone_key,
+  WalletLinkCallbacks callbacks = { nullptr, store_phone_key,
                                     show_pairing_code, clear_pairing_prompt,
                                     handle_request };
   WalletLinkDevice device;
@@ -145,7 +139,7 @@ int main() {
     if (length == 0) continue;
     if (strcmp(line, "QUIT") == 0) break;
     if (strcmp(line, "APPROVE") == 0) {
-      printf("PAIR %s\n", device.confirm_pairing() ? "ok" : "none");
+      printf("PAIR %s\n", device.confirm_pairing(clock_ms) ? "ok" : "none");
       fflush(stdout);
       continue;
     }

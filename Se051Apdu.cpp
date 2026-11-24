@@ -257,6 +257,32 @@ namespace hexwallet
                  builder.size(), kShortLeSize, out, capacity, out_size);
   }
 
+  bool se051_pin_derive_bip39_seed(Se051Sender send, void *context,
+                                   const Se051PinSession *session, uint32_t words_id,
+                                   uint32_t salt_id, uint32_t seed_id)
+  {
+    if (!send || !se051_pin_authenticated(session) || !words_id || !salt_id || !seed_id ||
+        words_id == salt_id || words_id == seed_id || salt_id == seed_id)
+      return false;
+
+    // Se05x_API_PBKDF2_extended with salt and output passed by object ID.
+    constexpr uint8_t kPbkdf = 0x2e, kHmacSha512 = 0x1b;
+    uint8_t data[32], command[40];
+    size_t command_size;
+    Se051TlvBuilder tlv(data, sizeof(data));
+    if (!tlv.tag_u32(kSe051Tag1, words_id) || !tlv.tag_u16(kSe051Tag3, 2048) ||
+        !tlv.tag_u16(kSe051Tag4, 64) || !tlv.tag_u8(0x45, kHmacSha512) ||
+        !tlv.tag_u32(0x46, salt_id) || !tlv.tag_u32(0x47, seed_id) ||
+        !build(kSe051InsCrypto, kSe051P1Default, kPbkdf, data, tlv.size(),
+               kShortLeSize, command, sizeof(command), &command_size))
+      return false;
+
+    uint8_t response[kStatusSize] = {};
+    size_t response_size = 0;
+    return send(context, command, command_size, response, sizeof(response), &response_size) &&
+           response_size == sizeof(response) && response[0] == 0x90 && response[1] == 0x00;
+  }
+
   bool se051_apdu_session_create(uint32_t auth_object_id, uint8_t *out,
                                  size_t capacity, size_t *out_size)
   {
@@ -704,6 +730,27 @@ namespace hexwallet
       size_t mac_size = 0;
       passed = passed && se051_pin_hmac(fake_send, &card, &session, 0x00000003u, 0x0a, user_id, sizeof(user_id), mac, sizeof(mac), &mac_size) &&
                mac_size == 4 && mac[0] == 0xaa && mac[3] == 0xdd;
+      card.response_size = 0;
+      const size_t derive_frame = card.count;
+      static const uint8_t kSeedCommand[] = {
+          0x80,0x03,0x00,0x2e,0x1d, 0x41,4,0,0,0,1, 0x43,2,8,0,
+          0x44,2,0,64, 0x45,1,0x1b, 0x46,4,0,0,0,2, 0x47,4,0,0,0,3, 0};
+      passed = passed && se051_pin_derive_bip39_seed(fake_send, &card, &session, 1, 2, 3) &&
+               card.frames[derive_frame].size == sizeof(kSeedCommand) &&
+               !memcmp(card.frames[derive_frame].bytes, kSeedCommand, sizeof(kSeedCommand));
+      card.response_size = 1;
+      passed = passed && !se051_pin_derive_bip39_seed(fake_send, &card, &session, 1, 2, 3);
+      card.response_size = 0;
+      card.status = 0x6985;
+      passed = passed && !se051_pin_derive_bip39_seed(fake_send, &card, &session, 1, 2, 3) &&
+               !se051_pin_verify(fake_send, &card, user_id, sizeof(user_id), &session) &&
+               !se051_pin_authenticated(&session);
+      const size_t after_failure = card.count;
+      passed = passed && !se051_pin_derive_bip39_seed(fake_send, &card, &session, 1, 2, 3) && card.count == after_failure;
+      card.status = 0x9000;
+      card.fail_at = card.count + 2;
+      passed = passed && !se051_pin_begin(fake_send, &card, 0x7fff0207u, kPolicy, sizeof(kPolicy), &session) &&
+               session.state == Se051PinState::Idle;
       Se051PinSession locked;
       se051_pin_reset(&locked);
       locked.state = Se051PinState::SessionCreated;

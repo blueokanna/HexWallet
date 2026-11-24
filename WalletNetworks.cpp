@@ -265,9 +265,9 @@ namespace hexwallet
       {"dgb", SighashFamily::Bitcoin, 0},
       {"dgb49", SighashFamily::Bitcoin, 0},
       {"dgb84", SighashFamily::Bitcoin, 0},
-      {"btg", SighashFamily::Bitcoin, 0},
-      {"btg49", SighashFamily::Bitcoin, 0},
-      {"btg84", SighashFamily::Bitcoin, 0},
+      {"btg", SighashFamily::ForkId, kBitcoinGoldForkId},
+      {"btg49", SighashFamily::ForkId, kBitcoinGoldForkId},
+      {"btg84", SighashFamily::ForkId, kBitcoinGoldForkId},
       {"rvn", SighashFamily::Bitcoin, 0},
       {"nmc", SighashFamily::Bitcoin, 0},
       {"vtc", SighashFamily::Bitcoin, 0},
@@ -277,7 +277,7 @@ namespace hexwallet
       {"bch", SighashFamily::ForkId, 0},
       {"xec", SighashFamily::ForkId, 0},
       {"bsv", SighashFamily::ForkId, 0},
-      {"zec", SighashFamily::ZcashZip243, 0},
+      {"zec", SighashFamily::ZcashZip244, 0},
       {"zer", SighashFamily::ZcashZip243, 0},
       // Groestlcoin: Bitcoin's legacy preimage, single SHA-256 digest. The
       // address checksum uses double Groestl-512 (AddressEncoding::P2pkhGroestl
@@ -294,7 +294,7 @@ namespace hexwallet
       sizeof(kNetworkSigningPolicies) / sizeof(kNetworkSigningPolicies[0]);
 
   const ZcashNetworkPolicy kZcashNetworkPolicies[] = {
-      {"zec", 0x5437f330, 21000000ULL * 100000000ULL},
+      {"zec", 0x77190ad9, 21000000ULL * 100000000ULL}, // ZIP 259, NU7
       {"zer", 0x7361707a, 17000000ULL * 100000000ULL},
   };
 
@@ -733,7 +733,7 @@ namespace hexwallet
                                network->encoding == AddressEncoding::P2pkhGroestl;
       const bool cashaddr_family = network->encoding == AddressEncoding::CashAddr &&
                                    network->alt_hrp != nullptr;
-      if (policy.family == SighashFamily::ZcashZip243)
+      if (policy.family == SighashFamily::ZcashZip243 || policy.family == SighashFamily::ZcashZip244)
       {
         if (network->encoding != AddressEncoding::ZcashTransparent ||
             find_zcash_network_policy(network->id) == nullptr)
@@ -748,7 +748,9 @@ namespace hexwallet
         if (policy.family == SighashFamily::ForkId)
         {
           const bool p2pkh = network->encoding == AddressEncoding::P2pkh;
-          if (!p2pkh && !cashaddr_family)
+          const bool gold_witness = policy.fork_id == kBitcoinGoldForkId &&
+                                    (network->encoding == AddressEncoding::P2wpkh || network->encoding == AddressEncoding::P2shP2wpkh);
+          if (!p2pkh && !cashaddr_family && !gold_witness)
             return false;
         }
         else if (cashaddr_family)
@@ -803,7 +805,7 @@ namespace hexwallet
         monero->cryptonote_subaddress_prefix != 42 ||
         zcash == nullptr || zcash->encoding != AddressEncoding::ZcashTransparent ||
         zcash->alt_p2pkh_version != 0x1cb8 || zcash->alt_p2sh_version != 0x1cbd ||
-        zcash_policy == nullptr || zcash_policy->branch_id != 0x5437f330 ||
+        zcash_policy == nullptr || zcash_policy->branch_id != 0x77190ad9 ||
         zero == nullptr || zero->encoding != AddressEncoding::ZcashTransparent ||
         zero->alt_p2pkh_version != 0x1cb8 || zero->alt_p2sh_version != 0x1cbd ||
         zero->derivation_coin_type != 323 || zero_policy == nullptr ||

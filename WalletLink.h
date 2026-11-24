@@ -74,8 +74,12 @@ struct WalletLinkCallbacks {
 class WalletLinkDevice {
  public:
   WalletLinkDevice();
+  ~WalletLinkDevice();
+  WalletLinkDevice(const WalletLinkDevice &) = delete;
+  WalletLinkDevice &operator=(const WalletLinkDevice &) = delete;
   bool init(const uint8_t identity_seed[32],
-            const WalletLinkCallbacks &callbacks, void *context);
+            const WalletLinkCallbacks &callbacks, void *context,
+            const uint8_t *paired_phone = nullptr);
   void reset_session();
   void reset_pairing();
 
@@ -84,7 +88,7 @@ class WalletLinkDevice {
                            size_t response_capacity, size_t *response_size);
 
   // Called by the trusted UI after the user confirms the displayed code.
-  bool confirm_pairing();
+  bool confirm_pairing(uint32_t now_ms);
   bool pairing_pending() const;
   bool session_active() const;
   uint32_t session_id() const;

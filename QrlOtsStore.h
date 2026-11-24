@@ -33,16 +33,10 @@ namespace hexwallet
     bool read_slot(uint8_t slot, QrlOtsRecord *out) override;
     bool write_slot(uint8_t slot, const QrlOtsRecord &record) override;
 
-    // Binds an unused account to index zero. Refuses when either slot already
-    // holds a valid record, whatever tag it carries: a blank journal on a device
-    // that still remembers the account would otherwise rewind the counter and
-    // publish two signatures over the same one-time key.
-    QrlOtsError bind();
     // First leaf this account may still sign with, or why it may not sign.
     QrlOtsError next_index(uint32_t *index);
     // Port consumed by qrl_xmss_sign_digest(). It re-reads the mark and advances
-    // it through qrl_ots_reserve(), so a concurrent writer loses the race and
-    // burns a leaf instead of reusing one.
+    // it through qrl_ots_reserve() under an exclusive reservation.
     QrlOtsPort port();
     const uint8_t *tag() const { return tag_; }
 

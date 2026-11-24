@@ -76,8 +76,8 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:ae | ae | AE | SIGN | Ed25519 ak_ address at m/44'/457'/0'/0'/i'; SpendTx review and signing (canonical RLP, ae_mainnet domain prefix, blake2b-256 tx hash); name, oracle and contract recipients are refused |
 | native:algo | algo | ALGO | SIGN | Mainnet canonical MessagePack payments, ASA transfers and opt-in; no groups, rekey or account closing |
 | native:alph | alph | ALPH | SIGN | Mainnet native ALPH P2PKH transfer with one recipient and optional change |
-| native:apt | apt | APT | SIGN | Ed25519 account address (sha3-256 of key \|\| 0x00); 0x1::aptos_account::transfer only, signed over sha3-256("APTOS::RawTransaction" \|\| BCS RawTransaction); no EntryFunction calls, sponsored transactions, multisig or tokens |
-| native:atom | atom | ATOM | SIGN | Cosmos SDK native MsgSend; direct sign mode, strict protobuf review |
+| native:apt | apt | APT | SIGN | 0x1::aptos_account::transfer with Ed25519 over the Aptos domain hash followed by BCS RawTransaction; returns a BCS Ed25519 authenticator |
+| native:atom | atom | ATOM | SIGN | Direct MsgSend. On cosmoshub-4: native ICS-20 transfer/channel-141, limited bank-send grant/revoke and single native legacy-amino MsgSend |
 | native:bch | bch | BCH | SIGN | P2PKH PSBT signing, BIP143 + SIGHASH_FORKID |
 | native:btc86 | btc86 | BTC | SIGN | P2TR key-path: bech32m address over TapTweak(internal key), SIGHASH_DEFAULT/ALL, no script tree |
 | native:ckb | ckb | CKB | SIGN | native CKB single-input transfer to SECP256K1/blake160 locks; no type scripts or DAO operations |
@@ -94,7 +94,7 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:kava | kava | KAVA | SIGN | Cosmos SDK native MsgSend on kava_2222-N with ukava; the EVM side is registered separately as kavaevm |
 | native:ksm | ksm | KSM | SIGN | Ed25519 SS58 account; balances.transfer / transferKeepAlive with mortal era and tip. Signed extensions are pinned to runtime 2005001/26 with genesis pinned, and CheckMetadataHash is carried as an explicit disabled mode; a runtime upgrade needs a firmware update |
 | native:near | near | NEAR | SIGN | Implicit receive accounts; Borsh V0 native Transfer; named account key membership and block network cannot be checked offline |
-| native:osmo | osmo | OSMO | SIGN | Cosmos SDK native MsgSend; direct sign mode, strict protobuf review |
+| native:osmo | osmo | OSMO | SIGN | Direct MsgSend. On osmosis-1: native ICS-20 transfer/channel-0, limited bank-send grant/revoke and single native legacy-amino MsgSend |
 | native:prl | prl | PRL | SIGN | Mainnet BIP86 P2TR key-path PSBT v0/v2, DEFAULT/ALL; no P2MR, XMSS or script-path signing |
 | native:qrl | qrl | QRL | SIGN | QRL v1 XMSS/SHAKE-256 tree height 10: native transfers only, the one-time leaf is reserved in durable storage before the WOTS+ signature exists and the device verifies its own signature before releasing it. Use the qrl2 entry for v2 accounts |
 | native:qrl2 | qrl2 | QRL | SIGN | QRL v2 (Zond) ML-DSA-87 accounts and dynamic-fee transactions: BIP44 m/44'/238'/account'/change/index, SHAKE-256 checksummed Q address, ML-DSA-87 over keccak-256 of the reviewed envelope. Mainnet chain id 1 only; unknown descriptors or non-empty extra_params are refused |
@@ -102,7 +102,7 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:quantus | quantus | QTC | SIGN | Mainnet runtime 153/6, native balances transfers, ML-DSA-87 signed v4 extrinsics |
 | native:ryo | ryo | RYO | ADDRESS | CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled |
 | native:sc | sc | SC | SIGN | v2 PolicyPublicKey single-input transfer; node must validate parent/proof/maturity; no contracts; wallet-specific SLIP10 seed derivation |
-| native:sol | sol | SOL | SIGN | SOL, SPL Token and Token-2022 TransferChecked: legacy/v0, single payer; exact mint/token accounts reviewed; Token-2022 extension warning; no ALTs or ATA creation |
+| native:sol | sol | SOL | SIGN | Legacy/v0 static accounts, one signer. SOL and TransferChecked, SPL Token Swap, existing stake delegation and deactivation. |
 | native:stark | stark | STRK | SIGN | Stark curve keys (grindKey of the BIP32 child) and Cairo v3 transactions: deploy_account and one ERC-20 transfer through the account's execute entry point. The device rebuilds the SNIP-5 account address from the class hash, salt and single-key constructor it displays, and pins the chain id to SN_MAIN. Multi-call accounts, declare, paymaster, multisig and non-mainnet networks are refused |
 | native:sui | sui | SUI | SIGN | Ed25519 BCS split-gas native SUI transfer; no Move calls, sponsored transactions or tokens |
 | native:terra | terra | LUNA | SIGN | Cosmos SDK native MsgSend on phoenix-N with uluna; CW20 and wasm execute messages are refused |
@@ -119,16 +119,16 @@ EVM domains use chain ID; Bitcoin-family address variants merge when coin type a
 | native:xrp | xrp | XRP | SIGN | Classic r-addresses; native Payment only; no issued currencies, paths, memos or partial payments |
 | native:xtz | xtz | XTZ | SIGN | Modern Ed25519 reveal and native implicit-account transfers; no KT1, FA tokens or NFT calls; branch origin unverified offline |
 | native:zano | zano | ZANO | ADDRESS | CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled |
-| native:zec | zec | ZEC | SIGN | Zcash v4 transparent ZIP-243 review and signing (NU6.2) |
+| native:zec | zec | ZEC | SIGN | NU7 v5 transparent ZIP-244 review and signing |
 | native:zeph | zeph | ZEPH | SIGN | Native ZPH-to-ZPH version 3, RingCT type 6, CLSAG; shared XMR spend/view derivation |
-| native:zer | zer | ZER | SIGN | Zcash v4 transparent ZIP-243 review and signing (NU6.2) |
+| native:zer | zer | ZER | SIGN | v4 transparent ZIP-243 review and signing |
 | utxo:0:0:5 | btc, btc44, btc49 | BTC | SIGN | BIP49 nested SegWit PSBT signing (BIP143); BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:10226:60:16 | fork_utxo_raptoreum | RTM | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:13:50:9 | fork_maza | MAZA | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:1313:38:122 | fork_utxo_gaelium | GAEL | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:136:82:7 | firo | FIRO | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:140:85:122 | fork_lbry | LBC | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
-| utxo:156:38:23 | btg, btg49, btg84 | BTG | SIGN | BIP49 nested SegWit PSBT signing (BIP143); BIP84 native SegWit PSBT signing (BIP143); P2PKH legacy sighash and BIP143 witness PSBT signing |
+| utxo:156:38:23 | btg, btg49, btg84 | BTG | SIGN | P2PKH PSBT signing with Bitcoin Gold ForkID 79; P2SH-P2WPKH PSBT signing with Bitcoin Gold ForkID 79; P2WPKH PSBT signing with Bitcoin Gold ForkID 79 |
 | utxo:160:3:125 | fork_bitcore | BTX | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:166:70:10 | fork_vivo | VIVO | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |
 | utxo:1668:38:122 | fork_utxo_neoxa | NEOX | SIGN | P2PKH legacy sighash and BIP143 witness PSBT signing |

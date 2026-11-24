@@ -76,20 +76,46 @@ namespace hexwallet
                            (static_cast<uint16_t>(rgb565[index * 2 + 1]) << 8);
       const uint16_t value = swapped ? static_cast<uint16_t>((raw << 8) | (raw >> 8)) : raw;
       const Rgb rgb = unpack(value);
-      const uint8_t colour = palette_index(rgb, depth);
       const size_t x = index % width;
       const size_t row = (index / width) * stride;
       if (depth == 1)
       {
-        const uint32_t luminance = (299U * rgb.r + 587U * rgb.g + 114U * rgb.b) / 1000U;
-        if (luminance < 128U)
+        if (299U * rgb.r + 587U * rgb.g + 114U * rgb.b < 128000U)
           out[row + (x >> 3)] |= static_cast<uint8_t>(0x80U >> (x & 7U));
       }
       else
       {
         const size_t byte = row + (x >> 2);
         const uint8_t shift = static_cast<uint8_t>(6U - 2U * (x & 3U));
-        out[byte] = static_cast<uint8_t>(out[byte] | (colour << shift));
+        out[byte] = static_cast<uint8_t>(out[byte] | (palette_index(rgb, depth) << shift));
+      }
+    }
+    return true;
+  }
+
+  bool eink_pack_landscape(const uint8_t *rgb565, uint16_t width, uint16_t height,
+                           EinkRect dirty, uint8_t depth, uint8_t *out, size_t capacity)
+  {
+    const size_t stride = eink_frame_size(height, 1, depth);
+    if (!rgb565 || !out || !stride || !width || capacity < stride * width ||
+        uint32_t(dirty.x) + dirty.width > width || uint32_t(dirty.y) + dirty.height > height)
+      return false;
+    const unsigned bits = depth == 1 ? 1 : 2;
+    const unsigned per_byte = 8 / bits;
+    const unsigned bottom = unsigned(dirty.y) + dirty.height;
+    const unsigned right = unsigned(dirty.x) + dirty.width;
+    for (unsigned y = dirty.y; y < bottom; ++y)
+    {
+      const unsigned column = height - 1 - y;
+      const unsigned shift = 8 - bits * (1 + column % per_byte);
+      const unsigned mask = ((1U << bits) - 1) << shift;
+      for (unsigned x = dirty.x; x < right; ++x)
+      {
+        const uint8_t *p = rgb565 + 2 * (size_t(y) * width + x);
+        const Rgb c = unpack(uint16_t(p[0]) | (uint16_t(p[1]) << 8));
+        const unsigned ink = depth == 1 ? (299U * c.r + 587U * c.g + 114U * c.b < 128000U) : palette_index(c, depth);
+        auto &byte = out[size_t(x) * stride + column / per_byte];
+        byte = uint8_t((byte & ~mask) | (ink << shift));
       }
     }
     return true;

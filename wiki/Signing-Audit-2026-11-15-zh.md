@@ -19,7 +19,7 @@ Kaspa 签名暂不接受非空 payload，因为审批界面没有审阅其内容
 ## 验证
 
 - 真实 Mbed TLS 构建：XRP 22 项、Kaspa 29 项审阅篡改全部拒绝；合法签名继续成功。覆盖异常计数、脚本长度、payload 长度和输出容量；失败输出清零，缓冲区末端哨兵不变。
-- 独立 Kaspa 参考：4 组交易编码、72 个 sighash、交易 ID 和质量一致；独立 secp256k1 验证器接受真实固件签名，拒绝修改摘要后的签名。编码器逐一检查所有不足容量。参考版本与复现命令见 [Kaspa 夹具](../tests/fixtures/kaspa/README.md)。
+- 独立 Kaspa 参考：4 组交易编码、72 个 sighash、交易 ID 和质量一致；独立 secp256k1 验证器接受真实固件签名，拒绝修改摘要后的签名。编码器逐一检查所有不足容量。参考版本与复现命令见 [Kaspa 夹具](https://github.com/blueokanna/HexWallet/blob/main/tests/fixtures/kaspa/README.md)。
 - 上述回归通过 ASan/UBSan。初次失败日志与修复后日志分别保存在本地 `build/audit-logs`，没有覆盖初次复现证据。
 - 主机套件、真实密码库链回归和策略检查通过；P4 32 位源码编译和 Arduino 头文件兼容检查通过。Kaspa 签名函数静态栈帧为 5104 字节，XRP 为 912 字节；静态单帧数字不代表运行时调用链峰值。
 - P4 电子纸配置（board 7、PSRAM enabled、min_spiffs）完整编译、链接通过：程序 1,402,770 字节，静态 RAM 234,700 字节。未刷写设备；这不构成实机验收。尚未接入命令入口的 Ryo/Zano 后端不能据此宣称已在生产流程中启用。

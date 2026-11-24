@@ -1,5 +1,6 @@
 #include "RyoTransaction.h"
 #include "CryptoNoteAmounts.h"
+#include "CryptoNoteOutputScan.h"
 #include "src/privacy/RingOps.h"
 
 namespace hexwallet
@@ -213,6 +214,25 @@ namespace hexwallet
       return RyoTxError::Ok;
     }
 
+    // Upstream device_default::encrypt_payment_id uses the first 40 bytes of
+    // the 200-byte Keccak state, with the Keccak-256 rate and a 0x55 suffix.
+    bool open_payment_id(const uint8_t encrypted[40], const uint8_t view[32],
+                         const uint8_t secret[32], uint8_t plain[40])
+    {
+      SensitiveValue<uint8_t[33]> input;
+      SensitiveValue<SHA3_CTX> context;
+      SensitiveValue<uint8_t[32]> digest;
+      if (!cryptonote_generate_key_derivation(view, secret, input.get()))
+        return false;
+      input.get()[32] = 0x55;
+      keccak_init(&context.get());
+      if (!keccak_update(&context.get(), input.get(), 33) || !keccak_final(&context.get(), digest.get()))
+        return false;
+      for (size_t i = 0; i < 40; ++i)
+        plain[i] = encrypted[i] ^ static_cast<uint8_t>(context.get().state[i / 8] >> (8 * (i % 8)));
+      return true;
+    }
+
     bool hash_triplet(const uint8_t *a, const uint8_t *b, const uint8_t *c, uint8_t *out)
     {
       uint8_t hashes[96];
@@ -288,6 +308,56 @@ namespace hexwallet
     return RyoTxError::InvalidArgument;
   }
 
+  bool ryo_decode_payment(const uint8_t *data, size_t size, const uint8_t tx_secret[32],
+                          const RyoPublicAddress &recipient, const RyoPublicAddress &wallet,
+                          RyoPaymentDetails *out)
+  {
+    if (!out) return false;
+    *out = {};
+    RyoTransactionView tx{};
+    uint8_t tx_public[32];
+    if (ryo_parse_transaction(data, size, &tx) != RyoTxError::Ok || tx.version != 3 ||
+        tx.unlock_time != 0 || tx.output_count > 2 || tx.extra_size != 74 ||
+        tx.extra[0] != 1 || tx.extra[33] != 5 || !scalar(tx_secret, false) ||
+        !mul(kG, tx_secret, tx_public) || !equal(tx.extra + 1, tx_public) ||
+        !point(recipient.spend) || !point(recipient.view) || !point(wallet.spend) || !point(wallet.view) ||
+        (equal(recipient.spend, wallet.spend) && equal(recipient.view, wallet.view)))
+      return false;
+
+    SensitiveValue<RyoPaymentDetails> details;
+    bool paid = false, has_change = false;
+    for (size_t i = 0; i < tx.output_count; ++i)
+    {
+      const auto &output = tx.outputs[i];
+      auto decode = [&](const RyoPublicAddress &addr, uint64_t &amount) {
+        return cryptonote_scan_output(tx_secret, addr.spend, addr.view, i, output.destination,
+            RingCtAmountEncoding::Legacy, output.ecdh, 64, output.commitment, &amount);
+      };
+      if (!paid && decode(recipient, details.get().amount)) paid = true;
+      else if (!has_change && decode(wallet, details.get().change)) has_change = true;
+      else return false;
+    }
+    if (!paid || !details.get().amount) return false;
+    SensitiveValue<uint8_t[40]> plain;
+    if (!open_payment_id(tx.extra + 34, recipient.view, tx_secret, plain.get())) return false;
+    if (crypto_constant_time_equal(plain.get(), kZero, 8))
+    {
+      memcpy(details.get().payment_id, plain.get() + 8, 32);
+      details.get().has_payment_id = true;
+    }
+    else
+    {
+      // Ryo encrypts the default {UINT64_MAX, null_hash} with the change
+      // view key if change is present. Require the entire plaintext to match.
+      constexpr uint8_t absent[40] = {255,255,255,255,255,255,255,255};
+      if (has_change && !open_payment_id(tx.extra + 34, wallet.view, tx_secret, plain.get())) return false;
+      if (!crypto_constant_time_equal(plain.get(), absent, sizeof(absent))) return false;
+    }
+    details.get().fee = tx.fee;
+    *out = details.get();
+    return true;
+  }
+
   RyoTxError ryo_transaction_verify_semantics(const uint8_t *data, size_t size)
   {
     RyoTransactionView tx{};
@@ -327,6 +397,128 @@ namespace hexwallet
     tx.proof.commitments = &divided[0][0];
     tx.proof.commitment_count = tx.output_count;
     return ryo_bulletproof_verify(tx.proof) ? RyoTxError::Ok : RyoTxError::InvalidProof;
+  }
+
+  namespace {
+    struct Opening { uint8_t spend[32], delta[32]; uint64_t amount; };
+
+    bool offsets_match(const RyoSpendSource &source, const RyoTxInputView &input)
+    {
+      if (!source.absolute_offsets) return false;
+      Cursor cursor{input.relative_offsets, input.offsets_size};
+      uint64_t absolute = 0;
+      for (size_t i = 0; i < source.ring_size; ++i) {
+        uint64_t relative;
+        if (!cursor.varint(relative) || relative > UINT64_MAX - absolute) return false;
+        absolute += relative;
+        if (absolute != source.absolute_offsets[i]) return false;
+      }
+      return cursor.position == cursor.size;
+    }
+
+    bool recover_source(const RyoSpendSource &source, const RyoTxInputView &input,
+                        const uint8_t spend[32], const uint8_t view[32], Opening &opening)
+    {
+      if (!point(source.funding_tx_public) || !scalar(source.pseudo_mask) || source.real_index >= source.ring_size)
+        return false;
+      const auto &member = source.ring[source.real_index];
+      SensitiveValue<uint8_t[32]> derivation, key, mask;
+      uint8_t expected[32];
+      if (!cryptonote_generate_key_derivation(source.funding_tx_public, view, derivation.get()) ||
+          !cryptonote_derive_secret_key(derivation.get(), source.funding_output_index, spend, opening.spend) ||
+          !mul(kG, opening.spend, expected) || !equal(expected, member.destination) ||
+          !cryptonote_generate_key_image(member.destination, opening.spend, expected) || !equal(expected, input.key_image) ||
+          !cryptonote_derivation_to_scalar(derivation.get(), source.funding_output_index, key.get()) ||
+          !ringct_decode_amount(RingCtAmountEncoding::Legacy, key.get(), source.funding_ecdh, 64,
+                               member.commitment, &opening.amount, mask.get()) ||
+          !ringct_commitment(source.pseudo_mask, opening.amount, expected) || !equal(expected, input.pseudo_out))
+        return false;
+      ed25519_scalar_mulsub(opening.delta, kOne, source.pseudo_mask, mask.get());
+      return true;
+    }
+  }
+
+  bool ryo_review_spend(const uint8_t *wire, size_t size, const RyoSpendSource *sources, size_t count,
+                        const uint8_t spend[32], const uint8_t view[32], const uint8_t tx_secret[32],
+                        const RyoPublicAddress &recipient, RyoSpendReview *out)
+  {
+    if (!out) return false;
+    *out = {};
+    RyoTransactionView tx{};
+    if (!sources || ryo_parse_transaction(wire, size, &tx) != RyoTxError::Ok || tx.version != 3 ||
+        tx.input_count != count || tx.ring_size < 25 || !scalar(spend, false) || !scalar(view, false)) return false;
+    // Ryo Blockchain::check_fee after FORK_FEE_V2 charges the common ring
+    // size once, plus a prorated fee on the entire serialized transaction.
+    constexpr uint64_t fee_per_ring_member = 500000;
+    constexpr uint64_t fee_per_kib = 500000;
+    if (tx.fee < tx.ring_size * fee_per_ring_member + size * fee_per_kib / 1024) return false;
+    RyoPublicAddress wallet;
+    SensitiveValue<RyoSpendReview> review;
+    if (!mul(kG, spend, wallet.spend) || !mul(kG, view, wallet.view) ||
+        !ryo_decode_payment(wire, size, tx_secret, recipient, wallet, &review.get().payment)) return false;
+    review.get().recipient = recipient;
+    review.get().wallet = wallet;
+    Transcript binding;
+    if (!binding.add(wire, size) || !binding.add(wallet.spend) || !binding.add(wallet.view) ||
+        !binding.add(recipient.spend) || !binding.add(recipient.view)) return false;
+    for (size_t i = 0; i < count; ++i) {
+      const auto &input = tx.inputs[i];
+      const auto &source = sources[i];
+      if (source.ring_size != tx.ring_size || !source.ring || !equal(kZero, input.challenge) ||
+          (i && memcmp(input.key_image, tx.inputs[i - 1].key_image, 32) >= 0) || !offsets_match(source, input)) return false;
+      for (size_t j = 0; j < 2 * source.ring_size; ++j)
+        if (!equal(kZero, input.responses + j * 32)) return false;
+      SensitiveValue<Opening> opening;
+      if (!ryo_validate_ring(source.ring, source.ring_size) || !recover_source(source, input, spend, view, opening.get()) ||
+          opening.get().amount > UINT64_MAX - review.get().total_input) return false;
+      review.get().total_input += opening.get().amount;
+      for (size_t j = 0; j < source.ring_size; ++j)
+        if (!binding.add(source.ring[j].destination) || !binding.add(source.ring[j].commitment)) return false;
+    }
+    const auto &payment = review.get().payment;
+    const uint64_t available = review.get().total_input;
+    if (payment.amount > available || payment.change > available - payment.amount ||
+        available - payment.amount - payment.change != payment.fee ||
+        ryo_transaction_verify_semantics(wire, size) != RyoTxError::Ok || !binding.hash(review.get().binding)) return false;
+    *out = review.get();
+    return true;
+  }
+
+  bool ryo_sign_spend(const uint8_t *wire, size_t size, const RyoSpendSource *sources, size_t count,
+                      const uint8_t spend[32], const uint8_t view[32], const uint8_t tx_secret[32],
+                      const RyoPublicAddress &recipient, const RyoSpendReview &approved,
+                      const uint8_t entropy[32], RyoMlsagSignature *workspace,
+                      uint8_t *signed_tx, size_t *in_out_size)
+  {
+    SigningOutputGuard guard(signed_tx, in_out_size);
+    SensitiveValue<RyoSpendReview> checked;
+    if (!guard.valid() || !workspace || !entropy || *in_out_size < size ||
+        !ryo_review_spend(wire, size, sources, count, spend, view, tx_secret, recipient, &checked.get())) return false;
+    const auto &a = approved.payment;
+    const auto &b = checked.get().payment;
+    if (!equal(checked.get().binding, approved.binding) || approved.total_input != checked.get().total_input ||
+        !equal(checked.get().wallet.spend, approved.wallet.spend) || !equal(checked.get().wallet.view, approved.wallet.view) ||
+        !equal(approved.recipient.spend, recipient.spend) || !equal(approved.recipient.view, recipient.view) ||
+        a.amount != b.amount || a.change != b.change || a.fee != b.fee || a.has_payment_id != b.has_payment_id ||
+        !equal(a.payment_id, b.payment_id)) return false;
+    RyoTransactionView tx{};
+    RyoTransactionHashes digest{};
+    if (ryo_parse_transaction(wire, size, &tx) != RyoTxError::Ok || !hashes(tx, digest)) return false;
+    memcpy(signed_tx, wire, size);
+    for (size_t i = 0; i < count; ++i) {
+      const auto &input = tx.inputs[i];
+      const auto &source = sources[i];
+      SensitiveValue<Opening> opening;
+      if (!recover_source(source, input, spend, view, opening.get()) ||
+          !ryo_mlsag_sign(digest.signing, source.ring, source.ring_size, source.real_index, opening.get().spend,
+                          opening.get().delta, input.pseudo_out, entropy, workspace)) return false;
+      if (!equal(workspace->key_image, input.key_image)) { secure_zero(workspace, sizeof(*workspace)); return false; }
+      memcpy(signed_tx + (input.responses - wire), workspace->responses, source.ring_size * 64);
+      memcpy(signed_tx + (input.challenge - wire), workspace->challenge, 32);
+      secure_zero(workspace, sizeof(*workspace));
+    }
+    *in_out_size = size;
+    return guard.commit();
   }
 
   RyoTxError ryo_transaction_verify_input(const uint8_t *data, size_t size,

@@ -7,7 +7,7 @@
 手机只拿到**公钥/地址**和**已签名的交易字节**；私钥、助记词、种子永不离开设备。
 
 > 现状：BTC/LTC/RVN 家族的 UTXO（PSBT）、EVM（EIP-155/1559 + 白名单合约）、Kaspa（BIP340 v0）、
-> Zcash（v4 透明 ZIP-243）以及 XMR（CryptoNote type-5/`kind=5`）已经走通
+> Zcash（NU7 v5 透明 ZIP-244）以及 XMR（CryptoNote type-5/`kind=5`）已经走通
 > “手机请求 → 设备审阅 → 按键批准 → 设备签名 → 返回给手机”。
 
 ## 1. 传输层
@@ -128,7 +128,7 @@ MAC 输入为 `header | nonce | ciphertext`。
 `Request.payload` 明文格式：
 
 ```
-request_id(4) | opcode(1) | 参数...
+opcode(1) | request_id(4) | 参数...
 ```
 
 `Response.payload` 明文格式：

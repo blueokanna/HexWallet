@@ -114,9 +114,8 @@ namespace hexwallet
     // "shared" secret public.
     bool x25519_ecdh(const uint8_t scalar[32], const uint8_t peer_public[32],
                      uint8_t out[32]);
-    // u = (1 + y) / (1 - y). The only well-defined direction of the birational
-    // map; x25519 -> ed25519 cannot recover the sign of x, so it is not
-    // offered and callers must not invent one.
+    // Convert a canonical, nonidentity Ed25519 public key in the prime-order
+    // subgroup using u = (1 + y) / (1 - y). Invalid keys clear the output.
     bool ed25519_public_to_x25519(const uint8_t ed_public[32], uint8_t out[32]);
     // SHA-512(seed)[0..31] - the unclamped pre-key Ed25519 uses for its own
     // scalar, and exactly what a peer library derives from the same seed.

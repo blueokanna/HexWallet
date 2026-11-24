@@ -30,7 +30,7 @@ namespace hexwallet
         {"xtz", "XTZ", "Tezos (tz1)", 1729, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xtz", "Modern Ed25519 reveal and native implicit-account transfers; no KT1, FA tokens or NFT calls; branch origin unverified offline"},
         {"algo", "ALGO", "Algorand", 283, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "algo", "Mainnet canonical MessagePack payments, ASA transfers and opt-in; no groups, rekey or account closing"},
         {"near", "NEAR", "NEAR Protocol", 397, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "near", "Implicit receive accounts; Borsh V0 native Transfer; named account key membership and block network cannot be checked offline"},
-        {"sol", "SOL", "Solana", 501, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "sol", "SOL, SPL Token and Token-2022 TransferChecked: legacy/v0, single payer; exact mint/token accounts reviewed; Token-2022 extension warning; no ALTs or ATA creation"},
+        {"sol", "SOL", "Solana", 501, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "sol", "Legacy/v0 static accounts, one signer. SOL and TransferChecked, SPL Token Swap, existing stake delegation and deactivation."},
         {"btc", "BTC", "Bitcoin", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc", "P2WPKH PSBT signing"},
         {"btc49", "BTC", "Bitcoin Nested SegWit", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "btc49", "P2SH-P2WPKH PSBT signing"},
         {"btc44", "BTC", "Bitcoin Legacy", 0, WalletCapabilityAddress, "btc44", "P2PKH address only; signing requires verified non_witness_utxo support"},
@@ -45,9 +45,9 @@ namespace hexwallet
         {"zksync", "ETH", "zkSync Era", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "zksync", "EIP-155/type-2 EOA transfers only; no type-113, paymasters or account abstraction"},
         {"eth", "ETH", "Ethereum", 60, WalletCapabilityAddress | WalletCapabilityTokenAccount, "eth", "EVM address and token account support; EIP-155 signing"},
         {"etc", "ETC", "Ethereum Classic", 61, WalletCapabilityAddress | WalletCapabilityTokenAccount, "etc", "EVM address and token account support; EIP-155 signing"},
-        {"btg", "BTG", "Bitcoin Gold Legacy", 156, WalletCapabilityAddress, "btg", "P2PKH address and Bitcoin-sighash signing"},
-        {"btg49", "BTG", "Bitcoin Gold Nested SegWit", 156, WalletCapabilityAddress, "btg49", "P2SH-P2WPKH address and BIP143 signing"},
-        {"btg84", "BTG", "Bitcoin Gold Native SegWit", 156, WalletCapabilityAddress, "btg84", "P2WPKH address and BIP143 signing"},
+        {"btg", "BTG", "Bitcoin Gold Legacy", 156, WalletCapabilityAddress, "btg", "P2PKH PSBT signing with Bitcoin Gold ForkID 79"},
+        {"btg49", "BTG", "Bitcoin Gold Nested SegWit", 156, WalletCapabilityAddress, "btg49", "P2SH-P2WPKH PSBT signing with Bitcoin Gold ForkID 79"},
+        {"btg84", "BTG", "Bitcoin Gold Native SegWit", 156, WalletCapabilityAddress, "btg84", "P2WPKH PSBT signing with Bitcoin Gold ForkID 79"},
         {"rvn", "RVN", "Ravencoin", 175, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "rvn", "P2PKH address and Bitcoin-sighash signing"},
         {"cro", "CRO", "Cronos", 394, WalletCapabilityAddress | WalletCapabilityTokenAccount, "cro", "EVM address and token account support; EIP-155 signing"},
         {"kavaevm", "KAVA", "Kava EVM", 459, WalletCapabilityAddress | WalletCapabilityTokenAccount, "kavaevm", "EVM address and token account support; EIP-155 signing"},
@@ -107,7 +107,7 @@ namespace hexwallet
         {"dgb49", "DGB", "DigiByte Nested SegWit", 20, WalletCapabilityAddress, "dgb49", "P2SH-P2WPKH address and BIP143 signing"},
         {"dgb84", "DGB", "DigiByte Native SegWit", 20, WalletCapabilityAddress, "dgb84", "P2WPKH address and BIP143 signing"},
         {"nmc", "NMC", "Namecoin", 7, WalletCapabilityAddress, "nmc", "P2PKH address and Bitcoin-sighash signing"},
-        {"zec", "ZEC", "Zcash", 133, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zec", "transparent t1/t3 address; v4 transparent ZIP-243 review and signing (NU6.2)"},
+        {"zec", "ZEC", "Zcash", 133, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zec", "NU7 v5 transparent ZIP-244 review and signing"},
         {"zer", "ZER", "ZERO", 323, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zer", "transparent t1/t3 address; v4 transparent ZIP-243 review and signing (COSMOS branch id); shielded z-addresses are not supported"},
         {"firo", "FIRO", "Firo", 136, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "firo", "transparent P2PKH address and Bitcoin-sighash PSBT signing; no privacy (Lelantus/Spark) transactions"},
         {"qtum", "QTUM", "Qtum", 2301, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "qtum", "P2PKH address and Bitcoin/BIP143 PSBT signing; no Qtum EVM contract calls"},
@@ -143,13 +143,21 @@ namespace hexwallet
         {"grs84", "GRS", "Groestlcoin Native SegWit", 17, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "grs84", "P2WPKH spends with grs1 bech32 addresses; BIP143 preimage with Groestlcoin's single-finalise writer on all four hashes"},
         {"zeph", "ZEPH", "Zephyr", 128, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zeph", "Native ZPH-to-ZPH version 3, RingCT type 6, CLSAG; shared XMR spend/view derivation"},
         {"xmr", "XMR", "Monero", 128, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xmr", "RingCT type-6 review and CLSAG signing; fully offline, host supplies decoys"},
+#if defined(HEXWALLET_HOST_TEST) && HEXWALLET_TEST_RYO_PHONE_PAYMENTS
+        {"ryo", "RYO", "RyoCurrency", 382, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ryo", "Host integration test of v3 standard-address payments"},
+#else
         {"ryo", "RYO", "RyoCurrency", 382, WalletCapabilityAddress, "ryo", "CryptoNote long address (prefix 0x2ce192); receive/address verification only - review and signing are not enabled"},
+#endif
+#if defined(HEXWALLET_HOST_TEST) && defined(HEXWALLET_TEST_ZANO_PHONE_PAYMENTS)
+        {"zano", "ZANO", "Zano", 1018, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "zano", "Host integration test of ordinary v4 native payments"},
+#else
         {"zano", "ZANO", "Zano", 1018, WalletCapabilityAddress, "zano", "CryptoNote Zx address (prefix 0xc5); receive/address verification only - review and signing are not enabled"},
+#endif
         {"ae", "AE", "Aeternity", 457, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ae", "Ed25519 ak_ address at m/44'/457'/0'/0'/i'; SpendTx review and signing (canonical RLP, ae_mainnet domain prefix, blake2b-256 tx hash); name, oracle and contract recipients are refused"},
         {"trx", "TRX", "TRON", 195, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "trx", "native TRX and registered TRC-20 transfer signing; owner permission only, strict protobuf review"},
         {"xlm", "XLM", "Stellar", 148, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xlm", "SEP-0005; public-network XDR Payment/CreateAccount; G addresses and explicit memo review"},
-        {"atom", "ATOM", "Cosmos Hub", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "atom", "Cosmos SDK native MsgSend; direct sign mode, strict protobuf review"},
-        {"osmo", "OSMO", "Osmosis", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "osmo", "Cosmos SDK native MsgSend; direct sign mode, strict protobuf review"},
+        {"atom", "ATOM", "Cosmos Hub", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "atom", "Direct MsgSend. On cosmoshub-4: native ICS-20 transfer/channel-141, limited bank-send grant/revoke and single native legacy-amino MsgSend"},
+        {"osmo", "OSMO", "Osmosis", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "osmo", "Direct MsgSend. On osmosis-1: native ICS-20 transfer/channel-0, limited bank-send grant/revoke and single native legacy-amino MsgSend"},
         {"tia", "TIA", "Celestia", 118, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "tia", "Cosmos SDK native MsgSend; direct sign mode, strict protobuf review"},
         {"kava", "KAVA", "Kava", 459, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "kava", "Cosmos SDK native MsgSend on kava_2222-N with ukava; the EVM side is registered separately as kavaevm"},
         {"terra", "LUNA", "Terra", 330, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "terra", "Cosmos SDK native MsgSend on phoenix-N with uluna; CW20 and wasm execute messages are refused"},
@@ -159,7 +167,7 @@ namespace hexwallet
         {"ada", "ADA", "Cardano (Ledger CIP-1852)", 1815, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "ada", "CIP-0003 Ledger/BitBox02 root, CIP-1852 BIP32-Ed25519; mainnet ADA-only transfer; UTxO ownership/value must be checked by the node; no tokens, scripts, staking or governance"},
         {"fil", "FIL", "Filecoin", 461, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "fil", "f1 sender, f0/f1/f3 recipient; canonical CBOR Send, CID signing; no actor calls or BLS signing"},
         {"sui", "SUI", "Sui", 784, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "sui", "Ed25519 BCS split-gas native SUI transfer; no Move calls, sponsored transactions or tokens"},
-        {"apt", "APT", "Aptos", 637, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "apt", "Ed25519 account address (sha3-256 of key || 0x00); 0x1::aptos_account::transfer only, signed over sha3-256(\"APTOS::RawTransaction\" || BCS RawTransaction); no EntryFunction calls, sponsored transactions, multisig or tokens"},
+        {"apt", "APT", "Aptos", 637, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "apt", "0x1::aptos_account::transfer with Ed25519 over the Aptos domain hash followed by BCS RawTransaction; returns a BCS Ed25519 authenticator"},
         {"erg", "ERG", "Ergo", 429, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "erg", "P2PK (ProveDlog) transfers: device rebuilds the tx-id preimage, signs the Schnorr proof and returns the signed transaction. Review displays the single external output plus every token it carries and refuses a second external output or an undisplayable token list; only inputs owned by this key are signed"},
         {"xch", "XCH", "Chia", 8444, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "xch", "Standard-coin spends: the device rebuilds the delegated puzzle and the AGG_SIG_ME message from the conditions it displays, then signs in G2 with the in-tree BLS12-381 backend (no variable-time MPI on the secret scalar). CAT/NFT, plot-NFT and offer spends are not admitted"},
         {"qrl", "QRL", "Quantum Resistant Ledger", 0, WalletCapabilityAddress | WalletCapabilityTransactionReview | WalletCapabilitySigning, "qrl", "QRL v1 XMSS/SHAKE-256 tree height 10: native transfers only, the one-time leaf is reserved in durable storage before the WOTS+ signature exists and the device verifies its own signature before releasing it. Use the qrl2 entry for v2 accounts"},
@@ -189,7 +197,8 @@ namespace hexwallet
       if (policy != nullptr)
       {
         capabilities |= WalletCapabilityTransactionReview | WalletCapabilitySigning;
-        if (network != nullptr && network->encoding == AddressEncoding::P2tr)
+        if (network->encoding == AddressEncoding::P2tr ||
+            (policy->family == SighashFamily::ForkId && policy->fork_id == kBitcoinGoldForkId))
         {
           // Preserve the explicit key-path-only scope from this network's row.
           status = seed.status;
@@ -209,7 +218,11 @@ namespace hexwallet
         }
         else if (policy->family == SighashFamily::ZcashZip243)
         {
-          status = "Zcash v4 transparent ZIP-243 review and signing (NU6.2)";
+          status = "v4 transparent ZIP-243 review and signing";
+        }
+        else if (policy->family == SighashFamily::ZcashZip244)
+        {
+          status = seed.status;
         }
         else if (policy->family == SighashFamily::GroestlLegacy)
         {
@@ -426,7 +439,7 @@ namespace hexwallet
             strcmp(entry.network->id, "dash") == 0;
         const bool cryptonote =
             entry.network->encoding == AddressEncoding::CryptoNote &&
-            cryptonote_review_policy(entry.network->id) != nullptr;
+            (cryptonote_review_policy(entry.network->id) != nullptr || !strcmp(entry.network->id, "ryo"));
         ChainFamily family = ChainFamily::None;
         const bool chain = chain_family_for_network(entry.network->id, &family);
         if (!evm && !utxo_policy && !kaspa && !cryptonote && !solana && !tron && !dash &&

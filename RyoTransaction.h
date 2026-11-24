@@ -60,6 +60,64 @@ struct RyoTransactionHashes {
   uint8_t signing[32];
 };
 
+struct RyoPublicAddress {
+  uint8_t spend[32];
+  uint8_t view[32];
+};
+
+struct RyoPaymentDetails {
+  uint64_t amount;
+  uint64_t change;
+  uint64_t fee;
+  bool has_payment_id;
+  uint8_t payment_id[32];
+};
+
+// Recover an outgoing v3 standard-address payment from the actual outputs.
+// The caller supplies its own change address and transaction secret. Supports
+// one recipient and optional change, pubkey + uniform payment ID extra only.
+// Input ownership, range proofs, ring selection and approval are separate.
+bool ryo_decode_payment(const uint8_t *data, size_t size, const uint8_t tx_secret[32],
+                        const RyoPublicAddress &recipient, const RyoPublicAddress &wallet,
+                        RyoPaymentDetails *out);
+
+// The ring is supplied in the same order as this input's on-chain offsets.
+// Offline verification can establish ownership, not chain membership or age.
+struct RyoSpendSource {
+  const RyoRingMember *ring;
+  const uint64_t *absolute_offsets; // one global output index per supplied member
+  size_t ring_size;
+  size_t real_index;
+  uint8_t funding_tx_public[32];
+  uint64_t funding_output_index;
+  uint8_t funding_ecdh[64];
+  uint8_t pseudo_mask[32];
+};
+
+struct RyoSpendReview {
+  RyoPaymentDetails payment;
+  RyoPublicAddress recipient;
+  RyoPublicAddress wallet;
+  uint64_t total_input;
+  uint8_t binding[32];
+};
+
+// Standard-address v3 payments with existing key images and zero-filled
+// MLSAG slots. Funding openings, images, amount conservation, outputs, the
+// fork's relay fee floor and the original range proof are checked at review.
+bool ryo_review_spend(const uint8_t *wire, size_t size, const RyoSpendSource *sources, size_t count,
+                      const uint8_t spend[32], const uint8_t view[32], const uint8_t tx_secret[32],
+                      const RyoPublicAddress &recipient, RyoSpendReview *out);
+
+// Internal signing backend. The caller owns the device approval, fee policy,
+// nonce entropy and a separate workspace. All output buffers must be disjoint
+// from the immutable reviewed inputs. Failures erase the signed output.
+bool ryo_sign_spend(const uint8_t *wire, size_t size, const RyoSpendSource *sources, size_t count,
+                    const uint8_t spend[32], const uint8_t view[32], const uint8_t tx_secret[32],
+                    const RyoPublicAddress &recipient, const RyoSpendReview &approved,
+                    const uint8_t entropy[32], RyoMlsagSignature *workspace,
+                    uint8_t *signed_tx, size_t *in_out_size);
+
 // All APIs borrow an immutable input buffer that must not overlap any output.
 // Version 2/3, RingCT type 3, uniform 2..241-member rings, one padded original
 // Bulletproof. These are codec limits. Fork-specific admission is a separate

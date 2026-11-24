@@ -6,9 +6,7 @@ namespace hexwallet
   namespace
   {
     using namespace privacy;
-    constexpr uint8_t kX[32] = {
-        0x3a, 0x25, 0xbc, 0xdb, 0x43, 0xf5, 0xd2, 0xc9, 0xdd, 0x06, 0x3d, 0xc3, 0x9a, 0x9e, 0x09, 0x87,
-        0xba, 0xfc, 0x6f, 0xcf, 0x2d, 0xf1, 0xbc, 0x76, 0x32, 0x2d, 0x75, 0x88, 0x4a, 0x4a, 0x38, 0x20};
+    constexpr auto &kX = kZanoX;
     constexpr char kDomains[3][32] = {"ZANO_HDS_CLSAG_GGX_LAYER_ZERO__",
                                       "ZANO_HDS_CLSAG_GGX_LAYER_ONE___", "ZANO_HDS_CLSAG_GGX_LAYER_TWO___"};
     constexpr char kChallenge[32] = "ZANO_HDS_CLSAG_GGX_CHALLENGE___";
@@ -46,7 +44,12 @@ namespace hexwallet
           !ed25519_point_mul8_compressed(asset, ctx.asset))
         return false;
       Transcript binding;
-      binding.add(message);
+      // Upstream add_scalar(m) implicitly converts the prefix hash to
+      // scalar_t, reducing its little-endian representation modulo L.
+      uint8_t message_scalar[32];
+      memcpy(message_scalar, message, sizeof(message_scalar));
+      ed25519_scalar_reduce_mod_l(message_scalar);
+      binding.add(message_scalar);
       for (size_t i = 0; i < n; ++i)
       {
         binding.add(ring[i].destination);

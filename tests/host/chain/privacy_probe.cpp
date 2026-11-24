@@ -5,7 +5,9 @@
 #include "RyoMlsag.h"
 #include "RyoBulletproof.h"
 #include "RyoTransaction.h"
+#include "RyoPhonePayment.h"
 #include "ZanoClsag.h"
+#include "ZanoOutput.h"
 #include "WalletSecurity.h"
 using namespace hexwallet;
 
@@ -30,6 +32,9 @@ uint32_t le32(const uint8_t *p) {
   return uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
       (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
+uint64_t le64(const uint8_t *p) {
+  return uint64_t(le32(p)) | (uint64_t(le32(p + 4)) << 32);
+}
 void append(std::vector<uint8_t> &v, const uint8_t *p, size_t n) {
   v.insert(v.end(), p, p + n);
 }
@@ -46,6 +51,131 @@ void print_hex(const char *name, const uint8_t *p, size_t size) {
 }  // namespace
 
 int privacy_probe(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "privacy-ryo-phone-bounds")) {
+    RyoPhonePayment state{};
+    uint8_t key[32] = {1};
+    for (const size_t size : {kRyoPhonePayloadMax - 1, kRyoPhonePayloadMax, kRyoPhonePayloadMax + 1}) {
+      for (const size_t wire : {sizeof(state.wire) - 1, sizeof(state.wire), sizeof(state.wire) + 1}) {
+        std::vector<uint8_t> payload(size, 0xff); // invalid wire version after the guarded copy
+        payload[0] = 1;
+        payload[1] = static_cast<uint8_t>(wire);
+        payload[2] = static_cast<uint8_t>(wire >> 8);
+        memset(state.wire, 0, sizeof(state.wire));
+        if (ryo_phone_prepare(payload.data(), size, key, key, state)) return 1;
+        const size_t copied = size <= kRyoPhonePayloadMax && wire <= sizeof(state.wire) ? wire : 0;
+        for (size_t i = 0; i < sizeof(state.wire); ++i)
+          if (state.wire[i] != (i < copied ? 0xff : 0)) return 1;
+      }
+    }
+    printf("Ryo payload=%zu wire=%zu, 9 copy boundaries passed\n", kRyoPhonePayloadMax, sizeof(state.wire));
+    return 0;
+  }
+  if (argc == 4 && !strcmp(argv[1], "privacy-ryo-spend")) {
+    std::vector<uint8_t> wire, data;
+    if (!read_file(argv[2], wire) || !read_file(argv[3], data) || data.size() < 161) return 2;
+    RyoTransactionView tx{};
+    if (ryo_parse_transaction(wire.data(), wire.size(), &tx) != RyoTxError::Ok) return 1;
+    const size_t stride = 140 + tx.ring_size * 72;
+    if (data.size() != 161 + tx.input_count * stride) return 2;
+    const uint8_t *p = data.data();
+    RyoPublicAddress recipient;
+    memcpy(recipient.spend, p + 96, 32);
+    memcpy(recipient.view, p + 128, 32);
+    std::vector<RyoSpendSource> sources(tx.input_count);
+    std::vector<RyoRingMember> rings(tx.input_count * tx.ring_size);
+    std::vector<uint64_t> offsets(rings.size());
+    for (size_t i = 0; i < sources.size(); ++i) {
+      auto &s = sources[i];
+      const uint8_t *q = p + 161 + i * stride;
+      s.real_index = le32(q);
+      s.funding_output_index = le64(q + 4);
+      memcpy(s.funding_tx_public, q + 12, 32);
+      memcpy(s.funding_ecdh, q + 44, 64);
+      memcpy(s.pseudo_mask, q + 108, 32);
+      s.ring_size = tx.ring_size;
+      size_t start = i * s.ring_size;
+      s.absolute_offsets = &offsets[start];
+      s.ring = &rings[start];
+      for (size_t j = 0; j < s.ring_size; ++j) {
+        const uint8_t *m = q + 140 + 72 * j;
+        offsets[start + j] = le64(m);
+        memcpy(rings[start + j].destination, m + 8, 32);
+        memcpy(rings[start + j].commitment, m + 40, 32);
+      }
+    }
+    RyoSpendReview reviewed{};
+    if (!ryo_review_spend(wire.data(), wire.size(), sources.data(), sources.size(), p, p + 32, p + 64, recipient, &reviewed))
+      return 1;
+    if (p[160] == 1) ++reviewed.payment.fee;
+    if (p[160] == 2) reviewed.binding[0] ^= 1;
+    if (p[160] == 3) reviewed.payment.payment_id[31] ^= 1;
+    std::vector<uint8_t> signed_tx(wire.size(), 0xa5);
+    RyoMlsagSignature workspace{};
+    size_t size = signed_tx.size();
+    const uint8_t entropy[32] = {42}; // public reproducible fixture
+    if (!ryo_sign_spend(wire.data(), wire.size(), sources.data(), sources.size(), p, p + 32, p + 64, recipient,
+                        reviewed, entropy, &workspace, signed_tx.data(), &size))
+      return !size && erased(signed_tx.data(), signed_tx.size()) ? 1 : 3;
+    if (size != wire.size() || !erased(&workspace, sizeof(workspace))) return 3;
+    for (size_t i = 0; i < sources.size(); ++i)
+      if (ryo_transaction_verify_input(signed_tx.data(), size, i, sources[i].ring, tx.ring_size) != RyoTxError::Ok) return 3;
+    printf("total=%llu\namount=%llu\nchange=%llu\nfee=%llu\n", (unsigned long long)reviewed.total_input,
+           (unsigned long long)reviewed.payment.amount, (unsigned long long)reviewed.payment.change,
+           (unsigned long long)reviewed.payment.fee);
+    print_hex("signed", signed_tx.data(), size);
+    return 0;
+  }
+  if (argc == 4 && !strcmp(argv[1], "privacy-ryo-payment")) {
+    std::vector<uint8_t> wire, keys;
+    RyoPublicAddress recipient, wallet;
+    if (!read_file(argv[2], wire) || !read_file(argv[3], keys) || keys.size() != 160) return 2;
+    memcpy(&recipient, keys.data() + 32, 64);
+    memcpy(&wallet, keys.data() + 96, 64);
+    RyoPaymentDetails result;
+    memset(&result, 0xa5, sizeof(result));
+    if (!ryo_decode_payment(wire.data(), wire.size(), keys.data(), recipient, wallet, &result))
+      return result.amount || result.change || result.fee || result.has_payment_id || !erased(result.payment_id, 32) ? 3 : 1;
+    printf("amount=%llu\nchange=%llu\nfee=%llu\n", (unsigned long long)result.amount,
+           (unsigned long long)result.change, (unsigned long long)result.fee);
+    if (result.has_payment_id) print_hex("payment_id", result.payment_id, 32);
+    return 0;
+  }
+  if (argc == 3 && !strcmp(argv[1], "privacy-zano-output")) {
+    std::vector<uint8_t> data;
+    if (!read_file(argv[2], data) || data.size() != 153 || data[152] > 1) return 2;
+    ZanoConfidentialOutput out;
+    memset(&out, 0xa5, sizeof(out));
+    if (!zano_build_output(data.data(), le64(data.data() + 128), data.data() + 32, data.data() + 64, data.data() + 96,
+                           le64(data.data() + 136), le64(data.data() + 144), data[152] != 0, &out)) return erased(&out, sizeof(out)) ? 1 : 3;
+    print_hex("stealth", out.stealth_address, 32);
+    print_hex("concealing", out.concealing_point, 32);
+    print_hex("commitment", out.amount_commitment, 32);
+    print_hex("asset", out.blinded_asset, 32);
+    printf("amount=%llu\npayment_id=%llu\n", (unsigned long long)out.encrypted_amount,
+           (unsigned long long)out.encrypted_payment_id);
+    return 0;
+  }
+  if (argc == 3 && !strcmp(argv[1], "privacy-zano-scan")) {
+    std::vector<uint8_t> data;
+    if (!read_file(argv[2], data) || data.size() != 248) return 2;
+    const auto *p = data.data();
+    ZanoConfidentialOutput output{};
+    memcpy(output.stealth_address, p + 104, 32);
+    memcpy(output.concealing_point, p + 136, 32);
+    memcpy(output.amount_commitment, p + 168, 32);
+    memcpy(output.blinded_asset, p + 200, 32);
+    output.encrypted_amount = le64(p + 232);
+    output.encrypted_payment_id = le64(p + 240);
+    ZanoReceivedOutput received;
+    memset(&received, 0xa5, sizeof(received));
+    if (!zano_scan_output(p, p + 32, p + 64, le64(p + 96), output, &received))
+      return erased(&received, sizeof(received)) ? 1 : 3;
+    print_hex("asset", received.asset_id, 32);
+    print_hex("amount_mask", received.amount_mask, 32);
+    print_hex("asset_mask", received.asset_mask, 32);
+    printf("amount=%llu\npayment_id=%llu\n", (unsigned long long)received.amount, (unsigned long long)received.payment_id);
+    return 0;
+  }
   if (argc == 3 && !strcmp(argv[1], "privacy-ryo-parser-stress")) {
     std::vector<uint8_t> original;
     if (!read_file(argv[2], original) || original.empty()) return 2;

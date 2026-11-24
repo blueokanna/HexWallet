@@ -153,7 +153,7 @@ namespace hexwallet
         return ChainError::FeePolicy;
       }
       // The maximum fee is shown to the user, so it has to be representable.
-      if (request->max_gas > UINT64_MAX / request->gas_unit_price)
+      if (request->gas_unit_price > UINT64_MAX / request->max_gas)
       {
         return ChainError::FeePolicy;
       }
@@ -197,26 +197,17 @@ namespace hexwallet
       return true;
     }
 
-    ChainError signing_digest(const AptosRequest &request,
-                              const uint8_t sender[kAptosAddressSize],
-                              uint8_t digest[kSha256Size])
+    constexpr size_t kMaxMessage = kSha256Size + 256;
+    ChainError signing_message(const AptosRequest &request, const uint8_t sender[kAptosAddressSize],
+                               uint8_t (&message)[kMaxMessage], size_t *size)
     {
-      uint8_t message[sizeof(kSigningDomain) - 1 + 256];
-      const size_t domain = sizeof(kSigningDomain) - 1;
-      memcpy(message, kSigningDomain, domain);
+      if (!crypto_sha3_256(reinterpret_cast<const uint8_t *>(kSigningDomain), sizeof(kSigningDomain) - 1, message))
+        return ChainError::CryptoFailure;
       size_t payload_size = 0;
-      ChainError error = ChainError::Ok;
-      if (!build_raw_transaction(request, sender, message + domain,
-                                 sizeof(message) - domain, &payload_size))
-      {
-        error = ChainError::BufferTooSmall;
-      }
-      else if (!crypto_sha3_256(message, domain + payload_size, digest))
-      {
-        error = ChainError::CryptoFailure;
-      }
-      secure_zero(message, sizeof(message));
-      return error;
+      if (!build_raw_transaction(request, sender, message + kSha256Size,
+                                 sizeof(message) - kSha256Size, &payload_size)) return ChainError::BufferTooSmall;
+      *size = kSha256Size + payload_size;
+      return ChainError::Ok;
     }
 
     bool decode_address(const char *text, uint8_t out[kAptosAddressSize])
@@ -280,7 +271,10 @@ namespace hexwallet
     uint8_t sender_bytes[kAptosAddressSize];
     if (!decode_address(sender, sender_bytes))
       return ChainError::WrongWallet;
-    error = signing_digest(request, sender_bytes, digest);
+    uint8_t message[kMaxMessage];
+    size_t message_size = 0;
+    error = signing_message(request, sender_bytes, message, &message_size);
+    if (error == ChainError::Ok && !crypto_sha3_256(message, message_size, digest)) error = ChainError::CryptoFailure;
     secure_zero(sender_bytes, sizeof(sender_bytes));
     if (error != ChainError::Ok)
       return error;
@@ -371,8 +365,9 @@ namespace hexwallet
       return key_ok ? ChainError::WrongWallet : ChainError::CryptoFailure;
     }
 
-    uint8_t digest[kSha256Size];
-    error = signing_digest(request, own_address, digest);
+    uint8_t message[kMaxMessage];
+    size_t message_size = 0;
+    error = signing_message(request, own_address, message, &message_size);
     secure_zero(own_address, sizeof(own_address));
     if (error != ChainError::Ok)
     {
@@ -382,13 +377,11 @@ namespace hexwallet
     if (capacity < kAptosAuthenticatorSize)
     {
       secure_zero(public_key, sizeof(public_key));
-      secure_zero(digest, sizeof(digest));
       return ChainError::BufferTooSmall;
     }
     uint8_t signature[64];
     const bool signed_ok =
-        ed25519_sign(private_key, digest, sizeof(digest), signature);
-    secure_zero(digest, sizeof(digest));
+        ed25519_sign(private_key, message, message_size, signature);
     if (!signed_ok)
     {
       secure_zero(public_key, sizeof(public_key));
@@ -397,8 +390,10 @@ namespace hexwallet
       return ChainError::CryptoFailure;
     }
     out[0] = 0x00; // AccountAuthenticator::Ed25519
-    memcpy(out + 1, signature, sizeof(signature));
-    memcpy(out + 1 + sizeof(signature), public_key, kAptosAddressSize);
+    out[1] = sizeof(public_key);
+    memcpy(out + 2, public_key, sizeof(public_key));
+    out[2 + sizeof(public_key)] = sizeof(signature);
+    memcpy(out + 3 + sizeof(public_key), signature, sizeof(signature));
     secure_zero(signature, sizeof(signature));
     secure_zero(public_key, sizeof(public_key));
     *in_out_size = kAptosAuthenticatorSize;
@@ -414,19 +409,16 @@ namespace hexwallet
     static const char kExpectedAddress[] =
         "0xb6bbeddd149a70b603089e5a1e4e259c39d6cbfb0139265b1d4bd79eaf790b03";
     static const uint8_t kExpectedDigest[kSha256Size] = {
-        0x64, 0xac, 0xdd, 0x1c, 0x2b, 0x63, 0x24, 0x29, 0x71, 0x69, 0xc9,
-        0x93, 0x3e, 0x52, 0x03, 0xf6, 0x8a, 0x6d, 0xa9, 0x79, 0x85, 0x5c,
-        0x50, 0x20, 0x20, 0x1d, 0x29, 0xc1, 0x26, 0x2c, 0xb3, 0xa9};
+        0x41,0xc0,0xbe,0x20,0x06,0x05,0x50,0xc9,0x69,0xce,0xd1,0x16,0xa0,0x0e,0xd0,0x6e,
+        0x51,0x99,0xa6,0xfd,0xb0,0x5f,0x9a,0x79,0x47,0x38,0x97,0xaa,0x97,0x74,0x2d,0x76};
     static const uint8_t kExpectedAuthenticator[kAptosAuthenticatorSize] = {
-        0x00, 0x40, 0x78, 0x9a, 0x84, 0x25, 0x48, 0x3d, 0x48, 0x3f, 0xa3,
-        0x5f, 0x6e, 0xe1, 0x99, 0x30, 0x92, 0x59, 0x18, 0xd3, 0x8b, 0xd7,
-        0xfb, 0x2a, 0x8e, 0x4b, 0x68, 0x21, 0xa9, 0x0b, 0xdc, 0xde, 0x4f,
-        0xb2, 0x18, 0xe3, 0xc9, 0xec, 0xe5, 0xe5, 0xc5, 0xc4, 0x1c, 0x18,
-        0xeb, 0x7b, 0x1c, 0xd2, 0x5e, 0xd8, 0x21, 0x76, 0x2a, 0xd8, 0x4c,
-        0x9f, 0x33, 0xf7, 0x50, 0x9d, 0x07, 0x95, 0x29, 0x76, 0x00, 0x79,
-        0xb5, 0x56, 0x2e, 0x8f, 0xe6, 0x54, 0xf9, 0x40, 0x78, 0xb1, 0x12,
-        0xe8, 0xa9, 0x8b, 0xa7, 0x90, 0x1f, 0x85, 0x3a, 0xe6, 0x95, 0xbe,
-        0xd7, 0xe0, 0xe3, 0x91, 0x0b, 0xad, 0x04, 0x96, 0x64};
+        0x00,0x20,0x79,0xb5,0x56,0x2e,0x8f,0xe6,0x54,0xf9,0x40,0x78,0xb1,0x12,0xe8,0xa9,
+        0x8b,0xa7,0x90,0x1f,0x85,0x3a,0xe6,0x95,0xbe,0xd7,0xe0,0xe3,0x91,0x0b,0xad,0x04,
+        0x96,0x64,0x40,0x94,0x75,0x82,0xf0,0x84,0x59,0xab,0xbe,0x6d,0x99,0x03,0x0c,0x6a,
+        0xbd,0x87,0xee,0xed,0x80,0x4c,0xb1,0xa3,0x3e,0x5a,0xaa,0xbb,0x1c,0x8d,0x31,0x1a,
+        0xdd,0xf9,0xcb,0xb0,0xbe,0x40,0x14,0x3b,0x73,0xe7,0xc5,0x90,0x76,0x9d,0x82,0xbc,
+        0x44,0x76,0x36,0xef,0xb8,0x3d,0x81,0x7e,0xdd,0x82,0x79,0x0a,0x4d,0xcb,0xb4,0xe8,
+        0xee,0x7f,0x07};
 
     uint8_t public_key[kAptosAddressSize];
     char address[kAptosAddressTextSize];

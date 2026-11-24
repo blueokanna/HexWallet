@@ -100,9 +100,7 @@ at once, and the IR drop of that burst is what actually ends a session on a near
 - `status` prints `battery=<mV> <level>` so the reason a review was refused is visible without a
   debugger.
 
-Display idle-off is **not** implemented. Turning the panel rail off and back on is board-specific
-(AMOLED vs e-paper vs TFT), and it has to be validated on hardware; a policy that assumes it works is
-worse than none.
+Board 7 puts the monochrome panel to sleep after 30 seconds without a changed frame. Power-rail behavior, actual current and wake latency still require measurements on this board. [Boards and display](Boards-and-Display)
 
 ## Secure element status
 

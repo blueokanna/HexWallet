@@ -15,7 +15,7 @@
 |---|---|---|
 | BTC / LTC / DOGE / DGB / BTG / NMC 等 UTXO | PSBT + legacy/BIP143/fork-id 摘要，官方向量 | `bitcoin-sighash`、`run_bitcoin_sighash_self_tests()` |
 | DASH | **两笔真实主网交易**的链上签名对本固件算出的摘要验签通过；合成向量逐字节复现 | `chain_probe dash-sign-selftest` |
-| ZEC (t1/t3) | 官方 ZIP-243 向量 + 真实 BIP32/ECDSA 签名 | `chain_probe zcash-sign-selftest` |
+| ZEC / ZERO (t1/t3) | NU7 v5 与 ZERO v4 双输入交易经手机协议批准签名，与官方序列化、ZIP-244/243 摘要和 ethers 签名逐字节比对 | `tests/host/zcash_protocol_check.py` |
 | XMR | 官方/独立向量 + CLSAG、金额、view tag | `cryptonote-*` 系列 |
 | TRON / TRC-10 / TRC-20 | 主网交易样本 + `transferFrom` + memo | `tron` |
 | Cosmos (ATOM/OSMO/TIA) | 独立 protobuf+RFC6979 生成器复现全部旧向量后产出 v2/v3 | `chain_probe cosmos-sign-selftest` |
@@ -23,7 +23,7 @@
 | **QRL**（XMSS/SHAKE-256） | 与 qrllib `src/xmss-alt` 的 `xmss_Signmsg` 在 h=4/6/10、索引 0/1/末叶**逐字节相同**；设备端在释放签名前用独立验证器重建根自检 | `tests/host/qrl_oracle_check.ps1`、`chain.qrl` |
 | **XCH**（Chia） | AGG_SIG_ME 消息由设备自建 `sha256tree((q . conditions))`；G1/G2 走仓库内的 BLS12-381 实现（`Bls12381.cpp`，32-bit limb，宿主机与 MCU 同一份代码，不链接第三方配对库），blspy 向量与 RFC 9380 J.10.1 通过 | `chain.bls-g2`、`chain.chia` |
 | **DOT / KSM** | 签名载荷布局由 `blake2b-256` 摘要锚定：已知摘要 + 完整 `kExpectedSigned` 逐字节比对，独立 Python 复现同一摘要；runtime 版本钉死 | `chain.polkadot` |
-| **APT**（Aptos） | 地址、`RawTransaction` BCS 摘要、Ed25519 authenticator 与 Python `sha3_256` + libsodium 独立实现逐字节一致 | `chain.aptos` |
+| **APT**（Aptos） | aptos-sdk 0.11.0 复核手机命令的派生地址、审阅金额、签名交易字节和 Ed25519 签名 | `chain.aptos`、`aptos_protocol_check.py` |
 | **STRK**（Starknet） | Pedersen/Poseidon/Stark ECDSA 与 StarkWare、`@scure/starknet` 公开向量一致；地址、v3 `invoke`/`deploy_account` 哈希与签名与独立 Python 参考实现逐字节一致 | `starknet-crypto`、`chain.starknet` |
 
 ### QRL v2（Zond，ML-DSA-87）— 已准入

@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <esp_timer.h>
-#include <Preferences.h>
+#include <nvs.h>
 #include <esp_system.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +45,7 @@
 #include "WalletTransportPolicy.h"
 #include "WalletUi.h"
 #include "WalletSigning.h"
+#include "TrustAnchor.h"
 
 namespace hexwallet
 {
@@ -66,7 +67,8 @@ namespace hexwallet
     constexpr uint32_t kMaximumBackoffMs = 10UL * 60UL * 1000UL;
     constexpr uint32_t kTransactionApprovalMs = 2UL * 60UL * 1000UL;
 
-    Preferences preferences;
+    nvs_handle_t preferences;
+    uint32_t failure_count = 0;
     bool preferences_open = false;
     bool display_is_available = false;
     bool provisioned = false;
@@ -102,6 +104,7 @@ namespace hexwallet
     uint32_t command_last_byte_ms = 0;
     BitcoinSigningRequest pending_transaction;
     EvmSigningRequest pending_evm_transaction;
+    uint8_t pending_display_digest[kReviewSealSize];
     KaspaTransaction pending_kaspa_transaction;
     ZcashSigningRequest pending_zcash_transaction;
     ChainTransaction pending_chain_transaction;
@@ -236,6 +239,7 @@ namespace hexwallet
     {
       clear_bitcoin_request(&pending_transaction);
       clear_evm_request(&pending_evm_transaction);
+      secure_zero(pending_display_digest, sizeof(pending_display_digest));
       clear_kaspa_transaction(&pending_kaspa_transaction);
       clear_zcash_request(&pending_zcash_transaction);
       secure_zero(&pending_chain_transaction, sizeof(pending_chain_transaction));
@@ -269,16 +273,44 @@ namespace hexwallet
       usb_apdu_frame.clear();
     }
 
+    void reset_auth_storage()
+    {
+      if (preferences_open) nvs_close(preferences);
+      preferences_open = provisioned = false;
+      failure_count = retry_after = 0;
+      secure_zero(salt, sizeof(salt));
+      secure_zero(verifier, sizeof(verifier));
+      wallet_cli_lock();
+    }
+
+    void close_auth_storage()
+    {
+      reset_auth_storage();
+      Serial.println("ERR authentication storage unavailable");
+    }
+
+    bool save_failures(uint32_t count)
+    {
+      if (nvs_set_u32(preferences, kFailuresKey, count) != ESP_OK || nvs_commit(preferences) != ESP_OK)
+      {
+        close_auth_storage();
+        return false;
+      }
+      failure_count = count;
+      return true;
+    }
+
+    uint32_t auth_backoff_ms()
+    {
+      const uint32_t exponent = failure_count > 10 ? 10 : failure_count;
+      const uint32_t delay_ms = 1000UL << exponent;
+      return delay_ms > kMaximumBackoffMs ? kMaximumBackoffMs : delay_ms;
+    }
+
     void record_failure()
     {
-      uint32_t failures = preferences.getUInt(kFailuresKey, 0);
-      if (failures != UINT32_MAX)
-        ++failures;
-      preferences.putUInt(kFailuresKey, failures);
-      const uint32_t exponent = failures > 10 ? 10 : failures;
-      uint32_t delay_ms = 1000UL << exponent;
-      if (delay_ms > kMaximumBackoffMs)
-        delay_ms = kMaximumBackoffMs;
+      if (!save_failures(failure_count == UINT32_MAX ? UINT32_MAX : failure_count + 1)) return;
+      const uint32_t delay_ms = auth_backoff_ms();
       retry_after = millis() + delay_ms;
       Serial.print("ERR authentication-failed retry-ms=");
       Serial.println(delay_ms);
@@ -350,6 +382,39 @@ namespace hexwallet
       return true;
     }
 
+    void report_transaction_review(const char *approval, bool complete = true)
+    {
+      if (!complete || (display_is_available && !wallet_ui_review_digest(pending_display_digest)))
+      {
+        clear_pending_transaction();
+        Serial.println("ERR transaction-review-incomplete");
+      }
+      else if (display_is_available)
+        Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
+      else if (pending_transaction_kind == PendingTransactionKind::Chain)
+      {
+        Serial.print("approval-code=");
+        Serial.println(approval);
+      }
+      else
+      {
+        Serial.print("OK confirm-code=");
+        Serial.print(approval);
+        Serial.println(" expires-ms=120000");
+      }
+    }
+
+    bool authorize_transaction_review()
+    {
+      if (transaction_pending && !deadline_reached(millis(), transaction_expires_at) && trust_signing_allowed(trust_state()) &&
+          wallet_transport_allows(WalletTransport::SerialUsb, WalletTransportOperation::ApprovalResponse,
+                                  current_transport_state()) &&
+          (!display_is_available || wallet_ui_review_authorize(pending_display_digest))) return true;
+      clear_pending_transaction();
+      Serial.println("ERR approval-unavailable; review-cleared");
+      return false;
+    }
+
     uint32_t parse_index(const char *text, bool *ok)
     {
       if (text == nullptr || *text == '\0')
@@ -374,7 +439,7 @@ namespace hexwallet
       Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
       Serial.println("OK NFT: token custom-add-nft <network> <contract-hex> <erc721|erc1155> <symbol> <name>");
       Serial.println("OK totp: totp time [unix] | totp add <otpauth-uri> | totp list | totp show <slot> | totp remove <slot>");
-      Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-payload-hex> | zec sign <code> | tx reject");
+      Serial.println("OK signing: tx inspect [<coin>] <psbt-v0-hex> | tx sign <code> | evm inspect <network> <index> <unsigned-rlp-hex> | evm sign <code> | kaspa inspect <payload-hex> | kaspa sign <code> | zec inspect <ZEC4-or-ZEC5-payload-hex> | zec sign <code> | tx reject");
       Serial.println("OK chain: chain begin <network> <index> <payload-hex> | chain sign <code> | chain reject  (payload is the adapter's unsigned transaction: Theta SendTx is 46 bytes, Aeternity SpendTx is its canonical RLP)");
       Serial.println("OK link: link status | link pair confirm | link pair reject");
       Serial.println("OK security: secret export and host mnemonic import unavailable | selftest");
@@ -404,6 +469,11 @@ namespace hexwallet
 
     void provision_pin(char *arguments)
     {
+      if (!preferences_open)
+      {
+        Serial.println("ERR protected credential storage unavailable");
+        return;
+      }
       if (provisioned)
       {
         Serial.println("ERR already-provisioned");
@@ -424,22 +494,26 @@ namespace hexwallet
         secure_zero(separator, strlen(separator));
         return;
       }
-      uint8_t new_verifier[kVerifierSize];
-      const bool derived = random_fill_checked(salt, sizeof(salt)) &&
+      SensitiveValue<uint8_t[kSaltSize + kVerifierSize]> record_storage;
+      auto &record = record_storage.get();
+      const bool derived = random_fill_checked(record, kSaltSize) &&
                            crypto_pbkdf2_sha256(reinterpret_cast<const uint8_t *>(arguments), pin_size,
-                                                salt, sizeof(salt), HEXWALLET_CLI_PBKDF2_ITERATIONS,
-                                                new_verifier, sizeof(new_verifier));
+                                                record, kSaltSize, HEXWALLET_CLI_PBKDF2_ITERATIONS,
+                                                record + kSaltSize, kVerifierSize);
       secure_zero(arguments, pin_size);
       secure_zero(separator, pin_size);
-      if (!derived || preferences.putBytes(kSaltKey, salt, sizeof(salt)) != sizeof(salt) || preferences.putBytes(kVerifierKey, new_verifier, sizeof(new_verifier)) != sizeof(new_verifier) || preferences.putBool(kProvisionedKey, true) == 0)
+      if (!derived)
       {
-        secure_zero(new_verifier, sizeof(new_verifier));
         Serial.println("ERR provisioning-failed");
         return;
       }
-      memcpy(verifier, new_verifier, sizeof(verifier));
-      secure_zero(new_verifier, sizeof(new_verifier));
-      preferences.putUInt(kFailuresKey, 0);
+      if (nvs_set_blob(preferences, kProvisionedKey, record, sizeof(record)) != ESP_OK || nvs_commit(preferences) != ESP_OK)
+      {
+        close_auth_storage();
+        return;
+      }
+      memcpy(salt, record, sizeof(salt));
+      memcpy(verifier, record + sizeof(salt), sizeof(verifier));
       provisioned = true;
       Serial.println("OK provisioned; run auth begin and auth unlock <proof-hex>");
     }
@@ -452,7 +526,7 @@ namespace hexwallet
         return;
       }
       const uint32_t now = millis();
-      if (!deadline_reached(now, retry_after))
+      if (failure_count && !deadline_reached(now, retry_after))
       {
         Serial.print("ERR backoff retry-ms=");
         Serial.println(retry_after - now);
@@ -496,7 +570,7 @@ namespace hexwallet
       }
       secure_zero(supplied, sizeof(supplied));
       secure_zero(expected, sizeof(expected));
-      preferences.putUInt(kFailuresKey, 0);
+      if (failure_count && !save_failures(0)) return;
       authenticated = true;
       authenticated_at = millis();
       retry_after = 0;
@@ -1128,7 +1202,7 @@ namespace hexwallet
           network.encoding == AddressEncoding::QrlXmss
               ? derive_address_ex(master, seed, network, 0, 0, address_index,
                                   qrl_progress_hook, nullptr, &derived)
-              : derive_address(master, seed, network, 0, 0, address_index, &derived);
+              : wallet_derive_for_display(master, seed, network, 0, 0, address_index, &derived);
       if (result != WalletError::Ok)
       {
         Serial.print("ERR network=");
@@ -1270,7 +1344,7 @@ namespace hexwallet
       SensitiveValue<DerivedAddress> derived_storage;
       auto &derived = derived_storage.get();
       const WalletError result =
-          derive_address(master, have_seed ? seed : nullptr, *network, 0, 0, index, &derived);
+          wallet_derive_for_display(master, have_seed ? seed : nullptr, *network, 0, 0, index, &derived);
       secure_zero(&master, sizeof(master));
       secure_zero(seed, sizeof(seed));
       if (result != WalletError::Ok)
@@ -1574,16 +1648,6 @@ namespace hexwallet
         Serial.println("ERR approval-unavailable; review-cleared");
         return;
       }
-      if (display_is_available)
-      {
-        Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
-      }
-      else
-      {
-        Serial.print("OK confirm-code=");
-        Serial.print(approval);
-        Serial.println(" expires-ms=120000; compare every output before tx sign");
-      }
       WalletUiTransactionReview review = {};
       BitcoinReviewText review_text = {};
       if (!bitcoin_prepare_review(pending_transaction, &review_text, &review))
@@ -1595,6 +1659,7 @@ namespace hexwallet
       }
       review.approval_code = approval;
       wallet_ui_show_transaction(review);
+      report_transaction_review(approval);
       secure_zero(approval, sizeof(approval));
     }
 
@@ -1652,6 +1717,8 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
+      if (!authorize_transaction_review()) return;
+      const bool single_sha = pending_transaction.chain.sighash == SighashFamily::GroestlLegacy;
       uint8_t *signed_transaction = cli_byte_scratch;
       constexpr size_t kSignedCapacity = HEXWALLET_MAX_PSBT_BYTES;
       size_t signed_size = kSignedCapacity;
@@ -1667,7 +1734,8 @@ namespace hexwallet
         return;
       }
       uint8_t wtxid[kSha256Size];
-      const bool hashed = crypto_double_sha256(signed_transaction, signed_size, wtxid);
+      const bool hashed = single_sha ? crypto_sha256(signed_transaction, signed_size, wtxid)
+                                     : crypto_double_sha256(signed_transaction, signed_size, wtxid);
       Serial.print("OK signed-transaction=");
       print_hex(signed_transaction, signed_size);
       Serial.println();
@@ -1737,7 +1805,7 @@ namespace hexwallet
         return;
       }
       clear_pending_transaction();
-      const EvmTransactionError error = evm_parse_for_review(
+      const EvmTransactionError error = wallet_worker_review_evm(
           transaction, transaction_size, *network, master, address_index, &pending_evm_transaction);
       secure_zero(&master, sizeof(master));
       secure_zero(transaction, kTransactionCapacity);
@@ -1870,16 +1938,6 @@ namespace hexwallet
         Serial.println("ERR approval-unavailable; review-cleared");
         return;
       }
-      if (display_is_available)
-      {
-        Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
-      }
-      else
-      {
-        Serial.print("OK confirm-code=");
-        Serial.print(approval);
-        Serial.println(" expires-ms=120000");
-      }
       char display_amount[256];
       char display_fee[112];
       char output_label[96];
@@ -1899,7 +1957,7 @@ namespace hexwallet
         Serial.println("ERR incomplete-evm-review");
         return;
       }
-      if (pending_evm_transaction.opaque)
+      if (pending_evm_transaction.opaque || pending_evm_transaction.protocol != EvmProtocolCall::None)
       {
         snprintf(output_label, sizeof(output_label), "%s", evm_operation_text(pending_evm_transaction));
       }
@@ -1924,6 +1982,7 @@ namespace hexwallet
       if (pending_evm_transaction.opaque)
         review.note = "UNDECODED CODE. The amount is native call value only. Code may move other assets or grant permissions. Verify the target and full data before approving.";
       wallet_ui_show_transaction(review);
+      report_transaction_review(approval);
       secure_zero(display_amount, sizeof(display_amount));
       secure_zero(display_fee, sizeof(display_fee));
       secure_zero(output_label, sizeof(output_label));
@@ -1978,10 +2037,11 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
+      if (!authorize_transaction_review()) return;
       uint8_t *signed_transaction = cli_byte_scratch;
       constexpr size_t kSignedCapacity = kEvmMaxSignedTransactionSize;
       size_t signed_size = kSignedCapacity;
-      const EvmTransactionError error = evm_sign_transaction(
+      const EvmTransactionError error = wallet_worker_sign_evm(
           pending_evm_transaction, master, signed_transaction, &signed_size);
       secure_zero(&master, sizeof(master));
       clear_pending_transaction();
@@ -2095,16 +2155,6 @@ namespace hexwallet
         Serial.println("ERR approval-unavailable; review-cleared");
         return;
       }
-      if (display_is_available)
-      {
-        Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
-      }
-      else
-      {
-        Serial.print("OK confirm-code=");
-        Serial.print(approval);
-        Serial.println(" expires-ms=120000");
-      }
       char amount_texts[kWalletUiMaxTransactionOutputs][32];
       WalletUiTransactionReview review = {};
       review.network = "KASPA";
@@ -2121,6 +2171,7 @@ namespace hexwallet
             pending_kaspa_transaction.outputs[index].script_size == 34 ? "KASPA P2PK" : "KASPA P2SH"};
       }
       wallet_ui_show_transaction(review);
+      report_transaction_review(approval);
       secure_zero(amount_texts, sizeof(amount_texts));
       secure_zero(amount, sizeof(amount));
       secure_zero(approval, sizeof(approval));
@@ -2174,6 +2225,7 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
+      if (!authorize_transaction_review()) return;
       uint8_t *signed_transaction = cli_byte_scratch;
       constexpr size_t kSignedCapacity = 4096;
       size_t signed_size = kSignedCapacity;
@@ -2209,14 +2261,6 @@ namespace hexwallet
       wallet_ui_show_catalog();
     }
 
-    void format_zec(uint64_t zats, char *out, size_t out_size)
-    {
-      const uint64_t whole = zats / kZcashZatsPerZec;
-      const uint32_t fraction = static_cast<uint32_t>(zats % kZcashZatsPerZec);
-      snprintf(out, out_size, "%llu.%08lu", static_cast<unsigned long long>(whole),
-               static_cast<unsigned long>(fraction));
-    }
-
     void inspect_zcash_transaction(char *arguments)
     {
       if (!require_authentication())
@@ -2233,7 +2277,7 @@ namespace hexwallet
       const ZcashNetworkPolicy *zcash_policy = find_zcash_network_policy("zec");
       WalletCatalogEntry entry;
       if (network == nullptr || policy == nullptr ||
-          policy->family != SighashFamily::ZcashZip243 || zcash_policy == nullptr ||
+          policy->family != SighashFamily::ZcashZip244 || zcash_policy == nullptr ||
           !wallet_catalog_find("zec", &entry) ||
           !wallet_catalog_has(entry, WalletCapabilityTransactionReview) ||
           !wallet_catalog_has(entry, WalletCapabilitySigning))
@@ -2267,7 +2311,7 @@ namespace hexwallet
         return;
       pending_transaction_kind = PendingTransactionKind::Zcash;
       Serial.println("BEGIN TRANSACTION REVIEW");
-      Serial.println("network=zec type=ZCASH-V4-TRANSPARENT");
+      Serial.println("network=zec type=ZCASH-V5-TRANSPARENT");
       Serial.print("branch-id=0x");
       {
         char branch[9];
@@ -2341,84 +2385,7 @@ namespace hexwallet
         Serial.println("ERR approval-unavailable; review-cleared");
         return;
       }
-      if (display_is_available)
-      {
-        Serial.println("OK confirmation-shown-on-trusted-display expires-ms=120000");
-      }
-      else
-      {
-        Serial.print("OK confirm-code=");
-        Serial.print(approval);
-        Serial.println(" expires-ms=120000");
-      }
-      char amount_texts[kWalletUiMaxTransactionOutputs][32];
-      char p2sh_addresses[kZcashMaxInputs][kAddressTextSize] = {};
-      char display_fee[64];
-      format_zec(pending_zcash_transaction.fee, display_fee, sizeof(display_fee));
-      strncat(display_fee, " ZEC", sizeof(display_fee) - strlen(display_fee) - 1);
-      WalletUiTransactionReview review = {};
-      review.network = "ZCASH";
-      review.fee = pending_zcash_transaction.fee;
-      review.fee_text = display_fee;
-      review.approval_code = approval;
-      size_t shown = 0;
-      bool display_ok =
-          pending_zcash_transaction.output_count <= kWalletUiMaxTransactionOutputs;
-      for (size_t index = 0; display_ok &&
-                             index < pending_zcash_transaction.output_count;
-           ++index)
-      {
-        format_zec(pending_zcash_transaction.outputs[index].value,
-                   amount_texts[index], sizeof(amount_texts[index]));
-        strncat(amount_texts[index], " ZEC",
-                sizeof(amount_texts[index]) - strlen(amount_texts[index]) - 1);
-        review.outputs[shown++] = {
-            pending_zcash_transaction.outputs[index].value, amount_texts[index],
-            pending_zcash_transaction.outputs[index].address, "EXTERNAL"};
-      }
-      bool has_p2sh_input = false;
-      for (size_t index = 0; display_ok &&
-                             index < pending_zcash_transaction.input_count;
-           ++index)
-      {
-        const ZcashInput &input = pending_zcash_transaction.inputs[index];
-        if (input.redeem_size == 0)
-          continue;
-        if (shown >= kWalletUiMaxTransactionOutputs)
-        {
-          display_ok = false;
-          break;
-        }
-        display_ok = address_zcash_transparent_from_script(
-                         pending_zcash_transaction.chain.p2pkh_version,
-                         pending_zcash_transaction.chain.p2sh_version, input.script,
-                         input.script_size, p2sh_addresses[index],
-                         sizeof(p2sh_addresses[index])) == WalletError::Ok;
-        if (display_ok)
-        {
-          has_p2sh_input = true;
-          review.outputs[shown++] = {input.value, nullptr, p2sh_addresses[index],
-                                     "P2SH INPUT"};
-        }
-      }
-      if (!display_ok)
-      {
-        Serial.println("ERR review-does-not-fit-trusted-display; review-cleared");
-        clear_pending_transaction();
-        secure_zero(amount_texts, sizeof(amount_texts));
-        secure_zero(p2sh_addresses, sizeof(p2sh_addresses));
-        secure_zero(display_fee, sizeof(display_fee));
-        secure_zero(approval, sizeof(approval));
-        return;
-      }
-      review.output_count = shown;
-      review.note = has_p2sh_input
-                        ? "P2SH inputs list the t3 address whose redeem script is spent. The firmware re-hashes that script against the address before signing."
-                        : nullptr;
-      wallet_ui_show_transaction(review);
-      secure_zero(amount_texts, sizeof(amount_texts));
-      secure_zero(p2sh_addresses, sizeof(p2sh_addresses));
-      secure_zero(display_fee, sizeof(display_fee));
+      report_transaction_review(approval, wallet_show_code_review(pending_zcash_transaction, approval));
       secure_zero(approval, sizeof(approval));
     }
 
@@ -2471,9 +2438,11 @@ namespace hexwallet
         clear_pending_transaction();
         return;
       }
+      if (!authorize_transaction_review()) return;
       uint8_t *signed_transaction = cli_byte_scratch;
       constexpr size_t kSignedCapacity = kZcashMaxTransactionSize;
       size_t signed_size = kSignedCapacity;
+      const uint32_t branch = pending_zcash_transaction.chain.branch_id;
       const ZcashError error = zcash_sign_request(
           pending_zcash_transaction, master, signed_transaction, &signed_size);
       secure_zero(&master, sizeof(master));
@@ -2487,7 +2456,7 @@ namespace hexwallet
       }
       uint8_t transaction_id[kSha256Size];
       const bool hashed =
-          crypto_double_sha256(signed_transaction, signed_size, transaction_id);
+          zcash_v5_txid(signed_transaction, signed_size, branch, transaction_id);
       Serial.print("OK signed-transaction=");
       print_hex(signed_transaction, signed_size);
       Serial.println();
@@ -2745,14 +2714,7 @@ namespace hexwallet
         Serial.println("ERR approval-unavailable; review-cleared");
         return;
       }
-      if (display_is_available)
-      {
-        wallet_ui_set_status("Confirm the amount and address on screen");
-        Serial.println("OK review-on-device compare the serial review with the display");
-        return;
-      }
-      Serial.print("approval-code=");
-      Serial.println(approval);
+      report_transaction_review(approval, !display_is_available || wallet_show_code_review(pending_chain_transaction, approval));
       secure_zero(approval, sizeof(approval));
     }
 
@@ -2811,6 +2773,11 @@ namespace hexwallet
       }
       const bool large = pending_chain_transaction.family == ChainFamily::Quantus ||
                          pending_chain_transaction.family == ChainFamily::QrlV2;
+      if (!authorize_transaction_review())
+      {
+        secure_zero(seed, sizeof(seed));
+        return;
+      }
       const size_t capacity = large ? kChainMaxSignedSize : kAeternityMaxSignedSize;
       std::unique_ptr<uint8_t[]> signed_transaction(new (std::nothrow) uint8_t[capacity]);
       size_t signed_size = capacity;
@@ -3157,24 +3124,64 @@ namespace hexwallet
     (void)display_available;
     return false;
 #else
+    if (preferences_open) reset_auth_storage();
     display_is_available = display_available;
     usb_data_enabled_at = millis();
-    preferences_open = preferences.begin(kPreferencesNamespace, false);
+    if (!board_credential_storage_ready())
+    {
+      Serial.println("INFO diagnostic CLI only; protected credential storage unavailable");
+      return true;
+    }
+    preferences_open = nvs_open(kPreferencesNamespace, NVS_READWRITE, &preferences) == ESP_OK;
     if (!preferences_open)
     {
       Serial.println("FATAL CLI authentication storage unavailable");
       return false;
     }
-    provisioned = preferences.getBool(kProvisionedKey, false) && preferences.getBytesLength(kSaltKey) == sizeof(salt) && preferences.getBytesLength(kVerifierKey) == sizeof(verifier) && preferences.getBytes(kSaltKey, salt, sizeof(salt)) == sizeof(salt) && preferences.getBytes(kVerifierKey, verifier, sizeof(verifier)) == sizeof(verifier);
-    const uint32_t failures = preferences.getUInt(kFailuresKey, 0);
-    if (failures != 0)
+    SensitiveValue<uint8_t[kSaltSize + kVerifierSize]> record_storage;
+    auto &record = record_storage.get();
+    size_t length = sizeof(record);
+    nvs_type_t type;
+    const esp_err_t status = nvs_find_key(preferences, kProvisionedKey, &type);
+    if (status == ESP_OK && type == NVS_TYPE_U8)
     {
-      const uint32_t exponent = failures > 10 ? 10 : failures;
-      uint32_t delay_ms = 1000UL << exponent;
-      if (delay_ms > kMaximumBackoffMs)
-        delay_ms = kMaximumBackoffMs;
-      retry_after = millis() + delay_ms;
+      uint8_t marker = 0;
+      size_t salt_size = sizeof(salt), verifier_size = sizeof(verifier);
+      if (nvs_get_u8(preferences, kProvisionedKey, &marker) != ESP_OK || marker != 1 ||
+          nvs_get_blob(preferences, kSaltKey, salt, &salt_size) != ESP_OK || salt_size != sizeof(salt) ||
+          nvs_get_blob(preferences, kVerifierKey, verifier, &verifier_size) != ESP_OK || verifier_size != sizeof(verifier))
+      {
+        close_auth_storage();
+        return false;
+      }
+      provisioned = true;
     }
+    else if (status == ESP_OK && type == NVS_TYPE_BLOB &&
+             nvs_get_blob(preferences, kProvisionedKey, record, &length) == ESP_OK && length == sizeof(record))
+    {
+      memcpy(salt, record, sizeof(salt));
+      memcpy(verifier, record + sizeof(salt), sizeof(verifier));
+      provisioned = true;
+    }
+    else if (status != ESP_ERR_NVS_NOT_FOUND ||
+             nvs_find_key(preferences, kSaltKey, nullptr) != ESP_ERR_NVS_NOT_FOUND ||
+             nvs_find_key(preferences, kVerifierKey, nullptr) != ESP_ERR_NVS_NOT_FOUND)
+    {
+      close_auth_storage();
+      return false;
+    }
+    const esp_err_t failures_status = nvs_find_key(preferences, kFailuresKey, &type);
+    // A failed page read can surface as NOT_FOUND. Partition statistics
+    // expose the INVALID page before we accept an empty store or counter.
+    nvs_stats_t stats{};
+    if (nvs_get_stats(nullptr, &stats) != ESP_OK || (failures_status != ESP_ERR_NVS_NOT_FOUND &&
+        (failures_status != ESP_OK || !provisioned || type != NVS_TYPE_U32 ||
+         nvs_get_u32(preferences, kFailuresKey, &failure_count) != ESP_OK)))
+    {
+      close_auth_storage();
+      return false;
+    }
+    if (failure_count) retry_after = millis() + auth_backoff_ms();
     Serial.println("HexWallet authenticated CLI ready; use help");
     Serial.print("INFO usb-data=");
     Serial.print(usb_data_enabled ? "on" : "off");

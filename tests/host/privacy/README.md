@@ -75,4 +75,44 @@ python tests/host/privacy/ryo_transaction_interop.py --probe build/chain-native/
 
 4 组夹具包含 v2/v3、25/241 成员环、8 输入及 16 输出。负例覆盖非最短 varint、计数越界、相对索引溢出/重复、证明布局、身份点、非规范标量、金额密文、费用、extra、伪输出、MLSAG 和环成员篡改。每组还遍历全部截断位置，运行 10,000 次定向变异及 1,000 组随机输入；失败时解析视图和摘要输出必须清零。
 
-完整交易验收仍需要：Ryo 发送交易构建、输入/输出所有权与金额审阅、uniform payment ID、分叉策略；Zano 的资产、范围和平衡证明及交易序列化；两条链的签名前复核、设备确认和节点接受真实交易的记录。原生验证层没有开放 Ryo/Zano 生产签名准入。
+## 付款夹具
+
+`tests/fixtures/privacy/ryo-historical-spends.json` 保存前一轮两笔各付 1,000,000 原子单位的完整签名字节与按输入排序的环。它们的 SHA-256 与历史验签记录一致；按当前节点费用规则，这两笔交易均低于下限。
+
+在仓库根目录运行 `python tests/host/privacy/payment_interop.py --probe <chain_probe.exe> --oracle <privacy_oracle.dll>`。116 项检查涵盖 Ryo 输入来源与环索引、复核费用和 payment ID 后的整笔签名，以及 Zano 普通输出的构建和归属扫描。Ryo 的两个 25 成员环付款例分别使用一个和两个输入，手续费均恰好达到 `Blockchain::check_fee()` 的分叉下限。另一个金额守恒的付款少付一个原子单位，审阅失败。独立验证器按输入检查实际签名字节。固定夹具保留完整签名交易的 SHA-256。省略 `--oracle` 时仍检查固定摘要和固件验签。
+
+开启 `TEST_RYO_PHONE_PAYMENTS` 的专用探针通过模拟按键批准。`ryo_ledger_check.py --probe <专用探针> --oracle <privacy_oracle.dll> --ryod <ryod> --wallet-rpc <ryo-wallet-rpc>` 会创建隔离链、开采成熟输入并等待两笔入块。官方只读钱包核对交易 ID、高度、金额、收款地址和完整 payment ID。`phone_payment_check.py` 使用相同的探针和上游库，另传 `--release-probe <默认探针>` 以核对默认目录拒签。
+
+`node tests/host/privacy/zano_ledger_check.cjs <chain_probe>` 读取 `tests/fixtures/privacy/zano-mainnet-payments.json`，用主网原始前缀哈希调用固件验签，使用手机代码验证普通 v4 付款的全部证明，并逐字节对照重编码。CLSAG_GGX 的 `add_scalar(m)` 会将前缀哈希以小端整数模 L 规约。两笔交易的其他证明分别按上游转录规则使用前缀哈希。[实链证据](../../../wiki/validation.md)
+
+## Zano 自建付款与收款扫描
+
+在仓库根目录安装 `tools` 的锁定依赖。准备好前述 Mbed TLS 3.6.5 和默认 `chain_probe` 后，另建专用主机探针。
+
+```powershell
+npm ci --prefix tools --ignore-scripts
+cmake -S tests/host/chain -B build/zano-phone-host -A x64 -DTEST_ZANO_PHONE_PAYMENTS=ON
+cmake --build build/zano-phone-host --config Release --target chain_probe
+node tests/host/privacy/zano_phone_check.cjs build/zano-phone-host/Release/chain_probe.exe build/chain-native/Release/chain_probe.exe
+```
+
+脚本使用公开测试助记词检查默认目录拒签、归属、金额、找零、费用、payment ID 和一次性批准。单输入案例恰好花完，给同一地址生成两个输出。双输入案例有找零。广播成功路径使用模拟 RPC，校验错误创世哈希或签名时会检查提交次数为零。
+
+隔离链使用单独的 Zano 源码目录。固定提交及子模块后应用附带的补丁，只调整测试网 HF4 至 HF7 的激活高度。按上游依赖说明配置 Boost 和 OpenSSL 并编译同一套 `zanod` 和 `simplewallet`。Windows 实测使用 Boost 1.84 和 OpenSSL 3。
+
+```powershell
+git clone https://github.com/hyle-team/zano.git build/zano-private
+git -C build/zano-private checkout b543053953f74c38a32d29a087ec586943b4a321
+git -C build/zano-private submodule update --init --recursive
+git -C build/zano-private apply (Resolve-Path tests/host/privacy/zano-private-testnet.patch).Path
+micromamba create -y -p build/zano-native-deps/env -c conda-forge 'libboost-devel=1.84.*' 'openssl=3.*'
+$deps = (Resolve-Path build/zano-native-deps/env/Library).Path.Replace('\','/')
+$libs = (Get-ChildItem "$deps/lib/boost_*.lib" | ForEach-Object { $_.FullName.Replace('\','/') }) -join ';'
+$flags = '/DWIN32 /D_WINDOWS /DBOOST_ALL_NO_LIB /DBOOST_THREAD_USE_DLL /DBOOST_FILESYSTEM_DYN_LINK /DBOOST_LOG_DYN_LINK /DBOOST_PROGRAM_OPTIONS_DYN_LINK /DBOOST_CHRONO_DYN_LINK /DBOOST_ATOMIC_DYN_LINK /DBOOST_LOCALE_DYN_LINK /DBOOST_REGEX_DYN_LINK /DBOOST_DATE_TIME_DYN_LINK'
+$env:PATH = "$deps/bin;$env:PATH"
+cmake -S build/zano-private -B build/zano-private-core -A x64 -DTESTNET=ON -DSTATIC=OFF -DDISABLE_MDBX=ON -DCOMMIT_ID_IN_VERSION=OFF '-DCMAKE_POLICY_VERSION_MINIMUM=3.5' "-DBoost_FATLIB=$libs" "-DBoost_INCLUDE_DIRS=$deps/include" "-DOPENSSL_ROOT_DIR=$deps" "-DCMAKE_CXX_FLAGS=$flags"
+cmake --build build/zano-private-core --config Release --target daemon simplewallet
+python tests/host/privacy/zano_private_ledger.py --probe build/zano-phone-host/Release/chain_probe.exe --release-probe build/chain-native/Release/chain_probe.exe --zanod build/zano-private-core/src/Release/zanod.exe --simplewallet build/zano-private-core/src/Release/simplewallet.exe
+```
+
+脚本创建临时节点和收款钱包，在付款前导出只读钱包。测试收集成熟输出和每个输入的 15 个诱饵，提交签名交易，核对内存池、区块高度及节点保存的完整字节，再查询只读钱包的 `payments` 记录。每次运行独立生成交易密钥、收款钱包及证明，交易 ID 随之变化。[回执](../../../wiki/validation.md)

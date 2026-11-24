@@ -7,8 +7,8 @@ audited in the repository; none is fetched at runtime.
 
 | Registry | Size | Source | Generator / check |
 | --- | --- | --- | --- |
-| Network profiles | 247 | `WalletNetworks.cpp` + `src/generated/WalletForkProfiles.inc` | `tools/fork_registry.json`, checked by `policy_check.ps1` |
-| Wallet catalog | 215 entries | `WalletCatalog.cpp` + generated fork catalog | `tests/host/catalog_dump.exe` |
+| Network profiles | 246 | `WalletNetworks.cpp` + `src/generated/WalletForkProfiles.inc` | `kNetworkProfileCount` in the firmware ELF |
+| Wallet catalog | 214 entries | `WalletCatalog.cpp` + generated fork catalog | `tests/host/catalog_dump.exe` |
 | Token records | 80 across 19 networks | `WalletTokens.cpp` | `tools/token_audit.ps1`, `tests/host/evm_access_list_check.ps1` |
 | Mining identities | 121 of 520 listings | `src/generated/WalletMiningCatalog.inc` | `tools/generate_mining_catalog.py --check` |
 
@@ -34,10 +34,7 @@ See [Admission-Policy](Admission-Policy).
 
 - **Pinned records** (`WalletTokens.cpp`) bind chain IDs to contracts and display metadata.
   There are 80 records on 19 networks, including the ENS Base Registrar and Name Wrapper.
-- **User-declared records**: up to 64 assets (`kCustomTokenMax`), stored in NVS as `HXCT` version 2
-  with a digest. They are labelled as declared on the review screen and never change the signed
-  bytes. EVM, Stellar and NFT declarations exist; an NFT declaration does not enable NFT transfers,
-  because no NFT contract registry exists.
+- **User-declared records** carry display metadata for up to 64 assets. Board 7 migrates the legacy NVS table into the LittleFS `assets` volume on the next successful save. A declaration identifies user-supplied metadata. NFT transfer admission depends on the chain, contract and call format. [Chain payloads](Chain-Payloads)
 - **No host-supplied decimals.** An unknown token renders its exact base-unit amount, e.g.
   `1500000 raw`, rather than guessing a decimal point.
 

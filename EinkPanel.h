@@ -136,10 +136,12 @@ class EinkPanel {
 
   // Deep sleep; the panel keeps its content and draws microamps.
   EinkRefreshResult sleep();
+  bool sleeping() const { return sleeping_; }
+  bool wake();
 
   const EinkStats &stats() const { return stats_; }
   bool partial_supported() const {
-    return stats_.initialised && config_.color == EinkColorMode::Mono;
+    return (stats_.initialised || sleeping_) && config_.color == EinkColorMode::Mono;
   }
   EinkColorMode color_mode() const { return config_.color; }
   size_t frame_bytes() const {
@@ -167,7 +169,12 @@ class EinkPanel {
   EinkBus bus_ = {};
   EinkPanelConfig config_ = {};
   EinkStats stats_ = {};
+  bool sleeping_ = false;
+  bool needs_baseline_ = true;
 };
+
+// Both buffers contain one complete packed 128 x 296 monochrome frame.
+EinkRect eink_mono_changes(const uint8_t *previous, const uint8_t *next);
 
 // Damage accumulator: callers report which rectangles LVGL invalidated, the
 // panel layer asks for the union. Keeps the "full vs partial" decision in one
