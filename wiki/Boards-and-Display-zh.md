@@ -19,7 +19,7 @@
 | 7 | HexWallet P4 rev A | 296×128 横屏，SSD1680 SPI | 确定、上一个、下一个、返回 | SE051C2HQ1 走 I²C，PN7161 走共享 SPI |
 
 7 号板取自 EasyEDA 工程 `c26102103`；每个引脚注释都写明封装焊盘，上电前可以从 P4 数据手册重新推出 GPIO 列。
-面板和 PN7161 共用 GPIO7（SCK）、GPIO8（MOSI）和 GPIO9（MISO）。面板只写，片选为 GPIO16；PN7161 的片选为 GPIO13，时钟为 1 MHz。两个驱动从同一入口初始化 SPI。墨水屏任务在等待 BUSY 时释放总线，NFC 可在显示传输之间通信。黑白屏按字节对齐转换 LVGL 重绘区域，跳过相同帧，连续 30 秒没有画面变化后休眠。
+面板和 PN7161 共用 GPIO7（SCK）和 GPIO8（MOSI）。GPIO9（MISO）只连到 PN7161。屏幕片选为 GPIO16（`EINK_CS`，屏座第 12 脚），PN7161 片选为 GPIO13（`SPI_NSS`，U3 第 1 脚），两者均低有效。两套驱动共用一个 SPI 实例，在事务锁内选通目标、读回两根片选，再发送数据。PN7161 时钟为 1 MHz。墨水屏任务在等待 BUSY 时释放总线，NFC 可在显示传输之间通信。黑白屏按字节对齐转换 LVGL 重绘区域，跳过相同帧，连续 30 秒没有画面变化后休眠。
 
 这份 rev A 主 PCB 的 USB1 D−、D+ 分别经 `DM`、`DP` 网络接到 U1 封装焊盘 24、25，U1 符号将它们映射为 GPIO22、GPIO23。P4 默认 USB Serial/JTAG 使用 GPIO24、GPIO25，高速 PHY 使用封装焊盘 49、50。这两对焊盘均未接到 USB1。要从这个接口使用原生 USB 枚举或 ROM USB 下载，需要改板接线。[乐鑫 USB PHY 引脚表](https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_overview/usb_phy.html)
 
@@ -34,6 +34,29 @@
 | 0（默认） | SSD1680 黑白 128×296 | 全刷；局刷走控制器自带 OTP 波形 |
 | 1 | SSD1683 类四色 128×296 | 2bpp，仅全刷，BUSY 低有效 |
 | 2 | SSD1680 黑白 V2 | 局刷走 OTP，BUSY 高有效 |
+| 3 | HINK-E029A01 黑白 128×296（SSD1608/IL3820 类命令） | 2 MHz SPI，室温 OTP 全刷；按 A/0 手册默认 BUSY 低有效 |
+| 4 | E029A01N16C355 黑白 128×296，排线 E029A01-FPC-A1 | 2 MHz SPI、25 ℃ OTP 全刷、同系列参考波形局刷，按所附 A/0 手册使用 BUSY 低有效 |
+
+实物标记为 HINK-E029A01 时，用 `tools/build_p4_board.ps1 -HinkE029A01` 选择档 3。
+COM6 的 8 MiB / USB Serial-JTAG 装配还需 `-FlashSizeMiB 8 -UsbSerialJtag`。
+HINK 的 `0x12` 是软件复位、`0x24` 写 1bpp 图像、`0x20` 启动刷新；微雪 G 型四色手册不适用。
+档 3 使用面板 OTP，板上未接外部温度传感器，因此通过 `0x1A` 写入 25 ℃，用 `0x22=0xDF`
+跳过外部温度读取、加载 OTP、全刷并关闭升压。该配置用于室温验证；不同温度下的显示仍需实测。
+它不发送 SSD1680 的 `0x18` 内置温度选择、双字节 `0x21` 或 `0x26` 旧帧写入。
+
+HINK A/0 手册写 BUSY 低有效；GDEH029A1 / GxEPD2_290 参考驱动则为高有效。
+核对实装面板后，可用 `-EpdBusyActiveLevel 1` 或编译宏 `HEXWALLET_EPD_BUSY_ACTIVE_LEVEL=1` 指定高有效。
+固件打印实际选择，不自动试刷不同电平。完整标记 `E029A01N16C355` 尚未找到独立数据手册，
+不能仅凭后缀保证与 HINK A/0 的电平、OTP 和波形完全一致。
+HINK 的主机波形是 30 字节；档 3 暂只实现全刷，不接受 SSD1680 的 159 字节局刷表。
+
+用 `-E029A01N16C355` 选择档 4。启动和唤醒后的首帧先全刷并同步两份图像 RAM；小范围变化按字节对齐，只更新变化窗口。驱动使用微雪 2.9 英寸黑白 V1 的 30 字节差分波形，并在 BUSY 周期完成后将同一窗口写入另一份 RAM。连续局刷 8 次后安排一次全刷。COM6 重新插屏后，RESET 驱低仍读高；实屏 BUSY 极性、首帧、局刷与残影仍待验证。[参考波形](https://github.com/waveshareteam/e-Paper/blob/master/Arduino/epd2in9/epd2in9.cpp)
+
+24 针排线的 1 脚对准板上屏座靠 C47 的一端。以第 17 脚为地，检查第 15 脚 VDDIO 与第 16 脚 VCI 的供电。第 8 脚接地，选择四线 SPI。第 10 脚 RES# 由 GPIO17 驱动，第 9 脚 BUSY 由 GPIO18 读取。驱动先预置 RES# 为高，再使能输出，等待 200 ms，拉低 10 ms，拉高后等待 200 ms，确认 BUSY 空闲为高再发送软件复位 `0x12`。这些时长由驱动选取；手册第 8、18、23 页规定有效电平、电压门限和上电顺序。在 VDDIO 为 3.3 V 时，用示波器测屏座第 10 脚焊点，复位期间应 ≤0.66 V，释放后应 ≥2.64 V。刷新激活后还应看到 BUSY 拉低再回高，并检查可见图像。
+
+参考：[HINK-E029A01 A/0 原厂手册副本](https://github.com/ieiao/hanshow-2in9-epaper/blob/master/docs/HINK-E029A01-0629.pdf)、
+[HINK 实装驱动记录](https://github.com/ieiao/hanshow-2in9-epaper)、
+[Zephyr 的 E029A01 / SSD1608 对照](https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/shields/waveshare_epaper/doc/index.rst)。
 
 驱动强制的规则：
 
@@ -46,7 +69,8 @@
 - 黑白帧 1 表示黑，发给 SSD1680 RAM 时反转。传输失败会让面板状态失效，而不是留下半张图。
 - 刷新超时是全刷 45 秒、局刷 4 秒。这是故障边界，不是实测耗时。
 
-批准屏障只在刷新成功之后释放。BUSY 超时或 SPI 失败永远不算"交易已经显示"。
+批准屏障只在刷新成功之后释放。RESET 电平读回错误会立即停止初始化并释放 RESET 输出；
+BUSY 必须实际进入忙状态再返回空闲。复位失败、无 BUSY 响应、超时或 SPI 失败均不能释放批准屏障。
 
 按屏幕在左、面向四个应用键的方向，PCB 背面从左至右为按键4（GPIO30，确定）、按键3（GPIO31，上一个）、按键2（GPIO32，下一个）、按键1（GPIO33，返回）。上一个和下一个可以滚动超过一屏的字段。确定先选中拒绝，切换到批准后需另行按住确定 750 毫秒，返回可直接拒绝。独立的 BOOT 键（GPIO35）负责运行时长按切换 USB 数据。实体装配方向有待实板核验。
 
@@ -54,11 +78,9 @@
 
 ## 摄像头
 
-OV9281 是 MIPI CSI-2 传感器，控制走 SCCB。树里只有控制侧：`camera_probe()` 读 chip-id 寄存器，
-返回四种状态之一——`NotConfigured`、`NoResponse`、`WrongSensor`、`PresentUnverified`。
-没有"已支持"这种状态。
+工程 c26102103 的 OV9281 接口与 U2、RTC 共用 GPIO10/11，FPC 的 2、3 脚分别接 SDA、SCL。CSI 时钟和两对数据线通过 R32–R37 接到主控。通过 USB 加载的 SRAM 程序已在 COM6 实板从七位地址 `0x60` 读回芯片 ID `0x9281`。
 
-工程 c26102103 中位号为 `OV9281` 的接口与 U2、RTC 共用 GPIO10/11，接口的 2、3 脚分别接 SDA、SCL。CSI 时钟和两对数据线通过 R32–R37 接入接口。7 号板固件当前返回 `NotConfigured`。传感器上电、CSI 采集以及从实拍图像解码二维码仍待实板联调。
+主机已用 640 × 400 RAW8 合成 BIP38 图像进入网络选择页。c26102103 的 U1 第 73 脚（`VDDO_3`）连到 1.8 V PSRAM 电源。板 7 当前禁用了摄像头对该路 2.5 V 的供电请求，实板扫描会提示相机不可用。[供电脚位与 COM6 实测](validation.md#com6-bring-up)
 
 ## QR 码
 

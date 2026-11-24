@@ -1,6 +1,7 @@
 // Board 7 bring-up using internal SRAM, the P4 ROM and USB Serial/JTAG.
 // No flash, filesystem, credential APDUs, RF discovery or card emulation.
 #include "WalletBoardPins.h"
+#include "CameraPort.h"
 #include "esp32p4/rom/gpio.h"
 #include "hal/gpio_ll.h"
 #include "hal/rtc_io_ll.h"
@@ -32,6 +33,13 @@ static void drive(unsigned pin, bool high) {
 }
 
 static bool level(unsigned pin) { return gpio_ll_get_level(&GPIO, pin) != 0; }
+
+// SCK stays low and VEN stays low during this check. Read the pads, not the
+// output latches. Bit 1 is EINK_CS and bit 0 is SPI_NSS.
+static uint8_t sample_selects() {
+  ets_delay_us(5);
+  return (level(HEXWALLET_EPD_PIN_CS) ? 2 : 0) | (level(nss) ? 1 : 0);
+}
 
 static void report(const char *text) {
   while (*text) {
@@ -105,6 +113,17 @@ static bool i2c_stop(void) {
   clock_high();
   i2c_level(sda, true);
   return level(scl) && level(sda);
+}
+
+// Register pointer followed by repeated START, retaining the shared bus.
+static bool camera_read_id_byte(uint8_t address, uint16_t reg, uint8_t &value) {
+  bool ok = i2c_start() && i2c_write_byte(address << 1) &&
+            i2c_write_byte(reg >> 8) && i2c_write_byte(uint8_t(reg));
+  if (ok) {
+    i2c_level(scl, false);
+    ok = i2c_start() && i2c_write_byte((address << 1) | 1) && i2c_read_byte(value, true);
+  }
+  return i2c_stop() && ok;
 }
 
 static const char *probe_se(bool &ack, uint8_t &attempts) {
@@ -186,6 +205,120 @@ static uint8_t spi_byte(uint8_t tx) {
     gpio_ll_set_level(&GPIO, sck, 0);
   }
   return rx;
+}
+
+struct PanelProbe {
+  bool reset_low, reset_high, busy_pullup, busy_pulldown, status_read;
+  bool reset_pullup, reset_pulldown;
+  bool reset_latch, reset_output, reset_gpio_route, reset_held;
+  uint8_t outputs_low, outputs_high, status_pullup, status_pulldown;
+};
+
+// Sample only after releasing the output. A weak bias helps distinguish a
+// floating input from a held level without extending a failed drive pulse.
+static void sample_weak_bias(unsigned pin, bool &up, bool &down) {
+  gpio_ll_output_disable(&GPIO, pin);
+  gpio_ll_pulldown_dis(&GPIO, pin); gpio_ll_pullup_en(&GPIO, pin);
+  ets_delay_us(1000); up = level(pin);
+  gpio_ll_pullup_dis(&GPIO, pin); gpio_ll_pulldown_en(&GPIO, pin);
+  ets_delay_us(1000); down = level(pin);
+  gpio_ll_pulldown_dis(&GPIO, pin);
+}
+
+static bool panel_busy() {
+  return level(HEXWALLET_EPD_PIN_BUSY) == HEXWALLET_EPD_BUSY_ACTIVE_LEVEL;
+}
+
+#if HEXWALLET_EPD_PROFILE == 0
+// SSD1680 section 6.1.1: in a four-wire read the display drives the SDA
+// contact used for MOSI. Keep PN7161 disabled and release SDA on turnaround.
+static uint8_t read_panel_status(bool pullup) {
+  constexpr unsigned cs = HEXWALLET_EPD_PIN_CS, dc = HEXWALLET_EPD_PIN_DC;
+  if (pullup) gpio_ll_pullup_en(&GPIO, mosi);
+  else gpio_ll_pulldown_en(&GPIO, mosi);
+  drive(dc, false); drive(cs, false);
+  for (unsigned bit = 0x80; bit; bit >>= 1) {
+    drive(mosi, (0x2f & bit) != 0); ets_delay_us(2);
+    drive(sck, true); ets_delay_us(2);
+    if (bit == 1) {
+      gpio_ll_output_disable(&GPIO, mosi);
+      drive(dc, true);
+    }
+    drive(sck, false); ets_delay_us(2);
+  }
+  uint8_t status = 0;
+  for (unsigned n = 0; n < 8; ++n) {
+    drive(sck, true); ets_delay_us(2);
+    status = uint8_t((status << 1) | level(mosi));
+    drive(sck, false); ets_delay_us(2);
+  }
+  drive(cs, true);
+  gpio_ll_pullup_dis(&GPIO, mosi); gpio_ll_pulldown_dis(&GPIO, mosi);
+  return status;
+}
+#endif
+
+static const char *probe_panel(PanelProbe &sample) {
+  constexpr unsigned rst = HEXWALLET_EPD_PIN_RST, dc = HEXWALLET_EPD_PIN_DC;
+  constexpr unsigned busy = HEXWALLET_EPD_PIN_BUSY, cs = HEXWALLET_EPD_PIN_CS;
+  select_pin(busy); select_pin(dc); select_pin(rst);
+  gpio_ll_set_output_enable_ctrl(&GPIO, rst, false, false);
+  gpio_ll_od_disable(&GPIO, rst);
+  // Check the driven pads locally while PN7161 is disabled. Test CS with
+  // SCK idle, then deselect the display before changing the data lines.
+  static constexpr unsigned outputs[] = {cs, dc, mosi, sck};
+  for (unsigned i = 0; i < 4; ++i) {
+    drive(outputs[i], false); ets_delay_us(5);
+    if (level(outputs[i])) sample.outputs_low |= 1U << i;
+    drive(outputs[i], true); ets_delay_us(5);
+    if (level(outputs[i])) sample.outputs_high |= 1U << i;
+  }
+  drive(sck, false); drive(dc, false); drive(rst, true); ets_delay_us(200000);
+  drive(rst, false); ets_delay_us(1000); sample.reset_low = level(rst);
+  // Snapshot the state while low is requested, before releasing a failed pad.
+  gpio_io_config_t cfg;
+  gpio_ll_get_io_config(&GPIO, rst, &cfg);
+  sample.reset_latch = (GPIO.out.val & (1u << rst)) != 0;
+  sample.reset_output = cfg.oe && !cfg.oe_ctrl_by_periph && !cfg.oe_inv;
+  sample.reset_gpio_route = cfg.ie && cfg.fun_sel == PIN_FUNC_GPIO && cfg.sig_out == SIG_GPIO_OUT_IDX &&
+                            !GPIO.func_out_sel_cfg[rst].out_inv_sel && !cfg.od;
+  sample.reset_held = gpio_ll_is_digital_io_hold(&GPIO, rst);
+  if (sample.reset_low) {
+    sample_weak_bias(rst, sample.reset_pullup, sample.reset_pulldown);
+    gpio_ll_output_disable(&GPIO, dc);
+    return "RESET_STUCK_HIGH";
+  }
+  ets_delay_us(9000); // Complete the application's 10 ms low pulse after the pad check.
+  drive(rst, true); ets_delay_us(200000); sample.reset_high = level(rst);
+  if (!sample.reset_high) {
+    sample_weak_bias(rst, sample.reset_pullup, sample.reset_pulldown);
+    gpio_ll_output_disable(&GPIO, dc);
+    return "RESET_STUCK_LOW";
+  }
+  for (unsigned i = 0; i < 500 && panel_busy(); ++i) ets_delay_us(1000);
+  const bool idle = !panel_busy();
+  bool asserted = false;
+  if (idle) {
+    drive(cs, false); spi_byte(0x12); drive(cs, true);
+    for (unsigned i = 0; i < 5000 && !asserted; ++i) { asserted = panel_busy(); ets_delay_us(2); }
+    for (unsigned i = 0; i < 500 && panel_busy(); ++i) ets_delay_us(1000);
+  }
+  const bool final_busy = panel_busy();
+#if HEXWALLET_EPD_PROFILE == 0
+  if (idle && !final_busy) {
+    sample.status_read = true;
+    sample.status_pullup = read_panel_status(true);
+    sample.status_pulldown = read_panel_status(false);
+  }
+#endif
+  // BUSY stays an input. A line that follows both weak biases has no
+  // strong driver at the MCU at the time of sampling.
+  sample_weak_bias(busy, sample.busy_pullup, sample.busy_pulldown);
+  gpio_ll_output_disable(&GPIO, rst);
+  gpio_ll_output_disable(&GPIO, dc);
+  if (!idle) return "BUSY_BEFORE_COMMAND";
+  if (!asserted) return "NO_BUSY_EDGE";
+  return final_busy ? "BUSY_TIMEOUT" : "SWRESET_BUSY_CYCLE";
 }
 
 typedef struct {
@@ -270,10 +403,26 @@ extern "C" void probe_main(void) {
   const char *se = probe_se(se_ack, se_attempts);
   uint8_t t1_length = 0;
   const char *t1 = se_ack ? probe_t1(t1_length) : "SKIPPED";
+  uint8_t camera_addr = 0, id_high = 0, id_low = 0;
+  if (test_nfc) {
+    for (uint8_t addr : hexwallet::kOv9281Addresses) {
+      uint8_t high, low;
+      if (!camera_read_id_byte(addr, hexwallet::kOv9281ChipIdHighRegister, high) ||
+          !camera_read_id_byte(addr, hexwallet::kOv9281ChipIdLowRegister, low)) continue;
+      camera_addr = addr;
+      id_high = high;
+      id_low = low;
+      if (((high << 8) | low) == hexwallet::kOv9281ChipId) break;
+    }
+  }
   gpio_ll_pullup_dis(&GPIO, sda);
   gpio_ll_pullup_dis(&GPIO, scl);
   NciProbe nci = {0};
   const char *nfc = "SKIPPED";
+  const char *panel = "SKIPPED";
+  PanelProbe panel_sample{};
+  uint8_t idle_cs = 0xff, display_cs = 0xff, nfc_cs = 0xff, released_cs = 0xff;
+  bool selects_ok = false;
   if (test_nfc) {
     for (unsigned pin : nfc_pins) select_pin(pin);
     drive(HEXWALLET_EPD_PIN_CS, true);
@@ -283,10 +432,29 @@ extern "C" void probe_main(void) {
     drive(download, false);
     drive(ven, false);
     ets_delay_us(15000);
-    drive(ven, true);
-    ets_delay_us(50000);
-    nfc = probe_nfc(&nci);
-    drive(ven, false);
+    idle_cs = sample_selects();
+    if (idle_cs == 3) {
+      drive(HEXWALLET_EPD_PIN_CS, false);
+      display_cs = sample_selects();
+      drive(HEXWALLET_EPD_PIN_CS, true);
+    }
+    if (display_cs == 1 && sample_selects() == 3) {
+      drive(nss, false);
+      nfc_cs = sample_selects();
+      drive(nss, true);
+    }
+    released_cs = sample_selects();
+    selects_ok = idle_cs == 3 && display_cs == 1 && nfc_cs == 2 && released_cs == 3;
+    if (selects_ok) {
+      drive(ven, true);
+      ets_delay_us(50000);
+      nfc = probe_nfc(&nci);
+      drive(ven, false);
+      drive(nss, true);
+      panel = probe_panel(panel_sample);
+    } else {
+      panel = nfc = "CS_READBACK_FAILED";
+    }
     for (unsigned pin : nfc_pins) gpio_ll_output_disable(&GPIO, pin);
   }
   // Reading the same cached result again does not issue another command.
@@ -302,6 +470,36 @@ extern "C" void probe_main(void) {
       report(" irq_after="); hex_byte(nci.irq_after_reset);
       report(" rsp="); for (unsigned j = 0; j < nci.response_size; ++j) hex_byte(nci.response[j]);
       report(" ntf="); for (unsigned j = 0; j < nci.notification_size; ++j) hex_byte(nci.notification[j]);
+      if (test_nfc) {
+        report("\r\nCS_GPIO idle/panel/nfc/idle="); hex_byte(idle_cs); hex_byte(display_cs);
+        hex_byte(nfc_cs); hex_byte(released_cs);
+        report("\r\nPANEL="); report(panel);
+        report(" profile="); hex_byte(HEXWALLET_EPD_PROFILE);
+        report(" busy_active="); hex_byte(HEXWALLET_EPD_BUSY_ACTIVE_LEVEL);
+        if (panel_sample.reset_low) report(" rst_low=01");
+        else if (selects_ok) {
+          report(" rst_low/high="); hex_byte(panel_sample.reset_low); hex_byte(panel_sample.reset_high);
+          if (panel_sample.reset_high) {
+            report(" busy_pullup/pulldown="); hex_byte(panel_sample.busy_pullup); hex_byte(panel_sample.busy_pulldown);
+          }
+        }
+        if (selects_ok) {
+          report(" rst_latch/oe/gpio/hold="); hex_byte(panel_sample.reset_latch); hex_byte(panel_sample.reset_output);
+          hex_byte(panel_sample.reset_gpio_route); hex_byte(panel_sample.reset_held);
+          if (panel_sample.reset_low || !panel_sample.reset_high) {
+            report(" released_rst_pullup/pulldown=");
+            hex_byte(panel_sample.reset_pullup); hex_byte(panel_sample.reset_pulldown);
+          }
+          report(" cs_dc_mosi_sck_low/high="); hex_byte(panel_sample.outputs_low); hex_byte(panel_sample.outputs_high);
+        }
+        if (panel_sample.status_read) {
+          report(" status_2f_pullup/pulldown="); hex_byte(panel_sample.status_pullup); hex_byte(panel_sample.status_pulldown);
+        }
+        report("\r\nCAMERA_SCCB=");
+        if (camera_addr) {
+          hex_byte(camera_addr); report(" chip_id="); hex_byte(id_high); hex_byte(id_low);
+        } else report("NO_COMPLETE_ID");
+      }
       report("\r\nEND RAM PROBE\r\n");
     }
     request = 0;

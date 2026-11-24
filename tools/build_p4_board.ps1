@@ -4,14 +4,21 @@ param(
   [string]$Lvgl = "$HOME/Arduino/libraries/lvgl",
   [string]$BuildDirectory,
   [ValidateSet(8, 32)][int]$FlashSizeMiB = 32,
-  [switch]$UsbSerialJtag
+  [switch]$UsbSerialJtag,
+  [switch]$HinkE029A01,
+  [switch]$E029A01N16C355,
+  [ValidateSet(0, 1)][int]$EpdBusyActiveLevel
 )
 $ErrorActionPreference = 'Stop'
+if ($HinkE029A01 -and $E029A01N16C355) { throw 'Select one e-paper profile.' }
 $root = Split-Path -Parent $PSScriptRoot
 if (!$BuildDirectory) {
   $variant = 'hexwallet-p4-v3'
   if ($FlashSizeMiB -ne 32) { $variant += "-${FlashSizeMiB}mb" }
   if ($UsbSerialJtag) { $variant += '-usb' }
+  if ($HinkE029A01) { $variant += '-hink' }
+  if ($E029A01N16C355) { $variant += '-n16c355' }
+  if ($PSBoundParameters.ContainsKey('EpdBusyActiveLevel')) { $variant += "-busy$EpdBusyActiveLevel" }
   $BuildDirectory = Join-Path $root "build/$variant"
 }
 $build = [IO.Path]::GetFullPath($BuildDirectory)
@@ -41,6 +48,12 @@ if ($esp32.installed_version -ne '3.3.13') {
 }
 $fqbn = "esp32:esp32:esp32p4:ChipVariant=postv3,FlashSize=${FlashSizeMiB}M,PartitionScheme=min_spiffs,PSRAM=enabled"
 if ($UsbSerialJtag) { $fqbn += ',USBMode=hwcdc,CDCOnBoot=cdc' }
+$compilerFlags = '-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7'
+if ($HinkE029A01) { $compilerFlags += ' -DHEXWALLET_EPD_PROFILE=3' }
+if ($E029A01N16C355) { $compilerFlags += ' -DHEXWALLET_EPD_PROFILE=4' }
+if ($PSBoundParameters.ContainsKey('EpdBusyActiveLevel')) {
+  $compilerFlags += " -DHEXWALLET_EPD_BUSY_ACTIVE_LEVEL=$EpdBusyActiveLevel"
+}
 $cliArgs += @('compile', '--fqbn', $fqbn,
   '--jobs', '6', '--build-path', $build, '--library', $Lvgl,
   '--build-property', $partitionHook,
@@ -49,8 +62,8 @@ $cliArgs += @('compile', '--fqbn', $fqbn,
   '--build-property', $mergeRecipe,
   '--build-property', 'upload.maximum_size=3932160',
   '--build-property', 'compiler.c.elf.extra_flags=-Wl,--wrap=nvs_flash_init',
-  '--build-property', 'compiler.cpp.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7',
-  '--build-property', 'compiler.c.extra_flags=-DLV_CONF_INCLUDE_SIMPLE -DHEXWALLET_BOARD=7', $root)
+  '--build-property', "compiler.cpp.extra_flags=$compilerFlags",
+  '--build-property', "compiler.c.extra_flags=$compilerFlags", $root)
 & $ArduinoCli @cliArgs
 if ($LASTEXITCODE) { throw "Board 7 compilation failed ($LASTEXITCODE)" }
 if ((Get-FileHash $layout).Hash -ne (Get-FileHash (Join-Path $build 'partitions.csv')).Hash) {

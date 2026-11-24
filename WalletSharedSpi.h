@@ -24,6 +24,32 @@ inline bool board_shared_spi_begin()
   }
   return ready;
 }
+
+inline bool board_spi_check_cs(uint8_t pin, int expected)
+{
+  if (digitalRead(pin) == expected) return true;
+  Serial.print(pin == HEXWALLET_EPD_PIN_CS ? "ERR: EINK_CS (GPIO16)" : "ERR: SPI_NSS (GPIO13)");
+  Serial.println(expected == LOW ? " did not go low" : " did not go high");
+  return false;
+}
+
+// Call only between beginTransaction and endTransaction, while holding the bus.
+inline bool board_spi_select(uint8_t pin)
+{
+  const uint8_t peer = pin == HEXWALLET_EPD_PIN_CS ? HEXWALLET_NFC_PIN_CS : HEXWALLET_EPD_PIN_CS;
+  if (!board_spi_check_cs(peer, HIGH) || !board_spi_check_cs(pin, HIGH)) return false;
+  digitalWrite(pin, LOW);
+  if (board_spi_check_cs(pin, LOW) && board_spi_check_cs(peer, HIGH)) return true;
+  digitalWrite(pin, HIGH);
+  return false;
+}
+
+inline bool board_spi_deselect(uint8_t pin)
+{
+  digitalWrite(pin, HIGH);
+  return board_spi_check_cs(pin, HIGH);
+}
+
 static_assert(HEXWALLET_EPD_PIN_CS != HEXWALLET_NFC_PIN_CS, "Shared SPI requires independent selects");
 #if CONFIG_DISABLE_HAL_LOCKS
 #error "Board 7 requires Arduino SPI transaction locks across tasks"

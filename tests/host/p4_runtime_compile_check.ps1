@@ -1,5 +1,6 @@
 # Compile the orchestration code against real P4 Arduino/FreeRTOS headers.
 # This is a compile check, not a firmware link or physical-device test.
+param([string]$LvglSourceDirectory = (Join-Path $PSScriptRoot 'lvgl_real'))
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'esp32_paths.ps1')
 $root=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -24,13 +25,13 @@ foreach($name in @('WalletWorker.cpp','WalletWorkerExecution.cpp','WalletSigning
 & $compiler @flags -DHEXWALLET_ENABLE_CLI=0 -x c++ -include Arduino.h -c (Join-Path $root 'WalletCli.cpp') -o (Join-Path $out 'WalletCli-disabled.o')
 if($LASTEXITCODE -ne 0){throw 'P4 disabled CLI compilation failed'}
 
-# The actual P4 display port, both panel protocols, and the real LVGL API.
-$lv=Join-Path $PSScriptRoot 'lvgl_real/src'
+# The actual P4 display port, all panel profiles, and the real LVGL API.
+$lv=Join-Path $LvglSourceDirectory 'src'
 if(!(Test-Path "$lv/lvgl.h")){throw 'LVGL checkout required for P4 display compilation'}
 $displayFlags=@($flags | Where-Object { $_ -ne '-DHEXWALLET_ENABLE_LVGL=0' })
 $displayFlags+=@('-DHEXWALLET_ENABLE_LVGL=1','-DHEXWALLET_BOARD=7','-DLV_CONF_INCLUDE_SIMPLE',"-I$lv",
   "-I$coreCandidate/libraries/SPI/src","-I$coreCandidate/libraries/Wire/src")
-foreach($profile in @(0,1,2)) {
+foreach($profile in @(0,1,2,3,4)) {
   # A 4-color board must supply its own register table; pass one here so the
   # board-side wiring of HEXWALLET_EPD_COLOR_INIT is actually compiled.
   $profileArgs = @("-DHEXWALLET_EPD_PROFILE=$profile")

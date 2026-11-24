@@ -25,6 +25,7 @@ void pinMode(uint8_t pin, uint8_t mode);
 void digitalWrite(uint8_t pin, uint8_t val);
 int digitalRead(uint8_t pin);
 void delay(uint32_t ms);
+void delayMicroseconds(uint32_t us);
 uint32_t millis(void);
 int analogRead(uint8_t pin);
 int analogReadMilliVolts(uint8_t pin);

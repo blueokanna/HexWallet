@@ -10,28 +10,25 @@ namespace hexwallet {
 //
 // The sensor is a MIPI CSI-2 part: 1280x800 global-shutter mono, 8/10-bit RAW,
 // programmed over SCCB (OmniVision's I2C variant) and streamed over the CSI
-// lanes. This file covers the part that can be specified without the module
-// vendor's register table: address the sensor, read its chip ID, and classify
-// the outcome. It deliberately does not pretend to stream frames - a made-up
-// init table produces a camera that returns noise, and a wallet that shows a
-// noisy frame as a scanned address is worse than one that says "no camera".
+// lanes. This layer identifies the sensor. CameraBackup.cpp uses the pinned
+// Espressif sensor driver and its mode table to acquire a grayscale frame.
 //
 // The c26102103 camera connector shares SCCB with the secure element and RTC.
-// Board 7 has no configured camera transport or CSI capture pipeline.
+// Board 7 probes the shared control bus before accessing the sensor.
 
 enum class CameraProbeState : uint8_t {
-  NotConfigured = 0,  // the board profile wires no SCCB bus
-  NoResponse,         // the sensor did not acknowledge its SCCB address
-  WrongSensor,        // something answered, but the chip ID is not an OV9281
-  PresentUnverified,  // the OV9281 chip ID was read back correctly
+  NotConfigured = 0, // the board profile wires no SCCB bus
+  NoResponse,        // the sensor did not acknowledge its SCCB address
+  WrongSensor,       // something answered, but the chip ID is not an OV9281
+  PresentUnverified, // the OV9281 chip ID was read back correctly
 };
 
 struct CameraInfo {
-  uint16_t chip_id;      // 0x9281 for an OV9281
-  uint8_t sccb_address;  // 8-bit SCCB address the probe used
+  uint16_t chip_id;     // 0x9281 for an OV9281
+  uint8_t sccb_address; // 7-bit I2C address of the responding sensor
 };
 
-// SCCB transport supplied by the board port. `address` is the 8-bit SCCB write
+// SCCB transport supplied by the board port. `address` is the 7-bit I2C
 // address; reads are a register write followed by a repeated start, which is
 // what the `read` callback is expected to do.
 struct CameraSccbBus {
@@ -41,7 +38,9 @@ struct CameraSccbBus {
   void (*delay_ms)(void *context, uint32_t milliseconds);
 };
 
-constexpr uint8_t kOv9281SccbAddress = 0x60;  // 0x30 << 1
+constexpr uint8_t kOv9281SccbAddress = 0x60; // SID low (0xc0 on the wire)
+// OV9281 SID high and the factory programmable alias, in Wire notation.
+constexpr uint8_t kOv9281Addresses[] = {kOv9281SccbAddress, 0x10, 0x70};
 constexpr uint16_t kOv9281ChipIdHighRegister = 0x300A;
 constexpr uint16_t kOv9281ChipIdLowRegister = 0x300B;
 constexpr uint16_t kOv9281ChipId = 0x9281;
@@ -57,6 +56,6 @@ bool camera_present(const CameraSccbBus &bus);
 
 bool run_camera_port_self_tests();
 
-}
+} // namespace hexwallet
 
 #endif

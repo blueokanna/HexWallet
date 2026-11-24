@@ -111,9 +111,15 @@ namespace hexwallet
       read_status = status;
     }
 
-    void chip_select(bool selected)
+    bool chip_select(bool selected)
     {
+#if defined(HEXWALLET_SHARED_SPI_PIN_SCK)
+      return selected ? board_spi_select(HEXWALLET_NFC_PIN_CS)
+                      : board_spi_deselect(HEXWALLET_NFC_PIN_CS);
+#else
       digitalWrite(HEXWALLET_NFC_PIN_CS, selected ? LOW : HIGH);
+      return true;
+#endif
     }
 
     bool irq_asserted()
@@ -131,13 +137,17 @@ namespace hexwallet
         if (irq_asserted())
           return false;
         nfc_spi.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
-        chip_select(true);
+        if (!chip_select(true)) {
+          nfc_spi.endTransaction();
+          return false;
+        }
         const bool ready = nfc_spi.transfer(0x00) == 0xff;
         if (ready)
           for (size_t i = 0; i < size; ++i)
             nfc_spi.transfer(data[i]);
-        chip_select(false);
+        const bool released = chip_select(false);
         nfc_spi.endTransaction();
+        if (!released) return false;
         if (ready)
           return true;
         delay(5);
@@ -159,7 +169,10 @@ namespace hexwallet
         delay(1);
       }
       nfc_spi.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
-      chip_select(true);
+      if (!chip_select(true)) {
+        nfc_spi.endTransaction();
+        return false;
+      }
       nfc_spi.transfer(0xff);
       for (size_t i = 0; i < 3; ++i)
         out[i] = nfc_spi.transfer(0xff);
@@ -170,9 +183,9 @@ namespace hexwallet
         if (i < capacity)
           out[i] = byte;
       }
-      chip_select(false);
+      const bool released = chip_select(false);
       nfc_spi.endTransaction();
-      if (length > capacity)
+      if (!released || length > capacity)
         return false;
       *out_size = length;
       return true;

@@ -203,9 +203,10 @@
 // Native SSD1680 driver (EinkPanel.cpp) instead of the GxEPD2 backend.
 #define HEXWALLET_EPD_NATIVE_SSD1680 1
 
-// 0: SSD1680 mono, 1: 2.9 inch 4-color 128x296, 2: SSD1680 mono V2 variant.
-// Partial refresh always runs on the controller's OTP waveform; a board that
-// needs a tuned table defines HEXWALLET_EPD_PARTIAL_LUT (159 bytes) itself.
+// 0: SSD1680 mono, 1: 2.9 inch 4-color, 2: SSD1680 V2, 3: HINK-E029A01.
+// SSD1680 partial refresh uses OTP or HEXWALLET_EPD_PARTIAL_LUT (159 bytes).
+// 4: E029A01N16C355 bring-up using the E029A01/SSD1608 family reference
+// differential waveform. Profile 3 retains the HINK A/0 full-only settings.
 // Profile 1 additionally needs HEXWALLET_EPD_COLOR_INIT: the driver will not
 // invent the module's analogue settings.
 #ifndef HEXWALLET_EPD_PROFILE
@@ -215,8 +216,20 @@
 #ifndef HEXWALLET_EPD_COLORS
 #define HEXWALLET_EPD_COLORS 4
 #endif
-#elif HEXWALLET_EPD_PROFILE != 0 && HEXWALLET_EPD_PROFILE != 2
+#elif HEXWALLET_EPD_PROFILE != 0 && HEXWALLET_EPD_PROFILE != 2 && HEXWALLET_EPD_PROFILE != 3 && HEXWALLET_EPD_PROFILE != 4
 #error "Unknown 2.9 inch panel profile"
+#endif
+// The supplied HINK-E029A01 A/0, note 6-4, specifies active-low BUSY for
+// the E029A01-FPC-A1 assembly. Both E029A01 waveform profiles use this pinout.
+#ifndef HEXWALLET_EPD_BUSY_ACTIVE_LEVEL
+#if HEXWALLET_EPD_PROFILE == 1 || HEXWALLET_EPD_PROFILE == 3 || HEXWALLET_EPD_PROFILE == 4
+#define HEXWALLET_EPD_BUSY_ACTIVE_LEVEL 0
+#else
+#define HEXWALLET_EPD_BUSY_ACTIVE_LEVEL 1
+#endif
+#endif
+#if HEXWALLET_EPD_BUSY_ACTIVE_LEVEL != 0 && HEXWALLET_EPD_BUSY_ACTIVE_LEVEL != 1
+#error "EPD BUSY active level must be 0 (low) or 1 (high)"
 #endif
 #if HEXWALLET_EPD_PROFILE != 1 && defined(HEXWALLET_EPD_COLORS) && HEXWALLET_EPD_COLORS != 1
 #error "A mono profile requires 1bpp; use profile 1 only for the 4-color panel"
@@ -234,9 +247,12 @@
 #define HEXWALLET_EPD_PIN_DC 19    // pad 20
 #define HEXWALLET_EPD_PIN_RST 17   // pad 18
 #define HEXWALLET_EPD_PIN_BUSY 18  // pad 19
-// SSD1680 write cycles are reliable well past this; 8 MHz keeps the 4.7 KiB
-// frame upload under 5 ms without pushing the panel's setup times.
+#if HEXWALLET_EPD_PROFILE == 3 || HEXWALLET_EPD_PROFILE == 4
+// HINK A/0 section 10 specifies a minimum SCLK period of 250 ns.
+#define HEXWALLET_EPD_SPI_FREQ 2000000U
+#else
 #define HEXWALLET_EPD_SPI_FREQ 8000000U
+#endif
 
 // U2 shares I2C with the RTC. Its ENA is tied to 3V3. Pad 14 is the
 // unused ISO7816 reset input; the I2C transport uses T=1 interface reset.
@@ -244,6 +260,12 @@
 #define HEXWALLET_SE051_I2C_SCL 11    // pad 12
 #define HEXWALLET_SE051_ISO7816_RST_N 12  // U1 pad 13, U2 pad 14
 #define HEXWALLET_SE051_I2C_ADDRESS 0x48
+
+// OV9281 FPC pads 2/3 share these physical I2C lines with U2 and U11.
+#define HEXWALLET_CAMERA_SCCB_SDA HEXWALLET_SE051_I2C_SDA
+#define HEXWALLET_CAMERA_SCCB_SCL HEXWALLET_SE051_I2C_SCL
+// c26102103 routes VDDO_3 to both 1.8 V PSRAM inputs. A revised board
+// can define the D-PHY LDO channel after its supply routing is verified.
 
 // PN7161 NFC front end in SPI mode; NSS is its own chip select.
 #define HEXWALLET_NFC_PN7161 1
@@ -266,7 +288,7 @@
 #define HEXWALLET_PIN_BAT_VOLT 20  // pad 22
 
 // Gate-driver and boost rails of the bare 2.9" panel (GDR/RESE/PREVGH/PREVGL on
-// the 26-pin FPC) are tied to passive networks only - there is no GPIO to drive
+// the 24-contact FPC) are tied to external circuitry - there is no GPIO to drive
 // and none is invented here.
 #define HEXWALLET_BOARD_NAME "HexWallet P4 E-Paper 2.9"
 

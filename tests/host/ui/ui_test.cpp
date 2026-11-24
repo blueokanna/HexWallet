@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "EinkFrame.h"
+#include "CameraDecode.h"
 #include "WalletWorker.h"
 #include "../../../WalletUi.cpp"
 
@@ -41,7 +42,17 @@ static void flush(lv_display_t *display, const lv_area_t *, uint8_t *) {
 
 namespace hexwallet
 {
-  CameraProbeState board_camera_probe() { return CameraProbeState::NotConfigured; }
+  static bool test_camera_present, scan_active;
+  static std::vector<uint8_t> camera_image;
+  CameraProbeState board_camera_probe(CameraInfo *) { return test_camera_present ? CameraProbeState::PresentUnverified : CameraProbeState::NotConfigured; }
+  CameraRead camera_backup_start() { scan_active = true; return CameraRead::Pending; }
+  void camera_backup_cancel() { scan_active = false; }
+  bool camera_backup_take(CameraRead &status, char (&key)[65]) {
+    if (!scan_active) return false;
+    scan_active = false;
+    status = camera_decode_backup(camera_image.data(), 640, 400, key);
+    return true;
+  }
   bool nfc_port_configured() { return true; }
   const char *nfc_port_error() { return nullptr; }
   static NfcBackupStatus tag_status = NfcBackupStatus::Idle;
@@ -720,6 +731,29 @@ int main(int argc, char **argv)
   wallet_ui_set_authenticated(false);
   CHECK(tag_status == NfcBackupStatus::Idle && current_page == Page::Home);
   wallet_ui_set_authenticated(true);
+  test_camera_present = true;
+  camera_image.assign(640 * 400, 244);
+  QrCode sample{};
+  CHECK(qr_encode(reinterpret_cast<const uint8_t *>(public_encrypted), strlen(public_encrypted), QrEcc::Medium, &sample));
+  for (unsigned y = 0; y < sample.size * 5u; ++y)
+    for (unsigned x = 0; x < sample.size * 5u; ++x)
+      camera_image[(60 + y) * 640 + 120 + x] = sample.modules[(y / 5) * sample.size + x / 5] ? 18 : 244;
+  open_page(Page::Scan);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::CameraWait && scan_active);
+  wallet_ui_set_authenticated(false);
+  CHECK(!scan_active && current_page == Page::Home);
+  wallet_ui_set_authenticated(true);
+  open_page(Page::Scan);
+  press_key(keypad, LV_KEY_ENTER);
+  wallet_ui_service();
+  CHECK(current_page == Page::KeyNetwork && !strcmp(setup_key.input, public_encrypted));
+  std::fill(camera_image.begin(), camera_image.end(), 120);
+  open_page(Page::Scan);
+  press_key(keypad, LV_KEY_ENTER);
+  wallet_ui_service();
+  CHECK(current_page == Page::Scan && !setup_key.input[0]);
+  test_camera_present = false;
   open_page(Page::NfcImport);
   press_key(keypad, LV_KEY_ENTER);
   tag_status = NfcBackupStatus::Complete;

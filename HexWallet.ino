@@ -51,7 +51,6 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 #include "ZcashTransaction.h"
 #include "src/EcdsaCurve.h"
 
-
 namespace {
 
 bool display_available = false;
@@ -241,7 +240,7 @@ void run_self_tests_task(void *context) {
 }
 #endif
 
-} // namespace
+}
 
 void setup() {
 #if ARDUINO_USB_CDC_ON_BOOT && !ARDUINO_USB_MODE
@@ -284,13 +283,13 @@ void setup() {
 #endif
 
   display_available = hexwallet::board_display_init();
+  if (display_available && !hexwallet::wallet_ui_init()) {
+    Serial.println("FATAL: LVGL UI initialization failed");
+    display_available = false;
+  }
   if (display_available) {
-    if (!hexwallet::wallet_ui_init()) {
-      Serial.println("FATAL: LVGL UI initialization failed");
-      display_available = false;
-    }
     hexwallet::board_power(true);
-    Serial.print("INFO: display ");
+    Serial.print("INFO: display configured ");
     Serial.print(hexwallet::board_display_width());
     Serial.print("x");
     Serial.print(hexwallet::board_display_height());

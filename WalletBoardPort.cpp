@@ -383,46 +383,77 @@ namespace hexwallet
 #elif defined(HEXWALLET_HAS_DISPLAY) && defined(HEXWALLET_DISPLAY_KIND_EINK)
 
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+    static void epd_write_bytes(const uint8_t *bytes, size_t size)
+    {
+      // Arduino-ESP32 3.3.13 spiWriteNL reads ceil(length / 4) words.
+      // Supply aligned storage for the last word but clock only real bytes.
+      uint32_t words[16];
+      while (size != 0) {
+        const size_t count = size < sizeof(words) ? size : sizeof(words);
+        words[(count - 1) / sizeof(uint32_t)] = 0;
+        memcpy(words, bytes, count);
+        SPI.writeBytes(reinterpret_cast<const uint8_t *>(words), count);
+        bytes += count;
+        size -= count;
+      }
+    }
+
+    static inline void epd_control_delay()
+    {
+#if HEXWALLET_EPD_PROFILE == 3 || HEXWALLET_EPD_PROFILE == 4
+      // HINK A/0 section 10: D/C setup and hold >= 150 ns, CS >= 120/60 ns.
+      delayMicroseconds(1);
+#endif
+    }
+
+    static bool epd_write_selected(bool is_data, const uint8_t *bytes, size_t size)
+    {
+      digitalWrite(HEXWALLET_EPD_PIN_DC, is_data ? HIGH : LOW);
+      epd_control_delay();
+      if (!board_spi_select(HEXWALLET_EPD_PIN_CS)) return false;
+      epd_control_delay();
+      if (is_data) epd_write_bytes(bytes, size);
+      else SPI.transfer(bytes[0]);
+      epd_control_delay();
+      const bool released = board_spi_deselect(HEXWALLET_EPD_PIN_CS);
+      epd_control_delay();
+      return released;
+    }
+
     static bool epd_write_command(void *, uint8_t command, const uint8_t *data,
                                   size_t size)
     {
       SPI.beginTransaction(SPISettings(HEXWALLET_EPD_SPI_FREQ, MSBFIRST, SPI_MODE0));
-      digitalWrite(HEXWALLET_EPD_PIN_CS, LOW);
-      digitalWrite(HEXWALLET_EPD_PIN_DC, LOW);
-      SPI.transfer(command);
-      if (size != 0)
-      {
-        digitalWrite(HEXWALLET_EPD_PIN_DC, HIGH);
-        SPI.writeBytes(data, size);
-      }
-      digitalWrite(HEXWALLET_EPD_PIN_CS, HIGH);
+      const bool ok = epd_write_selected(false, &command, 1) &&
+                      (size == 0 || epd_write_selected(true, data, size));
       SPI.endTransaction();
-      return true;
+      return ok;
     }
 
-    static void epd_set_reset(void *, bool asserted)
+    static bool epd_set_reset(void *, bool asserted)
     {
-      digitalWrite(HEXWALLET_EPD_PIN_RST, asserted ? LOW : HIGH);
+      const int expected = asserted ? LOW : HIGH;
+      digitalWrite(HEXWALLET_EPD_PIN_RST, expected);
+      delay(1);
+      if (digitalRead(HEXWALLET_EPD_PIN_RST) == expected)
+        return true;
+      pinMode(HEXWALLET_EPD_PIN_RST, INPUT);
+      Serial.println(asserted ? "ERR: e-paper RESET stuck high (GPIO17, FPC pin 10)"
+                              : "ERR: e-paper RESET stuck low (GPIO17, FPC pin 10)");
+      return false;
     }
 
     static bool epd_busy(void *)
     {
-#if HEXWALLET_EPD_PROFILE == 1
-      return digitalRead(HEXWALLET_EPD_PIN_BUSY) == LOW;
-#else
-      return digitalRead(HEXWALLET_EPD_PIN_BUSY) == HIGH;
-#endif
+      return digitalRead(HEXWALLET_EPD_PIN_BUSY) == HEXWALLET_EPD_BUSY_ACTIVE_LEVEL;
     }
 
     static bool epd_write_data(void *, const uint8_t *data, size_t size)
     {
       SPI.beginTransaction(SPISettings(HEXWALLET_EPD_SPI_FREQ, MSBFIRST, SPI_MODE0));
-      digitalWrite(HEXWALLET_EPD_PIN_CS, LOW);
-      digitalWrite(HEXWALLET_EPD_PIN_DC, HIGH);
-      SPI.writeBytes(data, size);
-      digitalWrite(HEXWALLET_EPD_PIN_CS, HIGH);
+      const bool ok = epd_write_selected(true, data, size);
       SPI.endTransaction();
-      return true;
+      return ok;
     }
 
     static void epd_delay(void *, uint32_t milliseconds) { delay(milliseconds); }
@@ -442,12 +473,34 @@ namespace hexwallet
     {
       if (!board_shared_spi_begin()) return false;
       pinMode(HEXWALLET_EPD_PIN_DC, OUTPUT);
+      // Preload inactive RES# before enabling the output. Otherwise the
+      // reset value of the ESP32 output latch adds a low pulse at startup.
+      pinMode(HEXWALLET_EPD_PIN_RST, INPUT);
+      digitalWrite(HEXWALLET_EPD_PIN_RST, HIGH);
       pinMode(HEXWALLET_EPD_PIN_RST, OUTPUT);
       pinMode(HEXWALLET_EPD_PIN_BUSY, INPUT);
       EinkPanelConfig config = {};
       config.width = HEXWALLET_EPD_WIDTH;
       config.height = HEXWALLET_EPD_HEIGHT;
       config.color = kEpdColorMode;
+#if HEXWALLET_EPD_PROFILE == 3 || HEXWALLET_EPD_PROFILE == 4
+      config.controller = EinkController::HinkE029A01;
+#if HEXWALLET_EPD_PROFILE == 4
+      // Waveshare Arduino/epd2in9/epd2in9.cpp, lut_partial_update (V1).
+      // E029A01 family reference; N16C355 optical validation is pending.
+      static constexpr uint8_t kE029A01Partial[] = {
+          0x10, 0x18, 0x18, 0x08, 0x18, 0x18, 0x08, 0x00, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x13, 0x14, 0x44, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+      config.partial_lut = kE029A01Partial;
+      config.partial_lut_size = sizeof(kE029A01Partial);
+      Serial.println("INFO: E029A01N16C355, E029A01 family reference, 2 MHz, OTP full / 30-byte partial");
+#else
+      Serial.println("INFO: HINK-E029A01, 2 MHz, mono full refresh (25 C OTP)");
+#endif
+#endif
+      Serial.println(HEXWALLET_EPD_BUSY_ACTIVE_LEVEL ? "INFO: e-paper BUSY active high"
+                                                   : "INFO: e-paper BUSY active low");
 #if HEXWALLET_EPD_PROFILE == 1
       config.controller = EinkController::Ssd1683;
 #if defined(HEXWALLET_EPD_COLOR_INIT)
@@ -466,7 +519,10 @@ namespace hexwallet
       config.full_timeout_ms = 45000;
       config.partial_timeout_ms = 4000;
       config.partial_budget = 8;
-      return s_epd_native.begin(kEpdBus, config);
+      const bool ready = s_epd_native.begin(kEpdBus, config);
+      if (!ready && s_epd_native.stats().busy_timeouts)
+        Serial.println("ERR: e-paper BUSY held active during init (GPIO18, FPC pin 9)");
+      return ready;
     }
 
 #else
@@ -580,10 +636,18 @@ namespace hexwallet
     static void refresh_panel_frame()
     {
       const size_t size = s_epd_native.frame_bytes();
-      const bool ok = s_epd_native.wake() &&
-          (s_panel_partial ? s_epd_native.partial_refresh(s_eink_bw, size, s_panel_window)
-                           : s_epd_native.full_refresh(s_eink_bw, size)) == EinkRefreshResult::Ok;
-      s_panel_job.store(ok ? PanelJob::Complete : PanelJob::Failed, std::memory_order_release);
+      const auto result = !s_epd_native.wake() ? s_epd_native.last_error() :
+          s_panel_partial ? s_epd_native.partial_refresh(s_eink_bw, size, s_panel_window)
+                          : s_epd_native.full_refresh(s_eink_bw, size);
+      if (result == EinkRefreshResult::BusyNotAsserted)
+        Serial.println("ERR: e-paper BUSY did not assert after refresh");
+      else if (result == EinkRefreshResult::BusyTimeout)
+        Serial.println("ERR: e-paper BUSY did not return to idle");
+      else if (result != EinkRefreshResult::Ok)
+        Serial.println("ERR: e-paper frame transfer or wake failed");
+      else if (s_epd_native.stats().full_refreshes == 1 && s_epd_native.stats().partial_refreshes == 0)
+        Serial.println("INFO: e-paper first refresh completed");
+      s_panel_job.store(result == EinkRefreshResult::Ok ? PanelJob::Complete : PanelJob::Failed, std::memory_order_release);
     }
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -643,7 +707,11 @@ namespace hexwallet
         g_display_ready = false;
 #endif
       if (!s_eink_dirty) return;
-      if (millis() - s_eink_dirty_ms < 120U)
+      if (
+#if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+          s_epd_native.stats().full_refreshes != 0 &&
+#endif
+          millis() - s_eink_dirty_ms < 120U)
         return;
       s_eink_dirty = false;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
@@ -1015,7 +1083,7 @@ namespace hexwallet
   bool board_partial_refresh_supported()
   {
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
-    return g_display_ready && kEpdColorMode == EinkColorMode::Mono;
+    return g_display_ready && kEpdColorMode == EinkColorMode::Mono && HEXWALLET_EPD_PROFILE != 3;
 #else
     return false;
 #endif
@@ -1178,43 +1246,41 @@ namespace hexwallet
 
     bool camera_sccb_write(void *, uint8_t address, uint16_t reg, uint8_t value)
     {
-      Wire.beginTransmission(address);
-      Wire.write(static_cast<uint8_t>(reg >> 8));
-      Wire.write(static_cast<uint8_t>(reg & 0xFF));
-      Wire.write(value);
-      return Wire.endTransmission() == 0;
+      Wire1.beginTransmission(address);
+      Wire1.write(static_cast<uint8_t>(reg >> 8));
+      Wire1.write(static_cast<uint8_t>(reg & 0xFF));
+      Wire1.write(value);
+      return Wire1.endTransmission() == 0;
     }
 
     bool camera_sccb_read(void *, uint8_t address, uint16_t reg, uint8_t *value)
     {
       if (value == nullptr)
         return false;
-      Wire.beginTransmission(address);
-      Wire.write(static_cast<uint8_t>(reg >> 8));
-      Wire.write(static_cast<uint8_t>(reg & 0xFF));
-      if (Wire.endTransmission(false) != 0)
+      Wire1.beginTransmission(address);
+      Wire1.write(static_cast<uint8_t>(reg >> 8));
+      Wire1.write(static_cast<uint8_t>(reg & 0xFF));
+      if (Wire1.endTransmission(false) != 0)
         return false;
-      if (Wire.requestFrom(address, static_cast<uint8_t>(1)) != 1)
+      if (Wire1.requestFrom(address, static_cast<uint8_t>(1)) != 1)
         return false;
-      *value = static_cast<uint8_t>(Wire.read());
+      const int received = Wire1.read();
+      if (received < 0) return false;
+      *value = static_cast<uint8_t>(received);
       return true;
     }
 
   }
 #endif
 
-  CameraProbeState board_camera_probe()
+  CameraProbeState board_camera_probe(CameraInfo *info)
   {
+    if (info) *info = {};
 #if defined(HEXWALLET_CAMERA_SCCB_SDA) && defined(HEXWALLET_CAMERA_SCCB_SCL)
-    static bool started = false;
-    if (!started)
-    {
-      started = Wire.begin(HEXWALLET_CAMERA_SCCB_SDA, HEXWALLET_CAMERA_SCCB_SCL);
-    }
-    if (!started)
+    if (!se051_transport_in_use() && !Wire1.begin(HEXWALLET_CAMERA_SCCB_SDA, HEXWALLET_CAMERA_SCCB_SCL, 100000))
       return CameraProbeState::NotConfigured;
-    const CameraSccbBus bus = {nullptr, camera_sccb_write, camera_sccb_read, nullptr};
-    return camera_probe(bus, nullptr);
+    const CameraSccbBus bus = {nullptr, camera_sccb_write, camera_sccb_read, [](void *, uint32_t ms) { delay(ms); }};
+    return camera_probe(bus, info);
 #else
     return CameraProbeState::NotConfigured;
 #endif

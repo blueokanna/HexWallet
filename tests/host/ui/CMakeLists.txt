@@ -14,6 +14,8 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_FLAGS MATCHES "
   link_directories("${CLANG_RESOURCE_DIR}/lib/x86_64-unknown-windows-msvc")
 endif()
 add_executable(ui_test ui_test.cpp "${WALLET_ROOT}/Mascot.cpp" "${WALLET_ROOT}/EinkFrame.cpp"
+  "${WALLET_ROOT}/CameraDecode.cpp" "${WALLET_ROOT}/src/quirc/identify.c" "${WALLET_ROOT}/src/quirc/quirc.c"
+  "${WALLET_ROOT}/src/quirc/decode.c" "${WALLET_ROOT}/src/quirc/version_db.c"
   "${WALLET_ROOT}/WalletBackupJob.cpp" "${WALLET_ROOT}/WalletWorker.cpp"
   "${WALLET_ROOT}/MaidSprite.cpp" "${WALLET_ROOT}/QrCode.cpp"
   "${WALLET_ROOT}/CoinIcons.cpp" "${WALLET_ROOT}/WalletUiFont.cpp" "${WALLET_ROOT}/WalletTextInput.cpp")
@@ -26,19 +28,28 @@ if(MSVC)
   target_compile_options(ui_test PRIVATE /utf-8 /W3)
 endif()
 
-foreach(profile IN ITEMS p4_eink s3_display)
-  if(profile STREQUAL "p4_eink")
+foreach(profile IN ITEMS p4_eink p4_hink p4_hink_busy_high p4_n16c355 s3_display)
+  if(profile MATCHES "^p4_")
     set(board_id 7)
   else()
     set(board_id 1)
   endif()
   add_executable(board_${profile}_test board_runtime_test.cpp
-    "${WALLET_ROOT}/EinkPanel.cpp" "${WALLET_ROOT}/EinkFrame.cpp")
+      "${WALLET_ROOT}/EinkPanel.cpp" "${WALLET_ROOT}/EinkFrame.cpp" "${WALLET_ROOT}/CameraPort.cpp")
   target_compile_features(board_${profile}_test PRIVATE cxx_std_17)
   target_compile_definitions(board_${profile}_test PRIVATE
     HEXWALLET_ENABLE_LVGL=1 HEXWALLET_BOARD=${board_id} HEXWALLET_BOARD_RUNTIME_TEST=1)
   if(board_id EQUAL 7)
     target_compile_definitions(board_${profile}_test PRIVATE HEXWALLET_SHARED_SPI_TEST=1)
+  endif()
+  if(profile MATCHES "^p4_hink")
+    target_compile_definitions(board_${profile}_test PRIVATE HEXWALLET_EPD_PROFILE=3)
+  endif()
+  if(profile STREQUAL "p4_hink_busy_high")
+    target_compile_definitions(board_${profile}_test PRIVATE HEXWALLET_EPD_BUSY_ACTIVE_LEVEL=1)
+  endif()
+  if(profile STREQUAL "p4_n16c355")
+    target_compile_definitions(board_${profile}_test PRIVATE HEXWALLET_EPD_PROFILE=4)
   endif()
   target_include_directories(board_${profile}_test BEFORE PRIVATE "${LVGL_SOURCE_DIR}/src")
   target_include_directories(board_${profile}_test PRIVATE
@@ -61,8 +72,13 @@ foreach(language IN ITEMS en zh)
 endforeach()
 add_test(NAME board_p4_eink COMMAND board_p4_eink_test)
 add_test(NAME board_p4_nfc_first COMMAND board_p4_eink_test nfc-first)
+add_test(NAME board_p4_hink COMMAND board_p4_hink_test)
+add_test(NAME board_p4_hink_nfc_first COMMAND board_p4_hink_test nfc-first)
+add_test(NAME board_p4_hink_busy_high COMMAND board_p4_hink_busy_high_test)
+add_test(NAME board_p4_n16c355 COMMAND board_p4_n16c355_test)
 add_test(NAME board_s3_display COMMAND board_s3_display_test)
-set(ui_tests ui ui_zh ui_frames_en ui_frames_zh board_p4_eink board_p4_nfc_first board_s3_display nfc_type4_backup)
+set(ui_tests ui ui_zh ui_frames_en ui_frames_zh board_p4_eink board_p4_nfc_first
+  board_p4_hink board_p4_hink_nfc_first board_p4_hink_busy_high board_p4_n16c355 board_s3_display nfc_type4_backup)
 set_tests_properties(${ui_tests} PROPERTIES TIMEOUT 30)
 if(CLANG_RESOURCE_DIR)
   # The Windows loader needs the same ASan runtime that clang-cl linked.

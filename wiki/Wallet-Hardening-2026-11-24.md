@@ -62,7 +62,7 @@ Sources: [Espressif ESP32-P4](https://www.espressif.com/en/products/socs/esp32-p
 | Requirement | Blocking work |
 | --- | --- |
 | 独立创建／恢复及 optional passphrase | Production sessions still return `CustodyUnavailable`. Complete non-exportable SE051 seed/derivation operations and the local backup, mnemonic input and passphrase flow. API enforcement alone does not deliver the requested screen flow. |
-| 双向扫码与 NFC 初次配对 | rev A lacks camera SCCB wiring, and `CameraPort.cpp` has probing but no CSI capture/QR decoder. Integrate the offer display, trusted camera delivery and real phone application. Current enrollment records bind identities and challenges, not account addresses. Initial hardware enrollment remains unavailable. |
+| 双向扫码与 NFC 初次配对 | The current board has a shared camera SCCB bus. COM6 returned the OV9281 ID. The trusted camera path for enrollment, offer display, account-address binding and the phone application still require integration. [Camera and backup QR status](Boards-and-Display.md) |
 | 全链审阅和卡内签名 | 214/214 covers catalog derivation/registration; 211 receive-admission entries are not 211 verified card adapters. Ryo/Zano production signing, Peercoin, TRON NFTs/batches, Dash special transactions, Lightning, Stacks, Grin and other documented forms remain open. [Per-chain review](Capability-Review) |
 | SE051C2HQ1 | Default integration remains disabled. PBKDF2 applet version/permissions/results, non-exportable BIP32 scalar addition and CryptoNote signed key images/MLSAG/CLSAG operations remain unverified on the card. |
 | 其他钱包功能 | BIP38, single-key import/export, QRL new-key initialization, all-network NFT home data with trusted network/account binding, and a complete phone application remain unfinished. |

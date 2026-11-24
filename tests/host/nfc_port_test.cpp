@@ -11,6 +11,7 @@
 #include <vector>
 
 SPIClass SPI;
+HardwareSerial Serial;
 static std::vector<uint8_t> sent;
 static std::deque<uint8_t> incoming;
 static uint32_t ticks = 0;
@@ -56,7 +57,11 @@ void digitalWrite(uint8_t p, uint8_t v) {
   }
   irq = !packets.empty();
 }
-int digitalRead(uint8_t) { return irq; }
+int digitalRead(uint8_t pin) {
+  if (pin == HEXWALLET_NFC_PIN_CS) return selected ? LOW : HIGH;
+  if (pin == HEXWALLET_NFC_PIN_IRQ) return irq;
+  return HIGH;
+}
 void delay(uint32_t v) { ticks += v; }
 uint32_t millis() { return ticks; }
 namespace hexwallet {

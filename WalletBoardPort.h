@@ -78,7 +78,7 @@ bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size);
 
 // OV9281 presence probe over SCCB. Returns NotConfigured when the board
 // profile does not provide a camera transport.
-CameraProbeState board_camera_probe();
+CameraProbeState board_camera_probe(CameraInfo *info = nullptr);
 
 }  // namespace hexwallet
 

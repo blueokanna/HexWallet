@@ -19,7 +19,7 @@ pinout. Nothing is inferred from a board name.
 
 Board 7 comes from the EasyEDA project `c26102103`; each pin comment names the package pad, so the
 GPIO column can be re-derived from the P4 datasheet before first power-on. The panel and the PN7161
-share GPIO7 (SCK), GPIO8 (MOSI) and GPIO9 (MISO). The panel uses CS GPIO16 and only writes. The PN7161 uses CS GPIO13 at 1 MHz. Both drivers initialize the bus through the same entry point. A FreeRTOS task waits for the panel's BUSY line with SPI released, allowing NFC transactions between display transfers. The monochrome path converts the byte-aligned bounds of LVGL changes, skips identical frames and puts the panel to sleep after 30 seconds without a changed frame.
+share GPIO7 (SCK) and GPIO8 (MOSI). GPIO9 (MISO) connects only to the PN7161. The panel uses EINK_CS on GPIO16 (FPC pin 12). The PN7161 uses SPI_NSS on GPIO13 (U3 pin 1) at 1 MHz. Both selects are active low. The drivers share one SPI instance and read back both select pads under the transaction lock before clocking data. A FreeRTOS task waits for the panel's BUSY line with SPI released, allowing NFC transactions between display transfers. The monochrome path converts the byte-aligned bounds of LVGL changes, skips identical frames and puts the panel to sleep after 30 seconds without a changed frame.
 
 On the supplied rev A PCB, USB1 D− and D+ reach U1 package pads 24 and 25 on the `DM` and `DP` nets. The U1 symbol maps these pads to GPIO22 and GPIO23. The P4's default USB Serial/JTAG PHY uses GPIO24/GPIO25, and its high-speed PHY uses package pads 49/50. Neither pair is wired to USB1. Native USB enumeration or ROM USB flashing through this connector requires a board wiring change. [Espressif USB PHY assignments](https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_overview/usb_phy.html)
 
@@ -36,6 +36,33 @@ A 2.9-inch diagonal is not a protocol. The P4 board selects an explicit profile:
 | 0 (default) | SSD1680 mono 128×296 | full refresh; partial uses the controller's OTP waveform |
 | 1 | SSD1683-class four-colour 128×296 | 2bpp, full refresh only, BUSY active low |
 | 2 | SSD1680 mono V2 | partial uses OTP, BUSY active high |
+| 3 | HINK-E029A01 mono 128×296 (SSD1608/IL3820-family commands) | 2 MHz SPI, room-temperature OTP full refresh; BUSY low per A/0 manual |
+| 4 | E029A01N16C355 with E029A01-FPC-A1, 128×296 mono | 2 MHz SPI, 25 °C OTP full refresh, 30-byte family reference partial waveform, BUSY low per supplied A/0 manual |
+
+Select profile 3 with `tools/build_p4_board.ps1 -HinkE029A01` for a HINK-E029A01 panel.
+The COM6 8 MiB USB Serial/JTAG assembly also needs `-FlashSizeMiB 8 -UsbSerialJtag`.
+HINK uses `0x12` for software reset, `0x24` for 1bpp RAM and `0x20` for activation.
+The Waveshare G four-colour manual does not apply. Profile 3 writes 25 C through `0x1A`
+because the board has no external panel temperature sensor, then uses `0x22=0xDF` to load
+OTP, perform a full refresh and shut down the pump without reading the absent sensor.
+This is a room-temperature bring-up configuration; other temperatures need validation.
+It omits SSD1680's `0x18` internal sensor selection, two-byte `0x21`, and `0x26` old RAM writes.
+
+The HINK A/0 manual specifies BUSY low, while the GDEH029A1 / GxEPD2_290 driver uses high.
+After checking the fitted panel, `-EpdBusyActiveLevel 1` (or the build macro
+`HEXWALLET_EPD_BUSY_ACTIVE_LEVEL=1`) selects high explicitly; firmware logs the selection.
+The complete marking `E029A01N16C355` has no independently verified datasheet here.
+Its suffix alone does not establish polarity, OTP contents or waveform compatibility.
+HINK's host LUT is 30 bytes; profile 3 currently supports full refresh only and rejects
+SSD1680's 159-byte partial waveform.
+
+Select profile 4 with `-E029A01N16C355`. The first frame after boot or wake uses a full refresh and seeds both RAM banks. Small changes use a byte-aligned window and the Waveshare V1 2.9-inch monochrome differential waveform. After activation and a completed BUSY cycle the driver writes the same window to the other bank. The board schedules a full refresh after eight partial updates. On COM6 the reinserted panel's RESET still reads high when driven low. BUSY polarity and visible full/partial refresh remain unverified on this assembly. [Reference waveform](https://github.com/waveshareteam/e-Paper/blob/master/Arduino/epd2in9/epd2in9.cpp)
+
+For the 24-pin FPC, align pin 1 with the C47 end of the socket. With respect to pin 17 (ground), verify the supply on pins 15 (VDDIO) and 16 (VCI). Pin 8 is grounded for 4-wire SPI. GPIO17 drives pin 10 (RES#); GPIO18 samples pin 9 (BUSY). The driver preloads RES# high, waits 200 ms, drives low for 10 ms, then drives high for 200 ms and checks for idle BUSY (high) before software reset `0x12`. These delays are driver settings. The manual specifies the electrical levels and order on pages 8, 18 and 23. At VDDIO = 3.3 V a scope at the pin 10 solder joint should show ≤0.66 V while asserted and ≥2.64 V after release. A successful visible frame also requires BUSY to go low during activation and return high.
+
+References: [HINK A/0 manufacturer manual mirror](https://github.com/ieiao/hanshow-2in9-epaper/blob/master/docs/HINK-E029A01-0629.pdf),
+[HINK hardware demo](https://github.com/ieiao/hanshow-2in9-epaper),
+[Zephyr E029A01 / SSD1608 mapping](https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/shields/waveshare_epaper/doc/index.rst).
 
 Rules the driver enforces:
 
@@ -52,8 +79,9 @@ Rules the driver enforces:
   panel state instead of leaving a half-updated screen.
 - Refresh timeouts are 45 s full / 4 s partial. That is a failure bound, not a measured refresh time.
 
-The approval barrier is released only after the refresh succeeds. A BUSY timeout or SPI failure
-never counts as "the transaction was displayed".
+The approval barrier is released only after refresh succeeds. A reset readback failure stops
+initialization and releases the reset output. BUSY must assert and then return idle. Failed reset,
+missing BUSY activity, timeout or SPI failure cannot release the approval barrier.
 
 With the display on the left and the bottom-side application keys facing the viewer, the PCB maps left to right to OK (GPIO30), Previous (GPIO31), Next (GPIO32) and Back (GPIO33). Previous and Next scroll long fields. OK selects Reject first. Select Approve and hold OK for 750 ms to authorize. Back rejects directly. A long press on the independent BOOT switch (GPIO35) controls USB data at runtime. Physical mounting awaits verification.
 
@@ -61,11 +89,9 @@ Board initialization owns `lv_init()`, the LVGL 9 millisecond callback, the disp
 
 ## Camera
 
-The OV9281 is a MIPI CSI-2 sensor with an SCCB control bus. Only the control side exists:
-`camera_probe()` reads the chip-id registers and returns one of four states —
-`NotConfigured`, `NoResponse`, `WrongSensor`, `PresentUnverified`. There is no "supported" state.
+The OV9281 connector shares GPIO10/11 with U2 and the RTC. FPC pads 2 and 3 carry SDA and SCL. The CSI clock and both data pairs connect through R32–R37. A USB-loaded SRAM probe on COM6 read chip ID `0x9281` at 7-bit address `0x60`.
 
-The `OV9281` footprint in PCB c26102103 shares GPIO10/11 with U2 and the RTC. Pads 2 and 3 carry SDA and SCL. The CSI clock and both data pairs reach the connector via R32–R37. The board 7 firmware currently reports `NotConfigured`. Sensor power-up, CSI capture and QR decoding from a captured frame still require hardware validation.
+The camera decoder accepts a 640 × 400 RAW8 frame. A synthetic BIP38 image reached the network selector in host tests. The c26102103 PCB connects U1 pin 73 (`VDDO_3`) to the 1.8 V PSRAM inputs. Board 7 therefore disables the camera's 2.5 V D-PHY supply request and reports capture unavailable. [Pin mapping and COM6 readback](validation.md#com6-bring-up)
 
 ## QR codes
 

@@ -2,6 +2,206 @@
 
 # HexWallet - validation
 
+## COM6 bring-up
+
+### 2026-11-24　N16 最终镜像与 USB 辅助启动复验
+
+用 `tools/start_p4_board7_usb.ps1 -Port COM6 -VerifyBuild build/p4-com6-n16-manual` 独立复验了 BUSY 低有效的最终应用（2,240,784 字节，SHA-256 `e8ddca0ee6faf768eb05219142017f577f481d6efcc2156857300dc611506e66`）。四段 ROM 校验全部匹配。应用打印 `e-paper BUSY active low`，随后在第一条屏幕 SPI 命令之前报告 `e-paper RESET stuck high (GPIO17, FPC pin 10)`；应用继续进入诊断模式。记录见 `build/audit-logs/panel-driver-final-assisted-verify.log`、`build/audit-logs/panel-driver-final-assisted-boot.log`。最终源代码的 ASan/UBSan 测试为 12/12，见 `build/audit-logs/panel-driver-manual-sanitized-test.log`。
+
+辅助启动脚本在 Windows 暂时打不开原生 USB 端口时会重试最初的芯片身份读取。模拟测试覆盖短暂丢失端口后恢复、板卡身份不符时停止、稳压器寄存器写失败时停止。实板辅助启动成功。完全断电后，当前 U7 的供电接线仍依赖辅助启动。
+
+### 2026-11-24　按用户提供的 HINK A/0 手册复核复位
+
+附件 `HINK-E029A01-0629.pdf` 的 SHA-256 为 `234366db11036ab6dfe71d1768ebd79e9901fb2ca970be1f7bece9272fe05071`。第 7–8 页将 10 脚定义为低有效 RES#，9 脚定义为低忙、高空闲的 BUSY，8 脚接地选择四线 SPI。重新解析所附 EDA 主板网表，EINK_RST 只有 U1.18 与屏座 10 两个器件焊盘，EINK_BUSY 连接 U1.19 与屏座 9。ESP32-P4 封装表将 U1.18、U1.19 分别列为 GPIO17、GPIO18。
+
+按该手册将 N16 配置的默认 BUSY 修正为低有效，GPIO17 先以输入模式预装高电平再打开输出。主机测试独立模拟低忙、高空闲以及输出锁存器上电为低的情况，12/12 项通过。COM6 的 SRAM 探针在拉低 1 ms 后采样：`profile=04 busy_active=00 rst_low=01 rst_latch/oe/gpio/hold=00010100`。输出寄存器为 0，输出已使能并由 GPIO 控制，推挽路由与输入采样均启用，单引脚保持位为 0，焊盘输入仍为 1。探针随即释放输出，弱上拉／弱下拉均读高 (`0101`)，屏幕命令与 BUSY 周期检测均未执行。日志见 `build/audit-logs/com6-n16-manual-probe.log` 和 `com6-n16-manual-ctest.log`。
+
+接收端验收点在屏座第 10 脚，示波器地接第 17 脚。按第 18 页，VIL ≤ 0.2 × VDDIO，VIH ≥ 0.8 × VDDIO；VDDIO 应在第 15 脚实测。若需用电阻档定位，先断开 USB 和电池，比较不插排线、插排线时第 10 脚到板上 3.3 V 的稳定电阻。光学首帧、连续局刷和唤醒后首帧仍待真实复位成功后验证。
+
+正式固件仅更新 COM6 的 `0x10000` 应用分区，2,240,784 字节，SHA-256 `e8ddca0ee6faf768eb05219142017f577f481d6efcc2156857300dc611506e66`。ROM 对四段镜像的摘要均匹配。辅助启动实录先打印 `e-paper BUSY active low`，随后报告 `e-paper RESET stuck high (GPIO17, FPC pin 10)`，在初始化及首帧前退出。原始记录为 `build/audit-logs/com6-n16-manual-write.log`、`com6-n16-manual-verify.log` 和 `com6-n16-manual-boot.log`。
+
+### 2026-11-24 22:09　HINK 驱动复核与新版应用实测
+
+复核了 A/0 手册中的四线 SPI 时序、128 × 296 黑白显存窗口和全刷顺序。Arduino-ESP32 3.3.13 的 `spiWriteNL` 从源地址按整字取数。屏驱动现将数据分段复制到对齐缓冲区，填零尾字，并按实际长度发送。HINK 命令和数据的 D/C、CS 切换保留 1 µs 建立和保持时间。写 HINK 显存、波形表和进入休眠前先等待 BUSY 空闲，发送刷新激活命令后要求观察到本次 BUSY 生效、释放。
+
+Release 和 ASan/UBSan 主机测试各通过 12/12。测试从 LVGL 首帧核对了 4,736 个面板数据字节，覆盖非对齐源地址跨两个 64 字节块、尾字节、片选故障、BUSY 卡住和遗留 BUSY 脉冲。两次测试记录分别在 `build/audit-logs/panel-driver-audit-ui-tests.log` 和 `build/audit-logs/panel-driver-audit-ui-sanitized-tests.log`。
+
+沿用板上 E029A01N16C355 档 4，仅写 `0x10000` 应用区。新版应用长 2,240,768 字节，SHA-256 为 `31026b19e5bb92dbf83c40752be237b80e33007dbcd82fa8f34ff2f407fd71e5`。写后校验阶段串口报错，随后独立连接 ROM，四段镜像逐段校验均匹配，辅助启动成功。新版应用仍报告 `e-paper RESET stuck high (GPIO17, FPC pin 10)`，在首次屏幕 SPI 命令之前退出。板上首帧、BUSY 极性和局刷光学效果仍待测。写入、独立校验和启动记录在 `build/audit-logs/panel-driver-review-write.log`、`build/audit-logs/panel-driver-review-verify.log`、`build/audit-logs/panel-driver-review-boot.log`。
+
+### E029A01 排线照片核对（2026-11-24）
+
+用户提供的照片可见 `E029A01-FPC-A1`、`SYX 1553`、`Date:20151223`。按照片中文字正读、金手指朝下的视角，最左为 1 脚、最右为 24 脚。用户报告的 `E029A01N16C355` 为面板标记；此图显示的是排线丝印，未拍到 PCB 屏座。按 E029A01 A/0 手册第 7 页及本板网表，9 脚为 BUSY，10 脚为低有效 RESET，12 脚为低有效 CS。PCB 屏座的 1 脚在 C47 一端，24 脚在 C42 一端。
+
+公开拆机示例记载的丝印为 `HINK-E029A01-FPC-A1`。其 MSP430 示例以 `(P2IN & BIT5) == 1` 等待 BUSY，BIT5 掩码为 `0x20`，表达式在两种电平下均为假，不能用该示例确认 BUSY 极性。当前 COM6 证据停在 RESET 拉低失败，尚无成功复位后的 BUSY 波形。[拆机记录与示例](https://github.com/ieiao/hanshow-2in9-epaper/blob/master/main.c) · [E029A01 A/0 手册](https://github.com/ieiao/hanshow-2in9-epaper/blob/master/docs/HINK-E029A01-0629.pdf)
+
+### 2026-11-24　重新插入 E029A01N16C355 黑白屏
+
+用户确认此次面板完整标记为 `E029A01N16C355`。重新插屏后，在 COM6 先以 HINK 系列探针配置复测，再以 `-E029A01N16C355` 的档 4 探针独立复测，结果一致。后一次 MCU 实测为 `CS_GPIO idle/panel/nfc/idle=03010203`，以及 `PANEL=RESET_STUCK_HIGH profile=04 busy_active=01 rst_low=01 released_rst_pullup/pulldown=0101`。RESET 拉低 2 ms 后仍读高，切回输入并分别施加内部弱上拉、弱下拉均读高。先前同板拔屏的驱低、驱高读数为 `00`、`01`。本次尚未进入屏幕软件复位或刷新，BUSY 高有效是参考配置值。原始记录见 `build/audit-logs/n16-config-probe.log`、`n16-reseat-probe.log`、`com6-epd-fpc-removed.log`。
+
+EDA 工程中屏座为华明通 `FPC0.5-WFB11-24P111-H20`（C42407951，0.5 mm、24 针、上下双侧触点）。在 PCB 顶视图中 1 脚靠 C47 一端，24 脚靠 C42 一端；第 10 脚为 RESET，第 15、16 脚接 3.3 V，第 17 脚接地。RESET 靠屏座的过孔中心位于工程坐标 `(2955,-590)`，距第 10 脚焊盘中心约 1.42 mm。优先断电比较插、拔排线时第 10 脚到 3.3 V 的稳定电阻，并按 1 脚对位核对排线。当前缺少屏座接收端的实测电阻和波形。
+
+档 4 按同系列参考实现了 30 字节差分 LUT、窗口局刷、两份 RAM 同步及唤醒首帧全刷，BUSY 完成前保持本地批准锁定。12/12 个主机测试通过；`board_p4_n16c355` 连续三次切换同一窗口的黑白状态，并检查写入另一份 RAM 的像素字节。日志为 `build/audit-logs/n16-final-ctest.log`。待实屏验证的项目包括 BUSY 极性、首帧、连续黑白切换的残影、窗口外像素及休眠恢复。波形来源：[微雪 2.9 英寸黑白 V1](https://github.com/waveshareteam/e-Paper/blob/16d3b59ae20b55cc8672d3f0cdb8f8ce568a65c7/Arduino/epd2in9/epd2in9.cpp)。
+
+本次只写 `0x10000` 的应用分区，镜像长 2,240,496 字节，SHA-256 为 `4d1c5b527384e62a32e1980d156171389fe70ba9f0045e55136ef5c960dd8584`，ROM 校验四段镜像均匹配。固件启动时打印 `E029A01N16C355, E029A01 family reference, 2 MHz, OTP full / 30-byte partial`，随后报告 `e-paper RESET stuck high (GPIO17, FPC pin 10)`，未进入首帧。详见 `build/audit-logs/n16-config-write.log`、`n16-config-verify.log`、`n16-config-boot.log`。
+
+### 2026-11-24 屏幕与 PN7161 片选实测
+
+核对用户提供的 `ProPrj_c26102103_2026-10-28.epro2` 主 PCB，按封装焊盘、铜线和过孔追踪，`EINK_CS` 从 U1.17（GPIO16）接到屏座第 12 脚，`SPI_NSS` 从 U1.14（GPIO13）接到 U3.1，`EINK_RST` 从 U1.18（GPIO17）接到屏座第 10 脚。三条布线各经过两个过孔。
+
+COM6 的 SRAM 探针保持 SCK、VEN 为低，依次测得 `CS_GPIO idle/panel/nfc/idle=03010203`。按 `(EINK_CS, SPI_NSS)` 顺序，MCU 焊盘读回 `(1,1)`、`(0,1)`、`(1,0)`、`(1,1)`。随后 PN7161 的三次 SPI 写方向握手均读到 `00`，屏幕探针驱低 RESET 后仍读回 `1`，停止发送面板命令。负载端焊脚波形待实测。记录见 `build/audit-logs/com6-cs-probe.log`。
+
+屏幕和 NFC 驱动在 SPI 事务锁内核对片选电平，选通失败时停止发时钟，释放失败时向调用方返回错误。`build/audit-ui` 的 Release CTest 11/11 通过，包括片选驱动与释放故障的注入测试。HINK 应用镜像 `build/p4-com6-hink-cs/HexWallet.ino.bin` 长 2,240,224 字节，SHA-256 为 `766f046280d0c3ca6fa4557bdf997d66ce06f08dc8f1d1231077ad81798fe18c`。
+
+仅更新 COM6 的 `0x10000` 应用区后，ROM 校验四段固件均匹配。辅助启动后的应用仍报 `e-paper RESET stuck high (GPIO17, FPC pin 10)`，在屏幕 SPI 命令前退出。PN7161 应用驱动报告 `CORE_INIT failed`，本次启动日志未报告片选电平异常。写入、校验、启动原始记录分别为 `build/audit-logs/com6-cs-write.log`、`com6-cs-verify.log`、`com6-cs-boot.log`。
+
+### 2026-11-24 HINK 专用 SRAM 程序复核片选与 RESET
+
+COM6 上运行以 `-HinkE029A01` 构建的 SRAM 程序，日志见
+`build/audit-logs/com6-hink-cs-reset-bias.log`。在不发 SPI 时钟的情况下，两路
+片选的管脚读回顺序为 `03010203`。按（屏幕 GPIO16，NFC GPIO13）表示，
+依次为（高，高）、（低，高）、（高，低）、（高，高）。接收端的实物焊盘尚未测量。
+
+程序报告 `RESET_STUCK_HIGH profile=03 busy_active=00 rst_low=01`。
+释放 GPIO17 再施加内部弱上拉、弱下拉，两种情况下均读高
+（`released_rst_pullup/pulldown=0101`）。程序在发送屏幕软件复位命令之前退出，
+本轮无 BUSY 响应或刷新结果。此前拔屏时 RESET 低/高读回为 0/1，见
+`build/audit-logs/com6-epd-fpc-removed.log`。需要在实物插座定位故障，
+GPIO 读回无法区分排线对位、接触异常、焊接短路或面板损伤。
+
+独立的 NFC SRAM 测试三次读回方向字节 `00`，本轮 SE 地址有 ACK 但 T=1 读超时，
+摄像头未返回完整 ID。应用回归中的 HINK、两种 BUSY 极性、共享总线初始化顺序与 NFC
+测试共六项通过，见 `build/audit-logs/hink-cs-regression.log`。
+
+### 2026-11-24 21:24 USB 重连后的显示复测
+
+COM6 仍为同一块 ESP32-P4 v3.2。重连后被动监听和 `status` 均无回复，应用在重连瞬间的启动状态未知。此次进入 ROM 后、运行辅助供电脚本前，已读出 Winbond `EF 40 17`（8 MiB）。辅助启动时 HINK 固件四段摘要全部匹配。应用再次报告 `ERR: e-paper RESET stuck high (GPIO17, FPC pin 10)`，在发送刷新命令前停止初始化。
+
+复核主 PCB 工程 `ProPrj_c26102103_2026-10-28.epro2`，`EINK_RST` 网络只有 U1.18（GPIO17）和屏座第 10 脚两个焊盘。屏座第 9、11 脚分别是 BUSY、D/C，第 15、16 脚接 3.3 V。此前插屏时 GPIO17 驱低／驱高分别读回 1／1，拔屏后分别为 0／1。屏座处的实际电压、排线 1 脚是否对齐，以及插屏和拔屏时 RESET 对 3.3 V 的断电电阻仍待现场确认。
+
+本次记录见 `build/audit-logs/com6-reconnect-20261124-212344-rom.log`、`com6-reconnect-20261124-212425-verify.log` 和 `com6-reconnect-20261124-212425-boot.log`。
+
+### 2026-11-24 再连接验收：HINK 固件一致，硬件故障仍在
+
+用户确认继续使用 HINK-E029A01、Flash 供电未改，实物没有画面。本轮重新读取
+COM6 身份为 ESP32-P4 v3.2 / `e8:f6:0a:ed:68:52`，USB Serial/JTAG。
+未经辅助供电时 ROM 的 Flash ID 仍是 `00:007f`；运行板级身份校验及临时供电
+脚本后识别为 Winbond `EF 40 17`、8 MiB。安全信息只读检查显示 Secure Boot
+和 Flash Encryption 均未启用，未烧写任何 eFuse。
+
+使用 Arduino-ESP32 3.3.13 重新构建 `-FlashSizeMiB 8 -UsbSerialJtag -HinkE029A01`。
+应用长度仍为 2,239,744 字节，SHA-256 为
+`0d65ea804409ecabaf2995d90b4c598c5d7bce28574ac409b2110c9bf9a78baa`。
+ROM `verify-flash` 对 `0x2000` 引导程序、`0x8000` 分区表、`0xe000` OTA 初始数据、
+`0x10000` 应用四段均返回 `Verification successful (digest matched)`。
+板上已是本轮构建的固件，因此没有重复擦写，未改变 NVS 或密钥分区。
+
+本轮重新编译并加载 SRAM 探测程序，带屏状态实测：
+
+| 检查 | 实测结果 | 能证明的范围 |
+| --- | --- | --- |
+| SE I2C / T=1 | `0x48 ACK`，`INTERFACE_RESET_OK` | 接口复位成功，不证明 SKU、开卡或签名可用 |
+| 摄像头 SCCB | `0x60`，ID `0x9281` | OV9281 身份读取成功，未验证 MIPI 图像采集 |
+| PN7161 | 三次 `SPI_DIRECTION_NOT_READY`，MISO `00`，IRQ `00` | 控制器通信未建立，RF 未验收 |
+| 屏幕 RESET | 输出低/高时读回 `01/01` | GPIO17 低电平未能建立，具体电气原因尚未定位 |
+| 屏幕 BUSY | 上拉/下拉均读 `00` | 没有有效刷新证据；不能据旧探测器的高有效假设确认 HINK 极性 |
+
+辅助启动后应用确认 HINK / 2 MHz / 25 ℃ OTP / BUSY 低有效，随即报
+`ERR: e-paper RESET stuck high (GPIO17, FPC pin 10)` 并停止面板初始化。
+同时报告 `diagnostic CLI only; protected credential storage unavailable`、
+配对存储不可用和 `nfc=init-failed detail=CORE_INIT failed`。串口公开状态命令未收到
+回复；当前应用要求实体 BOOT 长按开放 USB 数据，不能把无回复称为命令通过。
+本轮未验收独立冷启动、PSRAM 容量/压力测试、屏幕刷新、四键、RF、实拍扫码或钱包签名。
+代码的非主机 `WalletSession.cpp` 仍返回 `CustodyUnavailable`，修复硬件不等于补齐托管实现。
+
+日志：`build/audit-logs/p4-session-hink-build.log`、`com6-session-flash-id.log`、
+`com6-session-security-info.log`、`com6-session-probe.log`、
+`com6-session-assisted-power.log`、`com6-session-verify.log`、`com6-session-boot.log`。
+下一步为断开 USB 和电池后拔屏，再只接 USB 做 RESET / NFC 对照；等待现场操作确认。
+
+### 2026-11-24 HINK-E029A01 型号复核与驱动测试
+
+用户确认实物为黑白屏，标记 HINK-E029A01 / E029A01N16C355。此前微雪 G 型四色命令表不适用于
+该 HINK 型号。已核对 HINK A/0 手册第 8、11–16、19 页：128×296、1bpp、低有效 RESET、
+手册定义 BUSY 低有效、30 字节主机 LUT，以及 250 ns 最小时钟周期。原厂手册副本位于
+`build/hink-reference/HINK-E029A01-0629.pdf`，SHA-256 为
+`234366db11036ab6dfe71d1768ebd79e9901fb2ca970be1f7bece9272fe05071`。
+
+档 3 采用手册规定的 `0x0C=CF CE 8D`、`0x3A=1A`、`0x3B=08`，通过 `0x1A=19 00`
+提供室温值，用 `0x22=DF` 加 `0x20` 加载 OTP 并全刷。板上 TSCL/TSDA 未接外部温度计，
+故跳过外部温度读取。该路径不使用 SSD1680 的内置温度选择和旧 RAM 指令，也不接受其 159 字节
+局刷表。HINK 主机局刷波形尚未实现。GDEH029A1 参考驱动的 BUSY 极性与 HINK 手册相反，
+因此提供显式 `HEXWALLET_EPD_BUSY_ACTIVE_LEVEL` 配置；没有据此认定实装屏属于某个变体。
+
+`ctest --test-dir build/audit-ui -C Release --output-on-failure`：11/11 通过。新增 HINK 的
+低/高有效 BUSY 板级测试，覆盖实际 LVGL 帧转换、相同帧跳过、全刷退路、休眠恢复、NFC 共用总线、
+RESET 两种卡死电平、BUSY 超时/不响应，以及失败时批准屏障保持关闭。面板自测还拒绝不匹配的
+SSD1680 波形表，检查 HINK 只发送一份 4736 字节 RAM。模拟测试不代表实物显示已经成功。
+
+更新前通过辅助启动脚本再次核对 COM6 的四段 Flash，全部摘要匹配旧的 `build/p4-com6-8m-usb`。
+旧应用重启仍报告 `ERR: e-paper BUSY did not assert after refresh`。日志为
+`build/audit-logs/com6-hink-preflight.log` 和 `com6-hink-old-boot.log`。
+
+HINK 的 8 MiB / USB Serial-JTAG 应用构建通过，文件为
+`build/hexwallet-p4-v3-8mb-usb-hink/HexWallet.ino.bin`，长度 2,239,744 字节，SHA-256 为
+`0d65ea804409ecabaf2995d90b4c598c5d7bce28574ac409b2110c9bf9a78baa`。
+构建脚本验证了镜像芯片/容量/版本范围、ELF 摘要、分区表和工厂镜像布局。
+新旧引导程序、分区表、OTA 初始数据的摘要一致。
+
+首次写入因 USB 下载复位清除临时 Flash 供电而失败（`Failed to communicate with the flash chip` / `0106`），
+记录在 `build/audit-logs/com6-hink-write.log`。辅助脚本新增 `-StayInBootloader`：完成身份、校准字、
+JEDEC ID 检查并启用供电后保留 ROM 下载模式。紧接着的 esptool 操作必须用 `--before no-reset`，
+避免再次清掉供电配置。此选项仅供这块经过身份检查的装配使用。
+
+恢复供电并保持下载模式后，用 ROM 的未压缩写入路径将应用写至 `0x10000`；2,239,744 字节
+写入完成，设备摘要校验通过，见 `build/audit-logs/com6-hink-write-powered.log`。
+实际插屏型号经用户再次确认为 HINK-E029A01。
+P4 真实 Arduino-ESP32 3.3.13 头文件编译检查也通过，包括显示档位 0/1/2/3 和 LVGL UI。
+脚本增加 `-LvglSourceDirectory`，本机使用 `build/audit-arduino/libraries/lvgl`。
+原有 UI 的 LVGL 枚举位运算产生弃用警告，无编译错误；日志为 `build/audit-logs/p4-hink-runtime-compile.log`。
+
+新应用写入后的四段 ROM 摘要校验全部匹配，辅助启动后串口明确报告 HINK / 2 MHz / 25 ℃ OTP / BUSY 低有效，
+紧接着是 `ERR: e-paper RESET stuck high (GPIO17, FPC pin 10)`。初始化立即失败，未发送刷新；
+没有取得屏幕显示成功的证据。新代码把这个故障传播为 `ResetFault`，显示批准保持不可用。
+日志为 `build/audit-logs/com6-hink-verified-boot.log` 和 `com6-hink-boot.log`。
+
+结合此前插屏时 RESET 拉低仍读高、拔掉排线后能正常拉低的记录，当前排查重点为带屏负载下的 RESET
+电气路径：断电检查排线接触面、是否偏位、FPC 座触点；测 GPIO17 到 FPC 第 10 脚的连通，
+以及 RESET 与相邻脚/3V3 的异常短接。不能仅凭 GPIO 读回确定是排线、座子、PCB 还是面板损坏。
+BUSY 极性和实际全刷效果仍需 RESET 恢复后验证；本次没有宣称屏幕已修复。
+
+### 华邦 W25Q64JV 刷写与断电复测
+
+用户提供的 `W25Q64JV.PDF` 将顶标 `25Q64JVSIQ` 对应到 `W25Q64JVSSIQ`，容量 64 Mbit（8 MiB），电压 2.7–3.6 V。临时开启 U1 第 74 脚的 3.3 V 输出后，ROM 稳定读出 `EF 40 17` 和 SFDP 签名 `53 46 44 50`。原分区表扇区为空白。
+
+已将 8 MiB 版的引导程序、分区表、OTA 启动数据和应用分段写入 U7，从设备读回的四个文件均与本地文件逐字节一致。应用长 2,238,624 字节，SHA-256 为 `e008d2e7324be306891dcdbc4b27df9e3787adb77ebb81ede11a2b1a4f6e60fb`。USB 硬复位后应用打印 `INFO: display 296x128 (HexWallet P4 E-Paper 2.9)` 和诊断 CLI 启动信息。第一次启动报 PSRAM 未连接。启动日志报告安全凭据存储不可用及 PN7161 `CORE_INIT failed`。屏幕显示效果需要现场观察。
+
+用户切断 USB 和电池供电并重新上电后，ROM 在 `SPI_FAST_FLASH_BOOT` 中重复报告 `invalid header`，U1 第 74 脚对应稳压器 XPD=0。通过 USB 重新启用 Flash 供电，ROM 再次核对四段固件摘要，全部匹配。为 PSRAM 的实际供电通道加载本机 1.8 V 校准配置后，USB 复位启动再次进入 HexWallet。独立冷启动仍受挂接在默认关闭输出上的 U7 供电限制。
+
+已在此机测试 `powershell -ExecutionPolicy Bypass -File tools/start_p4_board7_usb.ps1`。脚本核对芯片身份、校准字和 Flash ID，配置易失的稳压器寄存器并复位。可选的 `-VerifyBuild build/p4-com6-8m-usb` 在复位前逐段校验 Flash 摘要。记录位于 `build/audit-logs/com6-w25q64-{write,readback,cold-start,assisted-boot}.log`。[USB 辅助启动脚本](../tools/start_p4_board7_usb.ps1)
+
+### 启动 Flash 的供电复核
+
+原始工程 `ProPrj_c26102103_2026-10-28.epro2` 与 `C26102103_R4.epro2` 的主 PCB 焊盘记录一致。下表按 ESP32-P4 封装脚号列出稳压器输出。板上的 `VO1` 至 `VO4` 是网络名称。
+
+| U1 输出脚 | 芯片定义 | PCB 网络 | 同网负载 |
+| --- | --- | --- | --- |
+| 71 | `VDDO_FLASH` | `VO4` | U1.85 `VDD_IO_5` |
+| 72 | `VDDO_PSRAM` | `VO3` | U1.41 `VDD_MIPI_DPHY` |
+| 73 | `VDDO_3` | `VO2` | U1.59、67，1.8 V PSRAM 电源 |
+| 74 | `VDDO_4` | `VO1` | U1.30 `VDD_FLASHIO`、U7.8 `VCC` |
+
+按原始 PCB 的铜线、过孔和焊盘复核，上表每一行的焊盘均在同一条导电路径上。U1 至 U7 的六根 SPI 信号线也分别连通。`build/audit-logs/board7-flash-rail-routing.log` 列出了每个网络的焊盘。这是设计文件的连通性结果，实板电压要在通电时测量。
+
+ROM 执行 `flash-id` 后保持在下载模式。随后通过 `--before no-reset --after no-reset --no-stub read-mem` 读取 PMU。Flash 稳压器控制字 `0x501151b8` 为 `0x00200100`（XPD=1），供 U7 的第 4 路控制字 `0x501151d8` 为 `0x40200000`（XPD=0）。Flash ID 仍为 `00:007f`。日志位于 `build/audit-logs/com6-flash-power-readback.log`。实板 U7 顶部料号和 U7.8 相对 U7.4 的电压仍待现场确认。按乐鑫参考接法，U7 与 `VDD_FLASHIO` 在 ROM 读片前由 `VDDO_FLASH` 供电。[芯片资料](https://documentation.espressif.com/esp32-p4_datasheet_en.html) · [供电设计指南](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32p4/schematic-checklist-esp32p4.html#internal-voltage-regulators-and-external-dcdc)
+
+板 7 保留 OV9281 的 SCCB 身份读取。当前接线上的第 3 路为 PSRAM 供电，固件禁用原来请求该路 2.5 V 的 CSI 采集路径。该路径只适用于已核实 D-PHY 独立供电通道的板型。
+
+2026-11-24，esptool 5.3.1 经原生 USB Serial/JTAG 识别出 ESP32-P4 v3.2。ROM 和 stub 均读到 Flash ID `00:007f`，SFDP 起始字节为 `00 7f ff ff`。没有取得可用容量，本次未擦写 NOR。附件主 PCB 的 U7 标注为 WT25Q64X（64 Mbit）。`ESP32-P4NRW32X` 的 32 MB 指封装内 PSRAM，用户拟装的外置 NOR 应按实装料号和 JEDEC ID 确定容量。
+
+SRAM 诊断实测中，OV9281 在 `0x60` 两次返回 `0x9281`。U2 在 `0x48` 先后出现应答后读超时、三次无应答、T=1 接口复位成功（含 CRC 校验）的结果。PN7161 的三次 SPI 选择均读到 `00`，没有收到就绪字节 `ff`。在保持 NFC 片选为高时单独发送屏幕软复位，未观察到 BUSY 有效沿。尚未验证屏显、RF 读卡、卡内签名或实拍扫码。复现入口见[诊断程序](../tools/p4_ram_probe/README.md)。
+
+最后一次硬复位后，ROM 选择 `SPI_FAST_FLASH_BOOT`，报告 `invalid header: 0xff7f0000` 和 `HP_SYS_HP_WDT_RESET`。本轮生成的 USB Serial/JTAG 32 MiB 配置应用为 2,294,768 字节，SHA-256 为 `e6d9f709bb2bebd15cd643f92e45f01616d6bddc9bb21c44de38440a1dd7209e`。诊断记录位于 `build/audit-logs/com6-*.log`。
+
 ## 2026-11-24　四键备份、Type 4 标签及 132 张主机画面
 
 Release 和 ASan/UBSan 的 UI/NFC 测试各通过 8/8。两种界面语言均用公开的英文词句，以四键走完 12、15、18、21、24 词的创建、重输及恢复提交。真实密码实现通过三种词表的 ethers 对照和 9 个 BIP38 官方向量。主机注入 scrypt 工作区分配失败，分别在运行中及结果待领取时取消，检查工作区释放前已清零，任务可再次提交。生产策略仍要求安全托管。
