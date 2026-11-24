@@ -18,6 +18,10 @@ constexpr size_t kLinkMaxFrameSize =
     kLinkHeaderSize + kLinkMaxPayload + 32;
 constexpr uint32_t kLinkSessionTimeoutMs = 3UL * 60UL * 1000UL;
 constexpr uint32_t kLinkMaxFramesPerSession = 4096;
+// Binary QR enrollment records: magic HWQP, version 1, role, two zero bytes,
+// then fixed-size fields and an Ed25519 signature. Never carry wallet secrets.
+constexpr size_t kPairingOfferSize = 136;
+constexpr size_t kPairingReplySize = 168;
 
 enum class WalletLinkType : uint8_t {
   PairRequest = 0x01,
@@ -83,6 +87,11 @@ class WalletLinkDevice {
   void reset_session();
   void reset_pairing();
 
+  // Trusted local actions only. The offer is displayed on the device; reply
+  // bytes must come from its camera, never a USB/NFC request claiming a scan.
+  bool begin_pairing_offer(uint32_t now_ms, uint8_t *out, size_t capacity);
+  bool accept_pairing_scan(const uint8_t *reply, size_t size, uint32_t now_ms);
+
   WalletLinkStatus receive(const uint8_t *frame, size_t frame_size,
                            uint32_t now_ms, uint8_t *response,
                            size_t response_capacity, size_t *response_size);
@@ -126,7 +135,9 @@ class WalletLinkDevice {
   bool have_phone_;
 
   bool pairing_pending_;
-  bool pairing_confirmed_;
+  bool pairing_offer_active_;
+  bool pairing_scan_verified_;
+  uint8_t pairing_offer_hash_[32];
   uint32_t pairing_started_ms_;
   uint8_t pairing_phone_[32];
   uint8_t pairing_nonce_[32];

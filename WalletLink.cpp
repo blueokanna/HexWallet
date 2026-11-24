@@ -186,7 +186,8 @@ namespace hexwallet
   WalletLinkDevice::WalletLinkDevice()
       : callbacks_{}, context_(nullptr), initialized_(false), identity_seed_{},
         identity_public_{}, phone_public_{}, have_phone_(false),
-        pairing_pending_(false), pairing_confirmed_(false),
+        pairing_pending_(false),
+        pairing_offer_active_(false), pairing_scan_verified_(false), pairing_offer_hash_{},
         pairing_started_ms_(0), pairing_phone_{}, pairing_nonce_{},
         session_active_(false), session_id_(0), tx_sequence_(0), rx_sequence_(0),
         frame_count_(0), last_activity_ms_(0), key_c2d_{}, key_d2c_{} {}
@@ -194,6 +195,7 @@ namespace hexwallet
   WalletLinkDevice::~WalletLinkDevice()
   {
     reset_session();
+    reset_pairing();
     secure_zero(identity_seed_, sizeof(identity_seed_));
   }
 
@@ -235,7 +237,9 @@ namespace hexwallet
   void WalletLinkDevice::reset_pairing()
   {
     pairing_pending_ = false;
-    pairing_confirmed_ = false;
+    pairing_offer_active_ = false;
+    pairing_scan_verified_ = false;
+    secure_zero(pairing_offer_hash_, sizeof(pairing_offer_hash_));
     pairing_started_ms_ = 0;
     secure_zero(pairing_phone_, sizeof(pairing_phone_));
     secure_zero(pairing_nonce_, sizeof(pairing_nonce_));
@@ -243,7 +247,7 @@ namespace hexwallet
 
   bool WalletLinkDevice::confirm_pairing(uint32_t now_ms)
   {
-    if (!pairing_pending_ || pairing_confirmed_)
+    if (!pairing_offer_active_ || !pairing_pending_ || !pairing_scan_verified_)
       return false;
     if (elapsed_at_least(now_ms, pairing_started_ms_, kPairingTimeoutMs))
     {
@@ -256,15 +260,56 @@ namespace hexwallet
       reset_pairing();
       return false;
     }
-    pairing_confirmed_ = true;
     memcpy(phone_public_, pairing_phone_, sizeof(phone_public_));
     have_phone_ = true;
+    reset_pairing();
+    return true;
+  }
+
+  bool WalletLinkDevice::begin_pairing_offer(uint32_t now_ms, uint8_t *out, size_t capacity)
+  {
+    if (!initialized_ || have_phone_ || session_active_ || pairing_offer_active_ ||
+        !out || capacity < kPairingOfferSize) return false;
+    reset_pairing();
+    const uint8_t header[] = {'H','W','Q','P',1,1,0,0};
+    memcpy(out, header, sizeof(header));
+    memcpy(out + 8, identity_public_, 32);
+    if (!random_fill_checked(out + 40, 32) ||
+        !sign_domain(identity_seed_, "HWPAIR1-OFFER", out, 72, out + 72) ||
+        !crypto_sha256(out, kPairingOfferSize, pairing_offer_hash_)) {
+      secure_zero(out, kPairingOfferSize);
+      reset_pairing();
+      return false;
+    }
+    pairing_started_ms_ = now_ms;
+    pairing_offer_active_ = true;
+    return true;
+  }
+
+  bool WalletLinkDevice::accept_pairing_scan(const uint8_t *reply, size_t size, uint32_t now_ms)
+  {
+    if (!initialized_ || !pairing_offer_active_ || have_phone_) return false;
+    if (elapsed_at_least(now_ms, pairing_started_ms_, kPairingTimeoutMs)) {
+      reset_pairing();
+      if (callbacks_.clear_pairing_prompt) callbacks_.clear_pairing_prompt(context_);
+      return false;
+    }
+    const uint8_t header[] = {'H','W','Q','P',1,2,0,0};
+    if (!reply || size != kPairingReplySize || memcmp(reply, header, sizeof(header)) ||
+        !crypto_constant_time_equal(reply + 8, pairing_offer_hash_, 32) ||
+        !verify_domain(reply + 40, "HWPAIR1-REPLY", reply, 104, reply + 104)) return false;
+    if (pairing_scan_verified_)
+      return crypto_constant_time_equal(reply + 40, pairing_phone_, 32) &&
+             crypto_constant_time_equal(reply + 72, pairing_nonce_, 32);
+    memcpy(pairing_phone_, reply + 40, 32);
+    memcpy(pairing_nonce_, reply + 72, 32);
+    pairing_scan_verified_ = true;
     return true;
   }
 
   bool WalletLinkDevice::pairing_pending() const
   {
-    return pairing_pending_ && !pairing_confirmed_;
+    return pairing_offer_active_;
   }
 
   bool WalletLinkDevice::session_active() const
@@ -280,7 +325,7 @@ namespace hexwallet
   bool WalletLinkDevice::tick(uint32_t now_ms)
   {
     bool changed = false;
-    if (pairing_pending_ && !pairing_confirmed_ &&
+    if (pairing_offer_active_ &&
         elapsed_at_least(now_ms, pairing_started_ms_, kPairingTimeoutMs))
     {
       reset_pairing();
@@ -348,7 +393,7 @@ namespace hexwallet
     }
     else
     {
-      if (pairing_pending_ &&
+      if (pairing_offer_active_ &&
           elapsed_at_least(now_ms, pairing_started_ms_, kPairingTimeoutMs))
       {
         // An abandoned pairing must not block the next legitimate attempt.
@@ -358,48 +403,38 @@ namespace hexwallet
           callbacks_.clear_pairing_prompt(context_);
         }
       }
+      // The transport cannot enroll its own key. It must match the reply
+      // observed by the trusted camera for the current device-generated offer.
+      if (!pairing_offer_active_ || !pairing_scan_verified_ ||
+          !crypto_constant_time_equal(phone_public, pairing_phone_, 32) ||
+          !crypto_constant_time_equal(phone_nonce, pairing_nonce_, 32))
+        return WalletLinkStatus::Rejected;
       if (pairing_pending_)
-      {
-        if (!crypto_constant_time_equal(phone_public, pairing_phone_, 32) ||
-            !crypto_constant_time_equal(phone_nonce, pairing_nonce_, 32))
-        {
-          // A third party must not be able to cancel the pairing that is
-          // already on screen, so the pending state is left untouched.
-          return WalletLinkStatus::Rejected;
-        }
-        if (!pairing_confirmed_)
-        {
-          return WalletLinkStatus::PendingPairing;
-        }
-      }
-      else
-      {
-        pairing_pending_ = true;
-        pairing_confirmed_ = false;
-        pairing_started_ms_ = now_ms;
-        memcpy(pairing_phone_, phone_public, 32);
-        memcpy(pairing_nonce_, phone_nonce, 32);
-        if (callbacks_.show_pairing_code != nullptr)
-        {
-          static const uint8_t kCodeLabel[] = "HWLK1-PAIR-CODE";
-          uint8_t code_input[sizeof(kCodeLabel) - 1 + 64];
-          memcpy(code_input, kCodeLabel, sizeof(kCodeLabel) - 1);
-          memcpy(code_input + sizeof(kCodeLabel) - 1, phone_public, 32);
-          memcpy(code_input + sizeof(kCodeLabel) - 1 + 32, identity_public_, 32);
-          uint8_t digest[32];
-          if (!crypto_sha256(code_input, sizeof(code_input), digest))
-          {
-            reset_pairing();
-            return WalletLinkStatus::RequestFailed;
-          }
-          const uint32_t code = ((static_cast<uint32_t>(digest[0]) << 16) |
-                                 (static_cast<uint32_t>(digest[1]) << 8) | digest[2]) % 1000000UL;
-          secure_zero(code_input, sizeof(code_input));
-          secure_zero(digest, sizeof(digest));
-          callbacks_.show_pairing_code(context_, pairing_phone_, code);
-        }
         return WalletLinkStatus::PendingPairing;
+      pairing_pending_ = true;
+      if (callbacks_.show_pairing_code != nullptr)
+      {
+        static const uint8_t kCodeLabel[] = "HWPAIR1-CODE";
+        uint8_t code_input[sizeof(kCodeLabel) - 1 + 96];
+        memcpy(code_input, kCodeLabel, sizeof(kCodeLabel) - 1);
+        memcpy(code_input + sizeof(kCodeLabel) - 1, phone_public, 32);
+        memcpy(code_input + sizeof(kCodeLabel) - 1 + 32, pairing_offer_hash_, 32);
+        memcpy(code_input + sizeof(kCodeLabel) - 1 + 64, pairing_nonce_, 32);
+        uint8_t digest[32];
+        const bool hashed = crypto_sha256(code_input, sizeof(code_input), digest);
+        secure_zero(code_input, sizeof(code_input));
+        if (!hashed)
+        {
+          secure_zero(digest, sizeof(digest));
+          reset_pairing();
+          return WalletLinkStatus::RequestFailed;
+        }
+        const uint32_t code = ((static_cast<uint32_t>(digest[0]) << 16) |
+                               (static_cast<uint32_t>(digest[1]) << 8) | digest[2]) % 1000000UL;
+        secure_zero(digest, sizeof(digest));
+        callbacks_.show_pairing_code(context_, pairing_phone_, code);
       }
+      return pairing_pending_ ? WalletLinkStatus::PendingPairing : WalletLinkStatus::Rejected;
     }
 
     uint8_t payload[kPairResponseSize];
@@ -896,6 +931,26 @@ namespace hexwallet
     WalletLinkDevice device;
     ok = ok && device.init(kDeviceSeed, callbacks, &store);
 
+    auto scan_pair = [&](WalletLinkDevice &target, uint32_t now) {
+      uint8_t offer[kPairingOfferSize], reply[kPairingReplySize] = {'H','W','Q','P',1,2,0,0};
+      if (!target.begin_pairing_offer(now, offer, sizeof(offer)) ||
+          !verify_domain(target.device_public_key(), "HWPAIR1-OFFER", offer, 72, offer + 72) ||
+          !crypto_sha256(offer, sizeof(offer), reply + 8)) return false;
+      memcpy(reply + 40, phone_public, 32);
+      memcpy(reply + 72, kPhoneNonce, 32);
+      if (!sign_domain(kPhoneSeed, "HWPAIR1-REPLY", reply, 104, reply + 104)) return false;
+      // Every byte is authenticated, including role/version/reserved bytes.
+      for (size_t i = 0; i < sizeof(reply); ++i) {
+        reply[i] ^= 1;
+        if (target.accept_pairing_scan(reply, sizeof(reply), now + 1)) return false;
+        reply[i] ^= 1;
+      }
+      if (target.accept_pairing_scan(reply, sizeof(reply) - 1, now + 1) ||
+          target.confirm_pairing(now + 1)) return false;
+      return target.accept_pairing_scan(reply, sizeof(reply), now + 1) &&
+             target.accept_pairing_scan(reply, sizeof(reply), now + 2);
+    };
+
     uint8_t pair_request[128];
     uint8_t pair_signed[64];
     memcpy(pair_request, phone_public, 32);
@@ -913,6 +968,9 @@ namespace hexwallet
                                         sizeof(frame), &frame_size);
     WalletLinkStatus status = device.receive(frame, frame_size, 1000, response,
                                              sizeof(response), &response_size);
+    ok = ok && status == WalletLinkStatus::Rejected && !device.pairing_pending() && !store.present;
+    ok = ok && scan_pair(device, 1000);
+    status = device.receive(frame, frame_size, 1003, response, sizeof(response), &response_size);
     ok = ok && status == WalletLinkStatus::PendingPairing && store.code != 0 &&
          device.pairing_pending() && memcmp(store.displayed_key, phone_public, 32) == 0;
 
@@ -943,6 +1001,7 @@ namespace hexwallet
     }
 
     ok = ok && !device.confirm_pairing(1000 + kPairingTimeoutMs) && !store.present;
+    ok = ok && scan_pair(device, 1500);
     status = device.receive(frame, frame_size, 1500, response, sizeof(response), &response_size);
     ok = ok && status == WalletLinkStatus::PendingPairing && device.confirm_pairing(1600) && store.present;
 
@@ -1037,6 +1096,7 @@ namespace hexwallet
       WalletLinkDevice fresh;
       PairStore fresh_store = {};
       ok = ok && fresh.init(kDeviceSeed, callbacks, &fresh_store);
+      ok = ok && scan_pair(fresh, 7000);
       static uint8_t fresh_frame[kLinkMaxFrameSize];
       size_t fresh_size = 0;
       ok = ok && wallet_link_frame_encode(WalletLinkType::PairRequest, 0, 0,

@@ -2,13 +2,13 @@
 
 The firmware embeds a 14 px, 1 bpp subset of Noto Sans CJK SC Regular. It falls back to LVGL's Montserrat 12 for ASCII. Both use a 16 px Chinese line box with baseline 3. Font data is licensed under [SIL OFL 1.1](OFL.txt); the original font's copyright name record reads `© 2014-2021 Adobe (http://www.adobe.com/).` No runtime font download is required.
 
-固件内置 14 px、1 bpp 的 Noto Sans CJK SC Regular 子集；ASCII 回退至 LVGL Montserrat 12。中文行高统一为 16 px、基线为 3。字库按 [SIL OFL 1.1](OFL.txt) 分发，运行时无需下载。当前包含 304 个中文及标点字形，只覆盖固件固定文案；不是任意中文输入字库。无法完整显示的交易审阅禁止批准。
+固件内置 14 px、1 bpp 的 Noto Sans CJK SC Regular 子集，ASCII 使用 LVGL Montserrat 12。中文行高为 16 px，基线为 3。生成器从界面文案、离线拼音候选和 BIP39 简繁中文词表提取字形。无法完整显示交易审阅内容时，固件禁止批准。字库沿用原字体的授权。[SIL OFL 1.1](OFL.txt)
 
 - Source / 来源: [NotoSansCJKsc-Regular.otf](https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf)
 - Revision / 固定提交: `523d033d6cb47f4a80c58a35753646f5c3608a78`
 - SHA-256: `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`
 - Converter / 转换器: `lv_font_conv@1.5.3` (its npm package bundles its dependencies)
-- Characters / 字符清单: [ui-characters.txt](ui-characters.txt), derived from `WalletUi.cpp` and `src/UiText.inc`
+- The [character list](ui-characters.txt) includes the UI strings, Pinyin candidates and both Chinese BIP39 wordlists.
 - Output / 生成文件: `src/generated/UiChineseFont.inc`, compiled through `WalletUiFont.cpp`
 
 Run from the repository root. / 在仓库根目录执行：

@@ -83,11 +83,11 @@ XRP/Kaspa 的 `chain_probe signing-audit all` 使用真实密码库，覆盖 22/
 
 在仓库根目录执行 `python tests/host/privacy/payment_interop.py --probe <chain_probe.exe>`。116 项检查覆盖 Ryo v3 收款与找零的两种顺序、uniform payment ID、单输入及双输入签名，以及 Zano post-HF6 普通输出构造与扫描。Ryo 签名前核对输入归属、环索引、金额、范围证明和分叉手续费下限。金额守恒且手续费少一个原子单位的付款在审阅时被拒绝。Zano 收款端核对显式原生资产及隐藏资产的 ID、金额与承诺。增加 `--oracle <privacy_oracle.dll>` 可用固定上游 MLSAG 实现验证每个夹具输入。Release 与 ASan/UBSan 均已通过。
 
-安装 `tests/host/protocol-oracles` 的锁定依赖后，`tests/host/privacy/address_interop.cjs` 可独立派生密钥、编码 CryptoNote Base58，核对手机 `ADDRESS` 返回值与屏幕回调。执行 `python tests/host/privacy/native_rpc_check.py --probe <chain_probe> --ryod <ryod> --ryo-validator <ryo-address-validator> --zanod <zanod>` 可复现官方发布程序的结果。脚本创建临时离线节点，检查 Ryo 创世状态提交失败且内存池为空。
+安装 `tests/host/protocol-oracles` 的锁定依赖后，`tests/host/privacy/address_interop.cjs` 验证 Ryo／Zano 手机 `ADDRESS` 请求在显示前被拒绝，再通过测试专用 `privacy-address` 命令核对底层编码器与独立密钥派生、CryptoNote Base58 的结果。执行 `python tests/host/privacy/native_rpc_check.py --probe <chain_probe> --ryod <ryod> --ryo-validator <ryo-address-validator> --zanod <zanod>` 可用官方发布程序复核编码器。脚本创建临时离线节点，检查 Ryo 创世状态提交失败且内存池为空。
 
 使用 `TEST_RYO_PHONE_PAYMENTS=ON` 构建专用探针，再运行 `python tests/host/privacy/ryo_ledger_check.py --probe <专用探针> --oracle <privacy_oracle.dll> --ryod <ryod> --wallet-rpc <ryo-wallet-rpc>`。官方节点确认单输入和双输入付款。官方只读钱包用收款查看密钥独立恢复两笔金额与 32 字节 payment ID。`phone_payment_check.py` 还覆盖拒绝、取消、超时、离场、一次性批准、费率上限及 16,384 字节应用帧。[回执](validation)
 
-安装 `tools` 的锁定依赖后，离线运行 `node tests/host/privacy/zano_ledger_check.cjs <chain_probe>`。夹具保存两笔 Zano 主网交易的原始字节和全部 48 条环记录。测试核对节点前缀哈希、费用、逐字节重编码、固件 CLSAG_GGX 验签及手机端整笔证明验证，拒绝每个截断位置及费用、环、签名和证明的篡改。发布目录对两种币开放地址。
+安装 `tools` 的锁定依赖后，离线运行 `node tests/host/privacy/zano_ledger_check.cjs <chain_probe>`。夹具保存两笔 Zano 主网交易的原始字节和全部 48 条环记录。测试核对节点前缀哈希、费用、逐字节重编码、固件 CLSAG_GGX 验签及手机端整笔证明验证，拒绝每个截断位置及费用、环、签名和证明的篡改。两种币的发布收款仍禁用，待完成签名准入和托管。
 
 以 `-DTEST_ZANO_PHONE_PAYMENTS=ON` 另建专用探针，运行 `node tests/host/privacy/zano_phone_check.cjs <专用探针> <默认探针>`，检查单输入及双输入付款的模拟批准和手机签后验证。`zano_private_ledger.py` 使用提前激活硬分叉的固定测试网节点，开采成熟输出，核对入池、入块和节点保存的交易字节。上游只读钱包用八字节 payment ID 独立检出两笔交易。完整命令见 `tests/host/privacy/README.md`。[回执](validation)
 

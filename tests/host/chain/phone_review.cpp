@@ -5,25 +5,34 @@
 #include <string>
 #include <vector>
 #include "ChainCommon.h"
+#include "CryptoExtended.h"
 #include "../../../WalletLinkService.cpp"
 
 namespace {
 uint32_t clock_ms = 1000;
 bool review_visible = false, low_battery = false;
+bool cli_review = false, totp_review = false, display_ready = true, display_present = true, usb_enabled = false;
 hexwallet::WalletUiDecisionCallback decision = nullptr;
 std::string review_text;
+std::string displayed_phone;
+uint32_t displayed_pair_code;
 int pair_status = ESP_OK, marker_status, phone_status, seed_status, commit_status;
+int open_status, set_status;
 nvs_type_t pair_type = NVS_TYPE_U8, seed_type = NVS_TYPE_BLOB;
 size_t seed_length = 32;
 bool invalid_page;
 unsigned handles, writes;
 }
 
-int nvs_open(const char *, int, nvs_handle_t *handle) { *handle = ++handles; return ESP_OK; }
+int nvs_open(const char *, int, nvs_handle_t *handle) {
+  if (open_status != ESP_OK) return open_status;
+  *handle = ++handles;
+  return ESP_OK;
+}
 void nvs_close(nvs_handle_t) { if (handles-- != 1) abort(); }
 int nvs_commit(nvs_handle_t) { return commit_status; }
 int nvs_get_stats(const char *, nvs_stats_t *) { return invalid_page ? -1 : ESP_OK; }
-int nvs_set_blob(nvs_handle_t, const char *, const void *, size_t) { ++writes; return ESP_OK; }
+int nvs_set_blob(nvs_handle_t, const char *, const void *, size_t) { ++writes; return set_status; }
 int nvs_find_key(nvs_handle_t, const char *key, nvs_type_t *type) {
   if (invalid_page) return ESP_ERR_NVS_NOT_FOUND;
   const bool paired = !strcmp(key, "paired"), seed = !strcmp(key, "id_seed");
@@ -92,16 +101,145 @@ int phone_storage_test() {
   return 0;
 }
 
+int phone_pairing_ui_test() {
+  using namespace hexwallet;
+  uint8_t phone[32];
+  for (size_t i = 0; i < sizeof(phone); ++i) phone[i] = static_cast<uint8_t>(i);
+  show_pairing_code(nullptr, phone, 123456);
+  if (displayed_phone != "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" ||
+      displayed_pair_code != 123456 || decision != pair_decision) return 1;
+  decision(false);
+  if (decision) return 1;
+  puts("phone-pairing-full-identity=pass");
+  return 0;
+}
+
+int phone_pairing_lifecycle_test() {
+  using namespace hexwallet;
+#define PAIR_CHECK(expr) do { if (!(expr)) { fprintf(stderr, "pairing lifecycle line %d: %s\n", __LINE__, #expr); return 1; } } while (0)
+  // Public identities and a simulated camera/UI; actual service, NVS error
+  // handling, APDU ownership and protocol signature checks run unchanged.
+  const uint8_t phone_seed[32] = {0x42}, other_device_seed[32] = {0x73};
+  uint8_t phone[32], offer[kPairingOfferSize], reply[kPairingReplySize] = {'H','W','Q','P',1,2,0,0};
+  uint8_t request[128], frame[256], response[256];
+  size_t frame_size = 0, response_size = 0;
+  auto sign_fields = [&](const char *label, const uint8_t *fields, size_t size, uint8_t *signature) {
+    std::vector<uint8_t> message(label, label + strlen(label));
+    message.insert(message.end(), fields, fields + size);
+    return ed25519_sign(phone_seed, message.data(), message.size(), signature);
+  };
+  PAIR_CHECK(ed25519_public_key(phone_seed, phone));
+  memcpy(reply + 40, phone, 32);
+  memset(reply + 72, 0x19, 32);
+  memcpy(request, reply + 40, 64);
+  PAIR_CHECK(sign_fields("HWLK1-PAIR", request, 64, request + 64));
+  PAIR_CHECK(wallet_link_frame_encode(WalletLinkType::PairRequest, 0, 0, request, sizeof(request), frame, sizeof(frame), &frame_size));
+  pair_status = phone_status = ESP_ERR_NVS_NOT_FOUND;
+  PAIR_CHECK(wallet_link_service_init());
+  auto send = [&] { return link.receive(frame, frame_size, clock_ms, response, sizeof(response), &response_size); };
+  auto offer_reply = [&] {
+    return wallet_link_service_pairing_offer(offer, sizeof(offer)) &&
+           crypto_sha256(offer, sizeof(offer), reply + 8) &&
+           sign_fields("HWPAIR1-REPLY", reply, 104, reply + 104);
+  };
+  auto begin_review = [&] {
+    return offer_reply() && wallet_link_service_pairing_scan(reply, sizeof(reply)) &&
+           send() == WalletLinkStatus::PendingPairing && decision == pair_decision;
+  };
+  auto closed = [&] { return !wallet_link_service_pairing_pending() && !decision && !handles && send() == WalletLinkStatus::Rejected; };
+  for (bool *blocked : {&cli_review, &totp_review}) {
+    *blocked = true;
+    PAIR_CHECK(!offer_reply());
+    *blocked = false;
+  }
+  for (bool *required : {&display_ready, &display_present}) {
+    *required = false;
+    PAIR_CHECK(!offer_reply());
+    *required = true;
+  }
+  PAIR_CHECK(offer_reply());
+  for (bool *blocked : {&cli_review, &totp_review}) {
+    *blocked = true;
+    PAIR_CHECK(!wallet_link_service_pairing_scan(reply, sizeof(reply)));
+    *blocked = false;
+  }
+  // A correctly signed phone reply for one device is invalid for another.
+  WalletLinkDevice other_device;
+  uint8_t other_offer[kPairingOfferSize];
+  PAIR_CHECK(other_device.init(other_device_seed, {}, nullptr) && other_device.begin_pairing_offer(clock_ms, other_offer, sizeof(other_offer)));
+  PAIR_CHECK(!other_device.accept_pairing_scan(reply, sizeof(reply), clock_ms));
+  PAIR_CHECK(send() == WalletLinkStatus::Rejected && !decision && !writes);
+  PAIR_CHECK(wallet_link_service_pairing_scan(reply, sizeof(reply)));
+  PAIR_CHECK(send() == WalletLinkStatus::PendingPairing && decision);
+  decision(false);
+  PAIR_CHECK(closed() && !writes && !wallet_link_service_pairing_scan(reply, sizeof(reply)));
+
+  for (int *failure : {&open_status, &set_status, &commit_status}) {
+    PAIR_CHECK(begin_review());
+    *failure = -1;
+    decision(true);
+    *failure = ESP_OK;
+    PAIR_CHECK(closed() && !wallet_link_service_pairing_scan(reply, sizeof(reply)));
+  }
+  const unsigned failed_writes = writes;
+  PAIR_CHECK(begin_review());
+  clock_ms += 60000;
+  decision(true);
+  PAIR_CHECK(closed() && writes == failed_writes);
+
+  // The unsigned millisecond subtraction must work across uint32 rollover.
+  clock_ms = UINT32_MAX - 30000;
+  PAIR_CHECK(begin_review());
+  clock_ms += 59999;
+  wallet_link_service_tick(clock_ms);
+  PAIR_CHECK(wallet_link_service_pairing_pending() && decision && send() == WalletLinkStatus::PendingPairing);
+  ++clock_ms;
+  wallet_link_service_tick(clock_ms);
+  PAIR_CHECK(closed() && writes == failed_writes);
+  PAIR_CHECK(offer_reply());
+  clock_ms += 60000;
+  PAIR_CHECK(!wallet_link_service_pairing_scan(reply, sizeof(reply)) && closed());
+
+  const uint8_t select[] = {0x00,0xa4,0x04,0x00,0x06,0xf0,0x48,0x57,0x4c,0x4b,0x31};
+  auto select_transport = [&](WalletLinkTransport transport) {
+    return wallet_link_service_apdu(transport, select, sizeof(select), clock_ms, response, sizeof(response)) == 4 &&
+           response[2] == 0x90 && response[3] == 0;
+  };
+  PAIR_CHECK(select_transport(WalletLinkTransport::Nfc) && begin_review());
+  wallet_link_service_field_lost();
+  PAIR_CHECK(closed() && transport_owner == WalletLinkTransport::None && writes == failed_writes);
+  PAIR_CHECK(!wallet_link_service_pairing_scan(reply, sizeof(reply)));
+  usb_enabled = true;
+  PAIR_CHECK(select_transport(WalletLinkTransport::Usb) && begin_review());
+  wallet_link_service_field_lost();
+  PAIR_CHECK(wallet_link_service_pairing_pending() && decision && transport_owner == WalletLinkTransport::Usb);
+  PAIR_CHECK(!select_transport(WalletLinkTransport::Nfc));
+  wallet_link_service_reset();
+  PAIR_CHECK(closed() && writes == failed_writes);
+  usb_enabled = false;
+
+  PAIR_CHECK(begin_review());
+  const auto approve = decision;
+  decision(true);
+  PAIR_CHECK(!wallet_link_service_pairing_pending() && !decision && !handles && writes == failed_writes + 1);
+  PAIR_CHECK(send() == WalletLinkStatus::Ok && !offer_reply());
+  approve(true);
+  PAIR_CHECK(!decision && writes == failed_writes + 1 && send() == WalletLinkStatus::Ok);
+  puts("phone-pairing-lifecycle=pass: storage failures, competing reviews, cross-device reply, exact deadline, clock rollover, field loss, transport ownership, one-time persistence");
+#undef PAIR_CHECK
+  return 0;
+}
+
 uint32_t millis() { return clock_ms; }
 void delay(uint32_t ms) { clock_ms += ms; }
 
 namespace hexwallet {
-bool board_has_display() { return true; }
-bool wallet_cli_review_active() { return false; }
-bool wallet_totp_pending() { return false; }
+bool board_has_display() { return display_present; }
+bool wallet_cli_review_active() { return cli_review; }
+bool wallet_totp_pending() { return totp_review; }
 bool battery_monitor_blocks_signing() { return low_battery; }
-bool wallet_usb_data_enabled() { return false; }
-bool wallet_ui_ready() { return true; }
+bool wallet_usb_data_enabled() { return usb_enabled; }
+bool wallet_ui_ready() { return display_ready; }
 void wallet_ui_service() {}
 void wallet_ui_set_status(const char *) {}
 void wallet_ui_show_catalog() { review_visible = false; }
@@ -134,7 +272,7 @@ bool wallet_ui_show_address(const char *, const char *address, const char *path)
   printf("address=%s\npath=%s\n", address, path);
   return true;
 }
-void wallet_ui_show_pairing(uint32_t, const char *) { abort(); }
+void wallet_ui_show_pairing(uint32_t code, const char *phone) { displayed_pair_code = code; displayed_phone = phone; }
 bool nfc_port_begin(NfcApduHandler, NfcSessionLostHandler) { abort(); }
 void nfc_port_service(uint32_t) { abort(); }
 NfcPortState nfc_port_state() { abort(); }
@@ -144,7 +282,7 @@ const char *nfc_port_state_text(NfcPortState) { abort(); }
 // Test transport for DApp clients. Only the local harness can simulate a panel decision.
 int phone_app_pipe() {
   using namespace hexwallet;
-  if (!wallet_link_service_init() || wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") != WalletError::Ok)
+  if (!wallet_link_service_init() || wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", "") != WalletError::Ok)
     return 1;
   static char line[2 * kLinkMaxPayload + 3];
   static uint8_t request[kLinkMaxPayload], response[kLinkMaxPayload];
@@ -187,7 +325,7 @@ int phone_review(int argc, char **argv) {
   using namespace hexwallet;
   if (argc != 5) return 2;
   // Public BIP39 fixture used by the SDK oracle. No secret is accepted as input.
-  if (wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") != WalletError::Ok)
+  if (wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", "") != WalletError::Ok)
     return 1;
   const std::string network(argv[2]);
   uint8_t kind;

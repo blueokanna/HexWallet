@@ -33,6 +33,12 @@ bool crypto_double_sha256_segments(const uint8_t *a, size_t a_size,
                                    uint8_t out[kSha256Size]);
 bool crypto_hmac_sha256(const uint8_t *key, size_t key_size, const uint8_t *data,
                         size_t data_size, uint8_t out[kSha256Size]);
+// Authenticate concatenated fields without a payload-sized temporary buffer.
+bool crypto_hmac_sha256_segments(const uint8_t *key, size_t key_size,
+                                const uint8_t *a, size_t a_size,
+                                const uint8_t *b, size_t b_size,
+                                const uint8_t *c, size_t c_size,
+                                uint8_t out[kSha256Size]);
 bool crypto_hmac_sha512(const uint8_t *key, size_t key_size, const uint8_t *data,
                         size_t data_size, uint8_t out[kSha512Size]);
 bool crypto_pbkdf2_sha256(const uint8_t *password, size_t password_size,

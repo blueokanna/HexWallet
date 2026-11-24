@@ -103,33 +103,11 @@ namespace hexwallet
                      const uint8_t *ciphertext, size_t ciphertext_size,
                      uint8_t out_tag[kLinkTagSize])
     {
-      if ((aad == nullptr && aad_size != 0) ||
-          (ciphertext == nullptr && ciphertext_size != 0))
-      {
-        return false;
-      }
-      // HMAC-SHA256 here is one-shot; the maximum link frame is 2 KiB, so a
-      // bounded stack buffer is preferable to a streaming state machine.
-      constexpr size_t kMaxAuthInput = 18 + kLinkNonceSize + 4608;
-      if (aad_size + kLinkNonceSize + ciphertext_size > kMaxAuthInput)
-        return false;
-      uint8_t buffer[kMaxAuthInput];
-      size_t offset = 0;
-      if (aad_size != 0)
-      {
-        memcpy(buffer, aad, aad_size);
-        offset += aad_size;
-      }
-      memcpy(buffer + offset, nonce, kLinkNonceSize);
-      offset += kLinkNonceSize;
-      if (ciphertext_size != 0)
-      {
-        memcpy(buffer + offset, ciphertext, ciphertext_size);
-        offset += ciphertext_size;
-      }
-      const bool ok = crypto_hmac_sha256(mac_key, kLinkKeySize, buffer, offset, out_tag);
-      secure_zero(buffer, sizeof(buffer));
-      return ok;
+      // The frame decoder owns the payload limit. Stream every authenticated
+      // byte in wire order so 16 KiB frames do not need a matching stack copy.
+      return crypto_hmac_sha256_segments(mac_key, kLinkKeySize, aad, aad_size,
+                                         nonce, kLinkNonceSize, ciphertext,
+                                         ciphertext_size, out_tag);
     }
 
   } // namespace

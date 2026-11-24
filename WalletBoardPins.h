@@ -238,10 +238,11 @@
 // frame upload under 5 ms without pushing the panel's setup times.
 #define HEXWALLET_EPD_SPI_FREQ 8000000U
 
-// NXP SE051C2HQ1 on its own I2C bus, plus a hardware reset line.
+// U2 shares I2C with the RTC. Its ENA is tied to 3V3. Pad 14 is the
+// unused ISO7816 reset input; the I2C transport uses T=1 interface reset.
 #define HEXWALLET_SE051_I2C_SDA 10    // pad 11
 #define HEXWALLET_SE051_I2C_SCL 11    // pad 12
-#define HEXWALLET_SE051_PIN_RESET 12  // pad 13
+#define HEXWALLET_SE051_ISO7816_RST_N 12  // U1 pad 13, U2 pad 14
 #define HEXWALLET_SE051_I2C_ADDRESS 0x48
 
 // PN7161 NFC front end in SPI mode; NSS is its own chip select.

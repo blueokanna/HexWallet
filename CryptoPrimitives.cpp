@@ -212,6 +212,27 @@ bool crypto_hmac_sha256(const uint8_t *key, size_t key_size, const uint8_t *data
   return hmac(MBEDTLS_MD_SHA256, key, key_size, data, data_size, out);
 }
 
+bool crypto_hmac_sha256_segments(const uint8_t *key, size_t key_size,
+                                const uint8_t *a, size_t a_size,
+                                const uint8_t *b, size_t b_size,
+                                const uint8_t *c, size_t c_size,
+                                uint8_t out[kSha256Size]) {
+  if (key == nullptr || out == nullptr || (a == nullptr && a_size != 0) ||
+      (b == nullptr && b_size != 0) || (c == nullptr && c_size != 0)) return false;
+  const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (info == nullptr) return false;
+  mbedtls_md_context_t context;
+  mbedtls_md_init(&context);
+  bool ok = mbedtls_md_setup(&context, info, 1) == 0 &&
+            mbedtls_md_hmac_starts(&context, key, key_size) == 0;
+  if (ok && a_size != 0) ok = mbedtls_md_hmac_update(&context, a, a_size) == 0;
+  if (ok && b_size != 0) ok = mbedtls_md_hmac_update(&context, b, b_size) == 0;
+  if (ok && c_size != 0) ok = mbedtls_md_hmac_update(&context, c, c_size) == 0;
+  if (ok) ok = mbedtls_md_hmac_finish(&context, out) == 0;
+  mbedtls_md_free(&context);
+  return ok;
+}
+
 bool crypto_hmac_sha512(const uint8_t *key, size_t key_size, const uint8_t *data,
                         size_t data_size, uint8_t out[kSha512Size]) {
   return hmac(MBEDTLS_MD_SHA512, key, key_size, data, data_size, out);

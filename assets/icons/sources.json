@@ -1,0 +1,1796 @@
+[
+  {
+    "file": "aca",
+    "keys": [
+      "ACA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "acala",
+    "name": "Acala",
+    "url": "https://coin-images.coingecko.com/coins/images/20634/large/upOKBONH_400x400.jpg?1696520038",
+    "sha256": "6c864dd6df3e145a11f592401a2f4b05efe1037fbf5df664d1e2bcbe38923eb3",
+    "source_sha256": "515530eb7a1a3ea837c22a2bea827ff21d5f1e8c0cd5b7ad1c386f8e83240772"
+  },
+  {
+    "file": "ada",
+    "keys": [
+      "ADA",
+      "CARDANO"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/ada.png",
+    "source_id": "6dfc1615ced429e75f6f8157a9251bdfc6ddfbee",
+    "sha256": "a50d75f4dd8014e73073c11fabbd41ed2a4a38f9342cacecf975b9d0d51de376"
+  },
+  {
+    "file": "ae",
+    "keys": [
+      "AE"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/ae.png",
+    "source_id": "4a780e8c555549d525010698f0c9a20964827e7b",
+    "sha256": "2abee411826387b0cd2b6df6af1a91500cec7166653a24a745cd4535dd5e24db"
+  },
+  {
+    "file": "aegs",
+    "keys": [
+      "AEGS"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "aegisum",
+    "url": "https://miningpoolstats.stream/ico/aegisum.webp",
+    "source_sha256": "5f88b327499dfe50791680163e4d36f3d6d34f6ea5c0e90383b23479afee28b2",
+    "sha256": "c801d52e9338371ad23bfa3611bd49b9513cbe610cccba304ea5a99f17443531"
+  },
+  {
+    "file": "algo",
+    "keys": [
+      "ALGO",
+      "ALGORAND"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/algo.png",
+    "source_id": "5a2bd078fb111d26b6186c79e39b8951bd44adc7",
+    "sha256": "e1454e77846d7d33df1b01543ba04e1f5931b13061b0558096ab0ab55ba217c9"
+  },
+  {
+    "file": "alph",
+    "keys": [
+      "ALPH"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "alephium",
+    "name": "Alephium",
+    "url": "https://coin-images.coingecko.com/coins/images/21598/large/Alephium-Logo-round.png?1750765372",
+    "sha256": "270a52fdcaeb89befc7ea2a3f0ef915568e2608fc5b46dd1bad0c587acede74b"
+  },
+  {
+    "file": "apt",
+    "keys": [
+      "APT"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "aptos",
+    "name": "Aptos",
+    "url": "https://coin-images.coingecko.com/coins/images/26455/large/Aptos-Network-Profile-Picture_%281%29.png?1788259511",
+    "sha256": "b619106017a1a80b87c1e092b57420d81b86312ad44dbc3716bbd7dbdad93e29"
+  },
+  {
+    "file": "astr",
+    "keys": [
+      "ASTR"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "astar",
+    "name": "Astar",
+    "url": "https://coin-images.coingecko.com/coins/images/22617/large/astr.png?1696521933",
+    "sha256": "8e75193c284b9d416d71b78c0aca83315a92cf351f9aa19aea9bc65d15038a8e"
+  },
+  {
+    "file": "atom",
+    "keys": [
+      "ATOM",
+      "COSMOS"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/atom.png",
+    "source_id": "1a7b93bfbd70973308cbedf9b7b59e47bd676c1f",
+    "sha256": "0815a4b0fb0fd1ba7dd9cba43591c0b1df820165033dd2ecd29ce7137d1a7d5c"
+  },
+  {
+    "file": "aur",
+    "keys": [
+      "AUR"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "auroracoin-groestl",
+    "url": "https://miningpoolstats.stream/ico/auroracoin.webp",
+    "source_sha256": "1007e61447b81660a0b95be763852b9b6b4ea18841e3836fa13a6e9ded0f211b",
+    "sha256": "78ee3a59ec7874ef61b4bcc6129b3046bbddda4fd27f212baebafd2635822cc1"
+  },
+  {
+    "file": "avax",
+    "keys": [
+      "AVAX"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/avax.png",
+    "source_id": "7a849879dfd06cd62e5e71afeb49d7e78beedb7d",
+    "sha256": "933513be8dcc48feed542a58d8eafe46acc676583deaf391d8b5b05213ea2ea3"
+  },
+  {
+    "file": "avs",
+    "keys": [
+      "AVS"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "aves",
+    "url": "https://miningpoolstats.stream/ico/aves.webp",
+    "source_sha256": "2edfdf5442a5ca2445465038b698e68285657615b10776cc622d44b33d24910e",
+    "sha256": "db148d939a23da8c86cbd2a735a23f3058eade90592c4b6abbe55beef705fa91"
+  },
+  {
+    "file": "axe",
+    "keys": [
+      "AXE"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "axerunners",
+    "url": "https://miningpoolstats.stream/ico/axerunners.webp",
+    "source_sha256": "db8dbbe8a60b855c5713a0dd024f80a4c777ff71c1275bd0d3c2707ed4c43ebe",
+    "sha256": "d8098c8d0f7a5f41bc53faf747e86456e1b3e84c6d49f758de56ea8b6d4487a3"
+  },
+  {
+    "file": "b1t",
+    "keys": [
+      "B1T"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "bit",
+    "url": "https://miningpoolstats.stream/ico/bit.webp",
+    "source_sha256": "4d0c7b0873cbb3696ed4e5398f5241f582e89829782b5a2019f91ff8f0926af1",
+    "sha256": "90aac3937f86be9e7bdf97e3be0cbd3baa98887e5d18c9d9fcd2366a7f53aea1"
+  },
+  {
+    "file": "bbc",
+    "keys": [
+      "BBC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "babacoin",
+    "url": "https://miningpoolstats.stream/ico/babacoin.webp",
+    "source_sha256": "46bc94e3d4fad805bb691f69c2d6e15381eb4568395ac5ac9d2bf2f7c1bf207f",
+    "sha256": "e0dd4be9da968c417df7b776be103c7c2c736727c22ea5d58365f3ea671f7d8f"
+  },
+  {
+    "file": "bbp",
+    "keys": [
+      "BBP"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "biblepay",
+    "url": "https://miningpoolstats.stream/ico/biblepay.webp",
+    "source_sha256": "3c5d7f5deb08adb33954b874226ea0f07fef1ced30cd29a4cb5385b7f60088b6",
+    "sha256": "3edeac6cdc85c6350b32516f3e9feb12ba5f28baeb59be2928da65dba7860b3f"
+  },
+  {
+    "file": "bch",
+    "keys": [
+      "BCH"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/bch.png",
+    "source_id": "17872731feab738b290edf5c6c84da6f7f2e33eb",
+    "sha256": "7bf44446b01ed58586187d631624cdde7abb2818f509b8073c641d68429d8a93"
+  },
+  {
+    "file": "bell",
+    "keys": [
+      "BELL"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "bellcoin",
+    "url": "https://miningpoolstats.stream/ico/bellcoin.webp",
+    "source_sha256": "c41758e7f5791001d085946adf7f19dfa4487e3c8b88bdf5b06cc689b4b842c8",
+    "sha256": "99c1e5506cecacd78798065bc6e7b710aa277280d776b2a2d714d48a8abf64b7"
+  },
+  {
+    "file": "bera",
+    "keys": [
+      "BERA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "berachain-bera",
+    "url": "https://coin-images.coingecko.com/coins/images/25235/large/BERA.png?1738822008",
+    "source_sha256": "f5c15875b85ca57447ec031930dbdac1f85799a4ca83ae8ecc204142ff433d60",
+    "sha256": "5d21d15132dffd5a0ee1722342d1145b6a4f577abcc90400a73d2f23c22911a2"
+  },
+  {
+    "file": "bnb",
+    "keys": [
+      "BNB"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/bnb.png",
+    "source_id": "92ceb6ef6653377803f4431e914939773d106aa3",
+    "sha256": "1e34388e25607508d6798d5f2ef71e850dd6c097ed39c81a6c401059452d3192"
+  },
+  {
+    "file": "bsty",
+    "keys": [
+      "BSTY"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "globalboost",
+    "name": "GlobalBoost",
+    "url": "https://coin-images.coingecko.com/coins/images/73/large/BSTY_COINGECKO_200.png?1761460832",
+    "sha256": "2dca9eb9f9bfaa0de8e96f84197aa604a7eaa1d6d20b526372eeb5c1ab558276"
+  },
+  {
+    "file": "bsv",
+    "keys": [
+      "BSV"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/bsv.png",
+    "source_id": "6fdec364c89c743603527dceb2460e767c71a0ea",
+    "sha256": "6082f0bf03a2648ed6eaa9e3804dbe8df1933bdbdff8a57643d20e0985e08aca"
+  },
+  {
+    "file": "btc",
+    "keys": [
+      "BTC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/btc.png",
+    "source_id": "39cebb0c9efef43d6ef3a535e5e2752c4c4ae0ca",
+    "sha256": "6a00ef2670157738264638d4f31a657e3990ec342fd82599617f8934f4f9de72"
+  },
+  {
+    "file": "btg",
+    "keys": [
+      "BTG"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/btg.png",
+    "source_id": "11efa4804f1c17dd084535267429339c21247bf9",
+    "sha256": "8aaf91bd89b3d223046ed7790c66701a08b2daa9d4bcb4f7d2f0162e28ee6503"
+  },
+  {
+    "file": "btn",
+    "keys": [
+      "BTN"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "bitnetmoney",
+    "url": "https://miningpoolstats.stream/ico/bitnetmoney.webp",
+    "source_sha256": "30e6125dbac35442c7808b229dd2da8da14b36b42ba756b81e6f6a06f8e8cad5",
+    "sha256": "7bffde6cfc34f481ca6f24122b34b70159b2920adf3ac7c10c82c1f320bf1982"
+  },
+  {
+    "file": "btx",
+    "keys": [
+      "BTX"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/btx.png",
+    "source_id": "2df903d671c66494d244b662493f48835f82ca4a",
+    "sha256": "580dbd12e71013ba3314dbd12a4ea90fe44ae8bfaac91b5f87d6be4fc08c8129"
+  },
+  {
+    "file": "canto",
+    "keys": [
+      "CANTO"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "canto",
+    "name": "CANTO",
+    "url": "https://coin-images.coingecko.com/coins/images/26959/large/canto-network.png?1696526014",
+    "sha256": "8c6c44c995f24f8c5be8680e848514ed3c4342f1e0b05659f01277f2c183f27e"
+  },
+  {
+    "file": "cau",
+    "keys": [
+      "CAU"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "canxium",
+    "url": "https://miningpoolstats.stream/ico/canxium.webp",
+    "source_sha256": "de7eff79dfcdfbd459565e5ff2cbb19b11ae077c7f087ff393e0d3dbef634098",
+    "sha256": "690b3cb86696c08bbf2d5c68ba466998715c0b219e20d799c00d02ccdcd54ba3"
+  },
+  {
+    "file": "celo",
+    "keys": [
+      "CELO"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "celo",
+    "name": "Celo",
+    "url": "https://coin-images.coingecko.com/coins/images/11090/large/InjXBNx9_400x400.jpg?1696511031",
+    "sha256": "bfbda36e1c53bcb38adb1f70376efd95d70e570cf87dff5a925eded7b82649bc",
+    "source_sha256": "86c8c836c40ba77754411b56457d3466308f8b55e2966d15e1660241a56447b8"
+  },
+  {
+    "file": "cfx",
+    "keys": [
+      "CFX"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "conflux-token",
+    "name": "Conflux",
+    "url": "https://coin-images.coingecko.com/coins/images/13079/large/3vuYMbjN.png?1696512867",
+    "sha256": "fda464e4b53f170356adf4c0822c35c8bedda5561f58d3acf97776cdffee086c"
+  },
+  {
+    "file": "chc",
+    "keys": [
+      "CHC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "chaincoin",
+    "url": "https://miningpoolstats.stream/ico/chaincoin.webp",
+    "source_sha256": "66f2515038247439e725049cd34f789e1f79c04d3571dec57c4645ce8ac857cb",
+    "sha256": "bae2cc2f895522d1fe9b655b652ad29b361218bcfb499721f5fe2e03fcce1cbb"
+  },
+  {
+    "file": "chta",
+    "keys": [
+      "CHTA"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "cheetahcoin",
+    "url": "https://miningpoolstats.stream/ico/cheetahcoin.webp",
+    "source_sha256": "3a2739f02f2c35c8c20b90d3585f34660cdaff03b1aa92db1334a1d8a8b5d29f",
+    "sha256": "6583b9c256c8369546d8bba45a3cc30a78aeaa3be468b11ca22d8de4934af118"
+  },
+  {
+    "file": "ckb",
+    "keys": [
+      "CKB"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "nervos-network",
+    "name": "Nervos Network",
+    "url": "https://coin-images.coingecko.com/coins/images/9566/large/Nervos_White.png?1696509646",
+    "sha256": "26a9519a74b9a348374e98510cfc2a3961d86fe02b02dd2bce18a9d5932aa842"
+  },
+  {
+    "file": "core",
+    "keys": [
+      "CORE"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "coredaoorg",
+    "name": "Core",
+    "url": "https://coin-images.coingecko.com/coins/images/28938/large/file_589.jpg?1701868471",
+    "sha256": "80fb19b94548b0e44dd651b14cb5dde99075b1a2e60483f13d5c585e90450626",
+    "source_sha256": "caa1878ba3031b8698c728d5af49568c30258ecc34bc6867d52a69d33d4d4e69"
+  },
+  {
+    "file": "cosa",
+    "keys": [
+      "COSA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "cosanta",
+    "name": "Cosanta",
+    "url": "https://coin-images.coingecko.com/coins/images/29313/large/cosanta_logo_200.png?1736266251",
+    "sha256": "a8588c2d1b5f747af49c3b51b34614b9ed42ccdf8e45410a2591f74218b8e434"
+  },
+  {
+    "file": "cro",
+    "keys": [
+      "CRO"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "crypto-com-chain",
+    "name": "Cronos",
+    "url": "https://coin-images.coingecko.com/coins/images/7310/large/CRO.png?1794186148",
+    "sha256": "30550c6af76bec114267ad18defb5f498f5b876ef878f562a3644b6207bf3dcf"
+  },
+  {
+    "file": "cy",
+    "keys": [
+      "CY"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "cyberyen",
+    "url": "https://miningpoolstats.stream/ico/cyberyen.webp",
+    "source_sha256": "e3f3f33aa47427868b137686c87847a692908cfbd5dc086a1cecc145ba1344b9",
+    "sha256": "63ebcdb59088746efeb44024f4000576a68a9fb4dd39d8d83a614bc81ed95461"
+  },
+  {
+    "file": "dash",
+    "keys": [
+      "DASH"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/dash.png",
+    "source_id": "0856db172a1d851feba17b921c30e8f28cc24884",
+    "sha256": "8f295d7e20e734c8c38d0a7ee1884a0aa78dc91973f52f6a82876f590d07d2ea"
+  },
+  {
+    "file": "dcr",
+    "keys": [
+      "DCR",
+      "DECRED"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/dcr.png",
+    "source_id": "cb872ff184c9b315230ab7efd3e18d1f07d9d52e",
+    "sha256": "ffdad8d66db4bdd76c198bb27dba4368249b9a3a216f6e800e68ed7ee61bbb6d"
+  },
+  {
+    "file": "dgb",
+    "keys": [
+      "DGB"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/dgb.png",
+    "source_id": "8bf9cb672cf5ea4eead92400992e4bb3949fad3d",
+    "sha256": "3a0e7e24fedd6f0cc8060d8d538d2a9da41c28a209b87c0596f4879094b89f5d"
+  },
+  {
+    "file": "dgc",
+    "keys": [
+      "DGC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "digitalcoin-scrypt",
+    "url": "https://miningpoolstats.stream/ico/digitalcoin.webp",
+    "source_sha256": "1a31d07707038c689a041b0ae9480caeb66ecaf21795c1aeb4cae9bb3513d0a8",
+    "sha256": "4fd1ec6f74ca55cd15a640abd11a1b68bf0c0861a4f602eeba843f45669f16f7"
+  },
+  {
+    "file": "doge",
+    "keys": [
+      "DOGE"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/doge.png",
+    "source_id": "1fe5963a1bdbf87711f8d282921bc3bbf93b6f6e",
+    "sha256": "a2443e0049cadbceabd3bd9148f752796cb163de9600473a2393c00868cef479"
+  },
+  {
+    "file": "dot",
+    "keys": [
+      "DOT",
+      "POLKADOT"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/dot.png",
+    "source_id": "1eb1b0b8e94328a53c84a221e75e69aac9ab762f",
+    "sha256": "46c31baa0cf15eaae10f0a77391f22f15f3798c28cd5151a8e6de8b01e583ca9"
+  },
+  {
+    "file": "dsv",
+    "keys": [
+      "DSV"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "doriancoin",
+    "url": "https://miningpoolstats.stream/ico/doriancoin.webp",
+    "source_sha256": "d449580f0c9249a124c80b7c4d065201c59ae2dee94e528bcd0933eb62b6d023",
+    "sha256": "b5f36f70250920cbb5e50eb082b4dc2f2120a4c73ff3437c56c7c91c6b20a641"
+  },
+  {
+    "file": "dyn",
+    "keys": [
+      "DYN"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "dynamic",
+    "url": "https://miningpoolstats.stream/ico/dynamic.webp",
+    "source_sha256": "c991e0bcbdec8ddb25755896a67b87eef41f88b5ce4c7546379976f507118264",
+    "sha256": "789cb54c9235808d831aa6ac97ef009e0f2a2f67b06646f6a0f2920f9ed52af7"
+  },
+  {
+    "file": "efl",
+    "keys": [
+      "EFL"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "egulden",
+    "url": "https://miningpoolstats.stream/ico/egulden.webp",
+    "source_sha256": "c254cd7a7f3e14fae8a432b785275ee8b42935521e34949fc80307f53eb4be79",
+    "sha256": "79ead0fae53f744d0ee085594cd6571ebd0d311b1e009251f61e922ec4943d69"
+  },
+  {
+    "file": "egaz",
+    "keys": [
+      "EGAZ"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "etica",
+    "url": "https://miningpoolstats.stream/ico/etica.webp",
+    "source_sha256": "367045886deb0128e5376bcf57419d27c533e193a43e2c9838d64bb764dae231",
+    "sha256": "acd4be5ead4164de3b7d404b5649ec282f3b67b05b84f4c0f435bf1dc05aa569"
+  },
+  {
+    "file": "emc2",
+    "keys": [
+      "EMC2"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/emc2.png",
+    "source_id": "9185a258c3385cacfae86cb45609899e14dfcff0",
+    "sha256": "3c3f41aaf1f511dc8564fcc7dd4c160949434a9cd76f22525a73d03b4f27d748"
+  },
+  {
+    "file": "erg",
+    "keys": [
+      "ERG"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "ergo",
+    "name": "Ergo",
+    "url": "https://coin-images.coingecko.com/coins/images/2484/large/channels4_profile.jpg?1726043738",
+    "sha256": "b7dbb80de48982c7eef1d61587d73b2b40fe0ca5948800f4a514c6a4f2fda794",
+    "source_sha256": "109a6a0197fa9a769ccf1a61545d8f2f4d19e4e5b611ce6dab4f2f7168d1b1b4"
+  },
+  {
+    "file": "etc",
+    "keys": [
+      "ETC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/etc.png",
+    "source_id": "2e8ebda936597606bbf1acf36490fd9b7ad3bfd3",
+    "sha256": "3ecd66284726c7be7890b526830039b5d10ba6785b0a3b8d129aa40b08baaa1e"
+  },
+  {
+    "file": "eth",
+    "keys": [
+      "ETH"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/eth.png",
+    "source_id": "ba2d82a4779554ecb3e0892af0a0c5c21d1d1c2b",
+    "sha256": "87b70401a83898ce7fee644dca6723fb39ee6edad743020e823c0ae9bcb21d2f"
+  },
+  {
+    "file": "etho",
+    "keys": [
+      "ETHO"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "etho",
+    "url": "https://miningpoolstats.stream/ico/etho.webp",
+    "source_sha256": "6cb9ef717a11909d585f74b7eda9e02f0ad4ff442d25dd03648e2323142e4a43",
+    "sha256": "6520b2d699924b8f66d9d0039268c168577ff61c124b1873c62315e2da1103ea"
+  },
+  {
+    "file": "ethw",
+    "keys": [
+      "ETHW"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "ethereum-pow-iou",
+    "name": "EthereumPoW",
+    "url": "https://coin-images.coingecko.com/coins/images/26997/large/logo-clear.png?1696526049",
+    "sha256": "aa6d5b4b3bd5a023087b7039ce21d5d889070c42dfb651f3fc458c205ef18d99"
+  },
+  {
+    "file": "evmos",
+    "keys": [
+      "EVMOS"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "evmos",
+    "name": "Evmos",
+    "url": "https://coin-images.coingecko.com/coins/images/24023/large/evmos.png?1696523216",
+    "sha256": "73ec00672daac4081b0d328246a34ebaa73ed933dc8a36a7927468b66deb2330"
+  },
+  {
+    "file": "fil",
+    "keys": [
+      "FIL"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/fil.png",
+    "source_id": "4636e9fd99971ec0b3bc0a79ebf1afc8ffbc6e1e",
+    "sha256": "41663d928aec02418462e513a644ca1ccdb5ed33da8803b18b55828077128383"
+  },
+  {
+    "file": "firo",
+    "keys": [
+      "FIRO"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "firo",
+    "url": "https://miningpoolstats.stream/ico/firo.webp",
+    "source_sha256": "b39ec962ce811ce481c598fdbd5896aff4d8aa8fb69dbe9d42331908007aeefe",
+    "sha256": "58ff1f1c8c8afd095611402498f59bd212dad373551ad7d861a7fa043c9fb278"
+  },
+  {
+    "file": "flo",
+    "keys": [
+      "FLO"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/flo.png",
+    "source_id": "a25482fb9e2936feeef14bb8e7b86d2192fb3520",
+    "sha256": "bd0f4e899906efc490493e759ed69ce48dac9d9837d7e889f837122a6a45afd4"
+  },
+  {
+    "file": "flow",
+    "keys": [
+      "FLOW"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "flow",
+    "name": "Flow",
+    "url": "https://coin-images.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1c936_Flow_Wordmark.png?1696513210",
+    "sha256": "43065d2377749fcacf7927960e62e9380f2dcd3e36cec07b48ff09a9b3fe74f8"
+  },
+  {
+    "file": "flr",
+    "keys": [
+      "FLR"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "flare-networks",
+    "name": "Flare",
+    "url": "https://coin-images.coingecko.com/coins/images/28624/large/FLR-icon200x200.png?1696527609",
+    "sha256": "6fe91bad842e54582f8315ba5a99a49fbb85509ee419fabb1bb44c2da7a4262e"
+  },
+  {
+    "file": "fsc",
+    "keys": [
+      "FSC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "fsociety",
+    "url": "https://miningpoolstats.stream/ico/fsociety.webp",
+    "source_sha256": "bdd5a5c2a5e7a2ad587dc0de9d441677abcbd6a61c67d1ec6ab07e1ce86ad991",
+    "sha256": "43613ba0451b579709d688877936830e998d426ba5378d64ac1388f16cdfae35"
+  },
+  {
+    "file": "ftc",
+    "keys": [
+      "FTC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/ftc.png",
+    "source_id": "bb6c92f85f4943bc239f75c5ffb1bc74c3e944ff",
+    "sha256": "c6bf1ec25e8b2977c0dce316f4416d308fb7b72278d0235d31815ef22bf0d5ec"
+  },
+  {
+    "file": "ftm",
+    "keys": [
+      "FTM"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "fantom",
+    "name": "Fantom",
+    "url": "https://coin-images.coingecko.com/coins/images/4001/large/Fantom_round.png?1696504642",
+    "sha256": "b05941b9ed648fc93851c3c3ae70e0425e9f89bc1b34627770cb36a553e51178"
+  },
+  {
+    "file": "fuse",
+    "keys": [
+      "FUSE"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "fuse-network-token",
+    "url": "https://coin-images.coingecko.com/coins/images/10347/large/fuse.png?1696510348",
+    "source_sha256": "b87744d0b1d9cd2fc51d63eed8e50481cf81344f58786c439f9f1c9880d82a78",
+    "sha256": "b8099fc8f52cd4cc3b0fd1ac478b4bd66fdeaccf51b5e233f376dc50d5ee45c7"
+  },
+  {
+    "file": "fxtc",
+    "keys": [
+      "FXTC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "fxtc-lyra2z",
+    "url": "https://miningpoolstats.stream/ico/fxtc.webp",
+    "source_sha256": "25bc130400c718e3715e1f7eb389542eb1657d0fda73a6792f086498d022ae0a",
+    "sha256": "a977682306bc922daa81fab48fd5a9d27ebce7a2751c4a75a77e593ba65cf3d6"
+  },
+  {
+    "file": "gael",
+    "keys": [
+      "GAEL"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "gaelium",
+    "url": "https://miningpoolstats.stream/ico/gaelium.webp",
+    "source_sha256": "fee7711b399b72b8d165db06961af1e5109b3bf39cbfa8af27d781d53ff16fd1",
+    "sha256": "ba08aa43305a1ba6f70502d94cb02cc55111b148c1138edf0bba1664a06a8a9d"
+  },
+  {
+    "file": "gbx",
+    "keys": [
+      "GBX"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/gbx.png",
+    "source_id": "eee829edada00f0c99d42a721084317e2aeb42ae",
+    "sha256": "550eef8790d42f6336a682a4194fab46c5d372d35f7dd9c8b9804614ea257ef4"
+  },
+  {
+    "file": "glmr",
+    "keys": [
+      "GLMR"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "moonbeam",
+    "name": "Moonbeam",
+    "url": "https://coin-images.coingecko.com/coins/images/22459/large/Moonbeam_GLMR_ICON.png?1716647586",
+    "sha256": "29e0d1ee323a0afd368ecde8db2379f256bd8e02921cacfbb52533509496fe8e"
+  },
+  {
+    "file": "grlc",
+    "keys": [
+      "GRLC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "garlicoin",
+    "name": "Garlicoin",
+    "url": "https://coin-images.coingecko.com/coins/images/2699/large/garlicoin.png?1696503483",
+    "sha256": "e625e3927f175c978a9d927f1496eacda87f2aae25ed621fd6a1b5bd79eaddd3"
+  },
+  {
+    "file": "grs",
+    "keys": [
+      "GRS"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/grs.png",
+    "source_id": "0c6861aed9bf92c4b20c95e37b01176a092acfb4",
+    "sha256": "1c805f9b88332c078625742ab8bdcceaa945f6b55e4708c0f3fa5f034d896d4a"
+  },
+  {
+    "file": "hbar",
+    "keys": [
+      "HBAR"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "hedera-hashgraph",
+    "name": "Hedera",
+    "url": "https://coin-images.coingecko.com/coins/images/3688/large/hbar.png?1696504364",
+    "sha256": "271ec24bf7dbca1308fdf4f7ce13596ebc1cd82a3f488c8196b6c2ebc280ebee"
+  },
+  {
+    "file": "hive",
+    "keys": [
+      "HIVE"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "hive",
+    "name": "Hive",
+    "url": "https://coin-images.coingecko.com/coins/images/10840/large/logo_transparent_4x.png?1696510797",
+    "sha256": "0aad66e0d43f4152dfa6663173b4722f96a683fbeac1acd5c94e53c09b19a977"
+  },
+  {
+    "file": "hth",
+    "keys": [
+      "HTH"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "hthcoin",
+    "url": "https://miningpoolstats.stream/ico/hthcoin.webp",
+    "source_sha256": "6137b666540bacc23d05053af3d9b0ce2bb947eabacfd3e401658d9e5b5cff2b",
+    "sha256": "098d44352f4aa13d764d23e6e28a91732a6102e6cd6d704bc3a8bcb8c169982a"
+  },
+  {
+    "file": "icp",
+    "keys": [
+      "ICP"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/icp.png",
+    "source_id": "546c5d055e8eb27e19e9cc89bd8ed63fafcc2502",
+    "sha256": "4066873dd288283792f15a1c9ba2e096772fda41520ce39c95c4938a99043592"
+  },
+  {
+    "file": "icx",
+    "keys": [
+      "ICX",
+      "ICON"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/icx.png",
+    "source_id": "89d32b81299773c319c8abb99c4e9e5537485991",
+    "sha256": "1f65d9f9ad17cd7b8ea0c110bdbf38835381bcdb557ddbf5dadc33e26973e4a5"
+  },
+  {
+    "file": "jgc",
+    "keys": [
+      "JGC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "jagoancoin",
+    "url": "https://miningpoolstats.stream/ico/jagoancoin.webp",
+    "source_sha256": "0c185642a1d62441c5c1b818b10ae065039746831c748d43f8d2e03e36785da9",
+    "sha256": "98d7ad9bd1adedd868de44cf8cba99de382759b8457fed80fff2f870a4e277d5"
+  },
+  {
+    "file": "jkc",
+    "keys": [
+      "JKC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "junkcoin",
+    "name": "Junkcoin",
+    "url": "https://coin-images.coingecko.com/coins/images/52213/large/logo-junkcoin-squarre-200px.png?1732751022",
+    "sha256": "b71b011b518e32db35053e291e65c3c12205c167e71be2fcbb5577b3376c4611"
+  },
+  {
+    "file": "kaia",
+    "keys": [
+      "KAIA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "kaia",
+    "name": "Kaia",
+    "url": "https://coin-images.coingecko.com/coins/images/39901/large/KAIA.png?1724734368",
+    "sha256": "d1b3b2ceb33431332596c7292b63bd4a7e5c5492e9d5f66203a91d1a9ee54477"
+  },
+  {
+    "file": "kas",
+    "keys": [
+      "KAS"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "kaspa",
+    "name": "Kaspa",
+    "url": "https://coin-images.coingecko.com/coins/images/25751/large/kaspa-icon-exchanges.png?1696524837",
+    "sha256": "37018f6a4d134a5bca96b77a1b49ccb54af5f6972d0b29894b04073260027bd4"
+  },
+  {
+    "file": "kava",
+    "keys": [
+      "KAVA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "kava",
+    "name": "Kava",
+    "url": "https://coin-images.coingecko.com/coins/images/9761/large/kava.png?1696509822",
+    "sha256": "4409f2065505fccf696e71574fc8d64af9a99debc2f604ebfeae49fa88b64030"
+  },
+  {
+    "file": "ksm",
+    "keys": [
+      "KSM",
+      "KUSAMA"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/ksm.png",
+    "source_id": "400955b022465a8170321a32e582b6c87bb880ff",
+    "sha256": "a9f28913be17537b2ff55fecd12aab5165cbd0010dec2e2fb7fee046642aea8a"
+  },
+  {
+    "file": "lbc",
+    "keys": [
+      "LBC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/lbc.png",
+    "source_id": "edf42ca31280d67849d3074e084668e24a882dad",
+    "sha256": "b89c6a8f983a47acc2b28536b931a626d9da1875ebea7ce1507037730bae1ac9"
+  },
+  {
+    "file": "lrs",
+    "keys": [
+      "LRS"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "larissa-blockchain",
+    "name": "Larissa Blockchain",
+    "url": "https://coin-images.coingecko.com/coins/images/34527/large/lrs_200x200.png?1705306770",
+    "sha256": "f978a10ff43a9720e6729f8abd82895aa8d446603c76c84da69ca6768bc772a5"
+  },
+  {
+    "file": "ltc",
+    "keys": [
+      "LTC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/ltc.png",
+    "source_id": "ba8a1a822aee8d2143eb04765572f85503f32fdf",
+    "sha256": "c5c28fe60682b16618efccb13af640abc191c35af508f3d1650bc69bbb4c700d"
+  },
+  {
+    "file": "luna",
+    "keys": [
+      "LUNA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "terra-luna-2",
+    "name": "Terra",
+    "url": "https://coin-images.coingecko.com/coins/images/25767/large/01_Luna_color.png?1696524851",
+    "sha256": "955faf211a82a797f276f75511d9225edc810d0bf9bdaca169a800fa15b81727"
+  },
+  {
+    "file": "lunc",
+    "keys": [
+      "LUNC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "terra-luna",
+    "name": "Terra Luna Classic",
+    "url": "https://coin-images.coingecko.com/coins/images/8284/large/01_LunaClassic_color.png?1696508486",
+    "sha256": "7192b1c3c0790c29111f18fd5d257ccae01ec9d9ca1c8b98c376da233b7a8ebd"
+  },
+  {
+    "file": "maza",
+    "keys": [
+      "MAZA"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "mazacoin-minotaurx",
+    "url": "https://miningpoolstats.stream/ico/mazacoin.webp",
+    "source_sha256": "cf93c535be40c995b1e8a732e8d1427c1f2a2814e75306ed736b9dbe0deb1050",
+    "sha256": "db6b26cd29452b6588302a0bcda8f5e17ee671dd675b5717a8a3471ea9f6df12"
+  },
+  {
+    "file": "metis",
+    "keys": [
+      "METIS"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "metis-token",
+    "name": "Metis",
+    "url": "https://coin-images.coingecko.com/coins/images/15595/large/Metis_Black_Bg.png?1702968192",
+    "sha256": "dc3f3cf14f9b8841ee90c0478dfc455564aba3f90b8e1ff1ebc067a411f8b616"
+  },
+  {
+    "file": "mnt",
+    "keys": [
+      "MNT"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "mantle",
+    "name": "Mantle",
+    "url": "https://coin-images.coingecko.com/coins/images/30980/large/MNT_Token_Logo.png?1765516974",
+    "sha256": "70d42fe92fa6901d1f30e10feb9757ead1d49cb1dc80b8feffce72864b35ea5d"
+  },
+  {
+    "file": "mon",
+    "keys": [
+      "MON"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "monad",
+    "name": "Monad",
+    "url": "https://coin-images.coingecko.com/coins/images/38927/large/mon.png?1766029057",
+    "sha256": "6feaba836d1de83b1d1a2dfc2380c17093f838c7e41386cbd7fe260a40b0373f"
+  },
+  {
+    "file": "mona",
+    "keys": [
+      "MONA"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/mona.png",
+    "source_id": "c1b99515e4ce42d134055211109174c8f0d6fa40",
+    "sha256": "1bb93435bddeb8ad9907cf5da226dcede342e848780688d65c469c3371b99ff8"
+  },
+  {
+    "file": "moon",
+    "keys": [
+      "MOON"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "mooncoin",
+    "url": "https://miningpoolstats.stream/ico/mooncoin.webp",
+    "source_sha256": "2dede3ee231d432b0eaf56093bb14412b110875be12d986e257e95d11f54f49c",
+    "sha256": "69c295b8b413ee8ed295ac0633a53af9bf10f8f3d92fd3630dc33904742f137b"
+  },
+  {
+    "file": "movr",
+    "keys": [
+      "MOVR"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "moonriver",
+    "name": "Moonriver",
+    "url": "https://coin-images.coingecko.com/coins/images/17984/large/Moonriver_MOVR_ICON.png?1716647589",
+    "sha256": "0c1ce80709771149998da71e1c6712d2df275ddd21a8c141e812200c5d2864ee"
+  },
+  {
+    "file": "mydoge",
+    "keys": [
+      "MYDOGE"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "mydogecoin",
+    "url": "https://miningpoolstats.stream/ico/mydogecoin.webp",
+    "source_sha256": "3d11400a73913454b1d738dd8fb040259cdf178920bf47fc1a498ac1a4e24d26",
+    "sha256": "5ca53f08b87db54680da725d2deee138da0a81ae628db2d201565466601b10c9"
+  },
+  {
+    "file": "myt",
+    "keys": [
+      "MYT"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "mytherra",
+    "url": "https://miningpoolstats.stream/ico/mytherra.webp",
+    "source_sha256": "5e2b4ed2c2d3936a7deb227f97437b71a28709a9819345ddc01233efd8c9466d",
+    "sha256": "61e167a6097b6f8c49f583e8e18c1e1ec91959d12763a02d28a59c26ace00d09"
+  },
+  {
+    "file": "nby",
+    "keys": [
+      "NBY"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "neobytes",
+    "url": "https://miningpoolstats.stream/ico/neobytes.webp",
+    "source_sha256": "f463cb8a9c5d2f792b74724460e68e9287ef24c4b689fb7322ec0606fe2ea9c1",
+    "sha256": "567c6792eb182ade615742fa9a9b15595ac57d9793dcf8b4ae8be87e265af37f"
+  },
+  {
+    "file": "near",
+    "keys": [
+      "NEAR"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "near",
+    "name": "NEAR Protocol",
+    "url": "https://coin-images.coingecko.com/coins/images/10365/large/near.jpg?1696510367",
+    "sha256": "fd3c41a9b04c6f046f38958b1a259dbe88fa1d2a7d80629cf7cfdf53b1b8cea7",
+    "source_sha256": "ebbdcfe1f67279e0bd590d3032f0807ce4113d0f7c17834680591153da6f7a11"
+  },
+  {
+    "file": "neng",
+    "keys": [
+      "NENG"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "newenglandcoin",
+    "url": "https://miningpoolstats.stream/ico/newenglandcoin.webp",
+    "source_sha256": "86890e0ae29d8c9eb5424aa2a67f56dbf7c7210dd6c72eb3588940bbbd338cec",
+    "sha256": "8b49ce8ad0038ab2704183e451791ac2a8426d125300adbcf8172698f0afceb1"
+  },
+  {
+    "file": "neox",
+    "keys": [
+      "NEOX"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "neoxa",
+    "name": "Neoxa",
+    "url": "https://coin-images.coingecko.com/coins/images/26417/large/Logo-Round_%281%29.png?1696525493",
+    "sha256": "ad69d7b1b119b5fbeddbe47d1208ce6055f0477e6fa63f2ad4018f0e8539497d"
+  },
+  {
+    "file": "nmc",
+    "keys": [
+      "NMC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/nmc.png",
+    "source_id": "6012c553b9d5d1517af3f6227a619b5bb69b3090",
+    "sha256": "63c87f822a934e16c86c57ce4602a03af7e98fd7771fd19048742c3345e6cbe4"
+  },
+  {
+    "file": "nyc",
+    "keys": [
+      "NYC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "newyorkcoin",
+    "url": "https://miningpoolstats.stream/ico/newyorkcoin.webp",
+    "source_sha256": "d4b7754cfe669062891e00028068c35dfc394444da809ad38baf49ce12f526f0",
+    "sha256": "dd183528f59cf9549395830412635612f24f5a346ddbe67c31a250e150713f01"
+  },
+  {
+    "file": "octa",
+    "keys": [
+      "OCTA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "octaspace",
+    "name": "OctaSpace",
+    "url": "https://coin-images.coingecko.com/coins/images/29687/large/logo-256x256.png?1696528621",
+    "sha256": "50eed7760a5f506151caf8a4a88453b55704d244ae97b14a460fefdb0af1824f"
+  },
+  {
+    "file": "okb",
+    "keys": [
+      "OKB"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "okb",
+    "name": "OKB",
+    "url": "https://coin-images.coingecko.com/coins/images/4463/large/WeChat_Image_20220118095654.png?1696505053",
+    "sha256": "abba7b628877f42e5a6f26a7f0757f6ffbcc940dd25cf1b7bad3ed070ddabafc"
+  },
+  {
+    "file": "okt",
+    "keys": [
+      "OKT"
+    ],
+    "provider": "CoinMarketCap",
+    "source_id": "8267",
+    "url": "https://s2.coinmarketcap.com/static/img/coins/64x64/8267.png",
+    "sha256": "f5885d09e88c56b64a53c6814e145398f404d87bf8e7e1e8684e723c9ba14164"
+  },
+  {
+    "file": "one",
+    "keys": [
+      "ONE"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/one.png",
+    "source_id": "2cb814a83c0622f6f3b7507d60507d20e6b36ee0",
+    "sha256": "e968341dbffbdabc306971a362ff651105cd40fefa5009b7f171b298845d3ff2"
+  },
+  {
+    "file": "osmi",
+    "keys": [
+      "OSMI"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "osmium",
+    "url": "https://miningpoolstats.stream/ico/osmium.webp",
+    "source_sha256": "101db2a7043a1dcf5b842d7b834eda2939cff445f22dd330975d0aa79251a2e4",
+    "sha256": "5ccb838773d6498b8bda8d8779eb34a0b7e509ba51efcc4f78de14159bea6fba"
+  },
+  {
+    "file": "osmo",
+    "keys": [
+      "OSMO"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "osmosis",
+    "name": "Osmosis",
+    "url": "https://coin-images.coingecko.com/coins/images/16724/large/osmo.png?1696516298",
+    "sha256": "5afc7a3c04c5adca4d98ba5818edfcb6bebf71a3816e2b6530172ade3d0ea0ea"
+  },
+  {
+    "file": "plm",
+    "keys": [
+      "PLM"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "palladium",
+    "url": "https://miningpoolstats.stream/ico/palladium.webp",
+    "source_sha256": "04893f6ee11c442ed5784f7ea1504392bb1970232f9f0f35ec33820a9bf5eef5",
+    "sha256": "e9cf1a91a604948486664d70d04f52cbcfffad71bc49bc4ec25ea1e7244bb536"
+  },
+  {
+    "file": "pol",
+    "keys": [
+      "POL"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "polygon-ecosystem-token",
+    "name": "POL (ex-MATIC)",
+    "url": "https://coin-images.coingecko.com/coins/images/32440/large/pol.png?1759114181",
+    "sha256": "c84c849e4c1f8972718cd55772e7bac7137ef98bbb9ffc5c1462b007f7960b02"
+  },
+  {
+    "file": "prl",
+    "keys": [
+      "PRL"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "pearl",
+    "url": "https://miningpoolstats.stream/ico/pearl.webp",
+    "source_sha256": "7685478a4e6d32d237cf52cf38fb9b981118a864aae721e75c3d680345acd41c",
+    "sha256": "12be5a1adb9ce27f6b96f384d0aeda375613fbe677d57678a62f72d94418b43f"
+  },
+  {
+    "file": "qrk",
+    "keys": [
+      "QRK"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "quarkcoin",
+    "url": "https://miningpoolstats.stream/ico/quarkcoin.webp",
+    "source_sha256": "2f4b90bcadb7be2942bb4f0048cd1bc195bdd6ef85ff6605afac1dea98690f9f",
+    "sha256": "574e43896bc3fc915e406a591208e249105d9d4432cf527097505e109b83cd82"
+  },
+  {
+    "file": "qrl",
+    "keys": [
+      "QRL"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/qrl.png",
+    "source_id": "6abfeec41a54d2e60ba3a38c418f5b2dddac53d5",
+    "sha256": "b19a6949464aac92c270cff2023092823d790956a1033bf5dad5543e27849ee9"
+  },
+  {
+    "file": "qtc",
+    "keys": [
+      "QTC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "quantus",
+    "url": "https://miningpoolstats.stream/ico/quantus.webp",
+    "source_sha256": "d08ee8fca94cd9dc382a7d959c31cb2215f51e8420365a8efda2a9f507af8750",
+    "sha256": "38cee06cc84e8e1eb1663a8eec9574ab52c68e9afe7c3ecf74647dd6e680286d"
+  },
+  {
+    "file": "qtum",
+    "keys": [
+      "QTUM"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/qtum.png",
+    "source_id": "10865b00206d65f4875b69642d35df6ae15cbe8d",
+    "sha256": "22d4d16905bb63e49aa751881bea16f359b2487e9e4f9e574d97ccf2452cdfbb"
+  },
+  {
+    "file": "quai",
+    "keys": [
+      "QUAI"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "quai-network",
+    "name": "Quai Network",
+    "url": "https://coin-images.coingecko.com/coins/images/27928/large/QuaiLogoFinal.png?1696526947",
+    "sha256": "f37ed527fff736d5d9d66888226dd96d7abc6863afa7adc721134195706c6017"
+  },
+  {
+    "file": "rbtc",
+    "keys": [
+      "RBTC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "rootstock",
+    "name": "Bitcoin on Rootstock",
+    "url": "https://coin-images.coingecko.com/coins/images/5070/large/rBTC_primary_symbol_256x256_%281%29.png?1779524021",
+    "sha256": "5d23dceff3215a8c8d7708d2e97a9534eadab03d34fc9eed09cd972f6956081f"
+  },
+  {
+    "file": "rin",
+    "keys": [
+      "RIN"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "rincoin",
+    "url": "https://miningpoolstats.stream/ico/rincoin.webp",
+    "source_sha256": "0fa95c533ce231e02f70d15c58c8c6cc72d6a6b1e4d8f28a9b6aa7e8b5ca5002",
+    "sha256": "9a665d2181d09829e94d1af47dc1112671b0119d8c0dc519cba08aca0bf4d76d"
+  },
+  {
+    "file": "rito",
+    "keys": [
+      "RITO"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "ritocoin",
+    "url": "https://miningpoolstats.stream/ico/ritocoin.webp",
+    "source_sha256": "21383046397bacc7905a7681aae918b97d2fec533cd6bb5d4889247c9500a80a",
+    "sha256": "22699d22d24cabff3dae07728916972ef8db277166c3634b8a00dde8606f0119"
+  },
+  {
+    "file": "roger",
+    "keys": [
+      "ROGER"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "theholyroger",
+    "url": "https://miningpoolstats.stream/ico/theholyroger.webp",
+    "source_sha256": "557ee92671a464f3b525329b506d4a1a827986cae04e452391cd0c43703616b2",
+    "sha256": "fbcdb9da5526bde8f3ba39af5c9eb0562d4c4ec38a6901ed69f7f50aebba301d"
+  },
+  {
+    "file": "ron",
+    "keys": [
+      "RON"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "ronin",
+    "name": "Ronin",
+    "url": "https://coin-images.coingecko.com/coins/images/20009/large/photo_2024-04-06_22-52-24.jpg?1712415367",
+    "sha256": "e5a81e05fd143c6376d43b652d2115ca4438173dd116149afefe0392131251c6",
+    "source_sha256": "9e0a36b67bb8d68517e3ceeb8737df95dc6465361027484ccf2a7f86c5c4eccf"
+  },
+  {
+    "file": "rose",
+    "keys": [
+      "ROSE"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "oasis-network",
+    "name": "Oasis",
+    "url": "https://coin-images.coingecko.com/coins/images/13162/large/200x200_%28Rounded%29.png?1743579893",
+    "sha256": "6c8f8d70b5c78c606e0d64882ff989eefde140611ad1937d4e40820dbfd410db"
+  },
+  {
+    "file": "rtm",
+    "keys": [
+      "RTM"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "raptoreum",
+    "name": "Raptoreum",
+    "url": "https://coin-images.coingecko.com/coins/images/14412/large/MM2019bird200pxRTM.png?1696514104",
+    "sha256": "712ff944e81d381d7a0578a8f4b8fd208f4c44e8014ac58b051c47e30ab1f5ea"
+  },
+  {
+    "file": "rvn",
+    "keys": [
+      "RVN"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/rvn.png",
+    "source_id": "14faea8d2505d8afb403ecdec7f935622625cba4",
+    "sha256": "953ed9060f9d93ca88471250e6664b1dab4718a6810127b04d4d94442a03808e"
+  },
+  {
+    "file": "ryo",
+    "keys": [
+      "RYO"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/ryo.png",
+    "source_id": "254a2839edfe5ce75559fda0ab8f29b4e9de4515",
+    "sha256": "5b6cbd7e4f5ec9e264efa65b908bce4d66f15cdffed72a3fd37423dc4f576dfa"
+  },
+  {
+    "file": "satox",
+    "keys": [
+      "SATOX"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "satoxcoin",
+    "name": "Satoxcoin",
+    "url": "https://coin-images.coingecko.com/coins/images/33043/large/sato-logo-200X200.png?1700528311",
+    "sha256": "b31f2b5b1bc83a6e02f46b763ed1406d37c23f1a4dd586b9e6028b25342b8127"
+  },
+  {
+    "file": "sc",
+    "keys": [
+      "SC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/sc.png",
+    "source_id": "ea6de1483b70b874e5b66e69800eab6b9ba69e5d",
+    "sha256": "f6b126d7aa37117bf0e7bab035e4e690cd443c14488a1780b1d789bbcef16750"
+  },
+  {
+    "file": "scc",
+    "keys": [
+      "SCC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "stakecubecoin",
+    "url": "https://miningpoolstats.stream/ico/stakecubecoin.webp",
+    "source_sha256": "3105436407800df88f2653733614223436db708cd12ff16451de6ef852f9c5ee",
+    "sha256": "17df5b76a257cb3ccd9c929ec1008e61ac6ea720e5a0cb4940612c59c22468d3"
+  },
+  {
+    "file": "sei",
+    "keys": [
+      "SEI"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "sei-network",
+    "name": "Sei",
+    "url": "https://coin-images.coingecko.com/coins/images/28205/large/SEI_2x.png?1794394439",
+    "sha256": "d158f40c8c644f679af430134b988370ae5cdfbf65af48aac1f0ffc274aeac38"
+  },
+  {
+    "file": "shic",
+    "keys": [
+      "SHIC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "shibacoin",
+    "name": "ShibaCoin",
+    "url": "https://coin-images.coingecko.com/coins/images/68206/large/Shibacoin-200.png?1755080233",
+    "sha256": "df80763437c4d883cda39cd01b0e7302730fe52fb93ebad71986c64030e4e3f2"
+  },
+  {
+    "file": "sol",
+    "keys": [
+      "SOL",
+      "SOLANA"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/sol.png",
+    "source_id": "3df41dd96da09c823f15e98d60288ac73bb9e6af",
+    "sha256": "306b6440ba38c8f0fa7152c43cb836ea940c091f1ff3065e0439549ed70452cb"
+  },
+  {
+    "file": "strk",
+    "keys": [
+      "STRK"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "starknet",
+    "name": "Starknet",
+    "url": "https://coin-images.coingecko.com/coins/images/26433/large/starknet.png?1696525507",
+    "sha256": "eab874c381e66b8844e9d83462cb8b62353f8a614aa9ac5a2208be8758e7651e"
+  },
+  {
+    "file": "sugar",
+    "keys": [
+      "SUGAR"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "sugarchain",
+    "url": "https://miningpoolstats.stream/ico/sugarchain.webp",
+    "source_sha256": "0271cbd69fa1717e5c884ae1bd491ada8ac7ebe792a231fe8360826a6c63e00e",
+    "sha256": "2289146b73d40fc4b74da64fd8b4849a7c52b482ac8ab90d71dd111299c6e576"
+  },
+  {
+    "file": "sui",
+    "keys": [
+      "SUI"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "sui",
+    "name": "Sui",
+    "url": "https://coin-images.coingecko.com/coins/images/26375/large/sui-ocean-square.png?1727791290",
+    "sha256": "0ee671f74cdc25b815784e56d7048c2cb7c3fdf245907df5580738ccb5a3fb67"
+  },
+  {
+    "file": "taft",
+    "keys": [
+      "TAFT"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "cointaft",
+    "url": "https://miningpoolstats.stream/ico/cointaft.webp",
+    "source_sha256": "5d179c719d7a655d7b0cdbbe8ef046d3830036a73fe7f4165121a24ad8447422",
+    "sha256": "30ba44179d16930c943c41799ac97a8fa264d99a688092c0c12e9b5a6fc2cd29"
+  },
+  {
+    "file": "tfuel",
+    "keys": [
+      "TFUEL"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "theta-fuel",
+    "name": "Theta Fuel",
+    "url": "https://coin-images.coingecko.com/coins/images/8029/large/1_0YusgngOrriVg4ZYx4wOFQ.png?1696508251",
+    "sha256": "38e05ff30fe5418d5d37e75d9678110823def64604ec56e587fa2e7e5a84a8f9"
+  },
+  {
+    "file": "tia",
+    "keys": [
+      "TIA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "celestia",
+    "name": "Celestia",
+    "url": "https://coin-images.coingecko.com/coins/images/31967/large/tia.jpg?1696530772",
+    "sha256": "7aac269f559f3333f3316cfb9ee490e191fa07139c6a3d5168e7d1aebb08f51e",
+    "source_sha256": "353f6a7bf61979ac3d3a77443e4f1ac8501726277dd51d35959a7209fa8db9fe"
+  },
+  {
+    "file": "tlos",
+    "keys": [
+      "TLOS"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "telos",
+    "name": "Telos",
+    "url": "https://coin-images.coingecko.com/coins/images/7588/large/tlos_png.png?1722391289",
+    "sha256": "cf3e0430cdc1309414fbeb22754ee684b0851bc6b505439ef7661af76e4db883"
+  },
+  {
+    "file": "ton",
+    "keys": [
+      "TON"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "the-open-network",
+    "url": "https://coin-images.coingecko.com/coins/images/17980/large/Gram_Circular_Badge.png?1781524778",
+    "source_sha256": "374f256cd2031b4b2526b4950533b2bf3788fa9b3f4c78118af079157061e764",
+    "sha256": "bf63cbdb2939c5e4f03d23c4e7be49bd9391bb659cfe448a5a631381662efc48"
+  },
+  {
+    "file": "trmp",
+    "keys": [
+      "TRMP"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "trumpow",
+    "url": "https://miningpoolstats.stream/ico/trumpow.webp",
+    "source_sha256": "40a4609ed23d0418dd4907eacac2f9ee337567e29afccaf0490f4155583fe14f",
+    "sha256": "6825845bef4e563526d5ef2d7050787a2b27d31b579b713c947d2734d60a57f1"
+  },
+  {
+    "file": "trx",
+    "keys": [
+      "TRX",
+      "TRON"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/trx.png",
+    "source_id": "0385b517e1d5c6d746ff6c8e0bf8298de4110108",
+    "sha256": "b01cc670888be66dee3142d65ccee5e1d834417759bbb356e8c64b52fcf9c129"
+  },
+  {
+    "file": "ufo",
+    "keys": [
+      "UFO"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "ufocoin",
+    "url": "https://miningpoolstats.stream/ico/ufocoin.webp",
+    "source_sha256": "74af69ed54d4758143b7b32588b0649c9782cf90a1d7b958638dd74480fabd59",
+    "sha256": "39bd622a121af3d76dad7b7483b611e9a9f1c706612110b6a2b588967ee495c4"
+  },
+  {
+    "file": "usdc",
+    "keys": [
+      "USDC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/usdc.png",
+    "source_id": "a2304bf1b513ec52ca5beddd48b45eb7be2d705f",
+    "sha256": "1bfe0193087e7e59f3530a17dfe40201388f5d1f6c37b4ffa01445c406a9f69d"
+  },
+  {
+    "file": "vbc",
+    "keys": [
+      "VBC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "virbicoin",
+    "url": "https://miningpoolstats.stream/ico/virbicoin.webp",
+    "source_sha256": "b4bbde2bc635bb32c67bd13b0f3171c554232b5f5940973427f0f58385ce36c0",
+    "sha256": "f6e7f340f03223720800c94116fd3c7cdbd8c67b909631094cbda313ac825d64"
+  },
+  {
+    "file": "veil",
+    "keys": [
+      "VEIL"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "veil-progpow",
+    "url": "https://miningpoolstats.stream/ico/veil.webp",
+    "source_sha256": "7440b95330cf486c8701fefbfed8deb45f45244e37c0dfaa2024632d3d810438",
+    "sha256": "ea3093ec499f4c6ecbbb3cfd32b0d17de825262b973d79b293d3135b844b0dfb"
+  },
+  {
+    "file": "vet",
+    "keys": [
+      "VET",
+      "VECHAIN"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/vet.png",
+    "source_id": "b066e68addb9dd8a65e5a3993660521058e810a3",
+    "sha256": "e4c31f7e282235cc1df01b79e7ae308759caaca91846d0e0ff7fe051d378e45f"
+  },
+  {
+    "file": "vips",
+    "keys": [
+      "VIPS"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "vipstarcoin",
+    "url": "https://miningpoolstats.stream/ico/vipstarcoin.webp",
+    "source_sha256": "9709d1ce35138ecd9ed829fbde433f82ba21c3186123c7bf260adeb8835587b0",
+    "sha256": "9fd8fea8bada7d55c2fba73ab8ccd26fd78259e5ebf9de7623f76b448d7aa8e1"
+  },
+  {
+    "file": "vivo",
+    "keys": [
+      "VIVO"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/vivo.png",
+    "source_id": "1477569a642a9d64fc544046188a0ea0409630f1",
+    "sha256": "6cff51493b37af36118852fd4b6361f90e85f1594e3767ca786dd8a1a299f82e"
+  },
+  {
+    "file": "vtc",
+    "keys": [
+      "VTC"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/vtc.png",
+    "source_id": "bc6e38003adb6182c2aedbd659ec487ecb64776c",
+    "sha256": "ccc0852470d989faaace6ac14c1fc67ffc5f6b84b1084b483aae1c81e61f71f4"
+  },
+  {
+    "file": "whive",
+    "keys": [
+      "WHIVE"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "whive",
+    "url": "https://miningpoolstats.stream/ico/whive.webp",
+    "source_sha256": "ef2cfa18aa03d2dd8a0e1154dfbfc5b74f4d5416130826be074790170b0bbea9",
+    "sha256": "06717ed8a97f2589fe7ca964f5148b6082046b6782247227d828c11a4091778a"
+  },
+  {
+    "file": "wjk",
+    "keys": [
+      "WJK"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "wojakcoin",
+    "url": "https://miningpoolstats.stream/ico/wojakcoin.webp",
+    "source_sha256": "188212d10190d19dc2a9f2893c5324ca59ab44dac18f31fb67b8053d008bb8c6",
+    "sha256": "bdec71c22292d5d71b623c3c8c3ceb0668f5e8ae0921770200de52446b088886"
+  },
+  {
+    "file": "xch",
+    "keys": [
+      "XCH"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "chia",
+    "name": "Chia",
+    "url": "https://coin-images.coingecko.com/coins/images/15174/large/zV5K5y9f_400x400.png?1696514829",
+    "sha256": "59cc051c48b67eb0d5844957ddb5ab389c3173c5b454c7550d686cbfa78e0c12"
+  },
+  {
+    "file": "xdai",
+    "keys": [
+      "XDAI"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "xdai",
+    "name": "XDAI",
+    "url": "https://coin-images.coingecko.com/coins/images/11062/large/Identity-Primary-DarkBG.png?1696511004",
+    "sha256": "54e2b0a4aff6f3291cce8b115939951330365a692cc9b6061a84bb68d09c9797"
+  },
+  {
+    "file": "xdc",
+    "keys": [
+      "XDC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "xdce-crowd-sale",
+    "name": "XDC Network",
+    "url": "https://coin-images.coingecko.com/coins/images/2912/large/xdc-icon.png?1696503661",
+    "sha256": "3ce9f390c85e42a3d0fdb09bf405571c6142707cb179d41987457ed2213d2b2c"
+  },
+  {
+    "file": "xec",
+    "keys": [
+      "XEC"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "ecash",
+    "name": "eCash",
+    "url": "https://coin-images.coingecko.com/coins/images/16646/large/Logo_final-22.png?1696516207",
+    "sha256": "b697009cb11865746dda45bd1ba61d0a216c67fc461f4b401deee5b055d5c7d9"
+  },
+  {
+    "file": "xem",
+    "keys": [
+      "XEM"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/xem.png",
+    "source_id": "637cd72f9945863b24050c3e9397d1992e450794",
+    "sha256": "1116a8ffa592a84a8005f9901241b38486960419f21c3e73f3f69d6ba02ec362"
+  },
+  {
+    "file": "xlm",
+    "keys": [
+      "XLM"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/xlm.png",
+    "source_id": "924d503d157f2ac61378f595840729d86c033e61",
+    "sha256": "b5a27432da4b2eb946f46af68c263b62fe6cb9f2b9bd3651dde8403f7463415e"
+  },
+  {
+    "file": "xmr",
+    "keys": [
+      "XMR"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/xmr.png",
+    "source_id": "f86d8ab15c4ec3befbb17954448eca40a0ee2f3f",
+    "sha256": "e0e8feacf1edac2b5215fb5ca105685a4bad5afc2cdf3c34583797a743fd2a52"
+  },
+  {
+    "file": "xmy",
+    "keys": [
+      "XMY"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color/xmy.png",
+    "source_id": "08351da8f212563e4f2691efcd2c7c6aadcca38d",
+    "sha256": "7e120280bae88540541759529b1d0cd73fd7898a4f30f126cf0391fa911c5391"
+  },
+  {
+    "file": "xna",
+    "keys": [
+      "XNA"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "neurai",
+    "name": "Neurai",
+    "url": "https://coin-images.coingecko.com/coins/images/30975/large/neurai-logo1.1_200px.png?1696529814",
+    "sha256": "94102c57ba51056bb2bc980a96fc4a8097a0d226df5dc938165b904f12f68731"
+  },
+  {
+    "file": "xpl",
+    "keys": [
+      "XPL"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "plasma",
+    "name": "Plasma",
+    "url": "https://coin-images.coingecko.com/coins/images/66489/large/Plasma-symbol-green-1.png?1755142558",
+    "sha256": "9a876a289a4c3c2823135b0bca48374694a2109b8f39745264f05190151f9ecd"
+  },
+  {
+    "file": "xrp",
+    "keys": [
+      "XRP"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/xrp.png",
+    "source_id": "06b50c2a5d91b9a5f8088c8101182f843f6991a8",
+    "sha256": "4a14336e365c79c3a0715a47e5a7e125d901a037543452e5ca04601989bdb3d5"
+  },
+  {
+    "file": "xtz",
+    "keys": [
+      "XTZ",
+      "TEZOS"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/xtz.png",
+    "source_id": "7d815ea832a0373f71488db5f4a56825e62fa918",
+    "sha256": "b55e317dba88b96aa81b9e8b609b676c80d5c4976e3d669953e4bffac17ee295"
+  },
+  {
+    "file": "zano",
+    "keys": [
+      "ZANO"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "zano",
+    "name": "Zano",
+    "url": "https://coin-images.coingecko.com/coins/images/8370/large/Icon-App-512x512.png?1761825305",
+    "sha256": "4ed31f9df915611255330bb863827a60fdbe8501b91046290d5c4c1e08933bca"
+  },
+  {
+    "file": "zec",
+    "keys": [
+      "ZEC",
+      "ZCASH"
+    ],
+    "provider": "cryptocurrency-icons / CC0",
+    "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/zec.png",
+    "source_id": "2d3b2cd33a4a2998ec91fefd9990bacd2cc66409",
+    "sha256": "afc7fdfa0390a0557506539ec0f3f40515751ccf0b52ebf86be5f5cbf4da6b48"
+  },
+  {
+    "file": "zeph",
+    "keys": [
+      "ZEPH"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "zephyr-protocol",
+    "name": "Zephyr Protocol",
+    "url": "https://coin-images.coingecko.com/coins/images/30865/large/ZephyrLogo200x200.png?1696529712",
+    "sha256": "6fb284ccaf5e38730e934191de9d70e20f4c84929c2b83c4263be92d0633971a"
+  },
+  {
+    "file": "zer",
+    "keys": [
+      "ZER"
+    ],
+    "provider": "CoinGecko",
+    "source_id": "zero",
+    "name": "Zero",
+    "url": "https://coin-images.coingecko.com/coins/images/1292/large/Zero_Full_Logo.png?1696502363",
+    "sha256": "e06d5241ba197e0ae90cf86d0383f6a4ff41bfe01520ee4f07e74ea8025befb1"
+  },
+  {
+    "file": "zoc",
+    "keys": [
+      "ZOC"
+    ],
+    "provider": "MiningPoolStats",
+    "source_id": "zeroonecoin",
+    "url": "https://miningpoolstats.stream/ico/zeroonecoin.webp",
+    "source_sha256": "17476174446a3649ce6649c496830381eb04e643911b6ad5afb0f550a5d4a9eb",
+    "sha256": "8a7e050f6ccaf3d9c221f036ae89e7459d560fe28b9588d03d11be4a70db5dc5"
+  }
+]

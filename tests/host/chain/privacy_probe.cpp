@@ -1,6 +1,7 @@
 // Test-only binary bridge. Never linked into the firmware command dispatcher.
 #include <cstdio>
 #include <cstring>
+#include <charconv>
 #include <vector>
 #include "RyoMlsag.h"
 #include "RyoBulletproof.h"
@@ -9,6 +10,8 @@
 #include "ZanoClsag.h"
 #include "ZanoOutput.h"
 #include "WalletSecurity.h"
+#include "WalletEngine.h"
+#include "SensitiveValue.h"
 using namespace hexwallet;
 
 namespace {
@@ -51,6 +54,34 @@ void print_hex(const char *name, const uint8_t *p, size_t size) {
 }  // namespace
 
 int privacy_probe(int argc, char **argv) {
+  if ((argc == 6 || argc == 8) && !strcmp(argv[1], "privacy-address")) {
+    // Exercise encoders independently of the wallet's receive-admission gate.
+    // Only the public BIP39 test wallet is available through this host command.
+    if (strcmp(argv[2], "ryo") && strcmp(argv[2], "zano")) return 2;
+    uint32_t index[5]{};
+    for (int i = 3; i < argc; ++i) {
+      const char *end = argv[i] + strlen(argv[i]);
+      const auto parsed = std::from_chars(argv[i], end, index[i - 3]);
+      if (parsed.ec != std::errc{} || parsed.ptr != end) return 2;
+    }
+    const NetworkProfile *network = find_network_profile(argv[2]);
+    SensitiveValue<uint8_t[kSeedSize]> seed;
+    SensitiveValue<HdPrivateNode> master;
+    SensitiveValue<DerivedAddress> derived;
+    if (!network || bip39_seed_from_english(
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        "", seed.get()) != WalletError::Ok ||
+        hd_private_from_seed(seed.get(), kSeedSize, &master.get()) != WalletError::Ok) return 1;
+    const WalletError result = argc == 8
+        ? derive_cryptonote_subaddress(master.get(), *network, index[0], index[1], index[2],
+                                      index[3], index[4], &derived.get())
+        : derive_address(master.get(), seed.get(), *network, index[0], index[1], index[2], &derived.get());
+    if (result == WalletError::Ok)
+      printf("status=ok\naddress=%s\npath=%s\n", derived.get().address, derived.get().path);
+    else
+      puts("status=refused");
+    return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "privacy-ryo-phone-bounds")) {
     RyoPhonePayment state{};
     uint8_t key[32] = {1};

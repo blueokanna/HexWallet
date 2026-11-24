@@ -12,7 +12,11 @@ HexWallet is offline transaction-review firmware for ESP32-P4 and ESP32-S3. The 
 | --- | --- |
 | ![Board 7 home in English](wiki/ui-gallery/en-home.png) | ![7 号板中文主页](wiki/ui-gallery/zh-home.png) |
 
-[All 44 states / 88 individual images](wiki/UI-Gallery.md) · [Filterable gallery](wiki/ui-gallery/index.html) · [Bilingual UI audit](wiki/UI-Audit-2026-11-24.md)
+[English and Chinese screen captures](wiki/UI-Gallery.md) · [Filterable gallery](wiki/ui-gallery/index.html) · [Bilingual UI audit](wiki/UI-Audit-2026-11-24.md) · [Pairing and wallet hardening](wiki/Wallet-Hardening-2026-11-24.md)
+
+Settings offers list, grid and rounded card layouts for the asset catalog. The receive QR stays on the left in landscape and above the address in portrait. The address and derivation path scroll independently of the QR. The keyboard accepts touch, physical keys and offline Chinese Pinyin input.
+
+Host tests cover all five BIP39 lengths in English, Simplified Chinese and Traditional Chinese, plus Bitcoin WIF, hexadecimal keys and BIP38 backups. BIP38 supports direct encryption and recovery of both direct and EC-multiplied backups. The local NFC backup flow reads one NFC-A Type 4 NDEF Text record and restores phone listening before releasing the key text for address verification. Radio operation and SE051 wallet custody await hardware validation. The OV9281 footprint shares the SCCB/I?C bus with U2. Sensor capture and camera-based QR import still require board integration.
 
 Each frame contains 296 × 128 pixels from the firmware's LVGL renderer and panel packing code running on the host. The setup pages explain the current secure-custody limitation. A public Ethereum payment illustrates scrolling, rejection and hold-to-approve. ZXing verifies the receive address from the panel pixels. Physical orientation, refresh time, ghosting and current draw await board measurements. [Board and display guide](wiki/Boards-and-Display.md)
 
@@ -20,7 +24,7 @@ Each frame contains 296 × 128 pixels from the firmware's LVGL renderer and pane
 | --- | --- |
 | Processor and screen | ESP32-P4 post-v3, 2.9-inch SSD1680 monochrome e-paper, four application buttons |
 | Peripherals | SE051C2HQ1 over I²C. SSD1680 and PN7161 share SPI GPIO7/8/9, with chip selects on GPIO16 and GPIO13 respectively |
-| Flash | 32 MiB. The first 8 MiB hold the factory layout with two OTA slots. The remaining 24 MiB hold public asset data in LittleFS |
+| Flash | 8 MiB or 32 MiB external NOR with two OTA slots. The original PCB specifies 8 MiB at U7. Select the installed capacity at build time |
 | Asset registry | 80 pinned token records. The application can persist 64 additional user-declared records |
 
 ## Build and validation

@@ -2,7 +2,7 @@
 
 [English](Boards-and-Display) · [首页](Home-zh)
 
-当前界面见[中英文逐格图库](UI-Gallery)：44 个状态、88 张独立 296 × 128 PNG，均由主机上的 LVGL 9.5.0 和实际墨水屏帧转换生成。可用 [HTML 图库](ui-gallery/index.html) 筛选语言，点击每格查看原图。修复、测试、镜像摘要和未完成范围见[本轮界面审计](UI-Audit-2026-11-24-zh)。旧 `P4-Review.png` 保留为历史画面。
+当前图库包含 66 个状态、132 张独立 296 × 128 PNG，均由主机上的 LVGL 9.5.0 和固件面板转换代码生成。HTML 页可按语言筛选。审计记录列出了镜像摘要和待实测项目。[中英文逐格图库](UI-Gallery) · [HTML 图库](ui-gallery/index.html) · [本轮界面审计](UI-Audit-2026-11-24-zh)
 
 引脚表在 `WalletBoardPins.h`，一块板一段，每个值都来自原理图或厂家引脚图。不根据板名猜引脚。
 
@@ -58,9 +58,7 @@ OV9281 是 MIPI CSI-2 传感器，控制走 SCCB。树里只有控制侧：`came
 返回四种状态之一——`NotConfigured`、`NoResponse`、`WrongSensor`、`PresentUnverified`。
 没有"已支持"这种状态。
 
-rev A 上摄像头**没有接**：CSI 焊盘经过串联电阻，另一侧悬空；相机 FPC 所有焊盘都没有网络。
-所以 `HEXWALLET_CAMERA_*` 一个都没定义，探测返回 `NotConfigured`。下一版只需在板级配置里补 SCCB 引脚，
-探测就能用；CSI 收流仍然需要厂商寄存器表，树里没有，也不会去编。
+工程 c26102103 中位号为 `OV9281` 的接口与 U2、RTC 共用 GPIO10/11，接口的 2、3 脚分别接 SDA、SCL。CSI 时钟和两对数据线通过 R32–R37 接入接口。7 号板固件当前返回 `NotConfigured`。传感器上电、CSI 采集以及从实拍图像解码二维码仍待实板联调。
 
 ## QR 码
 
@@ -72,10 +70,12 @@ rev A 上摄像头**没有接**：CSI 焊盘经过串联电阻，另一侧悬空
 不能证明扫得出来。另一个 host 检查会把每个版本/等级/掩码的矩阵与固定提交的 nayuki/QR-Code-generator
 逐位比较——格式信息写反的码能骗过自检，骗不过手机。
 
+收款页在横屏左侧、竖屏上方固定二维码，只允许详情区域滚动。二维码保留四模块静区，使用整数像素缩放。中英页面在原尺寸、缩小到 148×64，以及缩小到 222×96 后加 0.4 像素高斯模糊的测试中，ZXing 均读回完整的示例 ETH 地址。实机读距取决于取景、对焦和屏幕反光。[界面图库](UI-Gallery.md)
+
 ## 界面素材
 
-- `CoinIcons` —— 32×32 1bpp 图标，从 CC0 素材打包，固件里没有图片解码器。
-- `Mascot` / `MaidSprite` —— 审查界面的精灵动画，帧由 `tools/pack_maid_sprite.ps1` 打包。
+- `CoinIcons` 将 166 份来源图标编译为 32×32 单色位图。网络别名共用图标，全部 214 个资产目录条目均验证过符号匹配。[图标来源和摘要](../assets/icons/sources.json)
+- DeepSeek 伙伴在自己的页面内走动，可喂食、抚摸和玩耍。墨水屏按刷新就绪状态更新动作，空闲 30 秒后停更。P4 使用 PIE 复制对齐的精灵帧。较大的黑白屏更新走 PPA 分条旋转并使用 2D-DMA，初始化时用已知像素逐点校验，校验或传输失败时切回 CPU。
 - LVGL 9.5.0，`lv_conf.h` 放在 sketch 根目录。必须定义 `LV_CONF_INCLUDE_SIMPLE`，否则 LVGL 不读它，
   界面用到的控件根本不会被编译进去。
 

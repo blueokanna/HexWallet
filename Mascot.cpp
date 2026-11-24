@@ -120,7 +120,7 @@ bool mood_animates(MascotMood mood) { return mood != MascotMood::Working; }
 
 uint32_t frame_interval(MascotMood mood) {
   return mood == MascotMood::Eating || mood == MascotMood::Happy ||
-                 mood == MascotMood::Excited || mood == MascotMood::Shy
+                 mood == MascotMood::Excited || mood == MascotMood::Shy || mood == MascotMood::Bubbles
              ? kMascotActionFrameMs
              : kMascotAnimationMs;
 }
@@ -133,6 +133,8 @@ const char *mascot_mood_name(MascotMood mood) {
     return "calm";
   case MascotMood::Happy:
     return "happy";
+  case MascotMood::Bubbles:
+    return "blowing bubbles";
   case MascotMood::Alert:
     return "alert";
   case MascotMood::Angry:
@@ -173,6 +175,10 @@ MascotPose mascot_pose(MascotMood mood, uint8_t frame) {
     pose.mouth = 4;
     pose.sweat = true;
     pose.tail_high = true;
+    break;
+  case MascotMood::Bubbles:
+    pose.mouth = 4;
+    pose.tail_high = second;
     break;
   case MascotMood::Angry:
     pose.eyes = 3;
@@ -301,7 +307,7 @@ bool mascot_feed(uint32_t now_ms) {
   return true;
 }
 
-bool mascot_play(uint32_t now_ms) {
+static bool play_action(uint32_t now_ms, MascotMood mood) {
   if (!cooldown_elapsed(now_ms))
     return false;
   if (hunger_percent(now_ms) >= 80) {
@@ -313,10 +319,13 @@ bool mascot_play(uint32_t now_ms) {
   if (runtime.data.plays != UINT16_MAX)
     ++runtime.data.plays;
   bump_points(3);
-  set_reaction(MascotMood::Excited, now_ms);
+  set_reaction(mood, now_ms);
   mascot_save();
   return true;
 }
+
+bool mascot_play(uint32_t now_ms) { return play_action(now_ms, MascotMood::Excited); }
+bool mascot_blow_bubbles(uint32_t now_ms) { return play_action(now_ms, MascotMood::Bubbles); }
 
 void mascot_note_activity(uint32_t now_ms) { runtime.last_event_ms = now_ms; }
 

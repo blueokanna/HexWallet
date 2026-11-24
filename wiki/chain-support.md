@@ -4,6 +4,8 @@
 
 > 当前增量状态见 [2026-10-30 修复记录](hardening-2026-10-30.md) 和从编译目录生成的 [原生网络清单](native-chain-capabilities.md)。下文合并表包含历史快照，不能作为当前总数或主网验收证据。
 
+> 2026-11-24：当前发布钱包禁收 Hive／Ryo／Zano；下文历史“开放地址”条目已被[收款准入规则](Admission-Policy-zh)取代。编码器和隔离节点付款证据保留，实卡托管仍未完成。
+
 > **Tooling note (2026-10-28).** The Python/Node oracle harness (	ests/*.py, 	ests/reference/*, 	ools/*.py) was removed at the owner's request: this repository now needs exactly two toolchains, Arduino/xtensa for the device and MSVC or clang plus PowerShell for the host. Every vector those harnesses produced is still pinned in `src/generated/*.inc` and executed by `tests/host/host_test.exe`, so the checks still run on every build. The prose below records the original independent-SDK comparisons; bring the SDKs back if you need to regenerate a fixture.
 
 ## 多链与资产接入状态

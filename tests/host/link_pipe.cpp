@@ -2,11 +2,11 @@
 //
 // It runs the REAL device code (WalletLinkDevice) with an in-memory phone-key
 // store and a stub application handler, and speaks a tiny line protocol on
-// stdin/stdout so tools/phone_link_reference.py can drive a complete
+// stdin/stdout so tests/host/pairing_qr_check.cjs can drive a complete
 // pairing + handshake + encrypted request round trip without hardware.
 //
 // This binary is a test harness only: it is never flashed and it uses
-// deterministic randomness from host_security.cpp.
+// a public device identity fixture and the selected host entropy provider.
 #include <stdio.h>
 #include <string.h>
 
@@ -68,7 +68,7 @@ void show_pairing_code(void *, const uint8_t phone[32], uint32_t code) {
   store.present = false;
   memcpy(store.phone, phone, 32);
   printf("CODE %06u ", static_cast<unsigned>(code % 1000000UL));
-  print_hex(phone, 4);
+  print_hex(phone, 32);
   printf("\n");
   fflush(stdout);
 }
@@ -108,7 +108,11 @@ const char *status_text(WalletLinkStatus status) {
 
 }  // namespace
 
+#if defined(HEXWALLET_LINK_PIPE_EMBEDDED)
+int link_pipe_main() {
+#else
 int main() {
+#endif
   static const uint8_t kDeviceSeed[32] = {
     0x5a, 0x11, 0x69, 0x22, 0x77, 0x33, 0x85, 0x44,
     0x93, 0x55, 0xa1, 0x66, 0xb7, 0x77, 0xc9, 0x88,
@@ -128,9 +132,9 @@ int main() {
   printf("\n");
   fflush(stdout);
 
-  char line[16384];
-  uint8_t frame[8192];
-  uint8_t response[8192];
+  static char line[2 * (kLinkMaxFrameSize + 1) + 8];
+  static uint8_t frame[kLinkMaxFrameSize + 1];
+  static uint8_t response[kLinkMaxFrameSize];
   while (fgets(line, sizeof(line), stdin) != nullptr) {
     size_t length = strlen(line);
     while (length != 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
@@ -138,6 +142,21 @@ int main() {
     }
     if (length == 0) continue;
     if (strcmp(line, "QUIT") == 0) break;
+    if (strcmp(line, "OFFER") == 0) {
+      uint8_t offer[kPairingOfferSize];
+      if (device.begin_pairing_offer(clock_ms, offer, sizeof(offer))) {
+        printf("OFFER "); print_hex(offer, sizeof(offer)); printf("\n");
+      } else printf("OFFER refused\n");
+      fflush(stdout);
+      continue;
+    }
+    if (strncmp(line, "SCAN ", 5) == 0) {
+      size_t size = 0;
+      const bool accepted = decode_hex(line + 5, frame, sizeof(frame), &size) &&
+          device.accept_pairing_scan(frame, size, clock_ms);
+      printf("SCAN %s\n", accepted ? "ok" : "refused"); fflush(stdout);
+      continue;
+    }
     if (strcmp(line, "APPROVE") == 0) {
       printf("PAIR %s\n", device.confirm_pairing(clock_ms) ? "ok" : "none");
       fflush(stdout);
@@ -146,6 +165,13 @@ int main() {
     if (strcmp(line, "REJECT") == 0) {
       device.reset_pairing();
       printf("PAIR rejected\n");
+      fflush(stdout);
+      continue;
+    }
+    if (strcmp(line, "TICK") == 0) {
+      clock_ms += 61000;
+      device.tick(clock_ms);
+      printf("PENDING %d\n", device.pairing_pending() ? 1 : 0);
       fflush(stdout);
       continue;
     }

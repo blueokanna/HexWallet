@@ -1,4 +1,4 @@
-// Exercise the ADDRESS request and panel callback with the public BIP39 test wallet.
+// Check receive refusal and independently verify encoders with the public BIP39 test wallet.
 // NODE_PATH points to the locked tests/host/protocol-oracles/node_modules.
 'use strict';
 const assert = require('node:assert/strict');
@@ -40,14 +40,17 @@ function phoneAddress(coin, account, change, index, sub) {
 }
 
 async function check(coin, account, change, index, sub) {
-  const result = phoneAddress(coin, account, change, index, sub);
-  const response = Buffer.from(result.response, 'hex');
-  assert.deepEqual(response.subarray(0, 4), uint32s(1));
+  const phone = phoneAddress(coin, account, change, index, sub);
+  assert.deepEqual(Buffer.from(phone.response, 'hex'), Buffer.concat([uint32s(1), Buffer.from([3])]));
+  assert.equal(phone.address, undefined, 'disabled receiving must not reach the panel');
+  assert.equal(phone.path, undefined);
+  const output = execFileSync(probe, ['privacy-address', coin, account, change, index, ...(sub || [])].map(String), { encoding: 'utf8' });
+  const result = Object.fromEntries(output.trim().split(/\r?\n/).map(line => line.split('=')));
   const path = `m/44'/${coin === 'ryo' ? 382 : 1018}'/${account}'/${change}/${index}`;
   const explicitSuffix = sub && coin === 'ryo' && (sub.some(n => n !== 0) || account !== 0 || index !== 0);
   const displayedPath = explicitSuffix ? `${path}+${sub.join('/')}` : path;
   if ((coin === 'zano' && sub?.some(n => n !== 0)) || displayedPath.length >= 48) {
-    assert.deepEqual(response.subarray(4), Buffer.from([3]));
+    assert.equal(result.status, 'refused');
     assert.equal(result.address, undefined);
     return;
   }
@@ -63,10 +66,9 @@ async function check(coin, account, change, index, sub) {
   }
   const keys = Buffer.concat([spendPub.toBytes(), viewPub.toBytes()]);
   const address = encodeAddress(coin === 'zano' ? 0xc5 : isSub ? 0x2fe192 : 0x2ce192, keys);
+  assert.equal(result.status, 'ok');
   assert.equal(result.address, address);
   assert.equal(result.path, displayedPath);
-  assert.deepEqual(response.subarray(4), Buffer.concat([Buffer.from([0, address.length]),
-    Buffer.from(address), Buffer.from([displayedPath.length]), Buffer.from(displayedPath)]));
   if (coin === 'ryo' && values['ryo-validator']) {
     const [record] = JSON.parse(execFileSync(values['ryo-validator'], ['-n', 'mainnet', address], { encoding: 'utf8' }));
     assert.equal(record.valid, true);
@@ -98,8 +100,8 @@ async function main() {
       await check(coin, ...args);
     }
   }
-  console.log('14 phone address cases passed (Ryo and Zano)');
-  if (values['ryo-validator']) console.log('Ryo mainnet validator accepted 6 address responses');
+  console.log('14 phone receive refusals and 14 independent encoder cases passed (Ryo and Zano)');
+  if (values['ryo-validator']) console.log('Ryo mainnet validator accepted 6 encoder results');
   if (values['zano-rpc-port']) console.log('Zano daemon returned the expected integrated address in all 5 accepted cases');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

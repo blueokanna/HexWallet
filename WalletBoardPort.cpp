@@ -5,6 +5,11 @@
 #include "EinkFrame.h"
 #include "SecureElementPort.h"
 #include "WalletSecurity.h"
+#if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_IDF_TARGET_ESP32P4) && defined(HEXWALLET_EPD_NATIVE_SSD1680)
+#define HEXWALLET_PANEL_PPA 1
+#include "P4PanelRotation.h"
+#include <esp_heap_caps.h>
+#endif
 
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
 #include "EinkPanel.h"
@@ -533,6 +538,7 @@ namespace hexwallet
 //  LVGL glue (LVGL 9.5 API: lv_display_t / lv_indev_t)
 #if HEXWALLET_ENABLE_LVGL
     static uint8_t *g_draw_buf = nullptr;
+    static size_t g_draw_bytes = 0;
     static lv_display_t *g_display = nullptr;
     static lv_indev_t *g_keypad = nullptr;
     static lv_indev_t *g_touch = nullptr;
@@ -645,7 +651,11 @@ namespace hexwallet
         return;
       const auto width = board_display_width(), height = board_display_height();
       const EinkRect dirty = s_have_mono_frame ? s_mono_damage.bounds() : EinkRect{0, 0, width, height};
-      if (!eink_pack_landscape(g_draw_buf, width, height, dirty, kEpdConvertDepth,
+      bool rotated = false;
+#if HEXWALLET_PANEL_PPA
+      if (kEpdConvertDepth == 1) rotated = p4_panel_rotate_mono(g_draw_buf, dirty, s_eink_bw);
+#endif
+      if (!rotated && !eink_pack_landscape(g_draw_buf, width, height, dirty, kEpdConvertDepth,
                                s_eink_bw, s_epd_native.frame_bytes()))
       {
         g_display_ready = false;
@@ -863,7 +873,12 @@ namespace hexwallet
       const size_t buf_px =
           full_frame ? size_t(width) * height
                      : size_t(width) * (size_t(height) / 10 < 16 ? 16 : size_t(height) / 10);
-      uint8_t *buf = static_cast<uint8_t *>(board_alloc(buf_px * 2));
+      uint8_t *buf = nullptr;
+#if HEXWALLET_PANEL_PPA
+      if (full_frame) buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(128, buf_px * 2, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+      const bool dma_buffer = buf != nullptr;
+#endif
+      if (!buf) buf = static_cast<uint8_t *>(board_alloc(buf_px * 2));
       if (buf == nullptr)
         return false;
       lv_display_t *disp = lv_display_create(width, height);
@@ -903,12 +918,19 @@ namespace hexwallet
       g_key_group = group;
 #endif
       g_draw_buf = buf;
+      g_draw_bytes = buf_px * 2;
+#if HEXWALLET_PANEL_PPA
+      if (dma_buffer && width == 296 && height == 128) p4_panel_rotation_begin(buf);
+#endif
       g_display = disp;
       return true;
     }
 
     static void release_display()
     {
+#if HEXWALLET_PANEL_PPA
+      p4_panel_rotation_end();
+#endif
       g_display_ready = false;
       g_touch_ready = false;
       g_review_frame_pending = true;
@@ -923,13 +945,17 @@ namespace hexwallet
       }
       if (g_display != nullptr) lv_display_delete(g_display);
       g_display = nullptr;
+      if (g_draw_buf) secure_zero(g_draw_buf, g_draw_bytes);
+      g_draw_bytes = 0;
       free(g_draw_buf);
       g_draw_buf = nullptr;
 #if defined(HEXWALLET_DISPLAY_KIND_EINK)
+      if (s_eink_bw) secure_zero(s_eink_bw, eink_frame_size(HEXWALLET_EPD_WIDTH, HEXWALLET_EPD_HEIGHT, kEpdConvertDepth));
       free(s_eink_bw);
       s_eink_bw = nullptr;
       s_eink_dirty = false;
 #if defined(HEXWALLET_EPD_NATIVE_SSD1680)
+      if (s_last_mono_frame) secure_zero(s_last_mono_frame, eink_frame_bytes(kEink29Width, kEink29Height));
       free(s_last_mono_frame);
       s_last_mono_frame = nullptr;
       s_have_mono_frame = false;
@@ -1105,12 +1131,9 @@ namespace hexwallet
       static bool started = false;
       if (!started)
       {
-#ifdef HEXWALLET_SE051_PIN_RESET
-        pinMode(HEXWALLET_SE051_PIN_RESET, OUTPUT);
-        digitalWrite(HEXWALLET_SE051_PIN_RESET, LOW);
-        delay(10);
-        digitalWrite(HEXWALLET_SE051_PIN_RESET, HIGH);
-        delay(10);
+#ifdef HEXWALLET_SE051_ISO7816_RST_N
+        pinMode(HEXWALLET_SE051_ISO7816_RST_N, OUTPUT);
+        digitalWrite(HEXWALLET_SE051_ISO7816_RST_N, LOW);
 #endif
         started = Wire1.begin(kSecureElementSda, kSecureElementScl);
       }
@@ -1347,5 +1370,7 @@ namespace hexwallet
   {
     return g_display_ready && !g_review_frame_pending;
   }
+
+  bool board_display_operational() { return g_display_ready; }
 
 }

@@ -4,6 +4,7 @@
 #include "Clvm.h"
 #include "CryptoPrimitives.h"
 #include "WalletCatalog.h"
+#include "CoinIcons.h"
 #include "WalletCustody.h"
 #include "WalletEngine.h"
 #include "WalletSession.h"
@@ -53,11 +54,30 @@ int main(int argc, char **argv) {
   set_active_secure_element_profile(&se051c2hq1_profile());
   CHECK(&active_secure_element_profile() == &software_only_profile());
   CHECK(!wallet_session_custody_available());
-  CHECK(wallet_session_generate() == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_generate("") == WalletError::CustodyUnavailable);
   CHECK(wallet_session_generate("TREZOR") == WalletError::CustodyUnavailable);
   CHECK(wallet_session_import("public test", "TREZOR") == WalletError::CustodyUnavailable);
-  CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", "") == WalletError::CustodyUnavailable);
   CHECK(!wallet_session_is_loaded());
+  size_t receiving = 0, blocked = 0;
+  CHECK(run_coin_icon_self_tests());
+  for (size_t i = 0; i < wallet_catalog_count(); ++i) {
+    WalletCatalogEntry entry{};
+    CHECK(wallet_catalog_at(i, &entry));
+    CHECK(coin_icon_find(entry.symbol));
+    if (wallet_catalog_can_receive(entry)) {
+      CHECK(entry.network && wallet_catalog_has(entry, WalletCapabilitySigning) &&
+            wallet_catalog_has(entry, WalletCapabilityTransactionReview));
+      ++receiving;
+    } else {
+      ++blocked;
+      printf("receive-disabled=%s\n", entry.id);
+    }
+  }
+  WalletCatalogEntry address_only{};
+  CHECK(wallet_catalog_find("ryo", &address_only) && !wallet_catalog_can_receive(address_only));
+  CHECK(wallet_catalog_find("zano", &address_only) && !wallet_catalog_can_receive(address_only));
+  printf("receive-admission=%zu blocked=%zu (protocol code only; custody remains required)\n", receiving, blocked);
   memset(seed, 0xa5, sizeof(seed));
   memset(&master, 0xa5, sizeof(master));
   CHECK(wallet_session_load_seed(seed) == WalletError::CustodyUnavailable);
@@ -89,8 +109,8 @@ int main(int argc, char **argv) {
   CHECK(!gate.wallet_uses_handles);
   CHECK(custody_gate_blocker(gate) == CustodyBlocker::WalletLayerNotConverted);
   CHECK(&active_secure_element_profile() == &software_only_profile());
-  CHECK(wallet_session_generate() == WalletError::CustodyUnavailable);
-  CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about") == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_generate("") == WalletError::CustodyUnavailable);
+  CHECK(wallet_session_import("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", "") == WalletError::CustodyUnavailable);
   CHECK(secure_element_register_backend(nullptr));
   // With nothing registered the same gate names the card, not the wallet.
   CHECK(custody_gate_blocker(custody_gate_state()) ==

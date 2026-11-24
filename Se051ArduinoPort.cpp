@@ -10,7 +10,7 @@
 #endif
 #include <i2c_a7.h>
 #include <sm_timer.h>
-#if !defined(HEXWALLET_SE051_I2C_SDA) || !defined(HEXWALLET_SE051_PIN_RESET)
+#if !defined(HEXWALLET_SE051_I2C_SDA) || !defined(HEXWALLET_SE051_I2C_SCL)
 #error "Select a board with verified SE051 pins"
 #endif
 #if defined(HEXWALLET_SE051_PORT_TEST)
@@ -73,11 +73,10 @@ extern "C" i2c_error_t axI2CInit(void **context, const char *device)
     return I2C_FAILED;
   }
   Wire1.setTimeOut(100);
-  pinMode(HEXWALLET_SE051_PIN_RESET, OUTPUT);
-  digitalWrite(HEXWALLET_SE051_PIN_RESET, LOW);
-  delay(10);
-  digitalWrite(HEXWALLET_SE051_PIN_RESET, HIGH);
-  delay(10);
+#ifdef HEXWALLET_SE051_ISO7816_RST_N
+  pinMode(HEXWALLET_SE051_ISO7816_RST_N, OUTPUT);
+  digitalWrite(HEXWALLET_SE051_ISO7816_RST_N, LOW);
+#endif
   port = {true, false, current_task()};
   *context = &port;
   return I2C_OK;
@@ -87,7 +86,6 @@ extern "C" void axI2CTerm(void *context, int mode)
   (void)mode;
   if (context != &port || !port.opened || port.owner != current_task())
     return;
-  digitalWrite(HEXWALLET_SE051_PIN_RESET, LOW);
   Wire1.end();
   port = {};
 }

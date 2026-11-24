@@ -12,6 +12,7 @@
 #include "src/EcdsaCurve.h"
 #include "WalletAddresses.h"
 #include "word_list.h"
+#include "UnicodeNormalizer.h"
 
 namespace hexwallet
 {
@@ -19,9 +20,9 @@ namespace hexwallet
   {
 
     constexpr size_t kMnemonicTextSize = 256;
-    constexpr size_t kMaxPassphraseSize = 128;
     constexpr size_t kExtendedKeyPayloadSize = 78;
     constexpr size_t kExtendedKeyCheckedSize = 82;
+#include "src/generated/Bip39Chinese.inc"
 
     class WipeOnExit
     {
@@ -194,11 +195,12 @@ namespace hexwallet
       return WalletError::Ok;
     }
 
-    bool word_index(const char *word, size_t length, uint16_t *out_index)
+    bool word_index(const char *word, size_t length, MnemonicLanguage language, uint16_t *out_index)
     {
       for (uint16_t index = 0; index < 2048; ++index)
       {
-        const char *candidate = english_word_list[index];
+        const char *candidate = bip39_word_at(language, index);
+        if (!candidate) return false;
         if (strlen(candidate) == length && memcmp(candidate, word, length) == 0)
         {
           *out_index = index;
@@ -206,11 +208,6 @@ namespace hexwallet
         }
       }
       return false;
-    }
-
-    bool english_word_list_is_valid()
-    {
-      return strcmp(english_word_list[0], "abandon") == 0 && strcmp(english_word_list[2047], "zoo") == 0;
     }
 
   } // namespace
@@ -239,34 +236,50 @@ namespace hexwallet
     return true;
   }
 
-  WalletError bip39_generate_english_24(char *out, size_t out_size)
+  const char *bip39_word_at(MnemonicLanguage language, uint16_t index) {
+    if (index >= 2048) return nullptr;
+    switch (language) {
+      case MnemonicLanguage::English: return english_word_list[index];
+      case MnemonicLanguage::ChineseSimplified: return kBip39Simplified[index];
+      case MnemonicLanguage::ChineseTraditional: return kBip39Traditional[index];
+    }
+    return nullptr;
+  }
+
+  WalletError bip39_generate_english_24(char *out, size_t out_size) {
+    return bip39_generate(MnemonicLanguage::English, 24, out, out_size);
+  }
+
+  WalletError bip39_generate(MnemonicLanguage language, unsigned word_count, char *out, size_t capacity) {
+    if (!out) return WalletError::InvalidArgument;
+    secure_zero(out, capacity);
+    if (!bip39_word_at(language, 0) || word_count < 12 || word_count > 24 || word_count % 3)
+      return WalletError::InvalidArgument;
+    uint8_t entropy[32];
+    WipeOnExit wipe_entropy(entropy, sizeof(entropy));
+    const size_t size = word_count / 3 * 4;
+    if (!random_fill_checked(entropy, size)) return WalletError::RandomFailure;
+    return bip39_from_entropy(entropy, size, language, out, capacity);
+  }
+
+  WalletError bip39_from_entropy(const uint8_t *entropy, size_t entropy_size,
+                                MnemonicLanguage language, char *out, size_t out_size)
   {
     WipeOnExit output_on_failure(out, out_size);
-    if (out == nullptr || out_size < kMnemonicTextSize)
-    {
-      return WalletError::BufferTooSmall;
-    }
-    if (!english_word_list_is_valid())
-    {
-      return WalletError::CryptoFailure;
-    }
-    uint8_t entropy[32];
+    if (!out || !entropy || !bip39_word_at(language, 0) || entropy_size < 16 || entropy_size > 32 || entropy_size % 4)
+      return WalletError::InvalidArgument;
     uint8_t digest[32];
-    uint8_t bits[33];
-    WipeOnExit wipe_entropy(entropy, sizeof(entropy));
+    uint8_t bits[33] = {};
     WipeOnExit wipe_digest(digest, sizeof(digest));
     WipeOnExit wipe_bits(bits, sizeof(bits));
-    if (!random_fill_checked(entropy, sizeof(entropy)))
-      return WalletError::RandomFailure;
-    if (!crypto_sha256(entropy, sizeof(entropy), digest))
+    if (!crypto_sha256(entropy, entropy_size, digest))
     {
-      secure_zero(entropy, sizeof(entropy));
       return WalletError::CryptoFailure;
     }
-    memcpy(bits, entropy, sizeof(entropy));
-    bits[32] = digest[0];
+    memcpy(bits, entropy, entropy_size);
+    bits[entropy_size] = digest[0];
     size_t used = 0;
-    for (uint8_t word = 0; word < 24; ++word)
+    for (uint8_t word = 0; word < entropy_size / 4 * 3; ++word)
     {
       uint16_t index = 0;
       for (uint8_t bit = 0; bit < 11; ++bit)
@@ -274,11 +287,10 @@ namespace hexwallet
         const uint16_t position = static_cast<uint16_t>(word) * 11 + bit;
         index = static_cast<uint16_t>((index << 1) | ((bits[position / 8] >> (7 - position % 8)) & 1));
       }
-      const char *candidate = english_word_list[index];
+      const char *candidate = bip39_word_at(language, index);
       const size_t candidate_length = strlen(candidate);
       if (used + candidate_length + (word == 0 ? 1 : 2) > out_size)
       {
-        secure_zero(entropy, sizeof(entropy));
         secure_zero(digest, sizeof(digest));
         secure_zero(bits, sizeof(bits));
         return WalletError::BufferTooSmall;
@@ -291,7 +303,6 @@ namespace hexwallet
       used += candidate_length;
     }
     out[used] = '\0';
-    secure_zero(entropy, sizeof(entropy));
     secure_zero(digest, sizeof(digest));
     secure_zero(bits, sizeof(bits));
     output_on_failure.release();
@@ -300,12 +311,18 @@ namespace hexwallet
 
   WalletError bip39_validate_english(const char *mnemonic)
   {
-    if (mnemonic == nullptr || !is_ascii(mnemonic) || !english_word_list_is_valid())
+    return bip39_validate(mnemonic, MnemonicLanguage::English);
+  }
+
+  WalletError bip39_validate(const char *mnemonic, MnemonicLanguage language)
+  {
+    if (mnemonic == nullptr || !bip39_word_at(language, 0))
     {
-      return mnemonic != nullptr && !is_ascii(mnemonic) ? WalletError::UnsupportedUnicode : WalletError::InvalidMnemonic;
+      return WalletError::InvalidMnemonic;
     }
-    const size_t length = strlen(mnemonic);
-    if (length == 0 || length >= kMnemonicTextSize)
+    size_t length = 0;
+    while (length < kMnemonicTextSize && mnemonic[length]) ++length;
+    if (length == 0 || length >= kMnemonicTextSize || mnemonic[length - 1] == ' ')
     {
       return WalletError::InvalidMnemonic;
     }
@@ -319,7 +336,7 @@ namespace hexwallet
       const char *end = strchr(cursor, ' ');
       const size_t word_length = end == nullptr ? strlen(cursor) : static_cast<size_t>(end - cursor);
       uint16_t index;
-      if (word_length == 0 || word_count == 24 || !word_index(cursor, word_length, &index))
+      if (word_length == 0 || word_count == 24 || !word_index(cursor, word_length, language, &index))
       {
         return WalletError::InvalidMnemonic;
       }
@@ -370,31 +387,45 @@ namespace hexwallet
   WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,
                                       uint8_t out_seed[kSeedSize])
   {
+    return bip39_seed(mnemonic, MnemonicLanguage::English, passphrase, out_seed);
+  }
+
+  WalletError bip39_seed(const char *mnemonic, MnemonicLanguage language, const char *passphrase,
+                       uint8_t out_seed[kSeedSize])
+  {
+    size_t length = 0;
+    if (out_seed && passphrase) {
+      while (length <= kBip39MaxPassphraseBytes && passphrase[length]) ++length;
+    }
+    return bip39_seed(mnemonic, language, reinterpret_cast<const uint8_t *>(passphrase), length, out_seed);
+  }
+
+  WalletError bip39_seed(const char *mnemonic, MnemonicLanguage language, const uint8_t *passphrase,
+                         size_t passphrase_length, uint8_t out_seed[kSeedSize])
+  {
     WipeOnExit output_on_failure(out_seed, kSeedSize);
-    if (out_seed == nullptr || passphrase == nullptr)
+    if (out_seed == nullptr || passphrase == nullptr || passphrase_length > kBip39MaxPassphraseBytes)
     {
       return WalletError::InvalidArgument;
     }
-    const WalletError validation = bip39_validate_english(mnemonic);
+    const WalletError validation = bip39_validate(mnemonic, language);
     if (validation != WalletError::Ok)
     {
       return validation;
     }
-    if (!is_ascii(passphrase))
-    {
-      return WalletError::UnsupportedUnicode;
-    }
-    const size_t passphrase_length = strlen(passphrase);
-    if (passphrase_length > kMaxPassphraseSize)
-    {
-      return WalletError::InvalidArgument;
-    }
-    char salt[sizeof("mnemonic") + kMaxPassphraseSize];
+    // Compatibility decomposition can expand the UTF-8 input. Bound the
+    // result separately and erase it even when normalization fails.
+    char salt[8 + 18 * kBip39MaxPassphraseBytes];
+    WipeOnExit wipe_salt(salt, sizeof(salt));
     memcpy(salt, "mnemonic", 8);
-    memcpy(salt + 8, passphrase, passphrase_length);
+    size_t normalized_size = 0;
+    const auto normalized = normalize_passphrase(passphrase,
+        passphrase_length, UnicodeForm::Nfkd, reinterpret_cast<uint8_t *>(salt + 8),
+        sizeof(salt) - 8, &normalized_size);
+    if (normalized != WalletError::Ok) return normalized;
     const int result = mbedtls_pkcs5_pbkdf2_hmac_ext(
         MBEDTLS_MD_SHA512, reinterpret_cast<const unsigned char *>(mnemonic), strlen(mnemonic),
-        reinterpret_cast<const unsigned char *>(salt), 8 + passphrase_length,
+        reinterpret_cast<const unsigned char *>(salt), 8 + normalized_size,
         2048, kSeedSize, out_seed);
     secure_zero(salt, sizeof(salt));
     if (result == 0)

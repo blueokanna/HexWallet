@@ -13,6 +13,8 @@ FONT_SHA256 = "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
 def characters():
     text = (ROOT / "WalletUi.cpp").read_text(encoding="utf-8")
     text += (ROOT / "src/UiText.inc").read_text(encoding="utf-8")
+    text += (ROOT / "src/generated/PinyinDictionary.inc").read_text(encoding="utf-8")
+    text += (ROOT / "src/generated/Bip39Chinese.inc").read_text(encoding="utf-8")
     return "".join(sorted({c for c in text if ord(c) > 127}))
 
 

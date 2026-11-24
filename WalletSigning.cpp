@@ -1782,6 +1782,12 @@ namespace hexwallet
   WalletError wallet_derive_for_display(const HdPrivateNode &master, const uint8_t *seed,
       const NetworkProfile &network, uint32_t account, uint32_t change, uint32_t index, DerivedAddress *out)
   {
+    if (!out) return WalletError::InvalidArgument;
+    WalletCatalogEntry entry{};
+    if (!wallet_catalog_find(network.id, &entry) || !wallet_catalog_can_receive(entry)) {
+      clear_derived_address(out);
+      return WalletError::InvalidArgument;
+    }
     if (network.encoding != AddressEncoding::Evm && network.derivation != DerivationStyle::SolanaBip44)
       return derive_address(master, seed, network, account, change, index, out);
     WalletError result = WalletError::CryptoFailure;

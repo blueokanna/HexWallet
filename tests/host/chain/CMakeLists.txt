@@ -10,7 +10,7 @@ if(NOT EXISTS "${WALLET_ROOT}/build/chain-mbedtls/CMakeLists.txt")
 endif()
 add_subdirectory("${WALLET_ROOT}/build/chain-mbedtls" mbedtls EXCLUDE_FROM_ALL)
 set(WALLET_SOURCES
-  CryptoPrimitives.cpp WalletSecurity.cpp WalletEngine.cpp WalletAddresses.cpp
+  CryptoPrimitives.cpp WalletSecurity.cpp WalletKeyBackup.cpp UnicodeNormalizer.cpp src/unicode/utf8proc.c WalletEngine.cpp WalletAddresses.cpp
   WalletAltAddresses.cpp WalletNetworks.cpp WalletCatalog.cpp WalletMiningCatalog.cpp
   WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp Bls12381.cpp base58.cpp
   local_bech32.cpp local_segwit.cpp keccak256.cpp local_ripemd160.cpp
@@ -26,7 +26,12 @@ set(WALLET_SOURCES
   CryptoNoteTransaction.cpp CryptoNoteReview.cpp CryptoNoteBulletproofPlus.cpp CryptoNoteSigning.cpp
   RyoMlsag.cpp ZanoClsag.cpp ZanoOutput.cpp RyoBulletproof.cpp RyoTransaction.cpp CryptoNoteOutputScan.cpp XrpTransaction.cpp KaspaTransaction.cpp)
 list(TRANSFORM WALLET_SOURCES PREPEND "${WALLET_ROOT}/")
-add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp security_regression.cpp privacy_probe.cpp signing_audit.cpp)
+add_executable(chain_probe ${WALLET_SOURCES} chain_probe.cpp platform.cpp security_regression.cpp privacy_probe.cpp signing_audit.cpp key_backup_probe.cpp)
+target_sources(chain_probe PRIVATE ../link_pipe.cpp)
+target_sources(chain_probe PRIVATE "${WALLET_ROOT}/WalletBackupJob.cpp")
+set_property(SOURCE "${WALLET_ROOT}/WalletKeyBackup.cpp" APPEND PROPERTY COMPILE_DEFINITIONS
+  "$<$<STREQUAL:$<TARGET_PROPERTY:NAME>,chain_probe>:HEXWALLET_TEST_BACKUP_HEAP=1>")
+set_source_files_properties(../link_pipe.cpp PROPERTIES COMPILE_DEFINITIONS HEXWALLET_LINK_PIPE_EMBEDDED=1)
 set_property(SOURCE phone_review.cpp APPEND PROPERTY OBJECT_DEPENDS "${WALLET_ROOT}/WalletLinkService.cpp;${WALLET_ROOT}/WalletLink.h")
 target_sources(chain_probe PRIVATE phone_review.cpp "${WALLET_ROOT}/SolanaTransaction.cpp"
   "${WALLET_ROOT}/RyoPhonePayment.cpp"
@@ -86,7 +91,7 @@ target_link_libraries(p4_token_storage PRIVATE mbedcrypto)
 
 # Compile the real policy WITHOUT the host-only historical Substrate admission.
 # This target also exercises the production secure-custody requirement.
-add_executable(production_policy ${WALLET_SOURCES}
+add_executable(production_policy ${WALLET_SOURCES} "${WALLET_ROOT}/CoinIcons.cpp"
   production_policy.cpp platform.cpp)
 target_include_directories(production_policy PRIVATE entropy . "${WALLET_ROOT}"
   "${WALLET_ROOT}/tests/host" "${WALLET_ROOT}/tests/host/mock")

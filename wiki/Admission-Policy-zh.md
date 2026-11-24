@@ -13,7 +13,7 @@
 | `sign` | 产出链真正验证的摘要，来源是审查过的载荷；向量通过，或有独立实现逐字节一致 |
 | `token-account` | 有合约登记表与核对过的 calldata 子集；未知 calldata 按原始字节显示 |
 
-RyoCurrency 和 Zano 当前在目录中开放 `address`。Aeternity 还可审阅和签署向账户地址付款的原生 `SpendTx`。
+RyoCurrency 和 Zano 已有地址编码器，发布审阅／签名准入完成前禁用钱包收款。`wallet_catalog_can_receive()` 要求同时具备 `address`、`review` 和 `sign`，运行时另须通过托管门控。当前生产策略准入 211 项，禁收 Hive、Ryo、Zano；此计数不代表实卡能力。Aeternity 的原生 `SpendTx` 账户付款已通过协议审阅和签名测试。
 
 ## 门槛，按顺序
 

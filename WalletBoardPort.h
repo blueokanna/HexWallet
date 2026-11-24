@@ -39,6 +39,7 @@ uint8_t board_display_colors();
 // fail-closed state (no UI surfaces).
 bool board_display_init();
 void board_display_service();
+bool board_display_operational();
 // A new approval screen must finish rendering and panel transfer before it can
 // accept APPROVE. This is a software barrier, not optical verification.
 void board_display_prepare_review();
@@ -75,10 +76,8 @@ SecureElementProbeState board_secure_element_probe();
 // Clears outputs and returns false without consuming bytes on the SE bus.
 bool board_secure_element_atr(uint8_t *out, size_t capacity, size_t *size);
 
-// OV9281 presence probe over SCCB. Returns NotConfigured until a board profile
-// defines the sensor's SCCB bus, which is the honest answer for the current PCB:
-// its CSI pads run into series resistors and the camera FPC footprint carries no
-// nets, so there is no sensor to address yet.
+// OV9281 presence probe over SCCB. Returns NotConfigured when the board
+// profile does not provide a camera transport.
 CameraProbeState board_camera_probe();
 
 }  // namespace hexwallet

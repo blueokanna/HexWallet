@@ -36,9 +36,10 @@ namespace hexwallet
     Working,
     Sleep,
     Shy,
+    Bubbles,
   };
 
-  constexpr uint8_t kMascotMoodCount = 9;
+  constexpr uint8_t kMascotMoodCount = 10;
   constexpr const char *kMascotDisplayName = "DS-CHAN";
 
   const char *mascot_mood_name(MascotMood mood);
@@ -149,6 +150,7 @@ namespace hexwallet
   bool mascot_pet(uint32_t now_ms);
   bool mascot_feed(uint32_t now_ms);
   bool mascot_play(uint32_t now_ms);
+  bool mascot_blow_bubbles(uint32_t now_ms);
   void mascot_note_activity(uint32_t now_ms);
   void mascot_note_level_up(uint32_t now_ms);
 

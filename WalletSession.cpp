@@ -33,10 +33,13 @@ namespace hexwallet
 
   WalletError wallet_session_import(const char *words, const char *passphrase)
   {
-    if (words == nullptr || strlen(words) >= kMnemonicSize)
-      return WalletError::InvalidArgument;
+    return wallet_session_import_language(words, MnemonicLanguage::English, passphrase);
+  }
+
+  WalletError wallet_session_import_language(const char *words, MnemonicLanguage language, const char *passphrase)
+  {
     SensitiveValue<uint8_t[kSeedSize]> seed;
-    const WalletError result = bip39_seed_from_english(words, passphrase, seed.get());
+    const WalletError result = bip39_seed(words, language, passphrase, seed.get());
     if (result != WalletError::Ok)
       return result;
     wallet_session_clear();
@@ -88,6 +91,7 @@ namespace hexwallet
   bool wallet_session_custody_available() { return false; }
   WalletError wallet_session_generate(const char *) { return WalletError::CustodyUnavailable; }
   WalletError wallet_session_import(const char *, const char *) { return WalletError::CustodyUnavailable; }
+  WalletError wallet_session_import_language(const char *, MnemonicLanguage, const char *) { return WalletError::CustodyUnavailable; }
   WalletError wallet_session_load_master(HdPrivateNode *master)
   {
     if (master == nullptr)

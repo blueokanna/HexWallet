@@ -1,5 +1,11 @@
 #include "MaidSprite.h"
 #include <string.h>
+#ifdef ARDUINO_ARCH_ESP32
+#include <sdkconfig.h>
+#if CONFIG_IDF_TARGET_ESP32P4
+extern "C" void hexwallet_p4_copy_sprite(uint8_t *destination, const uint8_t *source);
+#endif
+#endif
 
 namespace hexwallet
 {
@@ -35,6 +41,7 @@ namespace hexwallet
       index = frame % kMascotAnimationFrames == 3 ? 1 : 0;
       break;
     case MascotMood::Happy:
+    case MascotMood::Bubbles:
       index = 2;
       break;
     case MascotMood::Alert:
@@ -67,14 +74,23 @@ namespace hexwallet
     frame %= kMascotAnimationFrames;
     const uint8_t *source = maid_sprite_pixels(mood, frame);
     const int lift = (mood == MascotMood::Excited && (frame & 1U)) ? 1 : 0;
-    memset(pixels, 0, stride * kMaidSpriteHeight);
-    for (size_t y = 0; y < kMaidSpriteHeight; ++y)
-    {
-      const size_t source_y = y + lift;
-      if (source_y < kMaidSpriteHeight)
-        memcpy(pixels + y * stride, source + source_y * kMaidSpriteRowBytes,
-               kMaidSpriteRowBytes);
+    const size_t rows = kMaidSpriteHeight - lift;
+    source += lift * kMaidSpriteRowBytes;
+    if (stride == kMaidSpriteRowBytes) {
+#if defined(ARDUINO_ARCH_ESP32) && CONFIG_IDF_TARGET_ESP32P4
+      static_assert(kMaidSpriteRowBytes * kMaidSpriteHeight == 512);
+      if (!lift && ((reinterpret_cast<uintptr_t>(pixels) | reinterpret_cast<uintptr_t>(source)) & 15) == 0)
+        hexwallet_p4_copy_sprite(pixels, source);
+      else
+#endif
+      memcpy(pixels, source, rows * stride);
+    } else {
+      for (size_t y = 0; y < rows; ++y) {
+        memcpy(pixels + y * stride, source + y * kMaidSpriteRowBytes, kMaidSpriteRowBytes);
+        memset(pixels + y * stride + kMaidSpriteRowBytes, 0, stride - kMaidSpriteRowBytes);
+      }
     }
+    if (lift) memset(pixels + rows * stride, 0, stride);
     switch (mood)
     {
     case MascotMood::Calm:
@@ -83,6 +99,16 @@ namespace hexwallet
     case MascotMood::Excited:
       sparkle(pixels, stride, 6, 13 - frame, 1 + (frame & 1U));
       sparkle(pixels, stride, 57, 8 + frame, 1 + ((frame + 1U) & 1U));
+      break;
+    case MascotMood::Bubbles:
+      for (unsigned i = 0; i < 3; ++i) {
+        const int phase = (frame + i) % kMascotAnimationFrames;
+        const int x = 48 + 4 * phase, y = 29 - 6 * phase;
+        dot(pixels, stride, x, y - 1);
+        dot(pixels, stride, x, y + 1);
+        dot(pixels, stride, x - 1, y);
+        dot(pixels, stride, x + 1, y);
+      }
       break;
     case MascotMood::Alert:
       for (int y = 6; y < 11 + static_cast<int>(frame & 1U); ++y)
@@ -132,6 +158,9 @@ namespace hexwallet
 
   bool run_maid_sprite_self_tests()
   {
+    alignas(16) uint8_t aligned[512];
+    if (!maid_sprite_render(MascotMood::Calm, 0, aligned, sizeof(aligned), 8) ||
+        memcmp(aligned, maid_sprite_pixels(MascotMood::Calm, 0), sizeof(aligned))) return false;
     uint8_t first[64 * 9 + 2], second[64 * 9 + 2];
     bool passed = true;
     for (uint8_t mood = 0; mood < kMascotMoodCount; ++mood)

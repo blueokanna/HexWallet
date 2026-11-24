@@ -59,9 +59,12 @@ namespace hexwallet
       const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
           ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, "assets");
       uint32_t physical_size = 0, addressable_size = 0;
-      if (!part || part->address != 0x800000 || part->size != 0x1800000 ||
-          esp_flash_get_physical_size(part->flash_chip, &physical_size) != ESP_OK || physical_size != 0x2000000 ||
-          esp_flash_get_size(part->flash_chip, &addressable_size) != ESP_OK || addressable_size < part->address + part->size)
+      if (!part || esp_flash_get_physical_size(part->flash_chip, &physical_size) != ESP_OK)
+        return false;
+      const bool layout_8m = physical_size == 0x800000 && part->address == 0x7d0000 && part->size == 0x20000;
+      const bool layout_32m = physical_size == 0x2000000 && part->address == 0x800000 && part->size == 0x1800000;
+      if ((!layout_8m && !layout_32m) || esp_flash_get_size(part->flash_chip, &addressable_size) != ESP_OK ||
+          addressable_size < part->address + part->size)
         return false;
       if (esp_littlefs_mounted("assets")) return true;
       esp_vfs_littlefs_conf_t config{};

@@ -40,6 +40,7 @@ SET_LOOP_TASK_STACK_SIZE(HEXWALLET_LOOP_TASK_STACK_SIZE);
 #include "WalletLinkCrypto.h"
 #include "WalletLinkService.h"
 #include "WalletNfcApdu.h"
+#include "WalletNfcPort.h"
 #include "WalletSecurity.h"
 #include "WalletSigning.h"
 #include "WalletTokens.h"
@@ -320,6 +321,10 @@ void setup() {
   if (!hexwallet::wallet_link_service_nfc_begin()) {
     Serial.print("INFO nfc=");
     Serial.print(hexwallet::wallet_link_service_nfc_state());
+    if (const char *error = hexwallet::nfc_port_error()) {
+      Serial.print(" detail=");
+      Serial.print(error);
+    }
     Serial.println();
   } else {
     Serial.println("INFO nfc=ready (PN7161 ISO-DEP card emulation)");

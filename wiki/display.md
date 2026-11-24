@@ -66,16 +66,7 @@ OMNIVISION OV9281 是 **MIPI CSI-2** 器件（1280×800 全局快门，8/10-bit 
 
 ### 这块板子上的摄像头接了吗
 
-没有。工程 `c26102103` 里可以逐条对上：
-
-- ESP32-P4 的 CSI 焊盘 42–48 有网络，但都只接到串联电阻 R31–R37，电阻另一侧没有连接器；
-- 板上的相机 FPC（26 pad，位号 `be25a532e5d3def2`）**所有焊盘都没有网络**；
-- OV9281 只出现在丝印/文本层（`Designator: OV9281`），没有 SCCB、没有 MCLK、没有
-  RST/PWDN 连到 P4。
-
-所以 `HEXWALLET_CAMERA_*` 一个都没定义，`board_camera_probe()` 在这块板上返回
-`NotConfigured`。等下一版把 SCCB 与 CSI 接出来以后，只需要在板级配置里补
-`HEXWALLET_CAMERA_SCCB_SDA/SCL`，探测路径立刻可用；CSI 收流仍需要厂商寄存器表。
+工程 `c26102103` 的 PCB 中，位号 `OV9281` 的接口 2、3 脚接到与 U2、RTC 共用的 `050_SDA`、`050_SCL`。CSI 时钟与两对数据线通过 R32–R37 接到该接口。网表可以确认设计连线，模块实装、上电时序和采集仍需实测。当前 7 号板固件未配置摄像头传输，`board_camera_probe()` 返回 `NotConfigured`。
 
 ## QR 码
 

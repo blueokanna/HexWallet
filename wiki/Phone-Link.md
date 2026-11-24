@@ -2,7 +2,7 @@
 
 [中文](Phone-Link-zh) · [Home](Home)
 
-The phone starts every link operation and submits signed transactions to the node. The wallet parses or reconstructs the transaction according to its adapter, shows it for local approval and signs. Protocol version is **2**. A v1 peer and a v2 device must
+The phone starts transport operations and submits signed transactions to the node. Initial enrollment also requires trusted local actions on the wallet. The wallet parses or reconstructs the transaction according to its adapter, shows it for local approval and signs. Protocol version is **2**. A v1 peer and a v2 device must
 fail, because the ephemeral exchange changed from Ed25519-group ECDH to Curve25519 and would derive
 different keys from the same transcript.
 
@@ -50,22 +50,21 @@ present only on Request/Response frames. A length that does not match exactly is
 
 ## Pairing (one time)
 
+Enrollment now requires a device-generated offer and a signed phone reply observed through the device's trusted camera path. The implementation and exact binary records are documented in [Mutual pairing](Mutual-Pairing). USB/NFC have no command that can claim to have performed this scan. Board 7 has no working CSI capture/QR decoder, so initial enrollment is currently unavailable on hardware. The Node/native tests exercise the cryptographic records with simulated camera delivery and approval.
+
 ```text
 PairRequest.payload  = PK_phone(32) | nonce_phone(32) | sig(64)
 sig = Ed25519(sk_phone, "HWLK1-PAIR" | PK_phone | nonce_phone)
 ```
 
-The device verifies the self-signature, refuses a second, different phone key, and — if it is not
-paired yet — shows a 6-digit code on the trusted display. The code is the first 3 bytes of
-`SHA256("HWLK1-PAIR-CODE" | PK_phone | PK_dev)`. Nothing is returned until the user presses APPROVE;
-the same request only yields `pending-pairing`. The prompt expires after 60 seconds.
+For an unpaired device, the key and nonce must match the signed reply scanned for its current offer. The device then verifies the self-signature and displays the full 32-byte phone identity and a six-digit comparison code. Interpret the first three bytes of `SHA256("HWPAIR1-CODE" | PK_phone | SHA256(offer) | nonce_phone)` as a big-endian integer, reduce modulo 1,000,000, and pad to six digits. The offer expires 60 seconds after creation, including scan and approval time. A matching request returns `pending-pairing` until local hold-to-approve succeeds. A different phone cannot replace an existing pairing.
 
 ```text
 PairResponse.payload = PK_dev(32) | nonce_phone(32) | nonce_dev(32) | sig(64)
 sig = Ed25519(sk_dev, "HWLK1-PAIR-RESP" | PK_phone | PK_dev | nonce_phone | nonce_dev)
 ```
 
-The phone pins `PK_dev` (TOFU plus fingerprint comparison) and must warn if it changes.
+The phone checks `PK_dev` against the identity in its scanned offer, verifies the response signature and its own nonce, then pins the identity for subsequent sessions. The signed offer proves possession of that identity; it does not certify the device manufacturer or firmware.
 
 ## Session handshake
 
@@ -89,7 +88,7 @@ session_id = LE32(hash[0..3])
 
 Identity keys stay Ed25519; only the ephemeral exchange is X25519. Each frame uses one direction
 key and a 12-byte nonce: `session_id(4) | direction(1) | sequence(4) | 00 00 00`. Encryption is
-ChaCha20 from counter 0, authentication is HMAC-SHA256 (encrypt-then-MAC).
+ChaCha20 from counter 0, authentication is HMAC-SHA256 (encrypt-then-MAC). Direction is `2` for phone-to-device and `1` for device-to-phone. Each directional key derives separate encryption and MAC keys with `HMAC-SHA256(key, "HexWallet Link encryption")` and `HMAC-SHA256(key, "HexWallet Link authentication")`. The tag authenticates `header || nonce || ciphertext` in that order. Streaming authentication supports the full 16,384-byte frame payload; larger frames are rejected by the decoder. Application headers consume part of this budget.
 
 The device enforces: matching `session_id`, strictly increasing `sequence`, immediate session
 destruction on any authentication failure, 3 minutes of inactivity, and a 4096-frame session cap.
@@ -114,7 +113,7 @@ Response.payload = request_id(4) | status(1) | data…
 
 For Ryo, omitting the optional subaddress pair preserves the legacy mapping from account and index. Explicit `(0, 0)` selects the standard address of that BIP32 child. When those choices give different addresses, the explicit standard address has `+0/0` in its displayed path. Zano uses a standard address at every BIP32 child and rejects a nonzero subaddress pair. An address request fails if its complete path exceeds the display field.
 
-The release catalog exposes addresses for both currencies. The `TEST_RYO_PHONE_PAYMENTS=ON` host probe also accepts `BEGIN_SIGN` for `ryo`, kind `5`, with one external long standard address and optional change. Its 16-byte application header leaves 16,368 bytes for the payment. The payload contains version `1`, a little-endian 16-bit unsigned transaction length, the transaction bytes, a 32-byte transaction secret, the recipient's public spend and view keys, and one funding record per input. Each record contains the 16-bit real ring position, 64-bit funding output number, funding public key, 64-byte ECDH data, pseudo-output mask and the ring members. Each member consists of a 64-bit absolute output index, destination key and commitment.
+Release wallet address requests for Hive, Ryo and Zano are disabled: receiving requires address, transaction-review and signing admission together, plus a usable wallet session. Address encoders remain available to protocol tests. The `TEST_RYO_PHONE_PAYMENTS=ON` host probe accepts `BEGIN_SIGN` for `ryo`, kind `5`, with one external long standard address and optional change. Its 16-byte application header leaves 16,368 bytes for the payment. The payload contains version `1`, a little-endian 16-bit unsigned transaction length, the transaction bytes, a 32-byte transaction secret, the recipient's public spend and view keys, and one funding record per input. Each record contains the 16-bit real ring position, 64-bit funding output number, funding public key, 64-byte ECDH data, pseudo-output mask and the ring members. Each member consists of a 64-bit absolute output index, destination key and commitment.
 
 The phone verifies input ownership and signed key images. The device checks the recipient, change, fee and full payment ID before enabling local approval. The fee cap is 0.1 RYO. `RESULT` returns the signed bytes once. The phone verifies them against the reviewed transaction and checks the mainnet genesis hash before broadcast. The private-fork test submits separately and a stock view-only wallet scans both receipts. [Receipts](validation)
 
@@ -130,8 +129,7 @@ Install the adapter's pinned dependencies with `npm ci --prefix tools --ignore-s
 
 `kind` selects the parser: 1 UTXO/PSBT, 2 EVM, 3 Kaspa, 4 Zcash, 5 CryptoNote (XMR), 6 Solana,
 7 TRON, 8 Cosmos, 9 Stellar, 10 Algorand, 11 NEAR, 12 Tezos, 13 XRP, 14 Chain (VET, ICX, TON, DCR,
-CKB, ADA, HIVE, SUI, FIL, DOT, KSM), 15 Dash. `BEGIN_SIGN` accepts up to 16384 bytes; anything
-larger is `invalid`, never truncated. The review expires after 120 seconds.
+CKB, ADA, HIVE, SUI, FIL, DOT, KSM), 15 Dash. The complete `BEGIN_SIGN` application request must fit the 16,384-byte link payload, including its header and network identifier. Individual parsers may impose smaller transaction limits. Excess bytes are rejected, never truncated. The review expires after 120 seconds.
 
 Kind 15 takes a `DAS2` or `DAS3` payload. Both must carry every input's funding transaction; `DAS3`
 adds one flags byte whose bit 0 declares InstantSend intent. The device shows that declaration, says

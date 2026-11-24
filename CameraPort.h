@@ -16,10 +16,8 @@ namespace hexwallet {
 // init table produces a camera that returns noise, and a wallet that shows a
 // noisy frame as a scanned address is worse than one that says "no camera".
 //
-// Board reality check (rev c26102103, from the EasyEDA project): the ESP32-P4
-// CSI pins carry series resistors R31-R37 and the camera FPC footprint has no
-// nets, so no SCCB bus reaches an OV9281 on this revision. camera_probe()
-// returns NotConfigured there instead of inventing pins.
+// The c26102103 camera connector shares SCCB with the secure element and RTC.
+// Board 7 has no configured camera transport or CSI capture pipeline.
 
 enum class CameraProbeState : uint8_t {
   NotConfigured = 0,  // the board profile wires no SCCB bus

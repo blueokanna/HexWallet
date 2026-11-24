@@ -14,7 +14,7 @@ lie and gets reverted.** Everything else here is how that rule is applied.
 | `sign` | the exact digest the chain verifies, produced from the reviewed payload, with a passing vector or an independent implementation agreeing byte for byte |
 | `token-account` | a registry of contracts with a reviewed calldata subset; unknown calldata is shown as raw bytes |
 
-RyoCurrency and Zano currently expose `address` in the catalog. Aeternity also reviews and signs native `SpendTx` payments to account addresses.
+RyoCurrency and Zano have address encoders, but wallet receiving is disabled until release review/signing admission is complete. `wallet_catalog_can_receive()` requires `address`, `review` and `sign` together; the runtime custody gate applies separately. The current production policy admits 211 entries and blocks Hive, Ryo and Zano. This count does not establish card-backed support. Aeternity reviews and signs native `SpendTx` payments to account addresses in protocol tests.
 
 ## The gate, in order
 

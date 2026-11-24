@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "EinkFrame.h"
+#include "WalletWorker.h"
 #include "../../../WalletUi.cpp"
 
 static uint32_t test_now = 0;
@@ -11,7 +12,8 @@ static lv_key_t input_key = LV_KEY_ENTER;
 static lv_indev_state_t input_state = LV_INDEV_STATE_RELEASED;
 static unsigned decisions = 0;
 static bool last_approval = false;
-static uint8_t display_pixels[128 * 296 * 2];
+static uint16_t panel_width = 296, panel_height = 128;
+static uint8_t display_pixels[240 * 320 * 2];
 static size_t catalog_size = 10;
 uint32_t millis() { return test_now; }
 void delay(uint32_t ms) { test_now += ms; }
@@ -39,13 +41,100 @@ static void flush(lv_display_t *display, const lv_area_t *, uint8_t *) {
 
 namespace hexwallet
 {
+  CameraProbeState board_camera_probe() { return CameraProbeState::NotConfigured; }
+  bool nfc_port_configured() { return true; }
+  const char *nfc_port_error() { return nullptr; }
+  static NfcBackupStatus tag_status = NfcBackupStatus::Idle;
+  NfcBackupStatus nfc_backup_start() { return tag_status = NfcBackupStatus::Pending; }
+  void nfc_backup_cancel() { tag_status = NfcBackupStatus::Idle; }
+  NfcBackupStatus nfc_backup_take(char (&key)[65]) {
+    if (tag_status == NfcBackupStatus::Complete) {
+      memcpy(key, "6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg", 59);
+      tag_status = NfcBackupStatus::Idle;
+      return NfcBackupStatus::Complete;
+    }
+    return tag_status;
+  }
+  static CustodyBlocker test_blocker = CustodyBlocker::BackendMissing;
+  CustodyGateState custody_gate_state() { return {}; }
+  CustodyBlocker custody_gate_blocker(const CustodyGateState &) { return test_blocker; }
+  bool wallet_session_is_loaded() { return false; }
+  static bool test_display_operational = true;
+  bool board_display_operational() { return test_display_operational; }
+  static const char public_encrypted[] = "6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg";
+  static unsigned backup_reads = 0;
+  WalletError bip38_decrypt(const char *input, size_t size, const uint8_t *password, size_t length,
+                            BitcoinKeyNetwork net, BitcoinPrivateKey *out, KeyBackupControl control) {
+    ++backup_reads;
+    if (!control.progress(control.context)) return WalletError::Aborted;
+    if (size != 58 || memcmp(input, public_encrypted, 58)) return WalletError::InvalidChecksum;
+    if (length != 1 || *password != 'p' || net != BitcoinKeyNetwork::Mainnet) return WalletError::IncorrectPassphrase;
+    out->network = net;
+    return WalletError::Ok;
+  }
+  WalletError private_key_decode(const char *text, size_t size, BitcoinKeyNetwork net, bool compressed, BitcoinPrivateKey *out) {
+    if (size != 64 || text[63] != '1') return WalletError::InvalidKey;
+    out->network = net;
+    out->compressed = compressed;
+    return WalletError::Ok;
+  }
+  WalletError bip38_encrypt(const BitcoinPrivateKey &, const uint8_t *, size_t, char *out, size_t capacity, KeyBackupControl) {
+    if (capacity < sizeof(public_encrypted)) return WalletError::BufferTooSmall;
+    memcpy(out, public_encrypted, sizeof(public_encrypted));
+    return WalletError::Ok;
+  }
+  WalletError bitcoin_key_address(const BitcoinPrivateKey &, char *out, size_t capacity) {
+    const char address[] = "1Jq6MksXQVWzrznvZzxkV6oY57oWXD9TXB";
+    if (capacity < sizeof(address)) return WalletError::BufferTooSmall;
+    memcpy(out, address, sizeof(address));
+    return WalletError::Ok;
+  }
+  static const char fixture_words[] = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  // English BIP39 phrases for zero-filled entropy, cross-checked with ethers.
+  static std::string fixture_phrase(unsigned count) {
+    static const char *const endings[] = {"about", "address", "agent", "admit", "art"};
+    if (count < 12 || count > 24 || count % 3) return {};
+    std::string words;
+    for (unsigned i = 1; i < count; ++i) words += "abandon ";
+    return words + endings[(count - 12) / 3];
+  }
+  WalletError bip39_generate(MnemonicLanguage language, unsigned count, char *out, size_t size) {
+    const auto words = fixture_phrase(count);
+    if (language != MnemonicLanguage::English || words.empty()) return WalletError::InvalidArgument;
+    if (size <= words.size()) return WalletError::BufferTooSmall;
+    memcpy(out, words.c_str(), words.size() + 1);
+    return WalletError::Ok;
+  }
+  WalletError bip39_validate(const char *words, MnemonicLanguage language) {
+    if (language == MnemonicLanguage::English) {
+      for (unsigned count = 12; count <= 24; count += 3)
+        if (fixture_phrase(count) == words) return WalletError::Ok;
+    }
+    return WalletError::InvalidMnemonic;
+  }
+  static unsigned imports = 0;
+  WalletError wallet_session_import_language(const char *words, MnemonicLanguage language, const char *) {
+    if (bip39_validate(words, language) != WalletError::Ok) return WalletError::InvalidMnemonic;
+    ++imports;
+    return WalletError::Ok;
+  }
+  void secure_zero(void *p, size_t size) { memset(p, 0, size); }
+  static AssetLayout saved_layout = AssetLayout::List;
+  static bool layout_write_failure = false;
+  const char *load_asset_layout(AssetLayout &layout) { layout = saved_layout; return nullptr; }
+  const char *save_asset_layout(AssetLayout layout) {
+    if (layout_write_failure) return "ESP_ERR_NVS_NOT_ENOUGH_SPACE";
+    saved_layout = layout;
+    return nullptr;
+  }
   bool board_is_eink() { return true; }
   uint8_t board_display_colors() { return 2; }
-  uint16_t board_display_width() { return 296; }
-  uint16_t board_display_height() { return 128; }
+  uint16_t board_display_width() { return panel_width; }
+  uint16_t board_display_height() { return panel_height; }
   bool wallet_link_service_connected() { return false; }
   uint16_t board_battery_millivolts() { return 3800; }
   bool board_has_display() { return true; }
+  bool board_has_touch() { return panel_width < panel_height; }
   bool board_partial_refresh_supported() { return test_partial; }
   bool board_display_review_ready() { return test_committed; }
   void board_display_prepare_review() {}
@@ -58,12 +147,20 @@ namespace hexwallet
     // Match the release gates for Ryo/Zano: host-only payment candidates must
     // not appear as available signing capabilities in the screenshot fixtures.
     const uint8_t capabilities = WalletCapabilityAddress |
-        ((index == 7 || index == 8) ? 0 : WalletCapabilitySigning);
+        ((index == 7 || index == 8) ? 0 : WalletCapabilitySigning | WalletCapabilityTransactionReview);
     *out = {symbols[index], symbols[index], names[index], 0,
             capabilities, nullptr, "Registered code; hardware validation pending"};
     return true;
   }
-  bool wallet_catalog_matches(const WalletCatalogEntry &, const char *) { return false; }
+  bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query) {
+    std::string needle(query);
+    for (auto &c : needle) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    for (std::string value : {entry.id, entry.name, entry.symbol}) {
+      for (auto &c : value) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+      if (value.find(needle) != std::string::npos) return true;
+    }
+    return false;
+  }
   bool wallet_catalog_has(const WalletCatalogEntry &entry, WalletCapability cap) { return (entry.capabilities & cap) != 0; }
   bool random_fill_checked(void *out, size_t size) { memset(out, test_entropy ? 0x37 : 0, size); return test_entropy; }
   bool review_seal_build(ReviewSeal *seal, const uint8_t *, const char *const *lines,
@@ -163,14 +260,45 @@ static bool audited_capture(lv_display_t *display, const char *directory, const 
   return capture(display, directory, name);
 }
 
+static bool type_key(lv_indev_t *keypad, const char *caption) {
+  using namespace hexwallet;
+  for (unsigned i = 0; input_matrix && i < 52; ++i) {
+    const char *selected = lv_buttonmatrix_get_button_text(input_matrix, lv_buttonmatrix_get_selected_button(input_matrix));
+    if (selected && !strcmp(selected, caption)) {
+      press_key(keypad, LV_KEY_ENTER);
+      return true;
+    }
+    press_key(keypad, LV_KEY_NEXT);
+  }
+  fprintf(stderr, "Keyboard button missing: %s\n", caption);
+  return false;
+}
+
+static bool type_secret(lv_indev_t *keypad, const char *text) {
+  const char *mode = "abc";
+  for (; *text; ++text) {
+    char key[2] = {*text, 0};
+    if (*text == ' ') {
+      if (!type_key(keypad, hexwallet::tr("Spc", "空格"))) return false;
+      continue;
+    }
+    const char *next = *text >= '0' && *text <= '9' ? "123" : *text >= 'A' && *text <= 'Z' ? "ABC" : "abc";
+    if (strcmp(mode, next) && !type_key(keypad, next)) return false;
+    if (!type_key(keypad, key)) return false;
+    mode = next;
+  }
+  return type_key(keypad, hexwallet::tr("Done", "完成"));
+}
+
 static int render_pages(lv_display_t *display, lv_indev_t *keypad, lv_group_t *group, const char *directory) {
   using namespace hexwallet;
   const char *address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
   auto shot = [&](const char *name) { return audited_capture(display, directory, name); };
   auto bottom = [&]() {
+    auto target = reader_target ? reader_target : screen_content;
     for (unsigned i = 0; i < 64; ++i) {
-      lv_obj_update_layout(screen_content);
-      if (lv_obj_get_scroll_bottom(screen_content) <= 0) return true;
+      lv_obj_update_layout(target);
+      if (lv_obj_get_scroll_bottom(target) <= 0) return true;
       press_key(keypad, LV_KEY_NEXT);
     }
     return false;
@@ -197,6 +325,44 @@ static int render_pages(lv_display_t *display, lv_indev_t *keypad, lv_group_t *g
   press_key(keypad, LV_KEY_NEXT);
   press_key(keypad, LV_KEY_ENTER);
   CHECK(current_page == Page::RecoverKey && shot("recover-key"));
+  wallet_ui_set_authenticated(true);
+  open_page(Page::RecoverKey);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::KeyNetwork && shot("backup-network"));
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::KeyEntry && type_secret(keypad, public_encrypted));
+  CHECK(current_page == Page::KeyPass && shot("backup-password") && type_secret(keypad, "p"));
+  CHECK(current_page == Page::KeyWorking && shot("backup-working"));
+  wallet_ui_service();
+  CHECK(current_page == Page::KeyResult && shot("backup-address"));
+  open_page(Page::NfcImport);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::TagWait && shot("backup-tag"));
+  press_key(keypad, LV_KEY_ESC);
+  test_blocker = CustodyBlocker::None;
+  open_page(Page::CreateWords);
+  CHECK(shot("mnemonic-language"));
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsCount && shot("mnemonic-count"));
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsBackup && shot("mnemonic-backup") && bottom());
+  press_key(keypad, LV_KEY_ENTER);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsConfirm && shot("mnemonic-retype") && type_secret(keypad, fixture_words));
+  CHECK(current_page == Page::PassChoice && shot("mnemonic-passphrase"));
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Enroll && shot("mnemonic-create-confirm"));
+  press_key(keypad, LV_KEY_ENTER);
+  open_page(Page::RecoverWords);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsInput && shot("mnemonic-recover") && type_secret(keypad, fixture_words));
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Enroll && shot("mnemonic-recover-confirm"));
+  test_blocker = CustodyBlocker::BackendMissing;
+  wallet_ui_set_authenticated(false);
   open_page(Page::Scan);
   CHECK(shot("scan"));
   press_key(keypad, LV_KEY_ESC);
@@ -214,6 +380,15 @@ static int render_pages(lv_display_t *display, lv_indev_t *keypad, lv_group_t *g
   CHECK(shot("language"));
   press_key(keypad, LV_KEY_ENTER);
   CHECK(current_page == Page::Language);
+  press_key(keypad, LV_KEY_ESC);
+  open_page(Page::Companion);
+  CHECK(companion_canvas && shot("companion"));
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Companion && companion_canvas && shot("companion-feed"));
+  test_now += kMascotActionCooldownMs;
+  for (unsigned i = 0; i < 3; ++i) press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(companion_rendered.mood == MascotMood::Bubbles && shot("companion-bubbles"));
   press_key(keypad, LV_KEY_ESC);
   open_page(Page::Catalog);
   CHECK(shot("catalog"));
@@ -234,11 +409,46 @@ static int render_pages(lv_display_t *display, lv_indev_t *keypad, lv_group_t *g
   open_page(Page::Catalog);
   CHECK(catalog_offset == 0 && lv_group_get_focused(group) == screen_content && shot("catalog-empty"));
   catalog_size = 10;
+  open_page(Page::Settings);
+  CHECK(shot("settings"));
+  for (unsigned i = 0; i < 3; ++i) press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Search && shot("keyboard"));
+  CHECK(type_key(keypad, tr("Pin", "拼音")) && type_key(keypad, "s") && type_key(keypad, "h") && type_key(keypad, "i"));
+  CHECK(type_key(keypad, tr("Han", "选字")) && input_candidates && shot("keyboard-candidates"));
+  press_key(keypad, LV_KEY_ESC);
+  CHECK(!input_matrix && !text_input.composition()[0] && !asset_query[0]);
+  open_page(Page::Settings);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Layout && shot("layout"));
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(asset_layout == AssetLayout::Grid && shot("catalog-grid"));
+  open_page(Page::Layout);
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(asset_layout == AssetLayout::Card && shot("catalog-card"));
+  CHECK(saved_layout == AssetLayout::Card);
+  CHECK(lv_obj_get_style_radius(lv_obj_get_child(screen_content, 0), LV_PART_MAIN) == (12 * lv_display_get_dpi(display) + 80) / 160);
+  open_page(Page::Layout);
+  layout_write_failure = true;
+  press_key(keypad, LV_KEY_PREV);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(asset_layout == AssetLayout::Card && current_page == Page::Layout && layout_error);
+  layout_write_failure = false;
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(!layout_error);
+  asset_layout = AssetLayout::List;
   wallet_ui_set_authenticated(true);
   CHECK(wallet_ui_show_address("ETH", address, "m/44'/60'/0'/0/1") && shot("receive"));
+  auto qr = lv_obj_get_child(lv_obj_get_child(lv_obj_get_child(screen_content, 0), 0), 0);
+  lv_area_t qr_before, qr_after;
+  lv_obj_get_coords(qr, &qr_before);
   press_key(keypad, LV_KEY_NEXT);
   CHECK(shot("receive-scroll"));
   CHECK(bottom() && shot("receive-bottom"));
+  lv_obj_get_coords(qr, &qr_after);
+  CHECK(!memcmp(&qr_before, &qr_after, sizeof(qr_before)) && lv_obj_get_scroll_y(screen_content) == 0);
   press_key(keypad, LV_KEY_ESC);
   CHECK(current_page == Page::Home);
   std::string long_address(220, 'X');
@@ -318,7 +528,8 @@ static int render_pages(lv_display_t *display, lv_indev_t *keypad, lv_group_t *g
   CHECK(shot("busy"));
   wallet_ui_set_status("UNDECODED CODE. The amount is native call value only. Code may move other assets or grant permissions. Approve only after independently verifying the target and every data byte.");
   CHECK(shot("status-long"));
-  wallet_ui_show_port_error();
+  test_display_operational = false;
+  wallet_ui_service();
   CHECK(!wallet_ui_ready() && shot("port-error"));
   return 0;
 }
@@ -385,7 +596,190 @@ int main(int argc, char **argv)
   press_key(keypad, LV_KEY_ENTER);
   CHECK(wallet_ui_language() == startup_language);
   press_key(keypad, LV_KEY_ESC);
-  CHECK(current_page == Page::Home);
+  CHECK(current_page == Page::Settings);
+
+  for (unsigned i = 0; i < 3; ++i) press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Search && input_matrix);
+  CHECK(type_key(keypad, "ABC") && type_key(keypad, "B") && type_key(keypad, "abc") && type_key(keypad, "t"));
+  CHECK(type_key(keypad, "123") && type_key(keypad, "8") && type_key(keypad, "#%") && type_key(keypad, "!"));
+  CHECK(!strcmp(text_input.text(), "Bt8!"));
+  CHECK(type_key(keypad, tr("Del", "删除")) && type_key(keypad, tr("Del", "删除")));
+  CHECK(type_key(keypad, "abc") && type_key(keypad, "c") && type_key(keypad, tr("Done", "完成")));
+  CHECK(current_page == Page::Catalog && catalog_matches == 1 && !strcmp(asset_query, "Btc") && !text_input.size());
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Search);
+  const char *pinyin = tr("Pin", "拼音"), *han = tr("Han", "选字");
+  CHECK(type_key(keypad, pinyin) && type_key(keypad, "s") && type_key(keypad, "h") && type_key(keypad, "i") && type_key(keypad, han));
+  CHECK(input_candidates && text_input.candidate_count() > 16);
+  CHECK(type_key(keypad, tr("Next", "下页")) && input_candidate_offset == 8);
+  CHECK(type_key(keypad, tr("Prev", "上页")) && input_candidate_offset == 0);
+  CHECK(type_key(keypad, tr("Next", "下页")));
+  char han_char[4];
+  CHECK(text_input.candidate(8, han_char) && type_key(keypad, han_char));
+  CHECK(!strcmp(text_input.text() + 3, han_char));
+  CHECK(type_key(keypad, tr("Done", "完成")) && !catalog_matches);
+  for (unsigned i = 0; i < 16; ++i) {
+    press_key(keypad, LV_KEY_ENTER);
+    CHECK(current_page == Page::Search && text_input.size() == 6);
+    CHECK(type_key(keypad, tr("Del", "删除")) && !strcmp(text_input.text(), "Btc"));
+    press_key(keypad, LV_KEY_ESC);
+    CHECK(current_page == Page::Catalog && !input_matrix && !text_input.size() && strlen(asset_query) == 6);
+  }
+  press_key(keypad, LV_KEY_ENTER);
+  for (unsigned i = 0; i < 4; ++i) CHECK(type_key(keypad, tr("Del", "删除")));
+  CHECK(type_key(keypad, tr("Done", "完成")) && catalog_matches == catalog_size && !asset_query[0]);
+
+  // Public words and a simulated custody gate exercise only the display flow.
+  wallet_ui_set_authenticated(true);
+  test_blocker = CustodyBlocker::None;
+  open_page(Page::Home);
+  for (unsigned i = 0; i < 3; ++i) press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsCount);
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsBackup && setup_words.count == 12);
+  lv_obj_update_layout(screen_content);
+  for (unsigned i = 0; i < 32 && lv_obj_get_scroll_bottom(screen_content) > 0; ++i) press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsConfirm && input_matrix);
+  CHECK(type_key(keypad, tr("Done", "完成")) && current_page == Page::WordsConfirm);
+  for (const char c : std::string(fixture_words)) {
+    const char key[] = {c, 0};
+    CHECK(type_key(keypad, c == ' ' ? tr("Spc", "空格") : key));
+  }
+  CHECK(type_key(keypad, tr("Done", "完成")) && current_page == Page::PassChoice);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(type_key(keypad, "p") && !strcmp(lv_label_get_text(input_preview), "*") && type_key(keypad, tr("Done", "完成")));
+  CHECK(current_page == Page::PassConfirm && type_key(keypad, "q") && type_key(keypad, tr("Done", "完成")));
+  CHECK(current_page == Page::PassConfirm && type_key(keypad, tr("Del", "删除")) && type_key(keypad, "p"));
+  CHECK(type_key(keypad, tr("Done", "完成")) && current_page == Page::Enroll);
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(imports == 0);
+  press_key(keypad, LV_KEY_ENTER, true);
+  CHECK(imports == 1 && current_page == Page::Home && !setup_words.words[0] && !setup_words.passphrase[0]);
+  // Restore with explicit empty passphrase and cancel at the default choice.
+  open_page(Page::Recover);
+  press_key(keypad, LV_KEY_ENTER);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::WordsInput && type_secret(keypad, fixture_words));
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::Enroll && !setup_words.passphrase[0]);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(imports == 1 && current_page == Page::Home && !setup_words.words[0]);
+
+  for (unsigned action = 0; action < 4; ++action) {
+    wallet_ui_set_authenticated(true);
+    open_page(Page::Recover);
+    press_key(keypad, LV_KEY_NEXT);
+    press_key(keypad, LV_KEY_ENTER);
+    press_key(keypad, LV_KEY_ENTER);
+    CHECK(current_page == Page::KeyNetwork);
+    press_key(keypad, LV_KEY_ENTER);
+    CHECK(type_secret(keypad, public_encrypted) && type_secret(keypad, "p"));
+    CHECK(current_page == Page::KeyWorking && !setup_key.input[0] && !setup_key.password[0] && !text_input.size());
+    if (action == 0) press_key(keypad, LV_KEY_ESC);
+    if (action == 1) wallet_ui_set_authenticated(false);
+    if (action == 3) {
+      CHECK(wallet_worker_wait(0)); // Result ready, UI has not collected it yet.
+      wallet_ui_set_authenticated(false);
+    }
+    wallet_ui_service();
+    if (action == 2) {
+      CHECK(current_page == Page::KeyResult && setup_key.result.address[0]);
+      press_key(keypad, LV_KEY_ESC);
+    }
+    CHECK(!setup_key.result.address[0] && backup_reads == (action < 2 ? 0U : action - 1));
+  }
+  wallet_ui_set_authenticated(true);
+  open_page(Page::CreateKey);
+  press_key(keypad, LV_KEY_ENTER);
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::KeyEntry && setup_key.network == BitcoinKeyNetwork::Testnet);
+  CHECK(type_secret(keypad, (std::string(63, '0') + '1').c_str()) && current_page == Page::KeyCompression);
+  press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(!setup_key.compressed && type_secret(keypad, "p") && type_secret(keypad, "x"));
+  CHECK(current_page == Page::KeyRepeat && type_key(keypad, tr("Del", "删除")) && type_secret(keypad, "p"));
+  wallet_ui_service();
+  CHECK(current_page == Page::KeyResult && !strcmp(setup_key.result.encrypted, public_encrypted));
+  lv_obj_update_layout(screen_content);
+  for (unsigned i = 0; i < 32 && lv_obj_get_scroll_bottom(screen_content) > 0; ++i) press_key(keypad, LV_KEY_NEXT);
+  press_key(keypad, LV_KEY_ENTER);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::KeyVerify && type_secret(keypad, public_encrypted));
+  CHECK(current_page == Page::Home && !setup_key.result.encrypted[0] && imports == 1);
+  open_page(Page::NfcImport);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::TagWait && tag_status == NfcBackupStatus::Pending);
+  wallet_ui_set_authenticated(false);
+  CHECK(tag_status == NfcBackupStatus::Idle && current_page == Page::Home);
+  wallet_ui_set_authenticated(true);
+  open_page(Page::NfcImport);
+  press_key(keypad, LV_KEY_ENTER);
+  tag_status = NfcBackupStatus::Complete;
+  wallet_ui_service();
+  CHECK(current_page == Page::KeyNetwork && setup_key.operation == BackupOperation::Decrypt);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(current_page == Page::KeyPass && type_secret(keypad, "p"));
+  wallet_ui_service();
+  CHECK(current_page == Page::KeyResult && setup_key.result.address[0]);
+  for (unsigned count = 15; count <= 24; count += 3) {
+    open_page(Page::CreateWords);
+    press_key(keypad, LV_KEY_ENTER);
+    if (count < 24) for (unsigned i = 0; i <= (count - 12) / 3; ++i) press_key(keypad, LV_KEY_NEXT);
+    press_key(keypad, LV_KEY_ENTER);
+    auto phrase = fixture_phrase(count);
+    CHECK(current_page == Page::WordsBackup && setup_words.count == count && phrase == setup_words.words);
+    lv_obj_update_layout(screen_content);
+    for (unsigned i = 0; i < 32 && lv_obj_get_scroll_bottom(screen_content) > 0; ++i) press_key(keypad, LV_KEY_NEXT);
+    press_key(keypad, LV_KEY_ENTER);
+    press_key(keypad, LV_KEY_ENTER);
+    CHECK(current_page == Page::WordsConfirm && type_secret(keypad, phrase.c_str()));
+    press_key(keypad, LV_KEY_NEXT);
+    press_key(keypad, LV_KEY_ENTER);
+    press_key(keypad, LV_KEY_NEXT);
+    const unsigned before = imports;
+    test_committed = false;
+    press_key(keypad, LV_KEY_ENTER, true);
+    CHECK(imports == before && current_page == Page::Enroll);
+    test_committed = true;
+    press_key(keypad, LV_KEY_ENTER, true);
+    CHECK(imports == before + 1 && current_page == Page::Home && !setup_words.words[0]);
+  }
+  for (unsigned count = 12; count <= 24; count += 3) {
+    open_page(Page::RecoverWords);
+    press_key(keypad, LV_KEY_ENTER);
+    CHECK(type_secret(keypad, fixture_phrase(count).c_str()));
+    press_key(keypad, LV_KEY_NEXT);
+    press_key(keypad, LV_KEY_ENTER);
+    press_key(keypad, LV_KEY_NEXT);
+    const auto before_restore = imports;
+    press_key(keypad, LV_KEY_ENTER, true);
+    CHECK(imports == before_restore + 1 && !setup_words.words[0] && current_page == Page::Home);
+  }
+  test_blocker = CustodyBlocker::BackendMissing;
+  wallet_ui_set_authenticated(false);
+
+  // Multiple visible icons must own different buffers and retain their pixels
+  // after the following rows are created and a page is repeatedly rebuilt.
+  for (unsigned iteration = 0; iteration < 16; ++iteration) {
+    open_page(Page::Catalog);
+    auto *btc = lv_obj_get_child(lv_obj_get_child(screen_content, 0), 0);
+    auto *eth = lv_obj_get_child(lv_obj_get_child(screen_content, 1), 0);
+    CHECK(lv_obj_check_type(btc, &lv_canvas_class) && lv_obj_check_type(eth, &lv_canvas_class));
+    auto *btc_buf = lv_canvas_get_draw_buf(btc);
+    auto *eth_buf = lv_canvas_get_draw_buf(eth);
+    CHECK(btc_buf != eth_buf && btc_buf->data != eth_buf->data);
+    CHECK(!memcmp(btc_buf->data + 8, coin_icon_find("BTC")->pixels, kCoinIconBytes));
+    CHECK(!memcmp(eth_buf->data + 8, coin_icon_find("ETH")->pixels, kCoinIconBytes));
+  }
+  open_page(Page::Home);
 
   WalletUiTransactionReview review = {};
   review.network = "ETH";
@@ -570,7 +964,80 @@ int main(int argc, char **argv)
   // Expiry of an earlier code must not erase a later transaction review.
   wallet_ui_hide_otp();
   CHECK(wallet_ui_review_authorize());
-  wallet_ui_show_port_error();
+  open_page(Page::Companion);
+  lv_obj_update_layout(screen_content);
+  CHECK(companion_canvas && companion_stage);
+  lv_area_t stage, center, right, left;
+  lv_obj_get_coords(companion_stage, &stage);
+  lv_obj_get_coords(companion_canvas, &center);
+  MascotSnapshot roaming{};
+  roaming.mood = MascotMood::Calm;
+  test_now += 2 * kMascotAnimationMs;
+  render_companion(roaming);
+  lv_obj_update_layout(screen_content);
+  lv_obj_get_coords(companion_canvas, &right);
+  test_now += 4 * kMascotAnimationMs;
+  render_companion(roaming);
+  lv_obj_update_layout(screen_content);
+  lv_obj_get_coords(companion_canvas, &left);
+  CHECK(left.x1 >= stage.x1 && right.x2 <= stage.x2 && left.x1 < center.x1 && center.x1 < right.x1);
+  roaming.mood = MascotMood::Sleep;
+  render_companion(roaming);
+  lv_obj_update_layout(screen_content);
+  lv_area_t resting;
+  lv_obj_get_coords(companion_canvas, &resting);
+  CHECK(resting.x1 == center.x1);
+  for (const uint16_t width : {176, 170, 240}) {
+    panel_width = width;
+    panel_height = width == 176 ? 192 : 320;
+    lv_display_set_resolution(display, panel_width, panel_height);
+    CHECK(wallet_ui_init());
+    CHECK(wallet_ui_show_address("ETH", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "m/44'/60'/0'/0/1"));
+    lv_obj_update_layout(screen_content);
+    auto row = lv_obj_get_child(screen_content, 0);
+    auto canvas = lv_obj_get_child(lv_obj_get_child(row, 0), 0);
+    CHECK(canvas && lv_obj_check_type(canvas, &lv_canvas_class));
+    lv_area_t before, after, details;
+    lv_obj_get_coords(canvas, &before);
+    lv_obj_get_coords(reader_target, &details);
+    CHECK(before.y1 >= 0 && before.y2 < details.y1 && before.x1 >= 0 && before.x2 < panel_width);
+    CHECK(details.y2 < panel_height && details.y2 - details.y1 >= 50);
+    lv_obj_scroll_to_y(reader_target, LV_COORD_MAX, LV_ANIM_OFF);
+    lv_obj_update_layout(screen_content);
+    lv_obj_get_coords(canvas, &after);
+    CHECK(!memcmp(&before, &after, sizeof(before)) && lv_obj_get_scroll_y(screen_content) == 0);
+    CHECK(!wallet_ui_show_address("ETH", "", "m/44'/60'/0'/0/1"));
+    open_page(Page::Search);
+    CHECK(input_matrix && lv_obj_get_child_count(screen_content) > 0);
+    auto toolbar = lv_obj_get_child(screen_content, 0);
+    auto cancel = lv_obj_get_child(toolbar, -1);
+    CHECK(cancel && lv_obj_check_type(cancel, &lv_button_class));
+    lv_obj_send_event(cancel, LV_EVENT_CLICKED, nullptr);
+    CHECK(current_page == Page::Catalog && !input_matrix);
+    open_page(Page::Companion);
+    lv_obj_update_layout(screen_content);
+    auto actions = lv_obj_get_child(screen_content, -1);
+    auto back = lv_obj_get_child(actions, -1);
+    lv_area_t controls;
+    lv_obj_get_coords(actions, &controls);
+    CHECK(controls.x1 >= 64 && controls.x2 < panel_width && lv_obj_check_type(back, &lv_button_class));
+    lv_obj_send_event(back, LV_EVENT_CLICKED, nullptr);
+    CHECK(current_page == Page::Home);
+  }
+  panel_width = 296;
+  panel_height = 128;
+  lv_display_set_resolution(display, panel_width, panel_height);
+  CHECK(wallet_ui_init());
+  wallet_ui_set_authenticated(true);
+  open_page(Page::RecoverKey);
+  press_key(keypad, LV_KEY_ENTER);
+  press_key(keypad, LV_KEY_ENTER);
+  CHECK(type_secret(keypad, public_encrypted) && type_secret(keypad, "p"));
+  CHECK(current_page == Page::KeyWorking && wallet_worker_wait(0));
+  test_display_operational = false;
+  wallet_ui_service();
+  const BitcoinBackupResult empty_result{};
+  CHECK(!memcmp(&setup_key.result, &empty_result, sizeof(empty_result)) && !text_input.size());
   CHECK(!wallet_ui_ready() && !wallet_ui_review_authorize());
   wallet_ui_service();
   lv_indev_delete(keypad);

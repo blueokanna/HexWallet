@@ -36,10 +36,16 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Codec bounds or EVM review binding regression failed' }
   & 'build/chain-native/Release/chain_probe.exe' phone-storage
   if ($LASTEXITCODE -ne 0) { throw 'Phone pairing storage regression failed' }
+  & 'build/chain-native/Release/chain_probe.exe' phone-pairing-ui
+  if ($LASTEXITCODE -ne 0) { throw 'Phone pairing identity display regression failed' }
+  & 'build/chain-native/Release/chain_probe.exe' phone-pairing-lifecycle
+  if ($LASTEXITCODE -ne 0) { throw 'Phone pairing lifecycle regression failed' }
   & 'build/chain-native/Release/cli_auth_storage.exe'
   if ($LASTEXITCODE -ne 0) { throw 'CLI credential storage regression failed' }
   & 'build/chain-native/Release/p4_token_storage.exe'
   if ($LASTEXITCODE -ne 0) { throw 'Board 7 token persistence regression failed' }
+  & 'build/chain-native/Release/p4_token_storage.exe' 8mb
+  if ($LASTEXITCODE -ne 0) { throw 'Board 7 8 MiB token persistence regression failed' }
   & 'build/chain-native/Release/chain_probe.exe' signing-audit all
   if ($LASTEXITCODE -ne 0) { throw 'XRP/Kaspa signing bounds or review binding failed' }
   python tests/host/kaspa_reference.py --probe build/chain-native/Release/chain_probe.exe

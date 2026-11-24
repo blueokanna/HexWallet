@@ -220,9 +220,13 @@ namespace hexwallet
         link.reset_pairing();
         return;
       }
-      char fingerprint[17];
-      snprintf(fingerprint, sizeof(fingerprint), "%02x%02x%02x%02x",
-               phone[0], phone[1], phone[2], phone[3]);
+      char fingerprint[65];
+      static constexpr char hex[] = "0123456789abcdef";
+      for (size_t i = 0; i < 32; ++i) {
+        fingerprint[2 * i] = hex[phone[i] >> 4];
+        fingerprint[2 * i + 1] = hex[phone[i] & 15];
+      }
+      fingerprint[64] = '\0';
       wallet_ui_set_decision_callback(pair_decision);
       wallet_ui_show_pairing(code, fingerprint);
       secure_zero(fingerprint, sizeof(fingerprint));
@@ -243,7 +247,7 @@ namespace hexwallet
     {
       WalletCatalogEntry entry;
       if (coin == nullptr || !wallet_catalog_find(coin, &entry) ||
-          !wallet_catalog_has(entry, WalletCapabilityAddress) ||
+          !wallet_catalog_can_receive(entry) ||
           entry.network == nullptr ||
           (subaddress != nullptr && entry.network->encoding != AddressEncoding::CryptoNote) ||
           entry.network->encoding == AddressEncoding::QrlXmss)
@@ -837,6 +841,20 @@ namespace hexwallet
   bool wallet_link_service_pairing_pending()
   {
     return service_ready && link.pairing_pending();
+  }
+
+  bool wallet_link_service_pairing_offer(uint8_t *out, size_t capacity)
+  {
+    if (!service_ready || !board_has_display() || !wallet_ui_ready() ||
+        wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending()) return false;
+    return link.begin_pairing_offer(millis(), out, capacity);
+  }
+
+  bool wallet_link_service_pairing_scan(const uint8_t *reply, size_t size)
+  {
+    if (!service_ready || !board_has_display() || !wallet_ui_ready() ||
+        wallet_signing_active() || wallet_cli_review_active() || wallet_totp_pending()) return false;
+    return link.accept_pairing_scan(reply, size, millis());
   }
 
   bool wallet_link_service_confirm_pairing()

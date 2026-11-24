@@ -1,35 +1,19 @@
-# Coin icons
+﻿# Asset icons
 
-These are the only images the wallet paints next to a transaction, and they are
-shipped as pre-packed pixel data because the firmware has no PNG decoder, no
-filesystem and no business decoding untrusted images.
+The device ships the catalog logos as 32 × 32 monochrome bitmaps. Each logo occupies 128 bytes of flash. Network aliases share artwork. The catalog resolves symbols by exact match and the firmware draws from compiled data.
 
-## Provenance
+## Sources
 
-- Upstream: <https://github.com/spothq/cryptocurrency-icons>
-- Path used: `32/icon/<ticker>.png` (32x32 PNG with alpha)
-- Licence: CC0 1.0 Universal (public domain dedication). The upstream text is
-  kept verbatim in [LICENSE](./LICENSE).
-- Downloaded on 2026-10-29, one file per ticker listed in
-  [icons.txt](./icons.txt). Nothing was redrawn, recoloured or "restored"
-  locally: if upstream has no artwork for a ticker, the wallet shows no icon.
+The manifest records the provider, project identifier, URL and SHA-256 of each packaged PNG. For images converted from a different encoding it also records the downloaded file digest. The CC0 license applies to the cryptocurrency-icons collection. Provider-hosted artwork retains its respective rights. [Artwork manifest](sources.json) · [CC0 license](LICENSE)
 
-Chains without upstream artwork (NEAR, TON, CKB, KAS, SUI, HIVE, OSMO, TIA)
-stay in that state. A plausible-looking substitute would be a lie on the one
-screen where the user is deciding whether to move money, so the review row
-degrades to text.
+## Rebuild
 
-## Regenerating
+Run the following command from the repository root to repack the checked-in files offline.
 
-```
-powershell -ExecutionPolicy Bypass -File tools/pack_coin_icons.ps1
+```powershell
+./tools/pack_coin_icons.ps1
 ```
 
-The packer rasterises each PNG to 32x32 with high-quality resampling, un-multiplies
-the edge alpha GDI+ reports (otherwise transparent edges come out darkened),
-converts to RGB565 plus an 8-bit alpha plane, and refuses any icon that covers
-less than 20% of the canvas - that check is what catches a mis-mapped or empty
-file before it reaches flash.
+To restore a missing source file, run `./tools/download_coin_icons.ps1`. It verifies the pinned digest before installing a file and repacks the complete directory. Conversion from WebP or JPEG requires Python and Pillow. A changed upstream image requires identity and artwork review before updating its digest.
 
-Output: `src/generated/CoinIcons.inc` (data + key table), consumed by
-`CoinIcons.cpp` (repo root, like every other module).
+The packer resamples each logo, thresholds luminance over opaque pixels and falls back to its alpha silhouette for flat artwork. The output uses MSB-first rows and the display theme supplies the foreground and background colors. [Generated table](../../src/generated/CoinIcons.inc)

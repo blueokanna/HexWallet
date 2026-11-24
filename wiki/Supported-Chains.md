@@ -4,9 +4,7 @@
 
 The firmware contains 246 network profiles. The wallet catalog exposes 214 entries. Node receipts and SDK comparisons are indexed in the [validation record](validation).
 
-Capability bits are literal: `address` derives and displays an address, `review` parses a payload
-into reviewable fields, `sign` releases a signature, `token-account` means the network has a token
-registry. RyoCurrency and Zano expose addresses only. Hive exposes account-key signing and has no receive address.
+Capability bits describe protocol code: `address` provides address derivation, `review` parses a payload into reviewable fields, `sign` identifies a signing adapter, and `token-account` identifies a token registry. Wallet receiving requires all of `address`, `review` and `sign`, plus a usable custody session. The release policy admits 211 catalog entries and blocks Hive, Ryo and Zano from receiving. These counts do not establish production custody or complete per-chain signing. Hive uses named accounts; its STM public key is not a receive address.
 
 ## UTXO and UTXO-like
 
@@ -145,7 +143,9 @@ The exact envelope is in [Chain-Payloads](Chain-Payloads).
 | `xch`                                                  | Chia `CREATE_COIN` only; BLS12-381 G1 keys                                                                                                                                                   |
 | `xem`                                                  | NEM Keccak-Ed25519 variant; not RFC 8032 Ed25519                                                                                                                                             |
 
-## Address only
+## Address encoders with wallet receiving disabled
+
+These encoders remain available to protocol tests. Disabling receiving is a temporary safeguard; completing the release signing and custody paths remains required.
 
 | Entry  | Why                                        |
 | ------ | ------------------------------------------ |

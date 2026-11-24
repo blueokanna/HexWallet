@@ -1,4 +1,4 @@
-"""Check phone addresses with the release binaries and Ryo relay at private genesis."""
+"""Check receive refusal, encoders against release binaries, and Ryo relay at private genesis."""
 import argparse
 from contextlib import ExitStack, contextmanager, nullcontext
 import hashlib

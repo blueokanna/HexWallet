@@ -1,0 +1,12 @@
+[
+  {
+    "language": "chinese_simplified",
+    "url": "https://raw.githubusercontent.com/bitcoin/bips/0d99ffd39fdaf75209c43b1f8ec3fbbc23f10814/bip-0039/chinese_simplified.txt",
+    "sha256": "5c5942792bd8340cb8b27cd592f1015edf56a8c5b26276ee18a482428e7c5726"
+  },
+  {
+    "language": "chinese_traditional",
+    "url": "https://raw.githubusercontent.com/bitcoin/bips/0d99ffd39fdaf75209c43b1f8ec3fbbc23f10814/bip-0039/chinese_traditional.txt",
+    "sha256": "417b26b3d8500a4ae3d59717d7011952db6fc2fb84b807f3f94ac734e89c1b5f"
+  }
+]

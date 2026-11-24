@@ -11,6 +11,9 @@
 #include "WalletCustody.h"
 #include "WalletCustomTokens.h"
 #include "WalletSession.h"
+#include "WalletLink.h"
+#include "WalletLinkCrypto.h"
+#include "WalletSigning.h"
 
 using namespace hexwallet;
 
@@ -169,6 +172,7 @@ namespace
 
 bool run_security_regressions()
 {
+  CHECK(run_link_crypto_self_test());
   const char *words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   uint8_t actual[kSeedSize], expected[kSeedSize];
   size_t expected_size;
@@ -177,7 +181,25 @@ bool run_security_regressions()
                         expected, sizeof(expected), &expected_size) && expected_size == sizeof(expected));
   CHECK(wallet_session_import(words, "TREZOR") == WalletError::Ok);
   CHECK(wallet_session_import(words, nullptr) == WalletError::InvalidArgument);
+  CHECK(wallet_session_import_language(words, MnemonicLanguage::ChineseTraditional, "") == WalletError::InvalidMnemonic);
   CHECK(wallet_session_load_seed(actual) == WalletError::Ok && !memcmp(actual, expected, sizeof(expected)));
+  char too_long[kBip39MaxPassphraseBytes + 2];
+  memset(too_long, 'A', sizeof(too_long));
+  too_long[sizeof(too_long) - 1] = 0;
+  CHECK(wallet_session_import(words, too_long) == WalletError::InvalidArgument);
+  CHECK(wallet_session_import(words, "\xc3") == WalletError::UnsupportedUnicode);
+  CHECK(wallet_session_load_seed(actual) == WalletError::Ok && !memcmp(actual, expected, sizeof(expected)));
+  CHECK(wallet_session_import(words, "\xc3\xa9") == WalletError::Ok);
+  CHECK(wallet_session_load_seed(actual) == WalletError::Ok);
+  CHECK(bip39_seed_from_english(words, "e\xcc\x81", expected) == WalletError::Ok && !memcmp(actual, expected, sizeof(expected)));
+  too_long[kBip39MaxPassphraseBytes] = 0;
+  CHECK(wallet_session_import(words, too_long) == WalletError::Ok);
+  CHECK(wallet_session_load_seed(actual) == WalletError::Ok && memcmp(actual, expected, sizeof(expected)));
+  CHECK(wallet_session_import(words, "") == WalletError::Ok);
+  CHECK(wallet_session_load_seed(actual) == WalletError::Ok && memcmp(actual, expected, sizeof(expected)));
+  memcpy(expected, actual, sizeof(expected));
+  CHECK(wallet_session_import(words, " ") == WalletError::Ok);
+  CHECK(wallet_session_load_seed(actual) == WalletError::Ok && memcmp(actual, expected, sizeof(expected)));
   wallet_session_clear();
   CHECK(wallet_session_load_seed(actual) != WalletError::Ok);
   for (auto byte : actual) CHECK(!byte);
@@ -190,11 +212,28 @@ bool run_security_regressions()
   CHECK(sol && derive_address(master, seed, *sol, 0, 1, 0, &address) == WalletError::InvalidArgument);
   const auto *bytes = reinterpret_cast<const uint8_t *>(&address);
   for (size_t i = 0; i < sizeof(address); ++i) CHECK(bytes[i] == 0);
+  const char *disabled_networks[] = {"hive",
+#if !HEXWALLET_TEST_RYO_PHONE_PAYMENTS
+    "ryo",
+#endif
+#if !HEXWALLET_TEST_ZANO_PHONE_PAYMENTS
+    "zano",
+#endif
+  };
+  for (const char *id : disabled_networks) {
+    const auto *network = find_network_profile(id);
+    CHECK(network);
+    memset(&address, 0xa5, sizeof(address));
+    CHECK(wallet_derive_for_display(master, seed, *network, 0, 0, 0, &address) == WalletError::InvalidArgument);
+    for (size_t i = 0; i < sizeof(address); ++i) CHECK(bytes[i] == 0);
+  }
   const auto *stark = find_network_profile("stark");
   CHECK(stark != nullptr);
   const auto custody = plan_key_custody(*stark, se051c2hq1_profile());
   CHECK(custody.scheme == KeyScheme::StarkEcdsa && !custody.se_can_sign &&
         custody.mcu_must_hold_key && strstr(custody.reason, "Stark curve") != nullptr);
   puts("security-regressions=pass");
+  CHECK(run_wallet_link_self_test());
+  puts("mutual-pairing-and-encrypted-link=pass");
   return true;
 }

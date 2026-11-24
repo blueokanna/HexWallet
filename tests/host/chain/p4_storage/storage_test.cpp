@@ -102,7 +102,14 @@ int rename(const char *from, const char *to) {
 }
 }
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "8mb")) {
+    physical = addressable = 0x800000;
+    partition.address = 0x7d0000;
+    partition.size = 0x20000;
+  } else {
+    CHECK(argc == 1);
+  }
   scratch = fs::temp_directory_path() / ("hexwallet-assets-" + std::to_string(GetCurrentProcessId()));
   CHECK(fs::create_directory(scratch));
   physical /= 2;

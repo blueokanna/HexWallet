@@ -297,6 +297,9 @@ typedef struct {
   int type;
   host_sha256_ctx sha256;
   host_sha512_ctx sha512;
+  uint8_t opad[128];
+  int hmac_enabled;
+  int hmac_active;
 } host_md_state;
 
 const mbedtls_md_info_t *mbedtls_md_info_from_type(mbedtls_md_type_t type) {
@@ -339,10 +342,10 @@ int mbedtls_md_setup(mbedtls_md_context_t *ctx, const mbedtls_md_info_t *info,
   host_md_state *state = calloc(1, sizeof(host_md_state));
   if (state == NULL) return MBEDTLS_ERR_MD_ALLOC_FAILED;
   state->type = md_sentinel_is_sha256(info) ? 256 : 512;
+  state->hmac_enabled = hmac != 0;
   ctx->md_info = info;
   ctx->md_ctx = state;
   ctx->hmac_ctx = NULL;
-  (void)hmac;
   return 0;
 }
 
@@ -409,17 +412,57 @@ int mbedtls_md_hmac(const mbedtls_md_info_t *info, const unsigned char *key,
 
 int mbedtls_md_hmac_starts(mbedtls_md_context_t *ctx, const unsigned char *key,
                            size_t keylen) {
-  (void)ctx; (void)key; (void)keylen;
-  return 0;
+  if (ctx == NULL || ctx->md_ctx == NULL || key == NULL)
+    return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  host_md_state *state = (host_md_state *)ctx->md_ctx;
+  if (!state->hmac_enabled) return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  state->hmac_active = 0;
+  if (hmac_calls_before_failure == 0) {
+    hmac_calls_before_failure = -1;
+    return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  }
+  if (hmac_calls_before_failure > 0) --hmac_calls_before_failure;
+  const size_t block = state->type == 256 ? 64 : 128;
+  uint8_t ipad[128] = {0};
+  int rc = 0;
+  if (keylen > block) rc = mbedtls_md(ctx->md_info, key, keylen, ipad);
+  else if (keylen != 0) memcpy(ipad, key, keylen);
+  if (rc == 0) {
+    for (size_t i = 0; i < block; ++i) {
+      state->opad[i] = ipad[i] ^ 0x5c;
+      ipad[i] ^= 0x36;
+    }
+    rc = mbedtls_md_starts(ctx);
+    if (rc == 0) rc = mbedtls_md_update(ctx, ipad, block);
+  }
+  mbedtls_platform_zeroize(ipad, sizeof(ipad));
+  state->hmac_active = rc == 0;
+  return rc;
 }
 int mbedtls_md_hmac_update(mbedtls_md_context_t *ctx, const unsigned char *input,
                            size_t ilen) {
-  (void)ctx; (void)input; (void)ilen;
-  return 0;
+  if (ctx == NULL || ctx->md_ctx == NULL ||
+      !((host_md_state *)ctx->md_ctx)->hmac_active)
+    return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  return mbedtls_md_update(ctx, input, ilen);
 }
 int mbedtls_md_hmac_finish(mbedtls_md_context_t *ctx, unsigned char *output) {
-  (void)ctx; (void)output;
-  return MBEDTLS_ERR_MD_FEATURE_UNAVAILABLE;
+  if (ctx == NULL || ctx->md_ctx == NULL || output == NULL)
+    return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  host_md_state *state = (host_md_state *)ctx->md_ctx;
+  if (!state->hmac_active) return MBEDTLS_ERR_MD_BAD_INPUT_DATA;
+  uint8_t inner[64];
+  const size_t block = state->type == 256 ? 64 : 128;
+  const size_t digest = state->type == 256 ? 32 : 64;
+  int rc = mbedtls_md_finish(ctx, inner);
+  if (rc == 0) rc = mbedtls_md_starts(ctx);
+  if (rc == 0) rc = mbedtls_md_update(ctx, state->opad, block);
+  if (rc == 0) rc = mbedtls_md_update(ctx, inner, digest);
+  if (rc == 0) rc = mbedtls_md_finish(ctx, output);
+  mbedtls_platform_zeroize(inner, sizeof(inner));
+  mbedtls_platform_zeroize(state->opad, sizeof(state->opad));
+  state->hmac_active = 0;
+  return rc;
 }
 
 /* ------------------------------------------------------------------ */

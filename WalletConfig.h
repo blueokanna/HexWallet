@@ -1,5 +1,6 @@
 #ifndef HEXWALLET_CONFIG_H
 #define HEXWALLET_CONFIG_H
+#include <stdint.h>
 
 // Local spending safety policy (0.1 XMR), not Monero consensus or a live fee
 // estimate. Only firmware configuration can change this; host requests cannot.
@@ -203,6 +204,9 @@
 #endif
 #ifndef HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
 #define HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION 0
+#endif
+#if !defined(HEXWALLET_HOST_TEST) && HEXWALLET_ALLOW_HOST_ONLY_CONFIRMATION
+#error "Device builds cannot authorize signing or pairing through host-only confirmation."
 #endif
 
 namespace hexwallet

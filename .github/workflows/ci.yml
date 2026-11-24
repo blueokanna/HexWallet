@@ -119,6 +119,12 @@ jobs:
           npm ci --prefix tests/host/protocol-oracles --ignore-scripts
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $env:NODE_PATH = (Resolve-Path tests/host/protocol-oracles/node_modules).Path
+          node tests/host/key_backup_check.cjs build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tests/host/pairing_qr_check.cjs build/chain-native/Release/chain_probe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tests/host/pairing_qr_check.cjs tests/host/link_pipe.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           node tests/host/protocol_sdk_check.cjs build/chain-native/Release/chain_probe.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           node tests/host/privacy/address_interop.cjs build/chain-native/Release/chain_probe.exe

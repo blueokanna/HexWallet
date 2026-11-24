@@ -9,6 +9,7 @@ namespace hexwallet {
 constexpr size_t kPrivateKeySize = 32;
 constexpr size_t kChainCodeSize = 32;
 constexpr size_t kSeedSize = 64;
+constexpr size_t kBip39MaxPassphraseBytes = 128;
 constexpr size_t kCompressedPublicKeySize = 33;
 constexpr size_t kUncompressedPublicKeySize = 65;
 constexpr size_t kExtendedKeyTextSize = 113;
@@ -29,6 +30,12 @@ enum class WalletError : uint8_t {
   HardenedPublicDerivation,
   Aborted,
   CustodyUnavailable,
+  OutOfMemory,
+  InvalidChecksum,
+  IncorrectPassphrase,
+  WrongNetwork,
+  UnsupportedFormat,
+  WorkerUnavailable,
 };
 
 struct HdPrivateNode {
@@ -67,6 +74,17 @@ enum class ExtendedKeyFormat : uint8_t {
 void secure_zero(void *data, size_t length);
 bool is_ascii(const char *text);
 
+enum class MnemonicLanguage : uint8_t { English, ChineseSimplified, ChineseTraditional };
+const char *bip39_word_at(MnemonicLanguage language, uint16_t index);
+WalletError bip39_from_entropy(const uint8_t *entropy, size_t entropy_size,
+                              MnemonicLanguage language, char *out, size_t capacity);
+WalletError bip39_generate(MnemonicLanguage language, unsigned word_count, char *out, size_t capacity);
+WalletError bip39_validate(const char *mnemonic, MnemonicLanguage language);
+// Length-delimited UTF-8 preserves embedded U+0000 in imported passphrases.
+WalletError bip39_seed(const char *mnemonic, MnemonicLanguage language,
+                       const uint8_t *passphrase, size_t length, uint8_t out_seed[kSeedSize]);
+WalletError bip39_seed(const char *mnemonic, MnemonicLanguage language,
+                      const char *passphrase, uint8_t out_seed[kSeedSize]);
 WalletError bip39_generate_english_24(char *out, size_t out_size);
 WalletError bip39_validate_english(const char *mnemonic);
 WalletError bip39_seed_from_english(const char *mnemonic, const char *passphrase,

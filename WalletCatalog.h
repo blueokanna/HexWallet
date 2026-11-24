@@ -34,6 +34,13 @@ bool wallet_catalog_at_sorted(size_t position, WalletCatalogEntry *out);
 bool wallet_catalog_find(const char *id_or_symbol, WalletCatalogEntry *out);
 bool wallet_catalog_matches(const WalletCatalogEntry &entry, const char *query);
 bool wallet_catalog_has(const WalletCatalogEntry &entry, WalletCapability capability);
+// Address encoders are also used in protocol tests. Receiving requires both
+// review and signing admission; this is separate from the runtime custody gate.
+inline bool wallet_catalog_can_receive(const WalletCatalogEntry &entry) {
+  constexpr uint8_t required = WalletCapabilityAddress |
+      WalletCapabilityTransactionReview | WalletCapabilitySigning;
+  return (entry.capabilities & required) == required;
+}
 bool run_catalog_self_tests();
 
 }

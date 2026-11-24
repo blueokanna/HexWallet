@@ -53,7 +53,7 @@ foreach ($s in $cppSources) {
 & cl @common "/Fe$out" $cppObjs (Join-Path $objDir "mbedtls_host.obj") /link
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Second binary: the phone-link harness used by tests/test_phone_link.py.
+# Second binary: the phone-link harness used by tests/host/pairing_qr_check.cjs.
 # It links the real WalletLink/WalletLinkCrypto/WalletNfcApdu code with a stub
 # application handler so the phone-side reference client can be validated
 # end to end without hardware.

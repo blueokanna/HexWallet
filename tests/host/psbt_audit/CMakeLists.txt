@@ -8,7 +8,7 @@ set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${root}/build/chain-mbedtls" mbedtls EXCLUDE_FROM_ALL)
 set(wallet_sources
-  CryptoPrimitives.cpp WalletSecurity.cpp WalletEngine.cpp WalletAddresses.cpp
+  CryptoPrimitives.cpp WalletSecurity.cpp UnicodeNormalizer.cpp src/unicode/utf8proc.c WalletEngine.cpp WalletAddresses.cpp
   WalletAltAddresses.cpp WalletNetworks.cpp WalletCatalog.cpp WalletMiningCatalog.cpp
   WalletTokens.cpp Blake2b.cpp Blake256.cpp CryptoExtended.cpp Ed25519.cpp BlsG1.cpp
   Bls12381.cpp base58.cpp local_bech32.cpp local_segwit.cpp keccak256.cpp local_ripemd160.cpp

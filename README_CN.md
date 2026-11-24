@@ -12,7 +12,11 @@ HexWallet 是面向 ESP32-P4 和 ESP32-S3 的离线交易审阅固件。手机�
 | --- | --- |
 | ![7 号板英文主页](wiki/ui-gallery/en-home.png) | ![7 号板中文主页](wiki/ui-gallery/zh-home.png) |
 
-[全部 44 个状态、88 张独立图片](wiki/UI-Gallery.md) · [可筛选图库](wiki/ui-gallery/index.html) · [双语界面审计](wiki/UI-Audit-2026-11-24-zh.md)
+[逐屏查看中英文界面](wiki/UI-Gallery.md) · [可筛选图库](wiki/ui-gallery/index.html) · [双语界面审计](wiki/UI-Audit-2026-11-24-zh.md) · [配对与钱包加固](wiki/Wallet-Hardening-2026-11-24.md)
+
+资产目录可在设置中切换列表、网格和圆角卡片。收款二维码固定在横屏左侧或竖屏上方，完整地址和派生路径可独立滚动。中英键盘支持实体键、触摸和离线拼音选字。
+
+主机测试覆盖 BIP39 英文、简体和繁体词表的全部五种长度，以及比特币 WIF、十六进制私钥和 BIP38 备份。BIP38 支持直接加密，并可解密直接加密或 EC 乘法生成的备份。本地 NFC 备份流程读取一条 NFC-A Type 4 标签上的 NDEF Text 记录，恢复手机监听后才将密钥文本交给地址核对流程。射频读卡及 SE051 卡内托管仍待实机验收。原工程的 OV9281 接口与 U2 共用 SCCB/I²C 总线，摄像头采集和扫码导入仍待板级集成。
 
 每幅画面保留 296 × 128 个像素，由主机运行固件的 LVGL 界面和面板打包代码生成。创建和恢复页面说明当前安全托管状态。公开的 ETH 付款示例展示滚动、拒绝和长按批准。ZXing 从面板像素读回收款地址。安装方向、刷新耗时、残影和电流仍待实物核验。[板卡与显示](wiki/Boards-and-Display-zh.md)
 
@@ -20,7 +24,7 @@ HexWallet 是面向 ESP32-P4 和 ESP32-S3 的离线交易审阅固件。手机�
 | --- | --- |
 | 处理器与屏幕 | ESP32-P4 post-v3，2.9 寸 SSD1680 黑白墨水屏，四枚应用按键 |
 | 外设 | SE051C2HQ1 通过 I²C 连接。屏幕与 PN7161 共用 GPIO7/8/9，片选分别为 GPIO16、GPIO13 |
-| Flash | 共 32 MiB。前 8 MiB 为含双 OTA 槽的出厂布局，后 24 MiB 为存储公开资产数据的 LittleFS 分区 |
+| Flash | 支持 8 MiB 或 32 MiB 外置 NOR，两种布局均含双 OTA 槽。原工程 U7 预留 8 MiB，构建时按实装容量选择 |
 | 资产登记 | 内置 80 条代币记录，应用最多另存 64 条用户声明的记录 |
 
 ## 构建与验证

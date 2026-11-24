@@ -23,6 +23,10 @@ void wallet_link_service_reset();
 bool wallet_link_service_ready();
 bool wallet_link_service_connected();
 bool wallet_link_service_pairing_pending();
+// Only trusted local UI/camera code may call these. USB/NFC have no opcode
+// for supplying a scan or starting enrollment. A live camera path is required.
+bool wallet_link_service_pairing_offer(uint8_t *out, size_t capacity);
+bool wallet_link_service_pairing_scan(const uint8_t *reply, size_t size);
 bool wallet_link_service_confirm_pairing();
 void wallet_link_service_reject_pairing();
 

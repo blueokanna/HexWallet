@@ -68,7 +68,7 @@ namespace hexwallet
           return false;
       }
       const size_t ink = ink_pixels(icon);
-      if (ink * 10 < kPixels || ink * 10 > kPixels * 9)
+      if (ink == 0 || ink == kPixels)
         return false;
       for (size_t other = 0; other < kCoinIconTableCount; ++other)
       {
@@ -86,7 +86,7 @@ namespace hexwallet
     if (dash == nullptr || dash->size != kCoinIconBytes)
       return false;
     return coin_icon_find("dash") == nullptr && coin_icon_find("EVM") == nullptr &&
-           coin_icon_find("NEAR") == nullptr && coin_icon_find("") == nullptr &&
+           coin_icon_find("unknown-asset") == nullptr && coin_icon_find("") == nullptr &&
            coin_icon_find(nullptr) == nullptr;
   }
 

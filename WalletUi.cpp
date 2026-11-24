@@ -1,6 +1,7 @@
 #include "WalletUi.h"
 
 #include <Arduino.h>
+#include <algorithm>
 #include <stdio.h>
 #include <string.h>
 
@@ -13,6 +14,12 @@
 #include "WalletCatalog.h"
 #include "WalletLinkService.h"
 #include "CoinIcons.h"
+#include "WalletTextInput.h"
+#include "WalletLayoutStore.h"
+#include "WalletSession.h"
+#include "WalletCustody.h"
+#include "WalletNfcPort.h"
+#include "WalletBackupJob.h"
 
 #if HEXWALLET_ENABLE_LVGL
 #include <lvgl.h>
@@ -142,24 +149,63 @@ namespace hexwallet
       return converted;
     }
     lv_obj_t *screen_content = nullptr;
+    lv_obj_t *screen_header = nullptr;
     lv_obj_t *state_label = nullptr;
     lv_obj_t *status_label = nullptr;
-    lv_obj_t *search_field = nullptr;
-    lv_obj_t *coin_list = nullptr;
-    lv_obj_t *keyboard = nullptr;
+    lv_obj_t *reader_target = nullptr;
+    WalletTextInput text_input;
+    lv_obj_t *input_matrix = nullptr, *input_preview = nullptr, *input_hint = nullptr;
+    bool input_pinyin = false, input_candidates = false;
+    size_t input_candidate_offset = 0;
+    char input_keys[40][4] = {};
+    char input_status[80] = {};
+    const char *input_map[56] = {};
+    char asset_query[65] = {};
     lv_obj_t *companion_stage = nullptr;
     lv_obj_t *companion_canvas = nullptr;
     lv_obj_t *companion_mood_label = nullptr;
     lv_obj_t *companion_hint_label = nullptr;
     MascotSnapshot companion_rendered = {};
     bool companion_has_frame = false;
-    static LV_ATTRIBUTE_MEM_ALIGN uint8_t companion_pixels[8 + 64 * 16];
+    uint32_t companion_entered_ms = 0;
+    // The LVGL I1 palette uses the eight bytes immediately before the pixels.
+    struct alignas(16) CompanionStorage { uint8_t padding[8]; uint8_t canvas[8 + 64 * 16]; };
+    CompanionStorage companion_storage{};
+    auto &companion_pixels = companion_storage.canvas;
+    enum class Page { Home, Create, Recover, CreateWords, RecoverWords, CreateKey, RecoverKey, RawKey, Scan, NfcImport, Controls, Catalog, Language, Asset, Companion, Settings, Layout, Search, WordsCount, WordsInput, WordsBackup, WordsConfirm, PassChoice, PassInput, PassConfirm, Enroll, KeyNetwork, KeyEntry, KeyCompression, KeyPass, KeyRepeat, KeyWorking, KeyResult, KeyVerify, TagWait };
+    struct MnemonicSetup {
+      char words[256];
+      char passphrase[kBip39MaxPassphraseBytes + 1];
+      MnemonicLanguage language;
+      bool creating;
+      unsigned count;
+    };
+    MnemonicSetup setup_words{};
+    struct KeySetup {
+      BackupOperation operation;
+      BitcoinKeyNetwork network;
+      bool compressed;
+      char input[65];
+      char password[kBip39MaxPassphraseBytes + 1];
+      BitcoinBackupResult result;
+    };
+    KeySetup setup_key{};
+    bool setup_transition = false;
+    size_t keyboard_limit = 64;
+    AssetLayout asset_layout = AssetLayout::List;
+    const char *layout_error = nullptr;
+    Page current_page = Page::Home;
+    void open_page(Page page);
 
     lv_key_t review_key_remap(lv_indev_t *indev, lv_key_t key)
     {
       lv_group_t *group = lv_indev_get_group(indev);
+      if (input_matrix && group && lv_group_get_focused(group) == input_matrix) {
+        if (key == LV_KEY_NEXT) return LV_KEY_RIGHT;
+        if (key == LV_KEY_PREV) return LV_KEY_LEFT;
+      }
       if ((reading_page || review_seal_valid) && group != nullptr &&
-          lv_group_get_focused(group) == screen_content)
+          lv_group_get_focused(group) == (reader_target ? reader_target : screen_content))
       {
         if (key == LV_KEY_NEXT) return LV_KEY_DOWN;
         if (key == LV_KEY_PREV) return LV_KEY_UP;
@@ -169,6 +215,11 @@ namespace hexwallet
 
     void review_body_event(lv_event_t *event)
     {
+      if ((current_page == Page::WordsBackup || (current_page == Page::KeyResult && setup_key.result.encrypted[0])) && reading_page && lv_event_get_code(event) == LV_EVENT_CLICKED &&
+          lv_obj_get_scroll_bottom(screen_content) <= 0) {
+        lv_group_focus_obj(lv_obj_get_child(screen_content, -1));
+        return;
+      }
       if (!review_seal_valid && !pairing_page) return;
       if (lv_event_get_code(event) == LV_EVENT_CANCEL)
       {
@@ -196,6 +247,15 @@ namespace hexwallet
 
     void clear_content()
     {
+      if (!setup_transition) {
+        nfc_backup_cancel();
+        bitcoin_backup_cancel();
+        secure_zero(&setup_key, sizeof(setup_key));
+        secure_zero(&setup_words, sizeof(setup_words));
+        current_page = Page::Home;
+      }
+      secure_zero(input_status, sizeof(input_status));
+      setup_transition = false;
       reading_page = false;
       pairing_page = false;
       otp_visible = false;
@@ -205,13 +265,19 @@ namespace hexwallet
       forget_companion();
       review_seal_valid = false;
       decision_pending = false;
-      search_field = nullptr;
-      coin_list = nullptr;
-      keyboard = nullptr;
+      reader_target = nullptr;
+      // The label preview references editor-owned memory; erase it before the
+      // objects disappear. Keys/candidates contain only public dictionary text.
+      text_input.clear();
+      input_matrix = input_preview = input_hint = nullptr;
       if (screen_content != nullptr)
       {
+        if (screen_header) lv_obj_remove_flag(screen_header, LV_OBJ_FLAG_HIDDEN);
+        if (status_label) lv_obj_remove_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_pad_all(lv_screen_active(), landscape_panel() ? 3 : sc(12), 0);
         lv_group_remove_obj(screen_content);
         lv_obj_clean(screen_content);
+        lv_obj_add_flag(screen_content, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_scroll_to_y(screen_content, 0, LV_ANIM_OFF);
         lv_obj_set_scrollbar_mode(screen_content, LV_SCROLLBAR_MODE_AUTO);
       }
@@ -282,7 +348,6 @@ namespace hexwallet
 
     void nothing_companion(lv_obj_t *parent, const MascotSnapshot &snapshot);
 
-    void create_catalog_view();
 
     // All labels on a button inherit its foreground in both focus states.
     void focus_ink(lv_obj_t *button)
@@ -409,22 +474,31 @@ namespace hexwallet
         return nullptr;
 
       static QrCode code;
-      QrEcc chosen = QrEcc::Medium;
-      if (!qr_encode_best(reinterpret_cast<const uint8_t *>(text), length, &code,
-                          &chosen))
-      {
-        return nullptr;
-      }
-      if (level_name != nullptr)
-        *level_name = qr_ecc_name(chosen);
       // Rasterize integer modules at their final size. The indexed image and
       // its quiet zone then occupy exactly the space LVGL assigns to the canvas.
       constexpr uint16_t max_side = 192;
       lv_obj_update_layout(parent);
       const lv_coord_t available = lv_obj_get_content_width(parent);
+      const int budget = available < max_side ? available : max_side;
+      // At this panel size a larger module is more useful than a denser H
+      // symbol. Choose the largest integer module, then the strongest ECC.
+      // Never emit a one-pixel module or reduce ECC below M.
+      QrEcc chosen = QrEcc::Medium;
+      int best_scale = 1;
+      for (QrEcc ecc : {QrEcc::High, QrEcc::Quartile, QrEcc::Medium}) {
+        for (uint8_t version = 1; version <= kQrMaxVersion; ++version) {
+          if (qr_capacity(version, ecc) < length) continue;
+          const int candidate = budget / (17 + 4 * version + 2 * kQrQuietZone);
+          if (candidate > best_scale) { best_scale = candidate; chosen = ecc; }
+          break;
+        }
+      }
+      if (best_scale < 2 || !qr_encode(reinterpret_cast<const uint8_t *>(text), length, chosen, &code))
+        return nullptr;
+      if (level_name) *level_name = qr_ecc_name(chosen);
       const uint16_t modules = code.size + 2U * kQrQuietZone;
-      const int scale = (available < max_side ? available : max_side) / modules;
-      if (scale < 1) return nullptr;
+      const int scale = budget / modules;
+      if (scale < 2) return nullptr;
       const uint16_t side = modules * scale;
       const uint32_t stride = lv_draw_buf_width_to_stride(side, LV_COLOR_FORMAT_I1);
       const size_t bytes = static_cast<size_t>(stride) * side;
@@ -459,133 +533,30 @@ namespace hexwallet
       const lv_coord_t side = static_cast<lv_coord_t>(kCoinIconSize);
       const uint32_t stride = lv_draw_buf_width_to_stride(side, LV_COLOR_FORMAT_I1);
       const size_t bytes = static_cast<size_t>(stride) * side;
-      static LV_ATTRIBUTE_MEM_ALIGN uint8_t pixels[8 + kCoinIconBytes];
-      if (bytes + 8 > sizeof(pixels) || icon->size != bytes)
+      if (icon->size != bytes)
         return nullptr;
-      memset(pixels, 0, bytes + 8);
-      memcpy(pixels + 8, icon->pixels, icon->size);
+      auto *draw_buffer = lv_draw_buf_create(side, side, LV_COLOR_FORMAT_I1, stride);
+      if (!draw_buffer) return nullptr;
+      memset(draw_buffer->data, 0, bytes + 8);
+      memcpy(draw_buffer->data + 8, icon->pixels, icon->size);
       lv_obj_t *canvas = lv_canvas_create(parent);
-      if (canvas == nullptr)
-        return nullptr;
-      static lv_draw_buf_t draw_buffer;
-      if (lv_draw_buf_init(&draw_buffer, side, side, LV_COLOR_FORMAT_I1, stride,
-                           pixels, static_cast<uint32_t>(bytes + 8)) != LV_RESULT_OK)
-      {
-        lv_obj_delete(canvas);
-        return nullptr;
-      }
-      lv_canvas_set_draw_buf(canvas, &draw_buffer);
+      if (!canvas) { lv_draw_buf_destroy(draw_buffer); return nullptr; }
+      lv_canvas_set_draw_buf(canvas, draw_buffer);
+      lv_obj_add_event_cb(canvas, [](lv_event_t *event) {
+        lv_draw_buf_destroy(static_cast<lv_draw_buf_t *>(lv_event_get_user_data(event)));
+      }, LV_EVENT_DELETE, draw_buffer);
       lv_canvas_set_palette(canvas, 0, to_color32(theme_bg()));
       lv_canvas_set_palette(canvas, 1, to_color32(theme_fg()));
       return canvas;
     }
 
     void show_asset(size_t index);
+    void render_companion(const MascotSnapshot &snapshot);
 
     void coin_clicked(lv_event_t *event)
     {
-      const size_t index = reinterpret_cast<size_t>(lv_event_get_user_data(event));
-      if (landscape_panel()) { show_asset(index); return; }
-      WalletCatalogEntry entry;
-      if (!wallet_catalog_at_sorted(index, &entry) || status_label == nullptr)
-        return;
-      lv_label_set_text_fmt(status_label, "%s\n%s", entry.name, entry.status);
+      show_asset(reinterpret_cast<size_t>(lv_event_get_user_data(event)));
     }
-
-    void populate_catalog(const char *query)
-    {
-      if (coin_list == nullptr)
-        return;
-      lv_obj_clean(coin_list);
-      size_t matches = 0;
-      for (size_t index = 0; index < wallet_catalog_count(); ++index)
-      {
-        WalletCatalogEntry entry;
-        if (!wallet_catalog_at_sorted(index, &entry) || !wallet_catalog_matches(entry, query))
-          continue;
-        char row[128];
-        const bool signs = wallet_catalog_has(entry, WalletCapabilitySigning);
-        const bool addresses = wallet_catalog_has(entry, WalletCapabilityAddress);
-        const bool tokens = wallet_catalog_has(entry, WalletCapabilityTokenAccount);
-        snprintf(row, sizeof(row), "%s  %s\n%s", entry.symbol, entry.name,
-                 signs ? (addresses ? "ADDRESS + SIGN" : "ACCOUNT SIGNING") : (tokens ? "ADDRESS + TOKENS" : (addresses ? "ADDRESS" : "UNSUPPORTED")));
-        lv_obj_t *button = lv_list_add_button(coin_list, nullptr, row);
-        lv_obj_set_height(button, LV_SIZE_CONTENT);
-        lv_obj_set_style_pad_ver(button, sc(10), 0);
-        lv_obj_set_style_radius(button, sc(8), 0);
-        lv_obj_t *label = lv_obj_get_child(button, 0);
-        if (label != nullptr)
-        {
-          lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-          lv_obj_set_width(label, LV_PCT(100));
-        }
-        lv_obj_set_style_text_color(button, theme_fg(), 0);
-        lv_obj_add_event_cb(button, coin_clicked, LV_EVENT_CLICKED, reinterpret_cast<void *>(index));
-        ++matches;
-        if (*query == '\0' && matches >= 40)
-        {
-          lv_list_add_text(coin_list, "TYPE TO NARROW");
-          break;
-        }
-      }
-      if (matches == 0)
-        lv_list_add_text(coin_list, "NO MATCHES");
-    }
-
-    void search_event(lv_event_t *event)
-    {
-      const lv_event_code_t code = lv_event_get_code(event);
-      if (code == LV_EVENT_VALUE_CHANGED)
-      {
-        populate_catalog(lv_textarea_get_text(search_field));
-      }
-      else if (code == LV_EVENT_FOCUSED && keyboard != nullptr)
-      {
-        lv_keyboard_set_textarea(keyboard, search_field);
-        lv_obj_remove_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-      }
-      else if (code == LV_EVENT_DEFOCUSED && keyboard != nullptr)
-      {
-        lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-      }
-    }
-
-    void create_catalog_view()
-    {
-      if (screen_content == nullptr)
-        return;
-      clear_content();
-      lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
-      lv_obj_set_style_pad_row(screen_content, 8, 0);
-      MascotInputs companion_inputs = {};
-      companion_inputs.phone_linked = wallet_link_service_connected();
-      companion_inputs.battery_mv = board_battery_millivolts();
-      nothing_companion(screen_content, mascot_snapshot(companion_inputs, millis()));
-      nothing_rule(screen_content);
-
-      search_field = lv_textarea_create(screen_content);
-      lv_obj_set_width(search_field, LV_PCT(100));
-      lv_obj_set_height(search_field, sc(44));
-      lv_textarea_set_one_line(search_field, true);
-      lv_textarea_set_max_length(search_field, 32);
-      lv_textarea_set_placeholder_text(search_field, "Search symbol or network");
-      lv_obj_set_style_radius(search_field, 4, 0);
-      lv_obj_add_event_cb(search_field, search_event, LV_EVENT_ALL, nullptr);
-
-      coin_list = lv_list_create(screen_content);
-      lv_obj_set_width(coin_list, LV_PCT(100));
-      lv_obj_set_flex_grow(coin_list, 1);
-      lv_obj_set_style_radius(coin_list, 4, 0);
-      lv_obj_set_scrollbar_mode(coin_list, LV_SCROLLBAR_MODE_AUTO);
-
-      keyboard = lv_keyboard_create(screen_content);
-      lv_obj_set_width(keyboard, LV_PCT(100));
-      lv_obj_set_height(keyboard, sc(150));
-      lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
-      populate_catalog("");
-    }
-
-    void create_catalog_view();
 
     // FEED / PET / PLAY. Plain widgets, so they work with a touch panel and, through
     // the keypad input device, with four physical buttons.
@@ -593,14 +564,24 @@ namespace hexwallet
     {
       const intptr_t action = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
       const uint32_t now = millis();
-      if (action == 0)
-        mascot_feed(now);
-      else if (action == 1)
-        mascot_pet(now);
-      else
-        mascot_play(now);
-      mascot_note_activity(now);
-      create_catalog_view();
+      bool accepted;
+      if (action == 0) accepted = mascot_feed(now);
+      else if (action == 1) accepted = mascot_pet(now);
+      else if (action == 3) accepted = mascot_blow_bubbles(now);
+      else accepted = mascot_play(now);
+      MascotInputs inputs{};
+      inputs.battery_mv = board_battery_millivolts();
+      inputs.phone_linked = wallet_link_service_connected();
+      const MascotSnapshot snapshot = mascot_snapshot(inputs, now);
+      if (current_page != Page::Companion) open_page(Page::Companion);
+      else render_companion(snapshot);
+      if (!accepted) {
+        wallet_ui_set_status(action >= 2 && snapshot.hunger >= 80
+            ? tr("Feed before playing", "先喂食再玩耍")
+            : tr("Try again in two seconds", "请在两秒后重试"));
+      } else {
+        wallet_ui_set_status("");
+      }
     }
 
     void companion_parts(lv_obj_t *stage, const MascotSnapshot &snapshot)
@@ -634,6 +615,19 @@ namespace hexwallet
     {
       if (companion_stage == nullptr || companion_canvas == nullptr || review_seal_valid)
         return;
+      if (current_page == Page::Companion) {
+        const uint32_t elapsed = millis() - companion_entered_ms;
+        const int room = lv_obj_get_content_width(companion_stage) - 64;
+        const int range = room > 0 ? room / 2 : 0;
+        const int phase = (elapsed / kMascotAnimationMs) % 8;
+        // Travel from the center to each edge, once per idle frame. Reactions
+        // stay centered so that resting, feeding and play have distinct poses.
+        const int step = phase <= 2 ? phase : (phase <= 6 ? 4 - phase : phase - 8);
+        const int x = snapshot.mood == MascotMood::Calm ? step * range / 2 : 0;
+        const int lift = lv_obj_get_content_height(companion_stage) - 64;
+        const int y = snapshot.mood == MascotMood::Excited && (snapshot.frame & 1) && lift >= 6 ? -3 : 0;
+        lv_obj_align(companion_canvas, LV_ALIGN_CENTER, x, y);
+      }
       const bool changed = !companion_has_frame || snapshot.mood != companion_rendered.mood ||
                            (snapshot.animating && snapshot.frame != companion_rendered.frame);
       if (changed)
@@ -652,15 +646,13 @@ namespace hexwallet
       companion_has_frame = true;
     }
 
-    enum class Page { Home, Create, Recover, CreateWords, RecoverWords, CreateKey, RecoverKey, Scan, Controls, Catalog, Language, Asset };
-    Page current_page = Page::Home;
-    void open_page(Page page);
     size_t catalog_offset = 0;
+    size_t catalog_matches = 0;
 
     void catalog_page_event(lv_event_t *event)
     {
       if (lv_event_get_user_data(event)) {
-        if (catalog_offset + 8 < wallet_catalog_count()) catalog_offset += 8;
+        if (catalog_offset + 8 < catalog_matches) catalog_offset += 8;
       } else if (catalog_offset >= 8) catalog_offset -= 8;
       open_page(Page::Catalog);
     }
@@ -673,9 +665,18 @@ namespace hexwallet
     void back_event(lv_event_t *)
     {
       switch (current_page) {
+        case Page::TagWait: open_page(Page::NfcImport); break;
+        case Page::KeyNetwork: case Page::KeyEntry: case Page::KeyCompression: case Page::KeyPass: case Page::KeyRepeat:
+        case Page::KeyWorking: case Page::KeyResult: case Page::KeyVerify:
+          open_page(setup_key.operation == BackupOperation::Encrypt ? Page::Create : Page::Recover); break;
         case Page::CreateWords: case Page::CreateKey: open_page(Page::Create); break;
-        case Page::RecoverWords: case Page::RecoverKey: open_page(Page::Recover); break;
+        case Page::RecoverWords: case Page::RecoverKey: case Page::RawKey: case Page::NfcImport: open_page(Page::Recover); break;
+        case Page::WordsCount: case Page::WordsInput: case Page::WordsBackup: case Page::WordsConfirm: case Page::PassChoice:
+        case Page::PassInput: case Page::PassConfirm: case Page::Enroll:
+          open_page(setup_words.creating ? Page::Create : Page::Recover); break;
         case Page::Asset: open_page(Page::Catalog); break;
+        case Page::Search: open_page(Page::Catalog); break;
+        case Page::Layout: case Page::Language: open_page(Page::Settings); break;
         default: open_page(Page::Home); break;
       }
     }
@@ -684,7 +685,7 @@ namespace hexwallet
     {
       auto button = lv_button_create(parent);
       focus_ink(button);
-      lv_obj_set_size(button, LV_PCT(100), 22);
+      lv_obj_set_size(button, LV_PCT(100), board_has_touch() ? 44 : 22);
       lv_obj_add_event_cb(button, open_page_event, LV_EVENT_CLICKED,
                           reinterpret_cast<void *>(static_cast<uintptr_t>(target)));
       lv_obj_add_event_cb(button, back_event, LV_EVENT_CANCEL, nullptr);
@@ -699,6 +700,7 @@ namespace hexwallet
     void focus_reader()
     {
       reading_page = true;
+      reader_target = screen_content;
       lv_obj_add_flag(screen_content, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
       if (auto group = lv_group_get_default()) {
         lv_group_add_obj(group, screen_content);
@@ -714,8 +716,368 @@ namespace hexwallet
       lv_label_set_text(label, text);
     }
 
+    void setup_page(Page page) {
+      setup_transition = true;
+      open_page(page);
+    }
+
+    const char *custody_reason() {
+      switch (custody_gate_blocker(custody_gate_state())) {
+        case CustodyBlocker::BackendMissing: return tr("E210 SE051 backend missing in this firmware", "E210 固件缺少 SE051 托管后端");
+        case CustodyBlocker::ChannelNotAuthenticated: return tr("E211 Open the authenticated card channel", "E211 安全卡通道未认证");
+        case CustodyBlocker::UserNotAuthenticated: return tr("E212 Verify the card PIN first", "E212 请先验证安全卡 PIN");
+        case CustodyBlocker::KeysExportable: return tr("E213 Card key policy allows export", "E213 卡内密钥策略允许导出");
+        case CustodyBlocker::WalletLayerNotConverted: return tr("E214 Firmware lacks card-backed wallet sessions", "E214 固件缺少卡内钱包会话");
+        default: return nullptr;
+      }
+    }
+
+    void start_words(lv_event_t *event) {
+      if (custody_reason() || !session_authenticated || wallet_session_is_loaded()) {
+        open_page(current_page);
+        return;
+      }
+      setup_words.language = static_cast<MnemonicLanguage>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+      setup_words.creating = current_page == Page::CreateWords;
+      setup_page(setup_words.creating ? Page::WordsCount : Page::WordsInput);
+    }
+
+    void generate_words(lv_event_t *event) {
+      if (custody_reason() || !session_authenticated || wallet_session_is_loaded()) {
+        open_page(Page::CreateWords);
+        return;
+      }
+      setup_words.count = static_cast<unsigned>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+      const auto result = bip39_generate(setup_words.language, setup_words.count, setup_words.words, sizeof(setup_words.words));
+      if (result != WalletError::Ok) {
+        wallet_ui_set_status(result == WalletError::RandomFailure ? tr("E215 Entropy source failed", "E215 随机数源失败") : tr("E216 Mnemonic encoding failed", "E216 助记词编码失败"));
+        return;
+      }
+      setup_page(Page::WordsBackup);
+    }
+
+    lv_obj_t *setup_button(const char *caption, lv_event_cb_t callback, uintptr_t value = 0) {
+      auto button = lv_button_create(screen_content);
+      focus_ink(button);
+      lv_obj_set_size(button, LV_PCT(100), 22);
+      lv_label_set_text(lv_label_create(button), caption);
+      lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, reinterpret_cast<void *>(value));
+      lv_obj_add_event_cb(button, back_event, LV_EVENT_CANCEL, nullptr);
+      return button;
+    }
+
+    void next_setup_page(lv_event_t *event) {
+      setup_page(static_cast<Page>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event))));
+    }
+
+    const char *backup_error(WalletError error) {
+      switch (error) {
+        case WalletError::InvalidChecksum: return tr("E230 Backup checksum mismatch", "E230 备份校验和不符");
+        case WalletError::WrongNetwork: return tr("E231 WIF belongs to another Bitcoin network", "E231 WIF 属于另一比特币网络");
+        case WalletError::IncorrectPassphrase: return tr("E232 Check the password and Bitcoin network", "E232 请核对密码和比特币网络");
+        case WalletError::OutOfMemory: return tr("E233 Insufficient scrypt memory", "E233 scrypt 内存不足");
+        case WalletError::WorkerUnavailable: return tr("E234 Crypto worker busy or unavailable", "E234 加密任务忙或无法启动");
+        case WalletError::UnsupportedFormat: return tr("E235 Invalid key format or length", "E235 私钥格式或长度无效");
+        case WalletError::InvalidKey: return tr("E236 Invalid secp256k1 private key", "E236 secp256k1 私钥无效");
+        case WalletError::Aborted: return tr("Backup cancelled", "已取消备份操作");
+        case WalletError::UnsupportedUnicode: return tr("E237 Invalid passphrase encoding", "E237 密码编码无效");
+        default: return tr("E238 Backup cryptography failed", "E238 备份加密运算失败");
+      }
+    }
+
+    void start_backup(lv_event_t *) {
+      if (!session_authenticated) { open_page(Page::Home); return; }
+      setup_key.operation = current_page == Page::CreateKey ? BackupOperation::Encrypt :
+                            current_page == Page::RawKey ? BackupOperation::ReadKey : BackupOperation::Decrypt;
+      setup_page(Page::KeyNetwork);
+    }
+
+    void run_backup() {
+      if (!session_authenticated) { open_page(Page::Home); return; }
+      const auto error = bitcoin_backup_begin(setup_key.operation, setup_key.network, setup_key.compressed,
+          setup_key.input, strlen(setup_key.input), reinterpret_cast<const uint8_t *>(setup_key.password), strlen(setup_key.password));
+      secure_zero(setup_key.password, sizeof(setup_key.password));
+      secure_zero(setup_key.input, sizeof(setup_key.input));
+      if (error != WalletError::Ok) {
+        open_page(Page::Home);
+        wallet_ui_set_status(backup_error(error));
+        return;
+      }
+      setup_page(Page::KeyWorking);
+    }
+
+    void after_key_entry() {
+      if (setup_key.operation == BackupOperation::ReadKey) run_backup();
+      else setup_page(Page::KeyPass);
+    }
+
+    void start_key_entry(lv_event_t *event) {
+      setup_key.network = static_cast<BitcoinKeyNetwork>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+      setup_key.compressed = true;
+      if (!setup_key.input[0]) setup_page(Page::KeyEntry);
+      else if (strlen(setup_key.input) == 64) setup_page(Page::KeyCompression);
+      else after_key_entry();
+    }
+
+    const char *tag_error(NfcBackupStatus status) {
+      switch (status) {
+        case NfcBackupStatus::Busy: return tr("E250 NFC session busy", "E250 NFC 会话忙");
+        case NfcBackupStatus::Timeout: return tr("E251 NFC read timed out", "E251 NFC 读取超时");
+        case NfcBackupStatus::TagLost: return tr("E252 Tag removed during read", "E252 读取期间标签已移开");
+        case NfcBackupStatus::UnsupportedTag: return tr("E253 Present one NFC-A Type 4 tag", "E253 请放置一张 NFC-A Type 4 标签");
+        case NfcBackupStatus::AccessDenied: return tr("E254 Tag refused NDEF access", "E254 标签拒绝读取 NDEF");
+          case NfcBackupStatus::InvalidRecord: return tr("E255 Expected one NDEF Text key record", "E255 需要单条 NDEF 文本私钥记录");
+          case NfcBackupStatus::MissingFile: return tr("E257 NDEF app or file missing", "E257 缺少 NDEF 应用或文件");
+          case NfcBackupStatus::CommandRejected: return tr("E258 Tag rejected read command", "E258 标签拒绝读取命令");
+        default: return tr("E256 NFC controller unavailable", "E256 NFC 控制器不可用");
+      }
+    }
+
+    void start_tag_read(lv_event_t *) {
+      if (!session_authenticated) { open_page(Page::Home); return; }
+      auto status = nfc_backup_start();
+      if (status == NfcBackupStatus::Pending) setup_page(Page::TagWait);
+      else wallet_ui_set_status(tag_error(status));
+    }
+
+    void choose_compression(lv_event_t *event) {
+      setup_key.compressed = lv_event_get_user_data(event) != nullptr;
+      after_key_entry();
+    }
+
+    void commit_setup(lv_event_t *) {
+      if (!board_display_review_ready()) {
+        wallet_ui_set_status(tr("Wait for the display, then hold again", "请等屏幕刷新完毕后再次长按"));
+        return;
+      }
+      if (auto indev = lv_indev_active()) lv_indev_wait_release(indev);
+      const char *error = custody_reason();
+      if (!error && (!session_authenticated || wallet_session_is_loaded()))
+        error = tr("E217 Unlock an empty wallet slot first", "E217 请先解锁空钱包槽位");
+      if (!error) {
+        const auto result = wallet_session_import_language(setup_words.words, setup_words.language, setup_words.passphrase);
+        if (result != WalletError::Ok) {
+          open_page(Page::Home);
+          const char *message;
+          switch (result) {
+            case WalletError::InvalidMnemonic: message = tr("E240 Check word order, language and checksum", "E240 请核对词序、语言和校验和"); break;
+            case WalletError::UnsupportedUnicode: message = tr("E241 Invalid passphrase encoding", "E241 附加密码编码无效"); break;
+            case WalletError::OutOfMemory: message = tr("E242 Insufficient memory to process the passphrase", "E242 处理附加密码的内存不足"); break;
+            case WalletError::BufferTooSmall: message = tr("E243 Normalized text exceeds the buffer", "E243 规范化文本超出缓冲区"); break;
+            case WalletError::InvalidArgument: message = tr("E244 Check the passphrase length", "E244 请核对附加密码长度"); break;
+            case WalletError::CustodyUnavailable: message = tr("E214 Card-backed wallet session unavailable", "E214 卡内钱包会话不可用"); break;
+            default: message = tr("E245 Wallet seed derivation failed", "E245 钱包种子派生失败"); break;
+          }
+          wallet_ui_set_status(message);
+          return;
+        }
+      }
+      open_page(Page::Home);
+      wallet_ui_set_status(error ? error : tr("Wallet ready", "钱包已就绪"));
+    }
+
     void language_event(lv_event_t *event) {
       wallet_ui_set_language(static_cast<WalletUiLanguage>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event))));
+    }
+
+    void layout_event(lv_event_t *event) {
+      const auto selected = static_cast<AssetLayout>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+      if (selected != asset_layout || layout_error) {
+        layout_error = save_asset_layout(selected);
+        if (layout_error) { open_page(Page::Layout); return; }
+        asset_layout = selected;
+      }
+      catalog_offset = 0;
+      open_page(Page::Catalog);
+    }
+
+    void keyboard_map(const char *alphabet) {
+      size_t map = 0, key = 0;
+      memset(input_keys, 0, sizeof(input_keys));
+      if (input_candidates) {
+        for (size_t i = 0; i < 8; ++i) {
+          if (!text_input.candidate(input_candidate_offset + i, input_keys[key])) break;
+          input_map[map++] = input_keys[key++];
+          if (i == 3 && input_candidate_offset + 4 < text_input.candidate_count()) input_map[map++] = "\n";
+        }
+        input_map[map++] = "\n";
+        input_map[map++] = tr("Prev", "上页"); input_map[map++] = tr("Next", "下页"); input_map[map++] = "abc";
+      } else {
+        for (size_t i = 0; alphabet[i] && key < 40; ++i) {
+          input_keys[key][0] = alphabet[i];
+          input_map[map++] = input_keys[key++];
+          if (i == 9 || i == 19) input_map[map++] = "\n";
+        }
+        input_map[map++] = tr("Del", "删除");
+        input_map[map++] = "\n";
+        for (const char *action : {"abc", "ABC", "123", "#%", tr("Pin", "拼音"), tr("Spc", "空格"), tr("Han", "选字"), tr("Done", "完成")})
+          input_map[map++] = action;
+      }
+      input_map[map] = "";
+      lv_buttonmatrix_set_map(input_matrix, input_map);
+      lv_buttonmatrix_set_button_ctrl_all(input_matrix, static_cast<lv_buttonmatrix_ctrl_t>(LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT));
+      lv_buttonmatrix_set_selected_button(input_matrix, 0);
+    }
+
+    void input_refresh(TextInputError error = TextInputError::Ok) {
+      lv_label_set_text_static(input_preview, text_input.preview());
+      const char *message = nullptr;
+      switch (error) {
+        case TextInputError::Full: message = tr("E201 Input is full", "E201 输入已满"); break;
+        case TextInputError::InvalidUtf8: message = tr("E202 Invalid UTF-8", "E202 字符编码无效"); break;
+        case TextInputError::UnsupportedCharacter: message = tr("E203 Character not allowed", "E203 字符不可用"); break;
+        case TextInputError::CompositionPending: message = tr("E204 Select a Chinese character first", "E204 请先选择汉字"); break;
+        case TextInputError::NoCandidates: message = tr("E205 No match; edit pinyin", "E205 无候选字；请修改拼音"); break;
+        default: break;
+      }
+      if (message) {
+        lv_label_set_text_static(input_hint, message);
+        return;
+      }
+      snprintf(input_status, sizeof(input_status), "%s  %s  %u / %u", input_pinyin ? tr("Pinyin", "拼音") : "ABC", text_input.composition(), static_cast<unsigned>(text_input.size()), static_cast<unsigned>(keyboard_limit));
+      lv_label_set_text_static(input_hint, input_status);
+    }
+
+    void input_key_event(lv_event_t *) {
+      const uint32_t selected = lv_buttonmatrix_get_selected_button(input_matrix);
+      const char *key = lv_buttonmatrix_get_button_text(input_matrix, selected);
+      if (!key) return;
+      TextInputError error = TextInputError::Ok;
+      if (input_candidates && strlen(key) == 3 && static_cast<uint8_t>(key[0]) >= 0xe0) {
+        error = text_input.choose(input_candidate_offset + selected);
+        input_candidates = false;
+        keyboard_map("abcdefghijklmnopqrstuvwxyz");
+      } else if (!strcmp(key, tr("Prev", "上页")) || !strcmp(key, tr("Next", "下页"))) {
+        if (!strcmp(key, tr("Prev", "上页"))) { if (input_candidate_offset >= 8) input_candidate_offset -= 8; }
+        else if (input_candidate_offset + 8 < text_input.candidate_count()) input_candidate_offset += 8;
+        keyboard_map("");
+      } else if (!strcmp(key, tr("Han", "选字"))) {
+        if (!text_input.candidate_count()) error = TextInputError::NoCandidates;
+        else { input_candidates = true; input_candidate_offset = 0; keyboard_map(""); }
+      } else if (!strcmp(key, tr("Done", "完成"))) {
+        if (text_input.composition()[0]) error = TextInputError::CompositionPending;
+        else if (current_page == Page::KeyEntry) {
+          const auto size = text_input.size();
+          const bool encrypted = setup_key.operation == BackupOperation::Decrypt;
+          if (encrypted ? size != 58 : (size != 51 && size != 52 && size != 64)) {
+            lv_label_set_text_static(input_hint, backup_error(WalletError::UnsupportedFormat));
+            return;
+          }
+          memcpy(setup_key.input, text_input.text(), size + 1);
+          if (size == 64) setup_page(Page::KeyCompression);
+          else after_key_entry();
+          return;
+        } else if (current_page == Page::KeyPass) {
+          if (!text_input.size() && setup_key.operation == BackupOperation::Encrypt) {
+            lv_label_set_text_static(input_hint, tr("Enter a backup password", "请输入备份密码")); return;
+          }
+          memcpy(setup_key.password, text_input.text(), text_input.size() + 1);
+          if (setup_key.operation == BackupOperation::Encrypt) setup_page(Page::KeyRepeat);
+          else run_backup();
+          return;
+        } else if (current_page == Page::KeyRepeat || current_page == Page::KeyVerify) {
+          const bool verify = current_page == Page::KeyVerify;
+          const char *expected = verify ? setup_key.result.encrypted : setup_key.password;
+          if (strcmp(text_input.text(), expected)) {
+            lv_label_set_text_static(input_hint, tr("Entries differ", "两次输入不一致")); return;
+          }
+          if (verify) { open_page(Page::Home); wallet_ui_set_status(tr("Encrypted backup verified", "已核对加密备份")); }
+          else run_backup();
+          return;
+        } else if (current_page == Page::WordsInput || current_page == Page::WordsConfirm) {
+          if (bip39_validate(text_input.text(), setup_words.language) != WalletError::Ok) {
+            lv_label_set_text(input_hint, tr("Check words, spaces and checksum", "请核对词语、空格及校验和"));
+            return;
+          }
+          if (current_page == Page::WordsConfirm && strcmp(text_input.text(), setup_words.words)) {
+            lv_label_set_text_static(input_hint, tr("Words differ from backup", "与备份的助记词不一致"));
+            return;
+          }
+          if (current_page == Page::WordsInput) memcpy(setup_words.words, text_input.text(), text_input.size() + 1);
+          setup_page(Page::PassChoice);
+          return;
+        } else if (current_page == Page::PassInput || current_page == Page::PassConfirm) {
+          if (!text_input.size()) { lv_label_set_text(input_hint, tr("Enter the passphrase", "请输入附加密码")); return; }
+          if (current_page == Page::PassInput) {
+            memcpy(setup_words.passphrase, text_input.text(), text_input.size() + 1);
+            setup_page(Page::PassConfirm);
+          } else if (!strcmp(setup_words.passphrase, text_input.text())) setup_page(Page::Enroll);
+          else lv_label_set_text(input_hint, tr("Passphrases differ", "两次输入的密码不一致"));
+          return;
+        } else if (current_page == Page::Search && text_input.size() < sizeof(asset_query)) {
+          memcpy(asset_query, text_input.text(), text_input.size() + 1);
+          catalog_offset = 0;
+          open_page(Page::Catalog);
+          return;
+        }
+      } else if (!strcmp(key, tr("Del", "删除"))) text_input.backspace();
+      else if (!strcmp(key, tr("Spc", "空格"))) {
+        error = text_input.composition()[0] ? TextInputError::CompositionPending : text_input.insert(" ", 1);
+      } else if (strlen(key) > 1) {
+        if (text_input.composition()[0] && strcmp(key, "abc")) error = TextInputError::CompositionPending;
+        else {
+          input_candidates = false;
+          input_pinyin = !strcmp(key, tr("Pin", "拼音")) || (text_input.composition()[0] != 0);
+          keyboard_map(!strcmp(key, "ABC") ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" :
+                       !strcmp(key, "123") ? "0123456789.,+-*/=()" :
+                       !strcmp(key, "#%") ? "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~" : "abcdefghijklmnopqrstuvwxyz");
+        }
+      } else error = input_pinyin ? text_input.compose(key[0]) : text_input.insert(key, 1);
+      input_refresh(error);
+    }
+
+    void open_keyboard(const char *title, size_t limit, bool secret) {
+      keyboard_limit = limit;
+      text_input.begin(limit, secret);
+      if (current_page == Page::Search) text_input.insert(asset_query, strlen(asset_query));
+      input_pinyin = input_candidates = false;
+      input_candidate_offset = 0;
+      lv_obj_add_flag(screen_header, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_pad_all(lv_screen_active(), 2, 0);
+      lv_obj_remove_flag(screen_content, LV_OBJ_FLAG_SCROLLABLE);
+      if (board_has_touch()) {
+        auto bar = lv_obj_create(screen_content);
+        set_clean_container(bar);
+        lv_obj_set_size(bar, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+        auto label = lv_label_create(bar);
+        lv_label_set_text(label, title);
+        lv_obj_set_width(label, 0);
+        lv_obj_set_flex_grow(label, 1);
+        auto cancel = lv_button_create(bar);
+        focus_ink(cancel);
+        lv_label_set_text(lv_label_create(cancel), tr("Cancel", "取消"));
+        lv_obj_add_event_cb(cancel, back_event, LV_EVENT_CLICKED, nullptr);
+      } else page_text(title);
+      input_preview = lv_label_create(screen_content);
+      lv_obj_set_size(input_preview, LV_PCT(100), 16);
+      lv_label_set_long_mode(input_preview, LV_LABEL_LONG_MODE_CLIP);
+      lv_obj_set_style_text_font(input_preview, &hexwallet_ui_chinese, 0);
+      input_hint = lv_label_create(screen_content);
+      lv_obj_set_size(input_hint, LV_PCT(100), 16);
+      lv_obj_set_style_text_font(input_hint, &hexwallet_ui_chinese, 0);
+      input_matrix = lv_buttonmatrix_create(screen_content);
+      lv_obj_set_size(input_matrix, LV_PCT(100), 0);
+      lv_obj_set_flex_grow(input_matrix, 1);
+      lv_obj_set_style_text_font(input_matrix, &hexwallet_ui_chinese, 0);
+      lv_obj_set_style_pad_all(input_matrix, 0, 0);
+      lv_obj_set_style_pad_row(input_matrix, 1, 0);
+      lv_obj_set_style_pad_column(input_matrix, 1, 0);
+      lv_obj_set_style_border_width(input_matrix, 0, 0);
+      lv_obj_set_style_radius(input_matrix, 0, 0);
+      lv_obj_set_style_bg_color(input_matrix, theme_bg(), LV_PART_ITEMS);
+      lv_obj_set_style_text_color(input_matrix, theme_fg(), LV_PART_ITEMS);
+      lv_obj_set_style_bg_color(input_matrix, theme_fg(), LV_PART_ITEMS | LV_STATE_FOCUSED);
+      lv_obj_set_style_text_color(input_matrix, theme_bg(), LV_PART_ITEMS | LV_STATE_FOCUSED);
+      lv_obj_set_style_bg_color(input_matrix, theme_fg(), LV_PART_ITEMS | LV_STATE_PRESSED);
+      lv_obj_set_style_text_color(input_matrix, theme_bg(), LV_PART_ITEMS | LV_STATE_PRESSED);
+      lv_obj_set_style_shadow_width(input_matrix, 0, LV_PART_ITEMS);
+      keyboard_map("abcdefghijklmnopqrstuvwxyz");
+      input_refresh();
+      lv_obj_add_event_cb(input_matrix, input_key_event, LV_EVENT_VALUE_CHANGED, nullptr);
+      lv_obj_add_event_cb(input_matrix, back_event, LV_EVENT_CANCEL, nullptr);
+      lv_group_focus_obj(input_matrix);
     }
 
     void open_page(Page page)
@@ -726,22 +1088,133 @@ namespace hexwallet
       lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
       lv_obj_set_style_pad_row(screen_content, 2, 0);
       wallet_ui_set_status(tr("OK select   Prev / Next   Back", "确定选择  上一个 / 下一个  返回"));
+      if (page == Page::Search) { open_keyboard(tr("Search assets  /  Back cancels", "搜索资产 / 返回取消"), sizeof(asset_query) - 1, false); return; }
+      if (page == Page::KeyNetwork) {
+        page_text(tr("Bitcoin backup network", "比特币备份网络"));
+        auto main = setup_button(tr("Bitcoin mainnet", "比特币主网"), start_key_entry);
+        setup_button(tr("Bitcoin testnet", "比特币测试网"), start_key_entry, 1);
+        lv_group_focus_obj(main);
+        return;
+      }
+      if (page == Page::TagWait) {
+        page_text(tr("Present one Type 4 NDEF text backup", "请放置一张 Type 4 NDEF 文本备份标签"));
+        auto cancel = menu_item(screen_content, tr("Cancel", "取消"), Page::NfcImport);
+        lv_group_focus_obj(cancel);
+        return;
+      }
+      if (page == Page::KeyEntry || page == Page::KeyVerify) {
+        const bool encrypted = setup_key.operation == BackupOperation::Decrypt || page == Page::KeyVerify;
+        open_keyboard(page == Page::KeyVerify ? tr("Retype the encrypted backup", "重新输入加密备份") :
+                      encrypted ? tr("Enter encrypted BIP38 key", "输入 BIP38 加密私钥") : tr("Enter WIF or 64 hex digits", "输入 WIF 或 64 位十六进制私钥"), encrypted ? 58 : 64, true);
+        return;
+      }
+      if (page == Page::KeyCompression) {
+        page_text(tr("Public key for the P2PKH address", "P2PKH 地址的公钥格式"));
+        auto first = setup_button(tr("Compressed", "压缩"), choose_compression, 1);
+        setup_button(tr("Uncompressed", "未压缩"), choose_compression);
+        lv_group_focus_obj(first);
+        return;
+      }
+      if (page == Page::KeyPass || page == Page::KeyRepeat) {
+        open_keyboard(page == Page::KeyPass ? tr("BIP38 backup password", "BIP38 备份密码") : tr("Repeat backup password", "再次输入备份密码"), kBip39MaxPassphraseBytes, true);
+        return;
+      }
+      if (page == Page::KeyWorking) {
+        page_text(tr("Processing Bitcoin key", "正在处理比特币私钥"));
+        auto cancel = menu_item(screen_content, tr("Cancel", "取消"), Page::Home);
+        lv_group_focus_obj(cancel);
+        return;
+      }
+      if (page == Page::KeyResult) {
+        page_text(setup_key.network == BitcoinKeyNetwork::Mainnet ? tr("Backup address / mainnet", "备份地址 / 主网") : tr("Backup address / testnet", "备份地址 / 测试网"));
+        page_text(setup_key.result.address);
+        page_text(setup_key.result.compressed ? tr("Compressed P2PKH", "压缩公钥 P2PKH") : tr("Uncompressed P2PKH", "未压缩公钥 P2PKH"));
+        if (setup_key.result.encrypted[0]) {
+          page_text(tr("Write down the encrypted key", "抄下加密私钥"));
+          auto label = lv_label_create(screen_content);
+          lv_obj_set_width(label, LV_PCT(100));
+          lv_label_set_text_static(label, setup_key.result.encrypted);
+          setup_button(tr("Verify backup", "核对备份"), next_setup_page, static_cast<uintptr_t>(Page::KeyVerify));
+        } else page_text(tr("Address check only. Wallet import unavailable.", "仅供核对地址。钱包导入尚不可用。"));
+        focus_reader();
+        return;
+      }
+      if (page == Page::WordsInput || page == Page::WordsConfirm) {
+        open_keyboard(page == Page::WordsInput ? tr("Recovery words / separate with spaces", "输入助记词 / 用空格分隔") : tr("Verify words from your backup", "重新输入备份的助记词"), sizeof(setup_words.words) - 1, true);
+        return;
+      }
+      if (page == Page::PassInput || page == Page::PassConfirm) {
+        open_keyboard(page == Page::PassInput ? tr("Enter BIP39 passphrase", "输入 BIP39 附加密码") : tr("Repeat the same passphrase", "再次输入相同的附加密码"), sizeof(setup_words.passphrase) - 1, true);
+        return;
+      }
+      if (page == Page::PassChoice) {
+        page_text(tr("BIP39 passphrase / each choice opens a different wallet", "BIP39 附加密码 / 不同密码对应不同钱包"));
+        auto add = setup_button(tr("Use a passphrase", "使用附加密码"), next_setup_page, static_cast<uintptr_t>(Page::PassInput));
+        setup_button(tr("Use empty passphrase", "明确使用空密码"), next_setup_page, static_cast<uintptr_t>(Page::Enroll));
+        lv_group_focus_obj(add);
+        return;
+      }
+      if (page == Page::WordsBackup) {
+        char heading[80];
+        snprintf(heading, sizeof(heading), tr("Write all %u words in order", "按顺序抄下全部 %u 个词"), setup_words.count);
+        page_text(heading);
+        auto label = lv_label_create(screen_content);
+        lv_obj_set_width(label, LV_PCT(100));
+        lv_obj_set_style_text_font(label, &hexwallet_ui_chinese, 0);
+        lv_label_set_text_static(label, setup_words.words);
+        setup_button(tr("Verify backup", "核对备份"), next_setup_page, static_cast<uintptr_t>(Page::WordsConfirm));
+        focus_reader();
+        return;
+      }
+      if (page == Page::Enroll) {
+        board_display_prepare_review();
+        page_text(setup_words.creating ? tr("Create this wallet?", "确认创建该钱包？") : tr("Recover this wallet?", "确认恢复该钱包？"));
+        auto cancel = menu_item(screen_content, tr("Cancel", "取消"), Page::Home);
+        auto approve = setup_button(tr("Hold OK to confirm", "长按确定以确认"), [](lv_event_t *) {});
+        lv_obj_add_event_cb(approve, commit_setup, LV_EVENT_LONG_PRESSED, nullptr);
+        lv_group_focus_obj(cancel);
+        return;
+      }
+      if (page == Page::WordsCount) {
+        page_text(tr("Number of recovery words", "助记词数量"));
+        for (unsigned count = 12; count <= 24; count += 3) {
+          char caption[16];
+          snprintf(caption, sizeof(caption), tr("%u words", "%u 个词"), count);
+          auto choice = setup_button(caption, generate_words, count);
+          if (count == 24) lv_group_focus_obj(choice);
+        }
+        return;
+      }
+      if (board_has_touch() && page != Page::Home && page != Page::Companion) {
+        auto back = lv_button_create(screen_content);
+        focus_ink(back);
+        lv_obj_set_size(back, LV_PCT(100), 32);
+        lv_label_set_text(lv_label_create(back), tr("Back", "返回"));
+        lv_obj_add_event_cb(back, back_event, LV_EVENT_CLICKED, nullptr);
+      }
       if (page == Page::Home) {
         catalog_offset = 0;
-        lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_ROW);
-        companion_stage = lv_obj_create(screen_content);
-        set_clean_container(companion_stage);
-        lv_obj_set_size(companion_stage, 74, LV_PCT(100));
-        lv_obj_clear_flag(companion_stage, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(companion_stage, companion_deleted, LV_EVENT_DELETE, nullptr);
+        const bool horizontal = board_display_width() > board_display_height();
         MascotInputs inputs{};
         inputs.battery_mv = board_battery_millivolts();
         inputs.phone_linked = wallet_link_service_connected();
-        companion_parts(companion_stage, mascot_snapshot(inputs, millis()));
+        const auto snapshot = mascot_snapshot(inputs, millis());
+        if (horizontal) {
+          lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_ROW);
+          companion_stage = lv_obj_create(screen_content);
+          set_clean_container(companion_stage);
+          lv_obj_set_size(companion_stage, 74, LV_PCT(100));
+          lv_obj_remove_flag(companion_stage, LV_OBJ_FLAG_SCROLLABLE);
+          lv_obj_add_event_cb(companion_stage, companion_deleted, LV_EVENT_DELETE, nullptr);
+          companion_parts(companion_stage, snapshot);
+        } else if (board_display_height() >= 320) {
+          nothing_companion(screen_content, snapshot);
+        }
         auto menu = lv_obj_create(screen_content);
         set_clean_container(menu);
-        lv_obj_set_flex_grow(menu, 1);
-        lv_obj_set_height(menu, 68); // Three complete 22px rows, no clipped fourth row.
+        lv_obj_set_width(menu, horizontal ? 0 : LV_PCT(100));
+        lv_obj_set_height(menu, horizontal ? 68 : LV_SIZE_CONTENT);
+        if (horizontal) lv_obj_set_flex_grow(menu, 1);
         lv_obj_set_flex_flow(menu, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(menu, 1, 0);
         landscape_scrollbar(menu);
@@ -751,7 +1224,9 @@ namespace hexwallet
         menu_item(menu, tr("Button guide", "按键说明"), Page::Controls);
         menu_item(menu, tr("Asset directory", "资产目录"), Page::Catalog);
         auto locale = menu_item(menu, "Language / 语言", Page::Language);
-        lv_obj_set_style_text_font(locale, &hexwallet_ui_chinese, 0);
+         lv_obj_set_style_text_font(locale, &hexwallet_ui_chinese, 0);
+          menu_item(menu, tr("DeepSeek companion", "DeepSeek 伙伴"), Page::Companion);
+        menu_item(menu, tr("Settings", "设置"), Page::Settings);
         lv_group_focus_obj(first);
         return;
       }
@@ -760,7 +1235,43 @@ namespace hexwallet
         page_text(create ? tr("Create wallet  /  Choose a backup", "创建钱包 / 选择备份方式") : tr("Recover wallet  /  Choose your backup", "恢复钱包 / 选择已有备份"));
         auto first = menu_item(screen_content, tr("BIP39  /  Recovery words", "BIP39 / 助记词"), create ? Page::CreateWords : Page::RecoverWords);
         menu_item(screen_content, tr("BIP38  /  Encrypted Bitcoin key", "BIP38 / 加密比特币私钥"), create ? Page::CreateKey : Page::RecoverKey);
+        if (!create) {
+          menu_item(screen_content, tr("Bitcoin private key / WIF or hex", "比特币私钥 / WIF 或十六进制"), Page::RawKey);
+          menu_item(screen_content, tr("Read NFC backup", "读取 NFC 备份"), Page::NfcImport);
+        }
         lv_group_focus_obj(first);
+        return;
+      }
+      if (page == Page::Companion) {
+        companion_entered_ms = millis();
+        lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_ROW);
+        companion_stage = lv_obj_create(screen_content);
+        set_clean_container(companion_stage);
+        lv_obj_set_size(companion_stage, LV_PCT(48), LV_PCT(100));
+        lv_obj_set_style_min_width(companion_stage, 64, 0);
+        lv_obj_remove_flag(companion_stage, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(companion_stage, companion_deleted, LV_EVENT_DELETE, nullptr);
+        MascotInputs inputs{};
+        inputs.battery_mv = board_battery_millivolts();
+        inputs.phone_linked = wallet_link_service_connected();
+        companion_parts(companion_stage, mascot_snapshot(inputs, millis()));
+        auto menu = lv_obj_create(screen_content);
+        set_clean_container(menu);
+        lv_obj_set_flex_grow(menu, 1);
+        lv_obj_set_height(menu, LV_PCT(100));
+        lv_obj_set_flex_flow(menu, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(menu, 1, 0);
+        const char *actions[] = {tr("Feed", "喂食"), tr("Pet", "抚摸"), tr("Play", "玩耍"), tr("Blow bubbles", "吹泡泡")};
+        for (intptr_t i = 0; i < 4; ++i) {
+          auto button = lv_button_create(menu);
+          focus_ink(button);
+          lv_obj_set_size(button, LV_PCT(100), board_has_touch() ? 44 : 22);
+          lv_label_set_text(lv_label_create(button), actions[i]);
+          lv_obj_add_event_cb(button, companion_action_event, LV_EVENT_CLICKED, reinterpret_cast<void *>(i));
+          lv_obj_add_event_cb(button, back_event, LV_EVENT_CANCEL, nullptr);
+          if (!i) lv_group_focus_obj(button);
+        }
+        if (board_has_touch()) menu_item(menu, tr("Back", "返回"), Page::Home);
         return;
       }
       if (page == Page::Language) {
@@ -777,26 +1288,76 @@ namespace hexwallet
         }
         return;
       }
-      if (page == Page::Catalog) {
-        if (catalog_offset >= wallet_catalog_count())
-          catalog_offset = wallet_catalog_count() ? ((wallet_catalog_count() - 1) / 8) * 8 : 0;
-        const size_t end = catalog_offset + 8;
-        for (size_t i = catalog_offset; i < end && i < wallet_catalog_count(); ++i) {
-          WalletCatalogEntry entry;
-          if (!wallet_catalog_at_sorted(i, &entry)) continue;
+      if (page == Page::Settings) {
+        page_text(tr("Settings", "设置"));
+        auto first = menu_item(screen_content, tr("Asset layout", "资产布局"), Page::Layout);
+        auto locale = menu_item(screen_content, "Language / 语言", Page::Language);
+        lv_obj_set_style_text_font(locale, &hexwallet_ui_chinese, 0);
+        menu_item(screen_content, tr("Button guide", "按键说明"), Page::Controls);
+        menu_item(screen_content, tr("Search assets", "搜索资产"), Page::Search);
+        lv_group_focus_obj(first);
+        return;
+      }
+      if (page == Page::Layout) {
+        page_text(tr("Asset layout", "资产布局"));
+        if (layout_error) {
+          auto error_label = lv_label_create(screen_content);
+          lv_obj_set_width(error_label, LV_PCT(100));
+          lv_label_set_text_fmt(error_label, tr("Layout storage error (%s)", "布局存储错误 (%s)"), layout_error);
+        }
+        for (uintptr_t i = 0; i < 3; ++i) {
           auto button = lv_button_create(screen_content);
           focus_ink(button);
-           lv_obj_set_width(button, LV_PCT(100));
-           lv_obj_set_height(button, LV_SIZE_CONTENT);
+          lv_obj_set_size(button, LV_PCT(100), 22);
+          lv_label_set_text(lv_label_create(button), i == 0 ? tr("ListView", "列表视图") : i == 1 ? tr("GridView", "网格视图") : tr("CardView", "卡片视图"));
+          lv_obj_add_event_cb(button, layout_event, LV_EVENT_CLICKED, reinterpret_cast<void *>(i));
+          lv_obj_add_event_cb(button, back_event, LV_EVENT_CANCEL, nullptr);
+          if (i == static_cast<uintptr_t>(asset_layout)) lv_group_focus_obj(button);
+        }
+        return;
+      }
+      if (page == Page::Catalog) {
+        catalog_matches = 0;
+        for (size_t i = 0; i < wallet_catalog_count(); ++i) {
+          WalletCatalogEntry entry;
+          if (wallet_catalog_at_sorted(i, &entry) && (!asset_query[0] || wallet_catalog_matches(entry, asset_query))) ++catalog_matches;
+        }
+        const bool grid = asset_layout == AssetLayout::Grid;
+        const bool card = asset_layout == AssetLayout::Card;
+        lv_obj_set_flex_flow(screen_content, grid ? LV_FLEX_FLOW_ROW_WRAP : LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_column(screen_content, 4, 0);
+        lv_obj_set_style_pad_row(screen_content, card ? 6 : 4, 0);
+        if (catalog_offset >= catalog_matches)
+          catalog_offset = catalog_matches ? ((catalog_matches - 1) / 8) * 8 : 0;
+        const size_t end = catalog_offset + 8;
+        size_t shown = 0, skipped = 0;
+        for (size_t i = 0; i < wallet_catalog_count() && shown < 8; ++i) {
+          WalletCatalogEntry entry;
+          if (!wallet_catalog_at_sorted(i, &entry)) continue;
+          if (asset_query[0] && !wallet_catalog_matches(entry, asset_query)) continue;
+          if (skipped++ < catalog_offset) continue;
+          ++shown;
+          auto button = lv_button_create(screen_content);
+          focus_ink(button);
+            lv_obj_set_width(button, LV_PCT(grid ? 48 : 100));
+            lv_obj_set_height(button, LV_SIZE_CONTENT);
+          const auto dpi = lv_display_get_dpi(lv_obj_get_display(button));
+          lv_obj_set_style_radius(button, card ? (12 * dpi + 80) / 160 : grid ? 6 : 2, 0);
+          lv_obj_set_style_pad_all(button, card ? 8 : 3, 0);
+          lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
+          lv_obj_set_style_pad_column(button, 6, 0);
+          lv_obj_set_flex_align(button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+          coin_icon_view(button, entry.symbol);
           auto label = lv_label_create(button);
-           lv_label_set_text_fmt(label, "%s   %s", entry.symbol, entry.name);
-           lv_obj_set_width(label, LV_PCT(100));
+            lv_label_set_text_fmt(label, "%s\n%s", entry.symbol, entry.name);
+           lv_obj_set_width(label, 0);
+           lv_obj_set_flex_grow(label, 1);
            lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
           lv_obj_add_event_cb(button, coin_clicked, LV_EVENT_CLICKED, reinterpret_cast<void *>(i));
           lv_obj_add_event_cb(button, back_event, LV_EVENT_CANCEL, nullptr);
         }
         for (int next = 0; next <= 1; ++next) {
-          if (next ? end >= wallet_catalog_count() : catalog_offset == 0) continue;
+          if (next ? end >= catalog_matches : catalog_offset == 0) continue;
           auto button = lv_button_create(screen_content);
           focus_ink(button);
            lv_obj_set_size(button, LV_PCT(100), 22);
@@ -804,20 +1365,76 @@ namespace hexwallet
           lv_obj_add_event_cb(button, catalog_page_event, LV_EVENT_CLICKED, reinterpret_cast<void *>(uintptr_t(next)));
           lv_obj_add_event_cb(button, back_event, LV_EVENT_CANCEL, nullptr);
         }
-        if (!lv_obj_get_child_count(screen_content)) {
-          page_text(tr("No assets available", "暂无资产"));
-          focus_reader();
+        if (!shown) {
+          page_text(asset_query[0] ? tr("No matching assets; edit search", "无匹配资产；请修改搜索") : tr("No assets available", "暂无资产"));
+          if (!wallet_catalog_count()) focus_reader();
         } else lv_group_focus_obj(lv_obj_get_child(screen_content, 0));
+        if (wallet_catalog_count()) {
+          auto search = menu_item(screen_content, tr("Search assets", "搜索资产"), Page::Search);
+          if (!shown) lv_group_focus_obj(search);
+        }
+        return;
+      }
+      if (page == Page::CreateWords || page == Page::RecoverWords) {
+        page_text(page == Page::CreateWords ? tr("Create / BIP39", "创建 / BIP39") : tr("Recover / BIP39", "恢复 / BIP39"));
+        const char *error = custody_reason();
+        if (error) page_text(error);
+        else if (!session_authenticated || wallet_session_is_loaded()) page_text(tr("E217 Unlock an empty wallet slot first", "E217 请先解锁空钱包槽位"));
+        else {
+          auto first = setup_button("English", start_words);
+          auto simplified = setup_button("简体中文", start_words, 1);
+          auto traditional = setup_button("繁體中文", start_words, 2);
+          lv_obj_set_style_text_font(simplified, &hexwallet_ui_chinese, 0);
+          lv_obj_set_style_text_font(traditional, &hexwallet_ui_chinese, 0);
+          lv_group_focus_obj(first);
+          return;
+        }
+        focus_reader();
         return;
       }
       switch (page) {
-        case Page::CreateWords: page_text(tr("Create / BIP39", "创建 / BIP39")); page_text(tr("24 recovery words + optional passphrase. Secure creation is not available yet.", "24 个助记词与可选密码共同确定钱包。安全创建功能尚未开放。")); break;
-        case Page::RecoverWords: page_text(tr("Recover / BIP39", "恢复 / BIP39")); page_text(tr("Use the original words and exact passphrase. Secure recovery is not available yet.", "需要原始助记词和完全一致的密码。安全恢复功能尚未开放。")); break;
-        case Page::CreateKey: page_text(tr("Create / BIP38", "创建 / BIP38")); page_text(tr("Encrypt one Bitcoin private key with a passphrase. Protected export is not available yet.", "使用密码加密一个比特币私钥。受保护的私钥导出尚未开放。")); break;
-        case Page::RecoverKey: page_text(tr("Recover / BIP38", "恢复 / BIP38")); page_text(tr("Use the encrypted Bitcoin key and its passphrase. Protected import is not available yet.", "需要加密的比特币私钥及其密码。受保护的私钥导入尚未开放。")); break;
-        case Page::Scan: page_text(tr("Scan QR", "扫描二维码")); page_text(tr("Camera capture is not available yet on this board.", "此板卡的摄像头采集尚未开放。")); break;
+        case Page::CreateKey:
+          page_text(tr("Create / BIP38", "创建 / BIP38"));
+          page_text(tr("E225 This firmware lacks protected Bitcoin key creation and BIP38 backup on the card.",
+                       "E225 固件缺少比特币私钥的卡内创建和 BIP38 备份功能。"));
+          break;
+        case Page::RecoverKey:
+          page_text(tr("Recover / BIP38", "恢复 / BIP38"));
+          page_text(tr("E218 This firmware lacks protected Bitcoin key import and signing on the card.",
+                       "E218 固件缺少比特币私钥的卡内导入与签名功能。"));
+          break;
+        case Page::RawKey: page_text(tr("Bitcoin / WIF or hex", "比特币 / WIF 或十六进制")); page_text(tr("E218 Firmware lacks secure single-key import and signing", "E218 固件缺少单私钥卡内导入与签名")); break;
+        case Page::NfcImport:
+          page_text(tr("Check Bitcoin backup on NFC tag", "核对 NFC 标签上的比特币备份"));
+          if (!nfc_port_configured()) page_text(tr("E220 No NFC controller configured", "E220 未配置 NFC 控制器"));
+          else if (!session_authenticated) page_text(tr("Unlock to read a backup", "请先解锁以读取备份"));
+          else {
+            if (const char *error = nfc_port_error()) page_text(error);
+            page_text(tr("WIF, hex or BIP38 / address check only", "WIF、十六进制或 BIP38 / 仅核对地址"));
+            lv_group_focus_obj(setup_button(tr("Read Type 4 tag", "读取 Type 4 标签"), start_tag_read));
+            return;
+          }
+          break;
+        case Page::Scan: {
+          page_text(tr("Scan QR", "扫描二维码"));
+          switch (board_camera_probe()) {
+            case CameraProbeState::NotConfigured: page_text(tr("E221 Camera control bus (SCCB) is not wired in this board profile", "E221 板卡配置无摄像头控制总线 SCCB")); break;
+            case CameraProbeState::NoResponse: page_text(tr("E222 Camera did not acknowledge SCCB", "E222 摄像头未响应 SCCB")); break;
+            case CameraProbeState::WrongSensor: page_text(tr("E223 Sensor ID differs from OV9281", "E223 传感器型号与 OV9281 不符")); break;
+            case CameraProbeState::PresentUnverified: page_text(tr("E224 OV9281 detected; CSI capture unavailable", "E224 已检测到 OV9281，CSI 采集尚不可用")); break;
+          }
+          break;
+        }
         case Page::Controls: page_text(tr("Keys: OK / Prev / Next / Back", "左起：确定 / 上一个 / 下一个 / 返回")); page_text(tr("Prev / Next move or scroll. Back cancels. Review: OK selects Reject first; select Approve, then hold OK for 0.75s.", "上一个、下一个用于选择或滚动；返回用于取消。审阅时，确定先选中拒绝；切换至批准后，另行长按确定 0.75 秒。")); break;
         default: break;
+      }
+      if (page == Page::RecoverKey || page == Page::RawKey || page == Page::CreateKey) {
+        if (session_authenticated) {
+          auto action = setup_button(page == Page::CreateKey ? tr("Encrypt an existing key", "加密已有私钥") : tr("Check backup address", "核对备份地址"), start_backup);
+          lv_group_focus_obj(action);
+          return;
+        }
+        page_text(tr("Unlock to check or encrypt a backup", "请解锁以核对或加密备份"));
       }
       focus_reader();
       wallet_ui_set_status(tr("Prev / Next scroll   Back to menu", "上 / 下滚动  返回菜单"));
@@ -843,6 +1460,9 @@ namespace hexwallet
       page_text(wallet_catalog_has(entry, WalletCapabilitySigning) ?
                 tr("Signing code: registered", "签名代码：已登记") : tr("Signing code: unavailable", "签名代码：不可用"));
       page_text(tr("Registry entries do not prove secure-card signing or on-chain acceptance.", "目录登记不代表实卡签名或链上验收完成。"));
+      if (!wallet_catalog_can_receive(entry))
+        page_text(tr("Receiving disabled: review and signing are required.", "收款已禁用：必须支持交易审阅和签名。"));
+      if (board_has_touch()) menu_item(screen_content, tr("Back to assets", "返回资产目录"), Page::Catalog);
       focus_reader();
       wallet_ui_set_status(tr("Prev / Next scroll   Back to assets", "上 / 下滚动  返回资产目录"));
     }
@@ -993,6 +1613,7 @@ namespace hexwallet
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
 
     lv_obj_t *header = lv_obj_create(screen);
+    screen_header = header;
     lv_obj_set_size(header, LV_PCT(100), LV_SIZE_CONTENT);
     set_clean_container(header);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
@@ -1030,6 +1651,7 @@ namespace hexwallet
     lv_obj_set_width(status_label, LV_PCT(100));
     lv_obj_set_style_text_color(status_label, theme_warn(), 0);
 
+    layout_error = load_asset_layout(asset_layout);
     initialized = true;
     last_service_ms = 0;
     wallet_ui_set_authenticated(false);
@@ -1069,8 +1691,9 @@ namespace hexwallet
   {
 #if HEXWALLET_ENABLE_LVGL
     lv_obj_t *screen = lv_screen_active();
-    if (screen == nullptr)
-      return;
+    bitcoin_backup_cancel();
+    nfc_backup_cancel();
+    secure_zero(&setup_key, sizeof(setup_key));
     forget_companion();
     review_seal_valid = false;
     decision_pending = false;
@@ -1080,8 +1703,14 @@ namespace hexwallet
     for (size_t i = 0; i < sizeof(otp_text); ++i) code[i] = 0;
     otp_visible = false;
     pairing_page = false;
-    screen_content = state_label = status_label = nullptr;
-    search_field = coin_list = keyboard = nullptr;
+    screen_content = screen_header = state_label = status_label = nullptr;
+    reader_target = nullptr;
+    input_matrix = input_preview = input_hint = nullptr;
+    text_input.clear();
+    secure_zero(&setup_words, sizeof(setup_words));
+    secure_zero(input_status, sizeof(input_status));
+    setup_transition = false;
+    if (!screen) return;
     lv_obj_clean(screen);
     lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
     lv_obj_t *message = lv_label_create(screen);
@@ -1095,6 +1724,7 @@ namespace hexwallet
   {
 #if HEXWALLET_ENABLE_LVGL
     session_authenticated = authenticated;
+    if (!authenticated && initialized && current_page >= Page::WordsCount) open_page(Page::Home);
     if (!initialized || state_label == nullptr)
       return;
     lv_label_set_text(state_label, authenticated ? tr("UNLOCKED", "已解锁") : tr("LOCKED", "已锁定"));
@@ -1175,12 +1805,7 @@ namespace hexwallet
 #if HEXWALLET_ENABLE_LVGL
     if (!initialized)
       return;
-    if (landscape_panel()) {
-      open_page(Page::Home);
-      return;
-    }
-    create_catalog_view();
-    wallet_ui_set_status(session_authenticated ? "Authenticated session active" : "Authentication required");
+    open_page(Page::Home);
 #endif
   }
 
@@ -1190,69 +1815,70 @@ namespace hexwallet
     review_seal_valid = false;
 #if HEXWALLET_ENABLE_LVGL
     if (!initialized || screen_content == nullptr || !board_has_display() ||
-        network == nullptr || address == nullptr || path == nullptr)
+        network == nullptr || !*network || address == nullptr || !*address || path == nullptr) {
+      if (initialized && screen_content)
+        wallet_ui_show_refusal(tr("E300 Missing receive network or address", "E300 缺少收款网络或地址"));
       return false;
+    }
     decision_callback = nullptr;
     decision_pending = false;
     board_display_prepare_review();
     clear_content();
-    search_field = nullptr;
-    coin_list = nullptr;
-    keyboard = nullptr;
     lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen_content, sc(8), 0);
     lv_obj_set_scrollbar_mode(screen_content, LV_SCROLLBAR_MODE_AUTO);
 
-    const bool wide = landscape_panel();
-    if (!wide) {
-      nothing_dot_band(screen_content, 10);
-      nothing_micro_label(screen_content, tr("RECEIVE", "收款"), true);
-      nothing_rule(screen_content);
-    }
+    const bool wide = board_display_width() >= board_display_height();
+    lv_obj_add_flag(screen_header, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_pad_all(lv_screen_active(), 0, 0);
+    lv_obj_remove_flag(screen_content, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *details = screen_content;
-    lv_obj_t *row = screen_content;
-    if (wide) {
-      row = lv_obj_create(screen_content);
-      set_clean_container(row);
-      lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-      lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    }
-
-    // The QR code is the fast path; the text below it is the path that works when
-    // a camera does not. Neither is optional on a wallet.
+    lv_obj_t *row = lv_obj_create(screen_content);
+    set_clean_container(row);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(row, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_flow(row, wide ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_gap(row, 4, 0);
+    lv_obj_update_layout(row);
+    const int width = lv_obj_get_content_width(row);
+    const int height = lv_obj_get_content_height(row);
+    // Keep space for the network and at least two lines of the full address.
+    const int room = wide ? std::min(height, width / 2) : std::min(width, height - 64);
+    const int side = std::max(1, std::min(room, 192));
     lv_obj_t *qr_row = lv_obj_create(row);
-    lv_obj_update_layout(screen_content);
     set_clean_container(qr_row);
-    lv_obj_clear_flag(qr_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(qr_row, wide ? lv_obj_get_content_height(screen_content) : LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_remove_flag(qr_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(qr_row, side, side);
     lv_obj_set_flex_flow(qr_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(qr_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    const char *qr_level = nullptr;
-    lv_obj_t *qr = nothing_qr(qr_row, address, &qr_level);
-    if (wide) {
-      details = lv_obj_create(row);
-      set_clean_container(details);
-      lv_obj_set_flex_grow(details, 1);
-      lv_obj_set_height(details, LV_SIZE_CONTENT);
-      lv_obj_set_flex_flow(details, LV_FLEX_FLOW_COLUMN);
-      lv_obj_set_style_pad_row(details, 1, 0);
-      focus_reader();
+    lv_obj_set_flex_align(qr_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *qr = nothing_qr(qr_row, address, nullptr);
+    if (!qr) lv_obj_add_flag(qr_row, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *details = lv_obj_create(row);
+    set_clean_container(details);
+    lv_obj_set_size(details, wide ? 0 : LV_PCT(100), wide ? LV_PCT(100) : 0);
+    lv_obj_set_flex_grow(details, 1);
+    lv_obj_set_flex_flow(details, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(details, 4, 0);
+    landscape_scrollbar(details);
+    reading_page = true;
+    reader_target = details;
+    lv_obj_add_flag(details, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
+    lv_obj_add_event_cb(details, reader_back_event, LV_EVENT_CANCEL, nullptr);
+    if (auto group = lv_group_get_default()) {
+      lv_group_add_obj(group, details);
+      lv_group_focus_obj(details);
     }
     lv_obj_t *network_label = lv_label_create(details);
     lv_obj_set_width(network_label, LV_PCT(100));
     lv_label_set_text_fmt(network_label, tr("Receive / %s", "收款 / %s"), network);
-    if (qr == nullptr)
-    {
-      lv_obj_add_flag(qr_row, LV_OBJ_FLAG_HIDDEN);
-      nothing_micro_label(details, tr("QR unavailable; use full address", "二维码不可用；请核对完整地址"), true);
-    }
-    else if (!wide && qr_level != nullptr)
-    {
-      char caption[16];
-      snprintf(caption, sizeof(caption), "QR %s", qr_level);
-      nothing_micro_label(screen_content, caption, false);
+    if (!qr) {
+      const bool too_long = strlen(address) > qr_capacity(kQrMaxVersion, QrEcc::Medium);
+      nothing_micro_label(details, too_long
+          ? tr("E301 Address exceeds QR capacity", "E301 地址超出二维码容量")
+          : tr("E302 QR cannot be drawn at a readable size", "E302 无法绘制清晰的二维码"), true);
     }
 
     char grouped[192];
@@ -1266,17 +1892,19 @@ namespace hexwallet
     lv_obj_set_style_border_width(address_label, 1, 0);
     lv_obj_set_style_border_color(address_label, theme_accent(), 0);
     lv_obj_set_style_radius(address_label, sc(8), 0);
-    lv_obj_set_style_pad_all(address_label, sc(8), 0);
-    lv_obj_set_style_text_letter_space(address_label, 1, 0);
+    lv_obj_set_style_pad_all(address_label, wide ? 1 : sc(8), 0);
+    lv_obj_set_style_text_letter_space(address_label, wide ? 0 : 1, 0);
 
     nothing_micro_label(details, path, false);
-    lv_obj_t *warning = lv_label_create(screen_content);
+    if (wide) nothing_micro_label(details, tr("Prev / Next scroll; Back", "上 / 下滚动；返回"), false);
+    lv_obj_t *warning = lv_label_create(details);
     lv_label_set_long_mode(warning, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(warning, LV_PCT(100));
     lv_label_set_text(warning,
                       tr("Compare every character with the sending wallet before receiving.", "收款前，请与付款钱包逐字核对完整地址。"));
     lv_obj_set_style_text_color(warning, theme_fg(), 0);
 
+    if (board_has_touch()) menu_item(details, tr("Back", "返回"), Page::Home);
     current_page = Page::Home;
     wallet_ui_set_status(tr("Verify address   Prev / Next scroll", "核对地址  上 / 下滚动  返回"));
     return true;
@@ -1363,9 +1991,6 @@ namespace hexwallet
     decision_pending = false;
     board_display_prepare_review();
     clear_content();
-    search_field = nullptr;
-    coin_list = nullptr;
-    keyboard = nullptr;
     lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen_content, landscape_panel() ? 2 : 6, 0);
     lv_obj_set_scrollbar_mode(screen_content, LV_SCROLLBAR_MODE_AUTO);
@@ -1567,9 +2192,6 @@ namespace hexwallet
     decision_pending = false;
     board_display_prepare_review();
     clear_content();
-    search_field = nullptr;
-    coin_list = nullptr;
-    keyboard = nullptr;
     lv_obj_set_flex_flow(screen_content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen_content, sc(10), 0);
 
@@ -1633,6 +2255,26 @@ namespace hexwallet
   void wallet_ui_service()
   {
 #if HEXWALLET_ENABLE_LVGL
+    WalletError backup_status;
+    if (initialized && !board_display_operational()) wallet_ui_show_port_error();
+    if (initialized && session_authenticated && current_page == Page::TagWait) {
+      const auto status = nfc_backup_take(setup_key.input);
+      if (status == NfcBackupStatus::Complete) {
+        setup_key.operation = strlen(setup_key.input) == 58 ? BackupOperation::Decrypt : BackupOperation::ReadKey;
+        setup_page(Page::KeyNetwork);
+      } else if (status != NfcBackupStatus::Pending) {
+        open_page(Page::NfcImport);
+        wallet_ui_set_status(tag_error(status));
+      }
+    }
+    if (bitcoin_backup_poll(backup_status, setup_key.result) && initialized && session_authenticated && current_page == Page::KeyWorking) {
+      if (backup_status == WalletError::Ok) {
+        setup_page(Page::KeyResult);
+      } else {
+        open_page(Page::Home);
+        wallet_ui_set_status(backup_error(backup_status));
+      }
+    }
     if (!initialized)
       return;
     if (decision_pending && (!decision_value || board_display_review_ready()))

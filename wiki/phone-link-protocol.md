@@ -1,4 +1,4 @@
-> Wire-level protocol record. Current documentation: [Phone-Link](Phone-Link) / [Phone-Link-zh](Phone-Link-zh). Protocol version is 2.
+> Historical wire-level record. Its single-direction enrollment description below is superseded by [Mutual-Pairing](Mutual-Pairing). Current documentation: [Phone-Link](Phone-Link) / [Phone-Link-zh](Phone-Link-zh). Protocol version is 2; unpaired devices require a trusted scan of the reply to a fresh local offer.
 
 
 # 手机 ↔ 硬件钱包链路协议（v1）

@@ -231,6 +231,16 @@ namespace hexwallet
         return "aborted";
       case WalletError::CustodyUnavailable:
         return "secure-custody-unavailable";
+      case WalletError::OutOfMemory:
+        return "insufficient-memory";
+      case WalletError::InvalidChecksum:
+        return "invalid-checksum";
+      case WalletError::IncorrectPassphrase:
+        return "passphrase-or-bitcoin-network-mismatch";
+      case WalletError::WrongNetwork:
+        return "private-key-network-mismatch";
+      case WalletError::UnsupportedFormat:
+        return "unsupported-key-format";
       }
       return "unknown";
     }
@@ -435,7 +445,7 @@ namespace hexwallet
       Serial.println("OK xelis check-address <mainnet-address>");
       Serial.println("OK public: help | status | coin list | coin search <text> | coin show <id> | coin why <id> | mining stats | mining list [ASIC|GPU|CPU|HDD|MERGED] [offset] | mining show <source-id-or-symbol> | token list [network] | token show <id>");
       Serial.println("OK auth: auth provision <pin> <pin> | auth begin | auth unlock <proof-hex> | lock");
-      Serial.println("OK wallet: wallet generate | wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
+      Serial.println("OK wallet: wallet address <id> [index] | wallet custody <id> | wallet token <id> [index] | wallet addresses [index]");
       Serial.println("OK tokens: token list [network] | token show <id> | token custom-list [network] | token custom-add <network> <id-hex> <symbol> <name> <decimals> | token custom-add-stellar <issuer-hex> <code> <symbol> <name> <decimals> | token custom-remove <network> <id-hex> | token custom-remove-stellar <issuer-hex> <code>");
       Serial.println("OK NFT: token custom-add-nft <network> <contract-hex> <erc721|erc1155> <symbol> <name>");
       Serial.println("OK totp: totp time [unix] | totp add <otpauth-uri> | totp list | totp show <slot> | totp remove <slot>");
@@ -1196,6 +1206,11 @@ namespace hexwallet
                        const uint8_t *seed, uint32_t address_index,
                        bool show_on_device = false)
     {
+      WalletCatalogEntry entry{};
+      if (!wallet_catalog_find(network.id, &entry) || !wallet_catalog_can_receive(entry)) {
+        Serial.println("ERR receiving-disabled-no-reviewed-signing-path");
+        return;
+      }
       SensitiveValue<DerivedAddress> derived_storage;
       auto &derived = derived_storage.get();
       const WalletError result =
@@ -1252,7 +1267,7 @@ namespace hexwallet
             continue;
           WalletCatalogEntry entry{};
           if (!wallet_catalog_find(network.id, &entry) ||
-              !wallet_catalog_has(entry, WalletCapabilityAddress))
+              !wallet_catalog_can_receive(entry))
             continue;
           print_derived(network, master, have_seed ? seed : nullptr,
                         address_index);
@@ -1278,9 +1293,9 @@ namespace hexwallet
         Serial.println("ERR unknown-coin");
         return;
       }
-      if (!wallet_catalog_has(entry, WalletCapabilityAddress) || entry.network == nullptr)
+      if (!wallet_catalog_can_receive(entry) || entry.network == nullptr)
       {
-        Serial.print("ERR address-unsupported status=\"");
+        Serial.print("ERR receiving-disabled status=\"");
         Serial.print(entry.status);
         Serial.println("\"");
         return;
@@ -1314,7 +1329,7 @@ namespace hexwallet
         Serial.println("ERR unknown-token");
         return;
       }
-      if (!token_supports_account_address(*token))
+      if (!token_supports_account_address(*token) || !token_supports_transfer_signing(*token))
       {
         Serial.print("ERR token-account-unsupported status=\"");
         Serial.print(token->status);
@@ -1462,8 +1477,7 @@ namespace hexwallet
         return;
       if (strcmp(command, "wallet generate") == 0)
       {
-        const WalletError result = wallet_session_generate();
-        Serial.println(result == WalletError::Ok ? "OK wallet-generated-in-volatile-memory" : "ERR wallet-generation-failed");
+        Serial.println("ERR use-device-setup-with-backup-and-explicit-passphrase-choice");
         return;
       }
       constexpr char kImportPrefix[] = "wallet import ";

@@ -73,8 +73,16 @@ static int check_catalog_addresses()
   return count && passed == count ? 0 : 1;
 }
 
+int link_pipe_main();
+int phone_pairing_ui_test();
+int phone_pairing_lifecycle_test();
+int key_backup_probe(int argc, char **argv);
 int main(int argc, char **argv)
 {
+  if (argc > 1 && !strcmp(argv[1], "key-backup")) return key_backup_probe(argc, argv);
+  if (argc == 2 && !strcmp(argv[1], "link-pipe")) return link_pipe_main();
+  if (argc == 2 && !strcmp(argv[1], "phone-pairing-ui")) return phone_pairing_ui_test();
+  if (argc == 2 && !strcmp(argv[1], "phone-pairing-lifecycle")) return phone_pairing_lifecycle_test();
   if (argc == 2 && !strcmp(argv[1], "curve-selftest")) {
     const bool signatures = run_crypto_extended_self_tests();
     const bool agreement = run_x25519_self_tests();
